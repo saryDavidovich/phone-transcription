@@ -45,8 +45,18 @@ def create_app():
     return app
 
 def _create_default_admin():
-    from models import AdminUser
-    if not AdminUser.query.first():
+    try:
+        from models import AdminUser
+        if not AdminUser.query.first():
+            from werkzeug.security import generate_password_hash
+            admin = AdminUser(
+                username='admin',
+                password_hash=generate_password_hash('admin123')
+            )
+            db.session.add(admin)
+            db.session.commit()
+    except Exception:
+        db.session.rollback()
         from werkzeug.security import generate_password_hash
         admin = AdminUser(
             username='admin',
