@@ -1,0 +1,7 @@
+flask 
+openai 
+anthropic 
+sendgrid 
+requests 
+python-dotenv 
+gunicorn
