@@ -1,0 +1,35 @@
+{% extends 'admin/base.html' %}
+{% block title %}דוחות{% endblock %}
+{% block page_title %}דוחות כספיים{% endblock %}
+{% block content %}
+<div class="table-card" style="margin-bottom:20px">
+  <div class="table-header"><span class="table-title">📈 הכנסות חודשיות</span></div>
+  <table>
+    <thead><tr><th>חודש</th><th>הכנסה</th></tr></thead>
+    <tbody>
+      {% for row in monthly %}
+      <tr>
+        <td>{{ row.month }}</td>
+        <td style="color:#10b981;font-weight:700">₪{{ "%.2f"|format(row.revenue or 0) }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+<div class="table-card">
+  <div class="table-header"><span class="table-title">🏆 לקוחות מובילים</span></div>
+  <table>
+    <thead><tr><th>טלפון</th><th>שם</th><th>סך הוצאה</th><th>יתרה</th></tr></thead>
+    <tbody>
+      {% for customer, spend in top_customers %}
+      <tr onclick="location='/admin/customers/{{ customer.id }}'" style="cursor:pointer">
+        <td>{{ customer.phone }}</td>
+        <td>{{ customer.name or '—' }}</td>
+        <td style="color:#ef4444;font-weight:700">₪{{ "%.2f"|format(spend or 0) }}</td>
+        <td style="color:#10b981">₪{{ "%.2f"|format(customer.balance) }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

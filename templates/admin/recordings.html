@@ -1,0 +1,31 @@
+{% extends 'admin/base.html' %}
+{% block title %}הקלטות{% endblock %}
+{% block page_title %}ניהול הקלטות{% endblock %}
+{% block content %}
+<div class="table-card">
+  <div class="table-header"><span class="table-title">🎧 הקלטות ({{ recordings.total }})</span></div>
+  <table>
+    <thead><tr><th>תאריך</th><th>לקוח</th><th>משך</th><th>עלות</th><th>שיטת שליחה</th><th>סטטוס</th></tr></thead>
+    <tbody>
+      {% for rec in recordings.items %}
+      <tr onclick="location='/admin/recordings/{{rec.id}}'" style="cursor:pointer">
+        <td>{{ rec.created_at.strftime('%d/%m/%Y %H:%M') }}</td>
+        <td><a href="/admin/customers/{{ rec.customer_id }}" onclick="event.stopPropagation()">{{ rec.customer.phone }}</a></td>
+        <td>{{ rec.duration_seconds // 60 }}:{{ '%02d'%(rec.duration_seconds % 60) }}</td>
+        <td>₪{{ "%.2f"|format(rec.cost) }}</td>
+        <td>{{ '📧 מייל' if rec.delivery_method == 'email' else '📠 פקס' }}</td>
+        <td>{% if rec.status == 'delivered' %}<span class="badge badge-green">נשלח</span>
+            {% elif rec.status == 'transcribing' %}<span class="badge badge-amber">מתמלל</span>
+            {% elif rec.status == 'error' %}<span class="badge badge-red">שגיאה</span>
+            {% else %}<span class="badge badge-gray">{{ rec.status }}</span>{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+<div class="pagination">
+  {% for p in recordings.iter_pages() %}
+    {% if p %}<a href="?page={{ p }}" class="page-btn {% if p == recordings.page %}active{% endif %}">{{ p }}</a>{% endif %}
+  {% endfor %}
+</div>
+{% endblock %}

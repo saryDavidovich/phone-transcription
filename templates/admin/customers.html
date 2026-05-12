@@ -1,0 +1,41 @@
+{% extends 'admin/base.html' %}
+{% block title %}לקוחות{% endblock %}
+{% block page_title %}ניהול לקוחות{% endblock %}
+{% block content %}
+<div class="search-bar">
+  <form method="GET" style="display:flex;gap:8px;width:100%">
+    <input class="form-input" name="q" value="{{ search }}" placeholder="חיפוש לפי טלפון, שם או מייל...">
+    <button class="btn btn-primary" type="submit">🔍 חפש</button>
+  </form>
+</div>
+<div class="table-card">
+  <div class="table-header">
+    <span class="table-title">👥 לקוחות ({{ customers.total }})</span>
+  </div>
+  <table>
+    <thead><tr>
+      <th>טלפון</th><th>שם</th><th>מייל</th><th>יתרה</th><th>הקלטות</th><th>סטטוס</th><th>תאריך הצטרפות</th>
+    </tr></thead>
+    <tbody>
+      {% for c in customers.items %}
+      <tr onclick="location='/admin/customers/{{c.id}}'" style="cursor:pointer">
+        <td><strong>{{ c.phone }}</strong></td>
+        <td>{{ c.name or '—' }}</td>
+        <td style="color:#8892b0">{{ c.email or '—' }}</td>
+        <td style="color:{% if c.balance < 5 %}#ef4444{% else %}#10b981{% endif %}">₪{{ "%.2f"|format(c.balance) }}</td>
+        <td>{{ c.recordings|length }}</td>
+        <td>{% if c.is_blocked %}<span class="badge badge-red">חסום</span>{% else %}<span class="badge badge-green">פעיל</span>{% endif %}</td>
+        <td style="color:#8892b0">{{ c.created_at.strftime('%d/%m/%Y') }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+<div class="pagination">
+  {% for p in customers.iter_pages() %}
+    {% if p %}
+      <a href="?page={{ p }}{% if search %}&q={{ search }}{% endif %}" class="page-btn {% if p == customers.page %}active{% endif %}">{{ p }}</a>
+    {% endif %}
+  {% endfor %}
+</div>
+{% endblock %}

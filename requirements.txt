@@ -1,7 +1,10 @@
-flask 
-openai 
-anthropic 
-sendgrid 
-requests 
-python-dotenv 
-gunicorn
+flask>=3.0
+flask-sqlalchemy>=3.1
+flask-login>=0.6
+openai>=1.30
+anthropic>=0.25
+requests>=2.31
+python-dotenv>=1.0
+gunicorn>=21.2
+psycopg2-binary>=2.9
+werkzeug>=3.0

@@ -1,0 +1,29 @@
+{% extends 'admin/base.html' %}
+{% block title %}הקלטה #{{ recording.id }}{% endblock %}
+{% block page_title %}הקלטה #{{ recording.id }}{% endblock %}
+{% block content %}
+<div class="grid-3" style="margin-bottom:20px">
+  <div class="stat-card">
+    <div class="stat-label">לקוח</div>
+    <div style="font-size:18px;font-weight:700"><a href="/admin/customers/{{ recording.customer_id }}" style="color:#4f6ef7">{{ recording.customer.phone }}</a></div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">משך</div>
+    <div style="font-size:18px;font-weight:700">{{ recording.duration_seconds // 60 }}:{{ '%02d'%(recording.duration_seconds % 60) }} דקות</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">עלות</div>
+    <div style="font-size:18px;font-weight:700;color:#ef4444">₪{{ "%.2f"|format(recording.cost) }}</div>
+  </div>
+</div>
+{% if recording.summary %}
+<div class="card" style="margin-bottom:20px">
+  <div style="font-size:14px;font-weight:600;margin-bottom:12px">📋 סיכום</div>
+  <div style="color:#8892b0;line-height:1.7">{{ recording.summary }}</div>
+</div>
+{% endif %}
+<div class="card">
+  <div style="font-size:14px;font-weight:600;margin-bottom:12px">📝 תמלול מלא</div>
+  <div style="background:#22263a;padding:20px;border-radius:8px;line-height:1.8;white-space:pre-wrap;font-size:14px">{{ recording.transcript or 'אין תמלול זמין' }}</div>
+</div>
+{% endblock %}

@@ -1,158 +1,221 @@
 from flask import Blueprint, request, current_app
-import uuid
-import logging
-from services.database import save_call, update_call_status, set_delivery_preference
-from services.transcribe_service import transcribe_async
-from services.t9 import t9_to_text
+from app import db
+from models import Customer, Recording, Transaction, Settings
+from services.transcribe import transcribe_async
+import uuid, logging
 
 ivr_bp = Blueprint('ivr', __name__)
 log = logging.getLogger(__name__)
 
-# T9 map: digit -> letters
-T9_MAP = {
-    '2': 'abc', '3': 'def', '4': 'ghi', '5': 'jkl',
-    '6': 'mno', '7': 'pqrs', '8': 'tuv', '9': 'wxyz',
-    '0': '.@-_'
-}
+def get_setting(key, default=''):
+    s = Settings.query.filter_by(key=key).first()
+    return s.value if s else default
 
+def r(text, next_route=None, input_len=1, timeout=10, terminator='#', record=None):
+    """Helper to build Yemot response"""
+    lines = [f'read={text}']
+    if record:
+        lines.append(f'record=1,{record},1,{next_route}')
+    elif next_route:
+        lines.append(f'input={input_len},{timeout},1,{next_route},{terminator}')
+    return '1:\n' + '\n'.join(lines) + '\n', 200, {'Content-Type': 'text/plain; charset=utf-8'}
 
 @ivr_bp.route('/incoming', methods=['GET', 'POST'])
 def incoming():
+    phone = request.args.get('ApiPhone', '')
     call_id = request.args.get('callId', str(uuid.uuid4()))
-    caller = request.args.get('ApiPhone', 'unknown')
-    log.info(f"incoming call: {call_id} from {caller}")
-    save_call(call_id, caller)
+    log.info(f"Call from {phone}, id={call_id}")
 
-    response = (
-        "1:\n"
-        "read=shalom umevorachim lemaarechet hatamul. "
-        "lehaklata vedivur lemail hakish 1. "
-        "lehakladat shimush bamail hapenimi hakish 2.\n"
-        "input=1,5,1,choose_method,1\n"
+    customer = Customer.query.filter_by(phone=phone).first()
+
+    if not customer:
+        # New customer
+        customer = Customer(phone=phone, balance=0.0)
+        db.session.add(customer)
+        db.session.commit()
+        welcome = get_setting('welcome_new', 'שלום וברוכים הבאים למערכת התמלול.')
+        return r(f'{welcome} לתפריט הקש 1', 'main_menu')
+
+    if customer.is_blocked:
+        return r('מצטערים, חשבונך חסום. לפרטים פנה לשירות לקוחות.', None)
+
+    welcome = get_setting('welcome_returning', 'שלום וברוכים השבים.')
+    balance_msg = f'יתרתך היא {customer.balance:.2f} שקל.'
+    return r(f'{welcome} {balance_msg} לתפריט הקש 1', 'main_menu')
+
+@ivr_bp.route('/main_menu', methods=['GET', 'POST'])
+def main_menu():
+    price = get_setting('price_per_30min', '5')
+    menu = (
+        f'להתחלת הקלטה הקש 1. '
+        f'לארנק וטעינה הקש 2. '
+        f'לעדכון פרטים הקש 3. '
+        f'להסבר על המערכת הקש 9.'
     )
-    return response, 200, {'Content-Type': 'text/plain; charset=utf-8'}
+    return r(menu, 'handle_menu')
 
-
-@ivr_bp.route('/choose_method', methods=['GET', 'POST'])
-def choose_method():
-    call_id = request.args.get('callId', '')
-    choice = request.args.get('Digits', '1')
+@ivr_bp.route('/handle_menu', methods=['GET', 'POST'])
+def handle_menu():
+    choice = request.args.get('Digits', '')
+    phone = request.args.get('ApiPhone', '')
+    customer = Customer.query.filter_by(phone=phone).first()
 
     if choice == '1':
-        # voice recording for email
-        response = (
-            "1:\n"
-            "read=acharei hatzliל tamer et ktovet hamail shelcha. "
-            "lemaashal: moshe shtrudel gmail nekuda com. az hakish kokhavit veshamor.\n"
-            "record=1,15,1,got_email_voice\n"
+        # Check balance
+        min_balance = float(get_setting('min_balance', '5'))
+        if not customer or customer.balance < min_balance:
+            return r(
+                f'אין לך מספיק כסף בארנק. לטעינה הקש 1, לחזרה הקש 0.',
+                'wallet_or_back'
+            )
+        max_sec = int(get_setting('max_recording_seconds', '1800'))
+        return r(
+            'השאר את הודעתך לאחר הצליל. לסיום הקש # או נתק.',
+            'recording_done',
+            record=max_sec
         )
+    elif choice == '2':
+        return r('לשמיעת יתרה הקש 1. לטעינה הקש 2. לחזרה הקש 0.', 'wallet_menu')
+    elif choice == '3':
+        return r('לעדכון מייל הקש 1. לעדכון פקס הקש 2. לחזרה הקש 0.', 'update_details')
+    elif choice == '9':
+        explanation = get_setting('system_explanation',
+            'מערכת התמלול מאפשרת לך להקליט הודעות שיתומללו ויישלחו אליך למייל או לפקס. '
+            'העלות היא לפי אורך ההקלטה. לחזרה הקש כל מקש.')
+        return r(explanation, 'main_menu')
     else:
-        # T9 input
-        response = (
-            "1:\n"
-            "read=hakish et ktovet hamail shelcha beshitat T9. "
-            "kol otiot baveit 2: alef beit gimel. "
-            "efshar lehakish kokhavit laavor laot habaa. "
-            "0 lineshar. besiyum hakish tashtit.\n"
-            "input=1,60,*,got_email_t9,#\n"
+        return r('בחירה לא חוקית.', 'main_menu')
+
+@ivr_bp.route('/wallet_or_back', methods=['GET', 'POST'])
+def wallet_or_back():
+    choice = request.args.get('Digits', '')
+    if choice == '1':
+        return r('לטעינת ארנק הקש את הסכום בשקלים ולאחר מכן הקש #', 'process_topup', input_len=6)
+    return r('חוזר לתפריט הראשי', 'main_menu')
+
+@ivr_bp.route('/wallet_menu', methods=['GET', 'POST'])
+def wallet_menu():
+    choice = request.args.get('Digits', '')
+    phone = request.args.get('ApiPhone', '')
+    customer = Customer.query.filter_by(phone=phone).first()
+    if choice == '1':
+        balance = customer.balance if customer else 0
+        return r(f'יתרתך היא {balance:.2f} שקל. לחזרה הקש כל מקש.', 'main_menu')
+    elif choice == '2':
+        return r('הקש את הסכום לטעינה ולאחר מכן הקש #', 'process_topup', input_len=6)
+    return r('חוזר לתפריט הראשי.', 'main_menu')
+
+@ivr_bp.route('/process_topup', methods=['GET', 'POST'])
+def process_topup():
+    amount_str = request.args.get('Digits', '0')
+    phone = request.args.get('ApiPhone', '')
+    try:
+        amount = float(amount_str)
+        if amount < 5:
+            return r('הסכום המינימלי לטעינה הוא 5 שקל. נסה שוב.', 'wallet_menu')
+        # In production: redirect to Cardcom payment page
+        # For now: store pending topup and give instructions
+        return r(
+            f'לטעינת {amount:.0f} שקל תועבר לסליקה. הקש 1 לאישור.',
+            'confirm_topup'
         )
-    return response, 200, {'Content-Type': 'text/plain; charset=utf-8'}
+    except:
+        return r('סכום לא תקין. נסה שוב.', 'wallet_menu')
 
+@ivr_bp.route('/confirm_topup', methods=['GET', 'POST'])
+def confirm_topup():
+    return r('הטעינה תבוצע בקרוב. תקבל אישור למייל. חוזר לתפריט.', 'main_menu')
 
-@ivr_bp.route('/got_email_voice', methods=['GET', 'POST'])
-def got_email_voice():
-    """User recorded their email address by voice - transcribe it"""
-    call_id = request.args.get('callId', '')
+@ivr_bp.route('/update_details', methods=['GET', 'POST'])
+def update_details():
+    choice = request.args.get('Digits', '')
+    if choice == '1':
+        return r('אמור בקול ברור את כתובת המייל שלך. לאחר הצליל.', 'save_email', record=15)
+    elif choice == '2':
+        return r('הקש את מספר הפקס ולאחר מכן הקש #', 'save_fax', input_len=15)
+    return r('חוזר לתפריט.', 'main_menu')
+
+@ivr_bp.route('/save_email', methods=['GET', 'POST'])
+def save_email():
+    phone = request.args.get('ApiPhone', '')
     rec_url = request.args.get('RecordingUrl', '')
+    # Transcribe email address and save
+    customer = Customer.query.filter_by(phone=phone).first()
+    if customer and rec_url:
+        from services.transcribe import _download, _whisper
+        import tempfile, os, re
+        path = _download(rec_url, f'email_{phone}')
+        if path:
+            text = _whisper(path)
+            os.remove(path)
+            if text:
+                email = text.lower().strip()
+                email = email.replace(' shtrudel ','@').replace(' at ','@')
+                email = email.replace(' nekuda ','.').replace(' dot ','.')
+                email = re.sub(r'\s+', '', email)
+                if '@' in email:
+                    customer.email = email
+                    db.session.commit()
+                    return r(f'המייל שלך עודכן ל {email}. לחזרה הקש כל מקש.', 'main_menu')
+    return r('לא הצלחתי לזהות את המייל. נסה שוב.', 'update_details')
 
-    if rec_url:
-        from services.transcribe_service import transcribe_email_voice
-        email = transcribe_email_voice(rec_url)
-        if email and '@' in email:
-            set_delivery_preference(call_id, 'email', email)
-            response = (
-                f"1:\n"
-                f"read=hamail shelcha hu {email.replace('@', ' shtrudel ').replace('.', ' nekuda ')}. "
-                f"im nachon hakish 1, im lo hakish 2.\n"
-                f"input=1,5,1,confirm_email,1\n"
-            )
-        else:
-            response = (
-                "1:\n"
-                "read=lo hatzlachti lizaot et ktovet hamail. nase shenit.\n"
-                "goto=choose_method\n"
-            )
-    else:
-        response = "1:\ngoto=choose_method\n"
-
-    return response, 200, {'Content-Type': 'text/plain; charset=utf-8'}
-
-
-@ivr_bp.route('/got_email_t9', methods=['GET', 'POST'])
-def got_email_t9():
-    """User entered email via T9 keypresses"""
-    call_id = request.args.get('callId', '')
-    digits = request.args.get('Digits', '')
-
-    email = t9_to_text(digits)
-    log.info(f"T9 digits: {digits} -> email: {email}")
-
-    if email and '@' in email:
-        set_delivery_preference(call_id, 'email', email)
-        readable = email.replace('@', ' shtrudel ').replace('.', ' nekuda ')
-        response = (
-            f"1:\n"
-            f"read=hamail shelcha hu {readable}. "
-            f"im nachon hakish 1, im lo hakish 2.\n"
-            f"input=1,5,1,confirm_email,1\n"
-        )
-    else:
-        response = (
-            "1:\n"
-            "read=lo hatzlachti lehavin et hamail. nase shenit.\n"
-            "goto=choose_method\n"
-        )
-
-    return response, 200, {'Content-Type': 'text/plain; charset=utf-8'}
-
-
-@ivr_bp.route('/confirm_email', methods=['GET', 'POST'])
-def confirm_email():
-    call_id = request.args.get('callId', '')
-    choice = request.args.get('Digits', '1')
-
-    if choice == '1':
-        # Email confirmed - now record the message
-        max_sec = current_app.config.get('MAX_RECORDING_SECONDS', 300)
-        response = (
-            f"1:\n"
-            f"read=tov meod. achshav haklet et hahaoda shelcha acharei hatzliל. "
-            f"lisiyum lakhatzu kokhavit.\n"
-            f"record=1,{max_sec},1,recording_done\n"
-        )
-    else:
-        response = (
-            "1:\n"
-            "read=beseder, nase shenit.\n"
-            "goto=choose_method\n"
-        )
-
-    return response, 200, {'Content-Type': 'text/plain; charset=utf-8'}
-
+@ivr_bp.route('/save_fax', methods=['GET', 'POST'])
+def save_fax():
+    phone = request.args.get('ApiPhone', '')
+    fax = request.args.get('Digits', '')
+    customer = Customer.query.filter_by(phone=phone).first()
+    if customer and fax:
+        customer.fax = fax
+        db.session.commit()
+        return r(f'מספר הפקס עודכן. לחזרה הקש כל מקש.', 'main_menu')
+    return r('שגיאה. נסה שוב.', 'update_details')
 
 @ivr_bp.route('/recording_done', methods=['GET', 'POST'])
 def recording_done():
-    call_id = request.args.get('callId', '')
+    phone = request.args.get('ApiPhone', '')
+    call_id = request.args.get('callId', str(uuid.uuid4()))
     rec_url = request.args.get('RecordingUrl', '')
-    caller = request.args.get('ApiPhone', '')
-    log.info(f"recording done: {call_id}")
+    duration = int(request.args.get('Duration', '0'))
 
-    if rec_url:
-        transcribe_async(call_id, rec_url, caller)
+    customer = Customer.query.filter_by(phone=phone).first()
+    if not customer:
+        return r('שגיאה. נסה שוב.', None)
 
-    response = (
-        "1:\n"
-        "read=toda raba. hahaklata התקבלה vehatamul yishalach eleicha bekarov. shalom.\n"
-        "hangup=\n"
+    rec = Recording(
+        call_id=call_id,
+        customer_id=customer.id,
+        duration_seconds=duration,
+        status='processing',
+        delivery_method=customer.delivery_method or 'email',
+        delivered_to=customer.email or customer.fax or ''
     )
-    return response, 200, {'Content-Type': 'text/plain; charset=utf-8'}
+    db.session.add(rec)
+    db.session.commit()
+
+    if rec_url and (customer.email or customer.fax):
+        transcribe_async(
+            call_id, rec_url, customer.id,
+            customer.delivery_method or 'email',
+            customer.email or customer.fax or '',
+            duration
+        )
+        return r(
+            'ההקלטה התקבלה. התמלול ישלח אליך בקרוב. לשליחה למייל הקש 1, לפקס הקש 2.',
+            'choose_delivery'
+        )
+    else:
+        return r(
+            'ההקלטה התקבלה. לשליחה למייל הקש 1, לפקס הקש 2.',
+            'choose_delivery'
+        )
+
+@ivr_bp.route('/choose_delivery', methods=['GET', 'POST'])
+def choose_delivery():
+    choice = request.args.get('Digits', '1')
+    phone = request.args.get('ApiPhone', '')
+    customer = Customer.query.filter_by(phone=phone).first()
+    if customer:
+        customer.delivery_method = 'email' if choice == '1' else 'fax'
+        db.session.commit()
+    dest = 'מייל' if choice == '1' else 'פקס'
+    return r(f'תודה. התמלול ישלח ל{dest}. שיחה טובה.', None)

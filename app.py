@@ -1,34 +1,61 @@
 import os
 import logging
 from flask import Flask
-from routes.ivr import ivr_bp
-from routes.transcribe import transcribe_bp
-from routes.deliver import deliver_bp
-from services.database import init_db
+from flask_sqlalchemy import SQLAlchemy
+from flask_login import LoginManager
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s %(levelname)s %(message)s',
-    handlers=[
-        logging.FileHandler('logs/app.log'),
-        logging.StreamHandler()
-    ]
-)
+db = SQLAlchemy()
+login_manager = LoginManager()
 
-app = Flask(__name__)
+def create_app():
+    app = Flask(__name__)
+    
+    app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'change-this')
+    app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:///transcription.db')
+    app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+    
+    # Pricing config (editable via admin)
+    app.config['PRICE_PER_30MIN'] = float(os.environ.get('PRICE_PER_30MIN', '5.0'))
+    app.config['MIN_BALANCE'] = float(os.environ.get('MIN_BALANCE', '5.0'))
+    
+    # API Keys
+    app.config['OPENAI_API_KEY'] = os.environ.get('OPENAI_API_KEY', '')
+    app.config['GMAIL_USER'] = os.environ.get('GMAIL_USER', '')
+    app.config['GMAIL_APP_PASSWORD'] = os.environ.get('GMAIL_APP_PASSWORD', '')
+    app.config['CARDCOM_TERMINAL'] = os.environ.get('CARDCOM_TERMINAL', '')
+    app.config['CARDCOM_USERNAME'] = os.environ.get('CARDCOM_USERNAME', '')
+    
+    db.init_app(app)
+    login_manager.init_app(app)
+    login_manager.login_view = 'admin.login'
+    
+    from routes.ivr import ivr_bp
+    from routes.admin import admin_bp
+    from routes.payment import payment_bp
+    
+    app.register_blueprint(ivr_bp, url_prefix='/ivr')
+    app.register_blueprint(admin_bp, url_prefix='/admin')
+    app.register_blueprint(payment_bp, url_prefix='/payment')
+    
+    with app.app_context():
+        db.create_all()
+        _create_default_admin()
+    
+    logging.basicConfig(level=logging.INFO)
+    return app
 
-app.config['MAX_RECORDING_SECONDS'] = 300
-app.config['OPENAI_API_KEY'] = os.environ.get('OPENAI_API_KEY', '')
-app.config['SENDGRID_API_KEY'] = os.environ.get('SENDGRID_API_KEY', '')
-app.config['SENDGRID_FROM'] = os.environ.get('SENDGRID_FROM', '')
-app.config['ANTHROPIC_API_KEY'] = os.environ.get('ANTHROPIC_API_KEY', '')
-app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'change-me')
+def _create_default_admin():
+    from models import AdminUser
+    if not AdminUser.query.first():
+        from werkzeug.security import generate_password_hash
+        admin = AdminUser(
+            username='admin',
+            password_hash=generate_password_hash('admin123')
+        )
+        db.session.add(admin)
+        db.session.commit()
 
-app.register_blueprint(ivr_bp, url_prefix='/ivr')
-app.register_blueprint(transcribe_bp, url_prefix='/transcribe')
-app.register_blueprint(deliver_bp, url_prefix='/deliver')
-
-init_db()
+app = create_app()
 
 if __name__ == '__main__':
     app.run(debug=False, host='0.0.0.0', port=5000)

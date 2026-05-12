@@ -1,0 +1,100 @@
+{% extends 'admin/base.html' %}
+{% block title %}לקוח {{ customer.phone }}{% endblock %}
+{% block page_title %}לקוח: {{ customer.name or customer.phone }}{% endblock %}
+{% block content %}
+<div class="grid-2">
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:20px">
+      <div>
+        <div style="font-size:22px;font-weight:800">{{ customer.phone }}</div>
+        <div style="color:#8892b0;font-size:13px">מצטרף מ-{{ customer.created_at.strftime('%d/%m/%Y') }}</div>
+      </div>
+      <div style="display:flex;gap:8px">
+        <form method="POST" action="/admin/customers/{{ customer.id }}/block">
+          <button class="btn {% if customer.is_blocked %}btn-success{% else %}btn-danger{% endif %}">
+            {% if customer.is_blocked %}✅ בטל חסימה{% else %}🚫 חסום{% endif %}
+          </button>
+        </form>
+      </div>
+    </div>
+    <form method="POST" action="/admin/customers/{{ customer.id }}/update">
+      <div class="form-group">
+        <label class="form-label">שם</label>
+        <input class="form-input" name="name" value="{{ customer.name or '' }}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">מייל</label>
+        <input class="form-input" name="email" value="{{ customer.email or '' }}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">פקס</label>
+        <input class="form-input" name="fax" value="{{ customer.fax or '' }}">
+      </div>
+      <button class="btn btn-primary" type="submit">💾 שמור פרטים</button>
+    </form>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:16px">
+    <div class="card">
+      <div class="card-title">יתרת ארנק</div>
+      <div class="card-value" style="color:{% if customer.balance < 5 %}#ef4444{% else %}#10b981{% endif %}">₪{{ "%.2f"|format(customer.balance) }}</div>
+    </div>
+    <div class="card">
+      <div style="font-size:14px;font-weight:600;margin-bottom:16px">➕ זיכוי ידני</div>
+      <form method="POST" action="/admin/customers/{{ customer.id }}/credit">
+        <div class="form-group">
+          <label class="form-label">סכום (₪)</label>
+          <input class="form-input" name="amount" type="number" step="0.01" min="0" placeholder="0.00">
+        </div>
+        <div class="form-group">
+          <label class="form-label">סיבה</label>
+          <input class="form-input" name="reason" placeholder="זיכוי ידני על ידי מנהל">
+        </div>
+        <button class="btn btn-success" type="submit">✅ זכה לקוח</button>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div style="margin-top:20px" class="table-card">
+  <div class="table-header"><span class="table-title">🎧 הקלטות</span></div>
+  <table>
+    <thead><tr><th>תאריך</th><th>משך</th><th>עלות</th><th>יעד</th><th>סטטוס</th></tr></thead>
+    <tbody>
+      {% for rec in recordings %}
+      <tr onclick="location='/admin/recordings/{{rec.id}}'" style="cursor:pointer">
+        <td>{{ rec.created_at.strftime('%d/%m/%Y %H:%M') }}</td>
+        <td>{{ rec.duration_seconds // 60 }}:{{ '%02d'%(rec.duration_seconds % 60) }}</td>
+        <td>₪{{ "%.2f"|format(rec.cost) }}</td>
+        <td>{{ rec.delivered_to or '—' }}</td>
+        <td>{% if rec.status == 'delivered' %}<span class="badge badge-green">נשלח</span>
+            {% elif rec.status == 'error' %}<span class="badge badge-red">שגיאה</span>
+            {% else %}<span class="badge badge-gray">{{ rec.status }}</span>{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div style="margin-top:20px" class="table-card">
+  <div class="table-header"><span class="table-title">💳 עסקאות</span></div>
+  <table>
+    <thead><tr><th>תאריך</th><th>סכום</th><th>סוג</th><th>תיאור</th></tr></thead>
+    <tbody>
+      {% for txn in transactions %}
+      <tr>
+        <td>{{ txn.created_at.strftime('%d/%m/%Y %H:%M') }}</td>
+        <td style="color:{% if txn.amount > 0 %}#10b981{% else %}#ef4444{% endif %}">
+          {% if txn.amount > 0 %}+{% endif %}₪{{ "%.2f"|format(txn.amount) }}
+        </td>
+        <td>{% if txn.type == 'charge' %}<span class="badge badge-green">טעינה</span>
+            {% elif txn.type == 'debit' %}<span class="badge badge-red">חיוב</span>
+            {% elif txn.type == 'credit' %}<span class="badge badge-blue">זיכוי</span>
+            {% else %}<span class="badge badge-gray">{{ txn.type }}</span>{% endif %}</td>
+        <td style="color:#8892b0">{{ txn.description }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

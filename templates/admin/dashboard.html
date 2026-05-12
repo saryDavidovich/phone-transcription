@@ -1,0 +1,90 @@
+{% extends 'admin/base.html' %}
+{% block title %}דשבורד{% endblock %}
+{% block page_title %}דשבורד{% endblock %}
+{% block content %}
+
+<div class="stats-grid">
+  <div class="stat-card">
+    <div class="stat-icon" style="background:rgba(79,110,247,0.15)">👥</div>
+    <div class="stat-label">סך לקוחות</div>
+    <div class="stat-value">{{ stats.total_customers }}</div>
+    <div class="stat-change" style="color:#10b981">{{ stats.active_customers }} פעילים</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-icon" style="background:rgba(16,185,129,0.15)">💰</div>
+    <div class="stat-label">הכנסות החודש</div>
+    <div class="stat-value">₪{{ "%.2f"|format(stats.month_revenue) }}</div>
+    <div class="stat-change" style="color:#8892b0">סה"כ ₪{{ "%.2f"|format(stats.total_revenue) }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-icon" style="background:rgba(245,158,11,0.15)">🎧</div>
+    <div class="stat-label">הקלטות היום</div>
+    <div class="stat-value">{{ stats.today_recordings }}</div>
+    <div class="stat-change" style="color:#8892b0">סה"כ {{ stats.total_recordings }}</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-icon" style="background:rgba(124,58,237,0.15)">💳</div>
+    <div class="stat-label">יתרות ארנקות</div>
+    <div class="stat-value">₪{{ "%.2f"|format(stats.total_balance) }}</div>
+    <div class="stat-change" style="color:#ef4444">{{ stats.blocked_customers }} חסומים</div>
+  </div>
+</div>
+
+<div class="grid-2" style="gap:20px">
+  <div class="table-card">
+    <div class="table-header">
+      <span class="table-title">🎧 הקלטות אחרונות</span>
+      <a href="/admin/recordings" class="btn btn-ghost" style="font-size:12px;padding:6px 12px">הכל</a>
+    </div>
+    <table>
+      <thead><tr>
+        <th>לקוח</th><th>משך</th><th>עלות</th><th>סטטוס</th>
+      </tr></thead>
+      <tbody>
+        {% for rec in recent_recordings %}
+        <tr onclick="location='/admin/recordings/{{rec.id}}'" style="cursor:pointer">
+          <td>{{ rec.customer.phone }}</td>
+          <td>{{ (rec.duration_seconds // 60) }}:{{ '%02d'%(rec.duration_seconds % 60) }}</td>
+          <td>₪{{ "%.2f"|format(rec.cost) }}</td>
+          <td>
+            {% if rec.status == 'delivered' %}<span class="badge badge-green">נשלח</span>
+            {% elif rec.status == 'transcribing' %}<span class="badge badge-amber">מתמלל</span>
+            {% elif rec.status == 'error' %}<span class="badge badge-red">שגיאה</span>
+            {% else %}<span class="badge badge-gray">{{ rec.status }}</span>{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="table-card">
+    <div class="table-header">
+      <span class="table-title">💳 עסקאות אחרונות</span>
+      <a href="/admin/reports" class="btn btn-ghost" style="font-size:12px;padding:6px 12px">דוחות</a>
+    </div>
+    <table>
+      <thead><tr>
+        <th>לקוח</th><th>סכום</th><th>סוג</th><th>תאריך</th>
+      </tr></thead>
+      <tbody>
+        {% for txn in recent_transactions %}
+        <tr>
+          <td>{{ txn.customer.phone }}</td>
+          <td style="color:{% if txn.amount > 0 %}#10b981{% else %}#ef4444{% endif %}">
+            {% if txn.amount > 0 %}+{% endif %}₪{{ "%.2f"|format(txn.amount) }}
+          </td>
+          <td>
+            {% if txn.type == 'charge' %}<span class="badge badge-green">טעינה</span>
+            {% elif txn.type == 'debit' %}<span class="badge badge-red">חיוב</span>
+            {% elif txn.type == 'credit' %}<span class="badge badge-blue">זיכוי</span>
+            {% else %}<span class="badge badge-gray">{{ txn.type }}</span>{% endif %}
+          </td>
+          <td style="color:#8892b0">{{ txn.created_at.strftime('%d/%m %H:%M') }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
