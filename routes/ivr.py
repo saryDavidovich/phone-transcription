@@ -17,14 +17,15 @@ def get_setting(key, default=''):
     return s.value if s else default
 
 def r(text, next_route=None, input_len=1, timeout=10, terminator='#', record=None):
-    lines = [f'read={text}']
     if record:
         next_url = f'{BASE_URL}/{next_route}' if next_route else ''
-        lines.append(f'record=1,{record},1,{next_url}')
+        response = f'read=t-{text}=Digits,,record,{next_url}'
     elif next_route:
         next_url = f'{BASE_URL}/{next_route}'
-        lines.append(f'input={input_len},{timeout},1,{next_url},{terminator}')
-        return '\n'.join(lines) + '\n', 200, {'Content-Type': 'text/plain; charset=utf-8'}
+        response = f'read=t-{text}=Digits,,1,1,{timeout},Number,yes'
+    else:
+        response = f'id_list_message=t-{text}'
+    return response, 200, {'Content-Type': 'text/plain; charset=utf-8'}
 @ivr_bp.route('/incoming', methods=['GET', 'POST'])
 def incoming():
     log.info(f"GET params: {dict(request.args)}")
