@@ -17,27 +17,21 @@ def get_setting(key, default=''):
     return s.value if s else default
 
 def r(text, next_route=None, input_len=1, timeout=10, terminator='#', record=None):
-    lines = []
+    lines = [f'read={text}']
     if record:
         next_url = f'{BASE_URL}/{next_route}' if next_route else ''
-        lines.append(f'read={text}')
         lines.append(f'record=1,{record},1,{next_url}')
     elif next_route:
         next_url = f'{BASE_URL}/{next_route}'
-        lines.append(f'read={text}')
-        lines.append(f'goto={next_url}')
-    else:
-        lines.append(f'read={text}')
-        lines.append('hangup=yes')
-    response = '\n'.join(lines)
-    return response, 200, {'Content-Type': 'text/plain; charset=utf-8'}
+        lines.append(f'input={input_len},{timeout},1,{next_url},{terminator}')
+    return '1:\n' + '\n'.join(lines) + '\n', 200, {'Content-Type': 'text/plain; charset=utf-8'}
 
 @ivr_bp.route('/incoming', methods=['GET', 'POST'])
 def incoming():
     log.info(f"GET params: {dict(request.args)}")
     log.info(f"POST params: {dict(request.form)}")
     phone = get_param('ApiPhone')
-    call_id = get_param('ApiCallId', str(uuid.uuid4()))
+    call_id = get_param('callId', str(uuid.uuid4()))
     log.info(f"Call from {phone}, id={call_id}")
 
     customer = Customer.query.filter_by(phone=phone).first()
@@ -75,23 +69,15 @@ def handle_menu():
     if choice == '1':
         min_balance = float(get_setting('min_balance', '5'))
         if not customer or customer.balance < min_balance:
-            return r(
-                'אין לך מספיק כסף בארנק. לטעינה הקש 1, לחזרה הקש 0.',
-                'wallet_or_back'
-            )
+            return r('אין לך מספיק כסף בארנק. לטעינה הקש 1, לחזרה הקש 0.', 'wallet_or_back')
         max_sec = int(get_setting('max_recording_seconds', '1800'))
-        return r(
-            'השאר את הודעתך לאחר הצליל. לסיום הקש # או נתק.',
-            'recording_done',
-            record=max_sec
-        )
+        return r('השאר את הודעתך לאחר הצליל. לסיום הקש # או נתק.', 'recording_done', record=max_sec)
     elif choice == '2':
         return r('לשמיעת יתרה הקש 1. לטעינה הקש 2. לחזרה הקש 0.', 'wallet_menu')
     elif choice == '3':
         return r('לעדכון מייל הקש 1. לעדכון פקס הקש 2. לחזרה הקש 0.', 'update_details')
     elif choice == '9':
-        explanation = get_setting('system_explanation',
-            'מערכת התמלול מאפשרת לך להקליט הודעות שיתומללו ויישלחו אליך למייל או לפקס.')
+        explanation = get_setting('system_explanation', 'מערכת התמלול מאפשרת לך להקליט הודעות שיתומללו ויישלחו אליך למייל או לפקס.')
         return r(explanation, 'main_menu')
     else:
         return r('בחירה לא חוקית.', 'main_menu')
@@ -176,7 +162,7 @@ def save_fax():
 @ivr_bp.route('/recording_done', methods=['GET', 'POST'])
 def recording_done():
     phone = get_param('ApiPhone')
-    call_id = get_param('ApiCallId', str(uuid.uuid4()))
+    call_id = get_param('callId', str(uuid.uuid4()))
     rec_url = get_param('RecordingUrl')
     duration = int(get_param('Duration', '0'))
 
@@ -196,17 +182,10 @@ def recording_done():
     db.session.commit()
 
     if rec_url and (customer.email or customer.fax):
-        transcribe_async(
-            call_id, rec_url, customer.id,
-            customer.delivery_method or 'email',
-            customer.email or customer.fax or '',
-            duration
-        )
-
-    return r(
-        'ההקלטה התקבלה. התמלול ישלח אליך בקרוב. לשליחה למייל הקש 1, לפקס הקש 2.',
-        'choose_delivery'
-    )
+        transcribe_async(call_id, rec_url, customer.id, customer.delivery_method or 'email', customer.email or customer.fax or '', duration)
+        return r('ההקלטה התקבלה. התמלול ישלח אליך בקרוב. לשליחה למייל הקש 1, לפקס הקש 2.', 'choose_delivery')
+    else:
+        return r('ההקלטה התקבלה. לשליחה למייל הקש 1, לפקס הקש 2.', 'choose_delivery')
 
 @ivr_bp.route('/choose_delivery', methods=['GET', 'POST'])
 def choose_delivery():
