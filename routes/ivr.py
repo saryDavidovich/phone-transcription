@@ -24,8 +24,7 @@ def r(text, next_route=None, input_len=1, timeout=10, terminator='#', record=Non
     elif next_route:
         next_url = f'{BASE_URL}/{next_route}'
         lines.append(f'input={input_len},{timeout},1,{next_url},{terminator}')
-   return '\n'.join(lines) + '\n', 200, {'Content-Type': 'text/plain; charset=utf-8'}
-
+        return '\n'.join(lines) + '\n', 200, {'Content-Type': 'text/plain; charset=utf-8'}
 @ivr_bp.route('/incoming', methods=['GET', 'POST'])
 def incoming():
     log.info(f"GET params: {dict(request.args)}")
