@@ -57,6 +57,8 @@ def _create_default_admin():
             db.session.commit()
     except Exception:
         db.session.rollback()
+    except Exception:
+        db.session.rollback()
         from werkzeug.security import generate_password_hash
         admin = AdminUser(
             username='admin',
