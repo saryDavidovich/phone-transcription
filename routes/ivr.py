@@ -30,6 +30,8 @@ def r(text, next_route=None, input_len=1, timeout=10, terminator='#', record=Non
  
 @ivr_bp.route('/incoming', methods=['GET', 'POST'])
 def incoming():
+    log.info(f"GET params: {dict(request.args)}")
+    log.info(f"POST params: {dict(request.form)}")
     phone = get_param('ApiPhone')
     call_id = get_param('callId', str(uuid.uuid4()))
     log.info(f"Call from {phone}, id={call_id}")
