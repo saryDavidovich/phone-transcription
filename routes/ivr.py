@@ -7,6 +7,8 @@ import uuid, logging
 ivr_bp = Blueprint('ivr', __name__)
 log = logging.getLogger(__name__)
  
+BASE_URL = 'https://web-production-90272.up.railway.app/ivr'
+ 
 def get_param(key, default=''):
     """Read parameter from GET or POST"""
     return request.args.get(key) or request.form.get(key) or default
@@ -16,12 +18,14 @@ def get_setting(key, default=''):
     return s.value if s else default
  
 def r(text, next_route=None, input_len=1, timeout=10, terminator='#', record=None):
-    """Helper to build Yemot response"""
+    """Helper to build Yemot response with full URLs"""
     lines = [f'read={text}']
     if record:
-        lines.append(f'record=1,{record},1,{next_route}')
+        next_url = f'{BASE_URL}/{next_route}' if next_route else ''
+        lines.append(f'record=1,{record},1,{next_url}')
     elif next_route:
-        lines.append(f'input={input_len},{timeout},1,{next_route},{terminator}')
+        next_url = f'{BASE_URL}/{next_route}'
+        lines.append(f'input={input_len},{timeout},1,{next_url},{terminator}')
     return '1:\n' + '\n'.join(lines) + '\n', 200, {'Content-Type': 'text/plain; charset=utf-8'}
  
 @ivr_bp.route('/incoming', methods=['GET', 'POST'])
@@ -40,7 +44,7 @@ def incoming():
         return r(f'{welcome} לתפריט הקש 1', 'main_menu')
  
     if customer.is_blocked:
-        return r('מצטערים, חשבונך חסום. לפרטים פנה לשירות לקוחות.', None)
+        return r('מצטערים, חשבונך חסום. לפרטים פנה לשירות לקוחות.')
  
     welcome = get_setting('welcome_returning', 'שלום וברוכים השבים.')
     balance_msg = f'יתרתך היא {customer.balance:.2f} שקל.'
@@ -48,12 +52,11 @@ def incoming():
  
 @ivr_bp.route('/main_menu', methods=['GET', 'POST'])
 def main_menu():
-    price = get_setting('price_per_30min', '5')
     menu = (
-        f'להתחלת הקלטה הקש 1. '
-        f'לארנק וטעינה הקש 2. '
-        f'לעדכון פרטים הקש 3. '
-        f'להסבר על המערכת הקש 9.'
+        'להתחלת הקלטה הקש 1. '
+        'לארנק וטעינה הקש 2. '
+        'לעדכון פרטים הקש 3. '
+        'להסבר על המערכת הקש 9.'
     )
     return r(menu, 'handle_menu')
  
@@ -67,7 +70,7 @@ def handle_menu():
         min_balance = float(get_setting('min_balance', '5'))
         if not customer or customer.balance < min_balance:
             return r(
-                f'אין לך מספיק כסף בארנק. לטעינה הקש 1, לחזרה הקש 0.',
+                'אין לך מספיק כסף בארנק. לטעינה הקש 1, לחזרה הקש 0.',
                 'wallet_or_back'
             )
         max_sec = int(get_setting('max_recording_seconds', '1800'))
@@ -142,15 +145,15 @@ def save_email():
     customer = Customer.query.filter_by(phone=phone).first()
     if customer and rec_url:
         from services.transcribe import _download, _whisper
-        import tempfile, os, re
+        import os, re
         path = _download(rec_url, f'email_{phone}')
         if path:
             text = _whisper(path)
             os.remove(path)
             if text:
                 email = text.lower().strip()
-                email = email.replace(' shtrudel ','@').replace(' at ','@')
-                email = email.replace(' nekuda ','.').replace(' dot ','.')
+                email = email.replace(' shtrudel ', '@').replace(' at ', '@')
+                email = email.replace(' nekuda ', '.').replace(' dot ', '.')
                 email = re.sub(r'\s+', '', email)
                 if '@' in email:
                     customer.email = email
@@ -166,7 +169,7 @@ def save_fax():
     if customer and fax:
         customer.fax = fax
         db.session.commit()
-        return r(f'מספר הפקס עודכן. לחזרה הקש כל מקש.', 'main_menu')
+        return r('מספר הפקס עודכן. לחזרה הקש כל מקש.', 'main_menu')
     return r('שגיאה. נסה שוב.', 'update_details')
  
 @ivr_bp.route('/recording_done', methods=['GET', 'POST'])
@@ -178,7 +181,7 @@ def recording_done():
  
     customer = Customer.query.filter_by(phone=phone).first()
     if not customer:
-        return r('שגיאה. נסה שוב.', None)
+        return r('שגיאה. נסה שוב.')
  
     rec = Recording(
         call_id=call_id,
@@ -217,7 +220,4 @@ def choose_delivery():
         customer.delivery_method = 'email' if choice == '1' else 'fax'
         db.session.commit()
     dest = 'מייל' if choice == '1' else 'פקס'
-    return r(f'תודה. התמלול ישלח ל{dest}. שיחה טובה.', None)
-
-    dest = 'מייל' if choice == '1' else 'פקס'
-    return r(f'תודה. התמלול ישלח ל{dest}. שיחה טובה.', None)
+    return r(f'תודה. התמלול ישלח ל{dest}. שיחה טובה.')
