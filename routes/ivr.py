@@ -23,7 +23,7 @@ def r(text, next_route=None, input_len=1, timeout=10, terminator='#', record=Non
         response = f'read=t-{text}=rec,,record,{next_url},{record}'
     elif next_route:
         next_url = f'{BASE_URL}/{next_route}'
-        response = f'read=t-{text}=Digits,,1,{input_len},{timeout},Number,yes,{next_url}'
+        response = f'read=t-{text}=Digits,,1,{input_len},{timeout},Number,yes,{next_url}&goto={next_url}'
     else:
         response = f'id_list_message=t-{text}'
     return response, 200, {'Content-Type': 'text/plain; charset=utf-8'}
