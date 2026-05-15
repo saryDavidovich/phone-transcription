@@ -1,6 +1,6 @@
-from flask import Blueprint, request, current_app
+from flask import Blueprint, request
 from app import db
-from models import Customer, Recording, Transaction, Settings
+from models import Customer, Recording, Settings
 from services.transcribe import transcribe_async
 import uuid, logging
 
@@ -16,14 +16,14 @@ def get_setting(key, default=''):
     s = Settings.query.filter_by(key=key).first()
     return s.value if s else default
 
-def r(text, next_route=None, input_len=1, timeout=10, terminator='#', record=None):
+def r(text, next_step=None, input_len=1, timeout=10, record=None):
     text = text.replace('.', ' ').replace('-', ' ')
     if record:
-        next_url = f'{BASE_URL}/{next_route}' if next_route else ''
-        response = f'read=t-{text}=rec,,record,{next_url},{record}'
-    elif next_route:
-        next_url = f'{BASE_URL}/{next_route}'
-        response = f'read=t-{text}=Digits,,1,{input_len},{timeout},Number,yes,{next_url}&goto={next_url}'
+        next_url = f'{BASE_URL}/incoming?step={next_step}' if next_step else ''
+        response = f'read=t-{text}=rec,,record,,rec_{next_step},{record},{next_url}'
+    elif next_step:
+        next_url = f'{BASE_URL}/incoming?step={next_step}'
+        response = f'read=t-{text}=Digits,,1,{input_len},{timeout},Number,yes,{next_url}'
     else:
         response = f'id_list_message=t-{text}'
     return response, 200, {'Content-Type': 'text/plain; charset=utf-8'}
@@ -32,12 +32,36 @@ def r(text, next_route=None, input_len=1, timeout=10, terminator='#', record=Non
 def incoming():
     log.info(f"GET params: {dict(request.args)}")
     log.info(f"POST params: {dict(request.form)}")
+
+    step = get_param('step', '')
     phone = get_param('ApiPhone')
     call_id = get_param('callId', str(uuid.uuid4()))
-    log.info(f"Call from {phone}, id={call_id}")
+    log.info(f"Call from {phone}, step={step}, id={call_id}")
+
+    if step == 'main_menu':
+        return main_menu()
+    elif step == 'handle_menu':
+        return handle_menu()
+    elif step == 'wallet_or_back':
+        return wallet_or_back()
+    elif step == 'wallet_menu':
+        return wallet_menu()
+    elif step == 'process_topup':
+        return process_topup()
+    elif step == 'confirm_topup':
+        return confirm_topup()
+    elif step == 'update_details':
+        return update_details()
+    elif step == 'save_email':
+        return save_email()
+    elif step == 'save_fax':
+        return save_fax()
+    elif step == 'recording_done':
+        return recording_done()
+    elif step == 'choose_delivery':
+        return choose_delivery()
 
     customer = Customer.query.filter_by(phone=phone).first()
-
     if not customer:
         customer = Customer(phone=phone, balance=0.0)
         db.session.add(customer)
@@ -52,7 +76,6 @@ def incoming():
     balance_msg = f'יתרתך היא {customer.balance:.2f} שקל'
     return r(f'{welcome} {balance_msg} לתפריט הקש 1', 'main_menu')
 
-@ivr_bp.route('/main_menu', methods=['GET', 'POST'])
 def main_menu():
     menu = (
         'להתחלת הקלטה הקש 1 '
@@ -62,7 +85,6 @@ def main_menu():
     )
     return r(menu, 'handle_menu')
 
-@ivr_bp.route('/handle_menu', methods=['GET', 'POST'])
 def handle_menu():
     choice = get_param('Digits')
     phone = get_param('ApiPhone')
@@ -84,14 +106,12 @@ def handle_menu():
     else:
         return r('בחירה לא חוקית', 'main_menu')
 
-@ivr_bp.route('/wallet_or_back', methods=['GET', 'POST'])
 def wallet_or_back():
     choice = get_param('Digits')
     if choice == '1':
         return r('הקש את הסכום בשקלים ולאחר מכן הקש סולמית', 'process_topup', input_len=6)
     return r('חוזר לתפריט הראשי', 'main_menu')
 
-@ivr_bp.route('/wallet_menu', methods=['GET', 'POST'])
 def wallet_menu():
     choice = get_param('Digits')
     phone = get_param('ApiPhone')
@@ -103,7 +123,6 @@ def wallet_menu():
         return r('הקש את הסכום לטעינה ולאחר מכן הקש סולמית', 'process_topup', input_len=6)
     return r('חוזר לתפריט הראשי', 'main_menu')
 
-@ivr_bp.route('/process_topup', methods=['GET', 'POST'])
 def process_topup():
     amount_str = get_param('Digits', '0')
     try:
@@ -114,11 +133,9 @@ def process_topup():
     except:
         return r('סכום לא תקין נסה שוב', 'wallet_menu')
 
-@ivr_bp.route('/confirm_topup', methods=['GET', 'POST'])
 def confirm_topup():
     return r('הטעינה תבוצע בקרוב תקבל אישור למייל חוזר לתפריט', 'main_menu')
 
-@ivr_bp.route('/update_details', methods=['GET', 'POST'])
 def update_details():
     choice = get_param('Digits')
     if choice == '1':
@@ -127,7 +144,6 @@ def update_details():
         return r('הקש את מספר הפקס ולאחר מכן הקש סולמית', 'save_fax', input_len=15)
     return r('חוזר לתפריט', 'main_menu')
 
-@ivr_bp.route('/save_email', methods=['GET', 'POST'])
 def save_email():
     phone = get_param('ApiPhone')
     rec_url = get_param('RecordingUrl')
@@ -147,10 +163,9 @@ def save_email():
                 if '@' in email:
                     customer.email = email
                     db.session.commit()
-                    return r(f'המייל שלך עודכן לחזרה הקש כל מקש', 'main_menu')
+                    return r('המייל שלך עודכן לחזרה הקש כל מקש', 'main_menu')
     return r('לא הצלחתי לזהות את המייל נסה שוב', 'update_details')
 
-@ivr_bp.route('/save_fax', methods=['GET', 'POST'])
 def save_fax():
     phone = get_param('ApiPhone')
     fax = get_param('Digits')
@@ -161,7 +176,6 @@ def save_fax():
         return r('מספר הפקס עודכן לחזרה הקש כל מקש', 'main_menu')
     return r('שגיאה נסה שוב', 'update_details')
 
-@ivr_bp.route('/recording_done', methods=['GET', 'POST'])
 def recording_done():
     phone = get_param('ApiPhone')
     call_id = get_param('callId', str(uuid.uuid4()))
@@ -193,7 +207,6 @@ def recording_done():
 
     return r('ההקלטה התקבלה התמלול ישלח אליך בקרוב לשליחה למייל הקש 1 לפקס הקש 2', 'choose_delivery')
 
-@ivr_bp.route('/choose_delivery', methods=['GET', 'POST'])
 def choose_delivery():
     choice = get_param('Digits', '1')
     phone = get_param('ApiPhone')
