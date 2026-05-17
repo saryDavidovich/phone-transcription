@@ -103,12 +103,13 @@ def incoming():
     balance_msg = f'יתרתך היא {customer.balance:.2f} שקל ' if customer.balance > 0 else ''
 
     set_step(call_id, 'main_choice')
-    return r(
-        f'שלום וברוכים הבאים למערכת התמלול '
-        f'{balance_msg}'
-        f'להתחלת הקלטה הקש 1 '
-        f'לתפריט אפשרויות הקש 2'
-    )
+return r(
+    f'שלום וברוכים הבאים למערכת התמלול '
+    f'{balance_msg}'
+    f'להתחלת הקלטה הקש 1 '
+    f'לתפריט אפשרויות הקש 2',
+    'main_choice'
+)
 
 def main_choice(call_id):
     choice = get_param('Digits')
