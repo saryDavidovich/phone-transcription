@@ -9,6 +9,9 @@ log = logging.getLogger(__name__)
 
 BASE_URL = 'https://web-production-90272.up.railway.app/ivr'
 
+# מילון שמחזיק את השלב הנוכחי לכל שיחה
+call_sessions = {}
+
 def get_param(key, default=''):
     return request.args.get(key) or request.form.get(key) or default
 
@@ -19,14 +22,19 @@ def get_setting(key, default=''):
 def r(text, next_step=None, input_len=1, timeout=10, record=None):
     text = text.replace('.', ' ').replace('-', ' ')
     if record:
-        next_url = f'{BASE_URL}/{next_step}' if next_step else ''
+        next_url = f'{BASE_URL}/incoming' if next_step else ''
         response = f'read=t-{text}=rec,,record,,,{record},no,yes,{next_url}'
     elif next_step:
-        next_url = f'{BASE_URL}/{next_step}'
-        response = f'read=t-{text}=Digits,,1,{input_len},{timeout},Number,yes,{next_url}'
+        response = f'read=t-{text}=Digits,,1,{input_len},{timeout},Number,yes,{BASE_URL}/incoming'
     else:
         response = f'id_list_message=t-{text}'
     return response, 200, {'Content-Type': 'text/plain; charset=utf-8'}
+
+def set_step(call_id, step):
+    call_sessions[call_id] = step
+
+def get_step(call_id):
+    return call_sessions.get(call_id, '')
 
 @ivr_bp.route('/incoming', methods=['GET', 'POST'])
 def incoming():
@@ -36,6 +44,53 @@ def incoming():
     call_id = get_param('ApiCallId', str(uuid.uuid4()))
     log.info(f"Call from {phone}, id={call_id}")
 
+    step = get_step(call_id)
+    log.info(f"Current step: {step}")
+
+    if step == 'main_choice':
+        set_step(call_id, '')
+        return main_choice(call_id)
+    elif step == 'options_menu':
+        set_step(call_id, '')
+        return options_menu(call_id)
+    elif step == 'handle_options':
+        set_step(call_id, '')
+        return handle_options(call_id)
+    elif step == 'wallet_or_continue':
+        set_step(call_id, '')
+        return wallet_or_continue(call_id)
+    elif step == 'recording_done':
+        set_step(call_id, '')
+        return recording_done(call_id)
+    elif step == 'choose_delivery':
+        set_step(call_id, '')
+        return choose_delivery(call_id)
+    elif step == 'wallet_menu':
+        set_step(call_id, '')
+        return wallet_menu(call_id)
+    elif step == 'handle_wallet':
+        set_step(call_id, '')
+        return handle_wallet(call_id)
+    elif step == 'process_topup':
+        set_step(call_id, '')
+        return process_topup(call_id)
+    elif step == 'confirm_topup':
+        set_step(call_id, '')
+        return confirm_topup(call_id)
+    elif step == 'update_details':
+        set_step(call_id, '')
+        return update_details(call_id)
+    elif step == 'handle_update':
+        set_step(call_id, '')
+        return handle_update(call_id)
+    elif step == 'save_email':
+        set_step(call_id, '')
+        return save_email(call_id)
+    elif step == 'save_fax':
+        set_step(call_id, '')
+        return save_fax(call_id)
+
+    # כניסה ראשונה לשיחה
     customer = Customer.query.filter_by(phone=phone).first()
     if not customer:
         customer = Customer(phone=phone, balance=0.0)
@@ -45,93 +100,80 @@ def incoming():
     if customer.is_blocked:
         return r('מצטערים חשבונך חסום לפרטים פנה לשירות לקוחות')
 
-    if customer.balance > 0:
-        balance_msg = f'יתרתך היא {customer.balance:.2f} שקל '
-    else:
-        balance_msg = ''
+    balance_msg = f'יתרתך היא {customer.balance:.2f} שקל ' if customer.balance > 0 else ''
 
+    set_step(call_id, 'main_choice')
     return r(
         f'שלום וברוכים הבאים למערכת התמלול '
         f'{balance_msg}'
         f'להתחלת הקלטה הקש 1 '
-        f'לתפריט אפשרויות הקש 2',
-        'main_choice'
+        f'לתפריט אפשרויות הקש 2'
     )
 
-@ivr_bp.route('/main_choice', methods=['GET', 'POST'])
-def main_choice():
+def main_choice(call_id):
     choice = get_param('Digits')
     if choice == '1':
-        return check_balance()
+        return check_balance(call_id)
     elif choice == '2':
-        return options_menu()
+        set_step(call_id, 'options_menu')
+        return options_menu(call_id)
     else:
-        return r('בחירה לא חוקית להתחלת הקלטה הקש 1 לתפריט אפשרויות הקש 2', 'main_choice')
+        set_step(call_id, 'main_choice')
+        return r('בחירה לא חוקית להתחלת הקלטה הקש 1 לתפריט אפשרויות הקש 2')
 
-@ivr_bp.route('/options_menu', methods=['GET', 'POST'])
-def options_menu():
+def options_menu(call_id):
+    set_step(call_id, 'handle_options')
     return r(
         'לטעינת ארנק הקש 1 '
         'לעדכון פרטים הקש 2 '
         'להסבר על המערכת הקש 3 '
-        'לחזרה הקש 0',
-        'handle_options'
+        'לחזרה הקש 0'
     )
 
-@ivr_bp.route('/handle_options', methods=['GET', 'POST'])
-def handle_options():
+def handle_options(call_id):
     choice = get_param('Digits')
     if choice == '1':
-        return wallet_menu()
+        return wallet_menu(call_id)
     elif choice == '2':
-        return update_details()
+        return update_details(call_id)
     elif choice == '3':
-        explanation = get_setting(
-            'system_explanation',
-            'מערכת זו מאפשרת לך להקליט הודעות שיתומללו ויישלחו אליך למייל או לפקס '
-            'העלות היא לפי אורך ההקלטה'
-        )
-        return r(explanation, 'options_menu')
+        explanation = get_setting('system_explanation', 'מערכת זו מאפשרת לך להקליט הודעות שיתומללו ויישלחו אליך למייל או לפקס העלות היא לפי אורך ההקלטה')
+        set_step(call_id, 'options_menu')
+        return r(explanation)
     elif choice == '0':
-        return r('להתחלת הקלטה הקש 1 לתפריט אפשרויות הקש 2', 'main_choice')
+        set_step(call_id, 'main_choice')
+        return r('להתחלת הקלטה הקש 1 לתפריט אפשרויות הקש 2')
     else:
-        return r('בחירה לא חוקית', 'options_menu')
+        set_step(call_id, 'handle_options')
+        return r('בחירה לא חוקית')
 
-def check_balance():
+def check_balance(call_id):
     phone = get_param('ApiPhone')
     customer = Customer.query.filter_by(phone=phone).first()
     min_balance = float(get_setting('min_balance', '0'))
     if not customer or customer.balance <= min_balance:
-        return r(
-            'יתרתך נמוכה '
-            'למעבר לטעינת ארנק הקש 1 '
-            'להמשך ללא תשלום הקש 2',
-            'wallet_or_continue'
-        )
-    return start_recording()
+        set_step(call_id, 'wallet_or_continue')
+        return r('יתרתך נמוכה למעבר לטעינת ארנק הקש 1 להמשך ללא תשלום הקש 2')
+    return start_recording(call_id)
 
-@ivr_bp.route('/wallet_or_continue', methods=['GET', 'POST'])
-def wallet_or_continue():
+def wallet_or_continue(call_id):
     choice = get_param('Digits')
     if choice == '1':
-        return r('הקש את הסכום בשקלים ולאחר מכן הקש סולמית', 'process_topup', input_len=6)
+        set_step(call_id, 'process_topup')
+        return r('הקש את הסכום בשקלים ולאחר מכן הקש סולמית', input_len=6)
     elif choice == '2':
-        return start_recording()
+        return start_recording(call_id)
     else:
-        return r('בחירה לא חוקית', 'wallet_or_continue')
+        set_step(call_id, 'wallet_or_continue')
+        return r('בחירה לא חוקית')
 
-def start_recording():
+def start_recording(call_id):
     max_sec = int(get_setting('max_recording_seconds', '1800'))
-    return r(
-        'השאר את הודעתך לאחר הצליל לסיום הקש סולמית או נתק',
-        'recording_done',
-        record=max_sec
-    )
+    set_step(call_id, 'recording_done')
+    return r('השאר את הודעתך לאחר הצליל לסיום הקש סולמית או נתק', record=max_sec)
 
-@ivr_bp.route('/recording_done', methods=['GET', 'POST'])
-def recording_done():
+def recording_done(call_id):
     phone = get_param('ApiPhone')
-    call_id = get_param('ApiCallId', str(uuid.uuid4()))
     rec_url = get_param('RecordingUrl')
     duration = int(get_param('Duration', '0'))
 
@@ -165,11 +207,11 @@ def recording_done():
             )
             return r('ההקלטה התקבלה התמלול ישלח אליך בקרוב שיחה טובה')
         else:
-            return r('ההקלטה התקבלה לשליחה למייל הקש 1 לפקס הקש 2', 'choose_delivery')
+            set_step(call_id, 'choose_delivery')
+            return r('ההקלטה התקבלה לשליחה למייל הקש 1 לפקס הקש 2')
     return r('ההקלטה התקבלה תודה')
 
-@ivr_bp.route('/choose_delivery', methods=['GET', 'POST'])
-def choose_delivery():
+def choose_delivery(call_id):
     choice = get_param('Digits', '1')
     phone = get_param('ApiPhone')
     customer = Customer.query.filter_by(phone=phone).first()
@@ -179,72 +221,74 @@ def choose_delivery():
     dest = 'מייל' if choice == '1' else 'פקס'
     return r(f'תודה התמלול ישלח ל{dest} שיחה טובה')
 
-@ivr_bp.route('/wallet_menu', methods=['GET', 'POST'])
-def wallet_menu():
+def wallet_menu(call_id):
     phone = get_param('ApiPhone')
     customer = Customer.query.filter_by(phone=phone).first()
     balance = customer.balance if customer else 0
+    set_step(call_id, 'handle_wallet')
     return r(
         f'יתרתך היא {balance:.2f} שקל '
         f'לשמיעת יתרה הקש 1 '
         f'לטעינה הקש 2 '
-        f'לחזרה הקש 0',
-        'handle_wallet'
+        f'לחזרה הקש 0'
     )
 
-@ivr_bp.route('/handle_wallet', methods=['GET', 'POST'])
-def handle_wallet():
+def handle_wallet(call_id):
     choice = get_param('Digits')
     phone = get_param('ApiPhone')
     customer = Customer.query.filter_by(phone=phone).first()
     if choice == '1':
         balance = customer.balance if customer else 0
-        return r(f'יתרתך היא {balance:.2f} שקל', 'wallet_menu')
+        set_step(call_id, 'wallet_menu')
+        return r(f'יתרתך היא {balance:.2f} שקל')
     elif choice == '2':
-        return r('הקש את הסכום לטעינה ולאחר מכן הקש סולמית', 'process_topup', input_len=6)
+        set_step(call_id, 'process_topup')
+        return r('הקש את הסכום לטעינה ולאחר מכן הקש סולמית', input_len=6)
     elif choice == '0':
-        return options_menu()
+        return options_menu(call_id)
     else:
-        return r('בחירה לא חוקית', 'wallet_menu')
+        set_step(call_id, 'wallet_menu')
+        return r('בחירה לא חוקית')
 
-@ivr_bp.route('/process_topup', methods=['GET', 'POST'])
-def process_topup():
+def process_topup(call_id):
     amount_str = get_param('Digits', '0')
     try:
         amount = float(amount_str)
         if amount < 5:
-            return r('הסכום המינימלי לטעינה הוא 5 שקל נסה שוב', 'wallet_menu')
-        return r(f'לטעינת {amount:.0f} שקל הקש 1 לאישור', 'confirm_topup')
+            set_step(call_id, 'process_topup')
+            return r('הסכום המינימלי לטעינה הוא 5 שקל נסה שוב')
+        set_step(call_id, 'confirm_topup')
+        return r(f'לטעינת {amount:.0f} שקל הקש 1 לאישור')
     except:
-        return r('סכום לא תקין נסה שוב', 'wallet_menu')
+        set_step(call_id, 'process_topup')
+        return r('סכום לא תקין נסה שוב')
 
-@ivr_bp.route('/confirm_topup', methods=['GET', 'POST'])
-def confirm_topup():
+def confirm_topup(call_id):
     return r('הטעינה תבוצע בקרוב תקבל אישור למייל שיחה טובה')
 
-@ivr_bp.route('/update_details', methods=['GET', 'POST'])
-def update_details():
+def update_details(call_id):
+    set_step(call_id, 'handle_update')
     return r(
         'לעדכון מייל הקש 1 '
         'לעדכון פקס הקש 2 '
-        'לחזרה הקש 0',
-        'handle_update'
+        'לחזרה הקש 0'
     )
 
-@ivr_bp.route('/handle_update', methods=['GET', 'POST'])
-def handle_update():
+def handle_update(call_id):
     choice = get_param('Digits')
     if choice == '1':
-        return r('אמור בקול ברור את כתובת המייל שלך לאחר הצליל', 'save_email', record=15)
+        set_step(call_id, 'save_email')
+        return r('אמור בקול ברור את כתובת המייל שלך לאחר הצליל', record=15)
     elif choice == '2':
-        return r('הקש את מספר הפקס ולאחר מכן הקש סולמית', 'save_fax', input_len=15)
+        set_step(call_id, 'save_fax')
+        return r('הקש את מספר הפקס ולאחר מכן הקש סולמית', input_len=15)
     elif choice == '0':
-        return options_menu()
+        return options_menu(call_id)
     else:
-        return r('בחירה לא חוקית', 'update_details')
+        set_step(call_id, 'handle_update')
+        return r('בחירה לא חוקית')
 
-@ivr_bp.route('/save_email', methods=['GET', 'POST'])
-def save_email():
+def save_email(call_id):
     phone = get_param('ApiPhone')
     rec_url = get_param('RecordingUrl')
     customer = Customer.query.filter_by(phone=phone).first()
@@ -264,10 +308,10 @@ def save_email():
                     customer.email = email
                     db.session.commit()
                     return r('המייל שלך עודכן בהצלחה שיחה טובה')
-    return r('לא הצלחתי לזהות את המייל נסה שוב', 'update_details')
+    set_step(call_id, 'handle_update')
+    return r('לא הצלחתי לזהות את המייל נסה שוב')
 
-@ivr_bp.route('/save_fax', methods=['GET', 'POST'])
-def save_fax():
+def save_fax(call_id):
     phone = get_param('ApiPhone')
     fax = get_param('Digits')
     customer = Customer.query.filter_by(phone=phone).first()
@@ -275,4 +319,5 @@ def save_fax():
         customer.fax = fax
         db.session.commit()
         return r('מספר הפקס עודכן בהצלחה שיחה טובה')
-    return r('שגיאה נסה שוב', 'update_details')
+    set_step(call_id, 'handle_update')
+    return r('שגיאה נסה שוב')
