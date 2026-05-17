@@ -23,7 +23,7 @@ def r(text, next_step=None, input_len=1, timeout=10, record=None):
         response = f'read=t-{text}=rec,,record,,rec_{next_step},{record},{next_url}'
     elif next_step:
         next_url = f'{BASE_URL}/incoming?step={next_step}'
-        response = f'read=t-{text}=Digits,,1,{input_len},{timeout},Number,yes,{next_url}'
+        response = f'read=t-{text}=Digits,,1,{input_len},{timeout},Number,yes\ngoto={next_url}'
     else:
         response = f'id_list_message=t-{text}'
     return response, 200, {'Content-Type': 'text/plain; charset=utf-8'}
