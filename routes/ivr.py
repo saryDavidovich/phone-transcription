@@ -20,7 +20,7 @@ def r(text, next_step=None, input_len=1, timeout=10, record=None):
     text = text.replace('.', ' ').replace('-', ' ')
     if record:
         next_url = f'{BASE_URL}/incoming?step={next_step}' if next_step else ''
-        response = f'read=t-{text}=rec,,record,,,{record}\ngoto={next_url}'
+        response = f'read=t-{text}=rec,,record,,,{record},no,yes,{next_url}'
     elif next_step:
         next_url = f'{BASE_URL}/incoming?step={next_step}'
         response = f'read=t-{text}=Digits,,1,{input_len},{timeout},Number,yes,{next_url}'
