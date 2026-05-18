@@ -53,3 +53,9 @@ class AdminUser(db.Model, UserMixin):
     username = db.Column(db.String(100), unique=True, nullable=False)
     password_hash = db.Column(db.String(256))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+class CallSession(db.Model):
+    __tablename__ = 'call_sessions'
+    id = db.Column(db.Integer, primary_key=True)
+    call_id = db.Column(db.String(100), unique=True, nullable=False, index=True)
+    step = db.Column(db.String(50), default='')
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
