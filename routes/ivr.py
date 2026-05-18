@@ -88,9 +88,7 @@ def incoming():
 
     set_step(call_id, 'main_choice')
     return r(
-        f'שלום וברוכים הבאים למערכת התמלול. '
-        f'{balance_msg} '
-        f'להתחלת הקלטה הקש 1. '
+       f'שלום וברוכים הבאים למערכת התמלול. {balance_msg}להתחלת הקלטה הקש 1. '
         f'לתפריט אפשרויות הקש 2.',
         'main_choice'
     )
