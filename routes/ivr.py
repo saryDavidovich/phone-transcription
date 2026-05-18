@@ -1,13 +1,13 @@
 from flask import Blueprint, request
 from app import db
-from models import Customer, Recording, Settings, CallSession
+from models import Customer, Recording, Settings
 from services.transcribe import transcribe_async
 import uuid, logging, os
 
 ivr_bp = Blueprint('ivr', __name__)
 log = logging.getLogger(__name__)
 
-BASE_URL = 'https://web-production-90272.up.railway.app/ivr'
+call_sessions = {}
 
 def get_param(key, default=''):
     return request.args.get(key) or request.form.get(key) or default
@@ -17,29 +17,15 @@ def get_setting(key, default=''):
     return s.value if s else default
 
 def set_step(call_id, step):
-    session = CallSession.query.filter_by(call_id=call_id).first()
-    if session:
-        session.step = step
-    else:
-        session = CallSession(call_id=call_id, step=step)
-        db.session.add(session)
-    db.session.commit()
+    call_sessions[call_id] = step
 
 def get_step(call_id):
-    session = CallSession.query.filter_by(call_id=call_id).first()
-    return session.step if session else ''
+    return call_sessions.get(call_id, '')
 
-def r(text, next_step=None, input_len=1, timeout=10, record=None):
-    text = text.replace('-', ' ')
+def r(text):
     if not text.endswith(('.', ',', '!')):
         text = text + '.'
-    if record:
-        response = f'read=t-{text}=rec,,record,,,{record},no,yes,{BASE_URL}/incoming'
-    elif next_step:
-        response = f'read=t-{text}=Digits,,1,{input_len},{timeout},Number,yes,{BASE_URL}/incoming'
-    else:
-        response = f'id_list_message=t-{text}'
-    return response, 200, {'Content-Type': 'text/plain; charset=utf-8'}
+    return text, 200, {'Content-Type': 'text/plain; charset=utf-8'}
 
 @ivr_bp.route('/incoming', methods=['GET', 'POST'])
 def incoming():
@@ -51,30 +37,107 @@ def incoming():
 
     step = get_step(call_id)
     log.info(f"Current step: {step}")
+    digits = get_param('Digits')
 
     if step == 'main_choice':
-        return main_choice(call_id)
-    elif step == 'handle_options':
-        return handle_options(call_id)
-    elif step == 'wallet_or_continue':
-        return wallet_or_continue(call_id)
-    elif step == 'recording_done':
-        return recording_done(call_id)
-    elif step == 'choose_delivery':
-        return choose_delivery(call_id)
-    elif step == 'handle_wallet':
-        return handle_wallet(call_id)
-    elif step == 'process_topup':
-        return process_topup(call_id)
-    elif step == 'confirm_topup':
-        return confirm_topup(call_id)
-    elif step == 'handle_update':
-        return handle_update(call_id)
-    elif step == 'save_email':
-        return save_email(call_id)
-    elif step == 'save_fax':
-        return save_fax(call_id)
+        if digits == '1':
+            return check_balance(call_id, phone)
+        elif digits == '2':
+            return options_menu(call_id)
+        else:
+            return r('בחירה לא חוקית. להתחלת הקלטה הקש 1. לתפריט אפשרויות הקש 2.')
 
+    elif step == 'handle_options':
+        if digits == '1':
+            return wallet_menu(call_id, phone)
+        elif digits == '2':
+            return update_details(call_id)
+        elif digits == '3':
+            explanation = get_setting('system_explanation', 'מערכת זו מאפשרת לך להקליט הודעות שיתומללו ויישלחו אליך למייל או לפקס.')
+            set_step(call_id, 'handle_options')
+            return r(explanation)
+        elif digits == '0':
+            set_step(call_id, 'main_choice')
+            return r('להתחלת הקלטה הקש 1. לתפריט אפשרויות הקש 2.')
+        else:
+            set_step(call_id, 'handle_options')
+            return r('בחירה לא חוקית. לטעינת ארנק הקש 1. לעדכון פרטים הקש 2. להסבר הקש 3. לחזרה הקש 0.')
+
+    elif step == 'wallet_or_continue':
+        if digits == '1':
+            set_step(call_id, 'process_topup')
+            return r('הקש את הסכום בשקלים ולאחר מכן הקש סולמית.')
+        elif digits == '2':
+            return start_recording(call_id)
+        else:
+            set_step(call_id, 'wallet_or_continue')
+            return r('בחירה לא חוקית. למעבר לטעינת ארנק הקש 1. להמשך ללא תשלום הקש 2.')
+
+    elif step == 'process_topup':
+        try:
+            amount = float(digits or '0')
+            if amount < 5:
+                set_step(call_id, 'process_topup')
+                return r('הסכום המינימלי לטעינה הוא 5 שקל. נסה שוב.')
+            set_step(call_id, 'confirm_topup')
+            return r(f'לטעינת {amount:.0f} שקל הקש 1 לאישור.')
+        except:
+            set_step(call_id, 'process_topup')
+            return r('סכום לא תקין. נסה שוב.')
+
+    elif step == 'confirm_topup':
+        return r('הטעינה תבוצע בקרוב. תקבל אישור למייל. שיחה טובה.')
+
+    elif step == 'handle_wallet':
+        if digits == '1':
+            customer = Customer.query.filter_by(phone=phone).first()
+            balance = customer.balance if customer else 0
+            set_step(call_id, 'handle_wallet')
+            return r(f'יתרתך היא {balance:.2f} שקל. לשמיעת יתרה הקש 1. לטעינה הקש 2. לחזרה הקש 0.')
+        elif digits == '2':
+            set_step(call_id, 'process_topup')
+            return r('הקש את הסכום לטעינה ולאחר מכן הקש סולמית.')
+        elif digits == '0':
+            return options_menu(call_id)
+        else:
+            set_step(call_id, 'handle_wallet')
+            return r('בחירה לא חוקית.')
+
+    elif step == 'handle_update':
+        if digits == '1':
+            set_step(call_id, 'save_email')
+            return r('אמור בקול ברור את כתובת המייל שלך לאחר הצליל.')
+        elif digits == '2':
+            set_step(call_id, 'save_fax')
+            return r('הקש את מספר הפקס ולאחר מכן הקש סולמית.')
+        elif digits == '0':
+            return options_menu(call_id)
+        else:
+            set_step(call_id, 'handle_update')
+            return r('בחירה לא חוקית.')
+
+    elif step == 'save_fax':
+        fax = digits
+        customer = Customer.query.filter_by(phone=phone).first()
+        if customer and fax:
+            customer.fax = fax
+            db.session.commit()
+            return r('מספר הפקס עודכן בהצלחה. שיחה טובה.')
+        set_step(call_id, 'handle_update')
+        return r('שגיאה. נסה שוב.')
+
+    elif step == 'recording_done':
+        return recording_done(call_id, phone)
+
+    elif step == 'choose_delivery':
+        customer = Customer.query.filter_by(phone=phone).first()
+        if customer:
+            customer.delivery_method = 'email' if digits == '1' else 'fax'
+            db.session.commit()
+        dest = 'מייל' if digits == '1' else 'פקס'
+        return r(f'תודה. התמלול ישלח ל{dest}. שיחה טובה.')
+
+    # כניסה ראשונה
     customer = Customer.query.filter_by(phone=phone).first()
     if not customer:
         customer = Customer(phone=phone, balance=0.0)
@@ -82,81 +145,40 @@ def incoming():
         db.session.commit()
 
     if customer.is_blocked:
-        return r('מצטערים חשבונך חסום לפרטים פנה לשירות לקוחות.')
+        return r('מצטערים. חשבונך חסום. לפרטים פנה לשירות לקוחות.')
 
-    balance_msg = f'יתרתך היא {customer.balance:.2f} שקל.' if customer.balance > 0 else ''
-
+    balance_msg = f'יתרתך היא {customer.balance:.2f} שקל. ' if customer.balance > 0 else ''
     set_step(call_id, 'main_choice')
-    return r(
-       f'שלום וברוכים הבאים למערכת התמלול. {balance_msg}להתחלת הקלטה הקש 1. '
-        f'לתפריט אפשרויות הקש 2.',
-        'main_choice'
-    )
-
-def main_choice(call_id):
-    choice = get_param('Digits')
-    if choice == '1':
-        return check_balance(call_id)
-    elif choice == '2':
-        return options_menu(call_id)
-    else:
-        set_step(call_id, 'main_choice')
-        return r('בחירה לא חוקית. להתחלת הקלטה הקש 1. לתפריט אפשרויות הקש 2.', 'main_choice')
+    return r(f'שלום וברוכים הבאים למערכת התמלול. {balance_msg}להתחלת הקלטה הקש 1. לתפריט אפשרויות הקש 2.')
 
 def options_menu(call_id):
     set_step(call_id, 'handle_options')
-    return r(
-        'לטעינת ארנק הקש 1. '
-        'לעדכון פרטים הקש 2. '
-        'להסבר על המערכת הקש 3. '
-        'לחזרה הקש 0.',
-        'handle_options'
-    )
+    return r('לטעינת ארנק הקש 1. לעדכון פרטים הקש 2. להסבר על המערכת הקש 3. לחזרה הקש 0.')
 
-def handle_options(call_id):
-    choice = get_param('Digits')
-    if choice == '1':
-        return wallet_menu(call_id)
-    elif choice == '2':
-        return update_details(call_id)
-    elif choice == '3':
-        explanation = get_setting('system_explanation', 'מערכת זו מאפשרת לך להקליט הודעות שיתומללו ויישלחו אליך למייל או לפקס.')
-        set_step(call_id, 'handle_options')
-        return r(explanation, 'handle_options')
-    elif choice == '0':
-        set_step(call_id, 'main_choice')
-        return r('להתחלת הקלטה הקש 1. לתפריט אפשרויות הקש 2.', 'main_choice')
-    else:
-        set_step(call_id, 'handle_options')
-        return r('בחירה לא חוקית.', 'handle_options')
-
-def check_balance(call_id):
-    phone = get_param('ApiPhone')
+def check_balance(call_id, phone):
     customer = Customer.query.filter_by(phone=phone).first()
     min_balance = float(get_setting('min_balance', '0'))
     if not customer or customer.balance <= min_balance:
         set_step(call_id, 'wallet_or_continue')
-        return r('יתרתך נמוכה. למעבר לטעינת ארנק הקש 1. להמשך ללא תשלום הקש 2.', 'wallet_or_continue')
+        return r('יתרתך נמוכה. למעבר לטעינת ארנק הקש 1. להמשך ללא תשלום הקש 2.')
     return start_recording(call_id)
-
-def wallet_or_continue(call_id):
-    choice = get_param('Digits')
-    if choice == '1':
-        set_step(call_id, 'process_topup')
-        return r('הקש את הסכום בשקלים ולאחר מכן הקש סולמית.', 'process_topup', input_len=6)
-    elif choice == '2':
-        return start_recording(call_id)
-    else:
-        set_step(call_id, 'wallet_or_continue')
-        return r('בחירה לא חוקית.', 'wallet_or_continue')
 
 def start_recording(call_id):
     max_sec = int(get_setting('max_recording_seconds', '1800'))
     set_step(call_id, 'recording_done')
-    return r('השאר את הודעתך לאחר הצליל. לסיום הקש סולמית או נתק.', 'recording_done', record=max_sec)
+    return r('השאר את הודעתך לאחר הצליל. לסיום הקש סולמית או נתק.')
 
-def recording_done(call_id):
-    phone = get_param('ApiPhone')
+def wallet_menu(call_id, phone):
+    customer = Customer.query.filter_by(phone=phone).first()
+    balance = customer.balance if customer else 0
+    set_step(call_id, 'handle_wallet')
+    return r(f'יתרתך היא {balance:.2f} שקל. לשמיעת יתרה הקש 1. לטעינה הקש 2. לחזרה הקש 0.')
+
+def update_details(call_id):
+    set_step(call_id, 'handle_update')
+    return r('לעדכון מייל הקש 1. לעדכון פקס הקש 2. לחזרה הקש 0.')
+
+def recording_done(call_id, phone):
     rec_url = get_param('RecordingUrl')
     duration = int(get_param('Duration', '0'))
 
@@ -191,118 +213,5 @@ def recording_done(call_id):
             return r('ההקלטה התקבלה. התמלול ישלח אליך בקרוב. שיחה טובה.')
         else:
             set_step(call_id, 'choose_delivery')
-            return r('ההקלטה התקבלה. לשליחה למייל הקש 1. לפקס הקש 2.', 'choose_delivery')
+            return r('ההקלטה התקבלה. לשליחה למייל הקש 1. לפקס הקש 2.')
     return r('ההקלטה התקבלה. תודה.')
-
-def choose_delivery(call_id):
-    choice = get_param('Digits', '1')
-    phone = get_param('ApiPhone')
-    customer = Customer.query.filter_by(phone=phone).first()
-    if customer:
-        customer.delivery_method = 'email' if choice == '1' else 'fax'
-        db.session.commit()
-    dest = 'מייל' if choice == '1' else 'פקס'
-    return r(f'תודה. התמלול ישלח ל{dest}. שיחה טובה.')
-
-def wallet_menu(call_id):
-    phone = get_param('ApiPhone')
-    customer = Customer.query.filter_by(phone=phone).first()
-    balance = customer.balance if customer else 0
-    set_step(call_id, 'handle_wallet')
-    return r(
-        f'יתרתך היא {balance:.2f} שקל. '
-        f'לשמיעת יתרה הקש 1. '
-        f'לטעינה הקש 2. '
-        f'לחזרה הקש 0.',
-        'handle_wallet'
-    )
-
-def handle_wallet(call_id):
-    choice = get_param('Digits')
-    phone = get_param('ApiPhone')
-    customer = Customer.query.filter_by(phone=phone).first()
-    if choice == '1':
-        balance = customer.balance if customer else 0
-        set_step(call_id, 'handle_wallet')
-        return r(f'יתרתך היא {balance:.2f} שקל.', 'handle_wallet')
-    elif choice == '2':
-        set_step(call_id, 'process_topup')
-        return r('הקש את הסכום לטעינה ולאחר מכן הקש סולמית.', 'process_topup', input_len=6)
-    elif choice == '0':
-        return options_menu(call_id)
-    else:
-        set_step(call_id, 'handle_wallet')
-        return r('בחירה לא חוקית.', 'handle_wallet')
-
-def process_topup(call_id):
-    amount_str = get_param('Digits', '0')
-    try:
-        amount = float(amount_str)
-        if amount < 5:
-            set_step(call_id, 'process_topup')
-            return r('הסכום המינימלי לטעינה הוא 5 שקל. נסה שוב.', 'process_topup')
-        set_step(call_id, 'confirm_topup')
-        return r(f'לטעינת {amount:.0f} שקל הקש 1 לאישור.', 'confirm_topup')
-    except:
-        set_step(call_id, 'process_topup')
-        return r('סכום לא תקין. נסה שוב.', 'process_topup')
-
-def confirm_topup(call_id):
-    return r('הטעינה תבוצע בקרוב. תקבל אישור למייל. שיחה טובה.')
-
-def update_details(call_id):
-    set_step(call_id, 'handle_update')
-    return r(
-        'לעדכון מייל הקש 1. '
-        'לעדכון פקס הקש 2. '
-        'לחזרה הקש 0.',
-        'handle_update'
-    )
-
-def handle_update(call_id):
-    choice = get_param('Digits')
-    if choice == '1':
-        set_step(call_id, 'save_email')
-        return r('אמור בקול ברור את כתובת המייל שלך לאחר הצליל.', 'save_email', record=15)
-    elif choice == '2':
-        set_step(call_id, 'save_fax')
-        return r('הקש את מספר הפקס ולאחר מכן הקש סולמית.', 'save_fax', input_len=15)
-    elif choice == '0':
-        return options_menu(call_id)
-    else:
-        set_step(call_id, 'handle_update')
-        return r('בחירה לא חוקית.', 'handle_update')
-
-def save_email(call_id):
-    phone = get_param('ApiPhone')
-    rec_url = get_param('RecordingUrl')
-    customer = Customer.query.filter_by(phone=phone).first()
-    if customer and rec_url:
-        from services.transcribe import _download, _whisper
-        import re
-        path = _download(rec_url, f'email_{phone}')
-        if path:
-            text = _whisper(path)
-            os.remove(path)
-            if text:
-                email = text.lower().strip()
-                email = email.replace(' shtrudel ', '@').replace(' at ', '@')
-                email = email.replace(' nekuda ', '.').replace(' dot ', '.')
-                email = re.sub(r'\s+', '', email)
-                if '@' in email:
-                    customer.email = email
-                    db.session.commit()
-                    return r('המייל שלך עודכן בהצלחה. שיחה טובה.')
-    set_step(call_id, 'handle_update')
-    return r('לא הצלחתי לזהות את המייל. נסה שוב.', 'handle_update')
-
-def save_fax(call_id):
-    phone = get_param('ApiPhone')
-    fax = get_param('Digits')
-    customer = Customer.query.filter_by(phone=phone).first()
-    if customer and fax:
-        customer.fax = fax
-        db.session.commit()
-        return r('מספר הפקס עודכן בהצלחה. שיחה טובה.')
-    set_step(call_id, 'handle_update')
-    return r('שגיאה. נסה שוב.', 'handle_update')
