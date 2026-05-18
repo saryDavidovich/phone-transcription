@@ -1,6 +1,6 @@
 from flask import Blueprint, request
 from app import db
-from models import Customer, Recording, Settings
+from models import Customer, Recording, Settings, CallSession
 from services.transcribe import transcribe_async
 import uuid, logging, os
 
@@ -9,14 +9,25 @@ log = logging.getLogger(__name__)
 
 BASE_URL = 'https://web-production-90272.up.railway.app/ivr'
 
-call_sessions = {}
-
 def get_param(key, default=''):
     return request.args.get(key) or request.form.get(key) or default
 
 def get_setting(key, default=''):
     s = Settings.query.filter_by(key=key).first()
     return s.value if s else default
+
+def set_step(call_id, step):
+    session = CallSession.query.filter_by(call_id=call_id).first()
+    if session:
+        session.step = step
+    else:
+        session = CallSession(call_id=call_id, step=step)
+        db.session.add(session)
+    db.session.commit()
+
+def get_step(call_id):
+    session = CallSession.query.filter_by(call_id=call_id).first()
+    return session.step if session else ''
 
 def r(text, next_step=None, input_len=1, timeout=10, record=None):
     text = text.replace('.', ' ').replace('-', ' ')
