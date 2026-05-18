@@ -110,7 +110,6 @@ def incoming():
             f'לתפריט אפשרויות הקש 2',
             'main_choice'
         )
-
 def main_choice(call_id):
     choice = get_param('Digits')
     if choice == '1':
