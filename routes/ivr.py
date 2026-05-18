@@ -43,8 +43,8 @@ def set_step(call_id, step):
     call_sessions[call_id] = step
 
 def get_step(call_id):
-    return call_sessions.get(call_id, '')
-
+    session = CallSession.query.filter_by(call_id=call_id).first()
+    return session.step if session else ''
 @ivr_bp.route('/incoming', methods=['GET', 'POST'])
 def incoming():
     log.info(f"GET params: {dict(request.args)}")
