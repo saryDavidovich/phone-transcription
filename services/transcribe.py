@@ -82,6 +82,7 @@ def _get_setting(key, default=''):
 
 def _download(url, call_id):
     try:
+        os.makedirs('recordings', exist_ok=True)
         r = requests.get(url, timeout=60)
         r.raise_for_status()
         path = f'recordings/{call_id}.wav'
