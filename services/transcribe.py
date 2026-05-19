@@ -88,7 +88,18 @@ def _download(url, call_id):
         path = f'recordings/{call_id}.wav'
         with open(path, 'wb') as f:
             f.write(r.content)
+        # המרת הקובץ לפורמט wav תקני
+        import subprocess
+        converted_path = f'recordings/{call_id}_converted.wav'
+        subprocess.run(['ffmpeg', '-i', path, '-ar', '16000', '-ac', '1', converted_path, '-y'], 
+                      capture_output=True)
+        if os.path.exists(converted_path):
+            os.remove(path)
+            return converted_path
         return path
+    except Exception as e:
+        log.error(f"Download error: {e}")
+        return None
     except Exception as e:
         log.error(f"Download error: {e}")
         return None
