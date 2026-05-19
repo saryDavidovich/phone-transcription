@@ -57,6 +57,11 @@ def transcribe():
     if not delivery_method:
         delivery_method = customer.delivery_method or 'email'
 
+    # תיקון בעיה 2 — מניעת כפילות
+    existing = Recording.query.filter_by(call_id=call_id).first()
+    if existing:
+        return jsonify({'ok': True, 'call_id': call_id})
+
     rec = Recording(
         call_id=call_id,
         customer_id=customer.id,
@@ -69,5 +74,4 @@ def transcribe():
     db.session.commit()
 
     transcribe_async(call_id, rec_url, customer.id, delivery_method, delivered_to, duration)
-
     return jsonify({'ok': True, 'call_id': call_id})
