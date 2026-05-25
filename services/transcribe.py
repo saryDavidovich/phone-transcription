@@ -137,13 +137,10 @@ def _summarize(transcript):
         return ''
 
 def _send_email(to, transcript, summary, customer):
-    import smtplib
-    from email.mime.multipart import MIMEMultipart
-    from email.mime.text import MIMEText
     try:
-        gmail_user = os.environ.get('GMAIL_USER','')
-        gmail_pass = os.environ.get('GMAIL_APP_PASSWORD','')
-        name = customer.name or customer.phone if customer else ''
+        import sendgrid
+        from sendgrid.helpers.mail import Mail
+        name = customer.name if hasattr(customer, 'name') and customer.name else customer.phone if customer else ''
         summary_html = ''
         if summary:
             lines = ''.join(f'<li>{l.strip()}</li>' for l in summary.split('\n') if l.strip())
@@ -155,14 +152,14 @@ def _send_email(to, transcript, summary, customer):
 <h3>תמלול מלא:</h3>
 <div style="background:#f9fafb;border:1px solid #e5e7eb;padding:16px;border-radius:8px;line-height:1.8;white-space:pre-wrap">{transcript}</div>
 </div>'''
-        msg = MIMEMultipart('alternative')
-        msg['Subject'] = f'תמלול שיחה - {name}'
-        msg['From'] = gmail_user
-        msg['To'] = to
-        msg.attach(MIMEText(html, 'html', 'utf-8'))
-        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as s:
-            s.login(gmail_user, gmail_pass)
-            s.sendmail(gmail_user, to, msg.as_string())
+        sg = sendgrid.SendGridAPIClient(api_key=os.environ.get('SENDGRID_API_KEY'))
+        message = Mail(
+            from_email=os.environ.get('SENDGRID_FROM_EMAIL', os.environ.get('GMAIL_USER', '')),
+            to_emails=to,
+            subject=f'תמלול שיחה - {name}',
+            html_content=html
+        )
+        sg.send(message)
         log.info(f"Email sent to {to}")
     except Exception as e:
         log.error(f"Email error: {e}")
