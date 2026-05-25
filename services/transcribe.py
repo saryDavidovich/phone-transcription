@@ -84,13 +84,13 @@ def _download(url, call_id):
     try:
         r = requests.get(url, timeout=60)
         r.raise_for_status()
-        with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as f:
+        with tempfile.NamedTemporaryFile(suffix='.mp3', delete=False) as f:
             f.write(r.content)
             original_path = f.name
         try:
             from pydub import AudioSegment
             audio = AudioSegment.from_file(original_path)
-            converted_path = original_path.replace('.wav', '_conv.wav')
+            converted_path = original_path.replace('.mp3', '_conv.wav')
             audio.export(converted_path, format='wav')
             os.remove(original_path)
             return converted_path
