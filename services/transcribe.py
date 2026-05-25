@@ -81,30 +81,42 @@ def _whisper_from_url(url):
         content = r.content
         log.info(f"Downloaded {len(content)} bytes from {url}")
 
-        for suffix in ['.mp3', '.wav', '.ogg', '.m4a', '.webm']:
-            tmp_path = None
-            try:
-                with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as f:
-                    f.write(content)
-                    tmp_path = f.name
+        # ימות שולח WAV בפורמט PCM 8000Hz 16bit מונו
+        # Whisper צריך לפחות 16000Hz — נמיר את הקובץ
+        import wave, audioop, io
 
-                client = OpenAI(api_key=os.environ.get('OPENAI_API_KEY'))
-                with open(tmp_path, 'rb') as f:
-                    result = client.audio.transcriptions.create(
-                        model='whisper-1', file=f, language='he', response_format='text'
-                    )
-                log.info(f"Whisper הצליח עם סיומת {suffix}")
-                os.remove(tmp_path)
-                return result
+        with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as f:
+            tmp_path = f.name
 
-            except Exception as e:
-                log.warning(f"נכשל עם סיומת {suffix}: {e}")
-                if tmp_path and os.path.exists(tmp_path):
-                    os.remove(tmp_path)
-                continue
+        # קריאת ה-WAV המקורי
+        with wave.open(io.BytesIO(content)) as wav_in:
+            frames = wav_in.readframes(wav_in.getnframes())
+            sampwidth = wav_in.getsampwidth()
+            nchannels = wav_in.getnchannels()
+            framerate = wav_in.getframerate()
 
-        log.error("כל הסיומות נכשלו")
-        return None
+        log.info(f"WAV: {framerate}Hz, {sampwidth*8}bit, {nchannels}ch")
+
+        # המרה מ-8000Hz ל-16000Hz
+        if framerate != 16000:
+            frames, _ = audioop.ratecv(frames, sampwidth, nchannels, framerate, 16000, None)
+            framerate = 16000
+
+        # שמירת WAV חדש
+        with wave.open(tmp_path, 'wb') as wav_out:
+            wav_out.setnchannels(nchannels)
+            wav_out.setsampwidth(sampwidth)
+            wav_out.setframerate(framerate)
+            wav_out.writeframes(frames)
+
+        client = OpenAI(api_key=os.environ.get('OPENAI_API_KEY'))
+        with open(tmp_path, 'rb') as f:
+            result = client.audio.transcriptions.create(
+                model='whisper-1', file=f, language='he', response_format='text'
+            )
+        os.remove(tmp_path)
+        log.info("Whisper הצליח!")
+        return result
 
     except Exception as e:
         log.error(f"Whisper error: {e}")
