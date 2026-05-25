@@ -84,10 +84,19 @@ def _download(url, call_id):
     try:
         r = requests.get(url, timeout=60)
         r.raise_for_status()
-        # שימוש ב-tempfile במקום תיקיית recordings קבועה
         with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as f:
             f.write(r.content)
-            return f.name
+            original_path = f.name
+        try:
+            from pydub import AudioSegment
+            audio = AudioSegment.from_file(original_path)
+            converted_path = original_path.replace('.wav', '_conv.wav')
+            audio.export(converted_path, format='wav')
+            os.remove(original_path)
+            return converted_path
+        except Exception as conv_err:
+            log.warning(f"המרה נכשלה: {conv_err}")
+            return original_path
     except Exception as e:
         log.error(f"Download error: {e}")
         return None
