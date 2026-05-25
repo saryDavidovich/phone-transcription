@@ -80,6 +80,7 @@ def _whisper_from_url(url):
         r.raise_for_status()
         content = r.content
         log.info(f"Downloaded {len(content)} bytes from {url}")
+        log.info(f"Content preview: {content[:200]}")
 
         # ימות שולח WAV בפורמט PCM 8000Hz 16bit מונו
         # Whisper צריך לפחות 16000Hz — נמיר את הקובץ
