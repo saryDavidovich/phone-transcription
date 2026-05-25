@@ -1,8 +1,8 @@
 import os, requests, logging, threading, tempfile
 from openai import OpenAI
-
+ 
 log = logging.getLogger(__name__)
-
+ 
 def transcribe_async(call_id, rec_url, customer_id, delivery_method, delivered_to, duration_seconds):
     t = threading.Thread(
         target=_process,
@@ -10,7 +10,7 @@ def transcribe_async(call_id, rec_url, customer_id, delivery_method, delivered_t
         daemon=True
     )
     t.start()
-
+ 
 def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, duration_seconds):
     from app import app, db
     from models import Recording, Customer, Transaction
@@ -20,26 +20,26 @@ def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, durat
             if rec:
                 rec.status = 'transcribing'
                 db.session.commit()
-
+ 
             audio_path = _download(rec_url, call_id)
             if not audio_path:
                 if rec: rec.status = 'error'; db.session.commit()
                 return
-
+ 
             transcript = _whisper(audio_path)
             os.remove(audio_path)
-
+ 
             if not transcript:
                 if rec: rec.status = 'error'; db.session.commit()
                 return
-
+ 
             summary = _summarize(transcript)
-
+ 
             # Calculate cost
             price_per_30min = float(_get_setting('price_per_30min', '5.0'))
             cost = (duration_seconds / 1800) * price_per_30min
             cost = round(cost, 2)
-
+ 
             if rec:
                 rec.transcript = transcript
                 rec.summary = summary
@@ -47,7 +47,7 @@ def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, durat
                 rec.cost = cost
                 rec.duration_seconds = duration_seconds
                 db.session.commit()
-
+ 
             # Deduct from wallet
             customer = Customer.query.get(customer_id)
             if customer:
@@ -61,49 +61,37 @@ def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, durat
                 )
                 db.session.add(txn)
                 db.session.commit()
-
+ 
             # Deliver
             if delivery_method == 'email':
                 _send_email(delivered_to, transcript, summary, customer)
             else:
                 log.info(f"Fax delivery to {delivered_to} - configure Interfax")
-
+ 
             if rec:
                 rec.status = 'delivered'
                 db.session.commit()
-
+ 
         except Exception as e:
             log.error(f"Error processing {call_id}: {e}")
-
+ 
 def _get_setting(key, default=''):
     from models import Settings
     s = Settings.query.filter_by(key=key).first()
     return s.value if s else default
-
+ 
 def _download(url, call_id):
     try:
-        os.makedirs('recordings', exist_ok=True)
         r = requests.get(url, timeout=60)
         r.raise_for_status()
-        path = f'recordings/{call_id}.wav'
-        with open(path, 'wb') as f:
+        # שימוש ב-tempfile במקום תיקיית recordings קבועה
+        with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as f:
             f.write(r.content)
-        # המרת הקובץ לפורמט wav תקני
-        import subprocess
-        converted_path = f'recordings/{call_id}_converted.wav'
-        subprocess.run(['ffmpeg', '-i', path, '-ar', '16000', '-ac', '1', converted_path, '-y'], 
-                      capture_output=True)
-        if os.path.exists(converted_path):
-            os.remove(path)
-            return converted_path
-        return path
+            return f.name
     except Exception as e:
         log.error(f"Download error: {e}")
         return None
-    except Exception as e:
-        log.error(f"Download error: {e}")
-        return None
-
+ 
 def _whisper(path):
     try:
         client = OpenAI(api_key=os.environ.get('OPENAI_API_KEY'))
@@ -115,7 +103,7 @@ def _whisper(path):
     except Exception as e:
         log.error(f"Whisper error: {e}")
         return None
-
+ 
 def _summarize(transcript):
     try:
         import anthropic
@@ -128,7 +116,7 @@ def _summarize(transcript):
         return msg.content[0].text
     except:
         return ''
-
+ 
 def _send_email(to, transcript, summary, customer):
     import smtplib
     from email.mime.multipart import MIMEMultipart
@@ -159,3 +147,13 @@ def _send_email(to, transcript, summary, customer):
         log.info(f"Email sent to {to}")
     except Exception as e:
         log.error(f"Email error: {e}")
+ 
+
+
+
+
+
+
+
+
+
