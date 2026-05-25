@@ -58,10 +58,9 @@ def _download_recording(url, call_id):
     try:
         r = requests.get(url, timeout=60)
         r.raise_for_status()
-        path = os.path.join('recordings', f"{call_id}.wav")
-        with open(path, 'wb') as f:
+        with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as f:
             f.write(r.content)
-        return path
+            return f.name
     except Exception as e:
         log.error(f"שגיאה בהורדה: {e}")
         return None
