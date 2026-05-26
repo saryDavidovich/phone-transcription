@@ -355,10 +355,9 @@ def download_word(id):
 @login_required
 def reports():
     monthly = db.session.query(
-        func.strftime('%Y-%m', Transaction.created_at).label('month'),
-        func.sum(Transaction.amount).label('revenue')
-    ).filter(Transaction.type == 'charge').group_by('month').order_by('month').all()
-
+    func.to_char(Transaction.created_at, 'YYYY-MM').label('month'),
+    func.sum(Transaction.amount).label('revenue')
+).filter(Transaction.type == 'charge').group_by('month').order_by('month').all()
     top_customers = db.session.query(
         Customer,
         func.sum(Transaction.amount).label('total_spend')
