@@ -29,7 +29,6 @@ def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, durat
 
             summary = _summarize(transcript)
 
-            # Calculate cost
             price_per_30min = float(_get_setting('price_per_30min', '5.0'))
             cost = (duration_seconds / 1800) * price_per_30min
             cost = round(cost, 2)
@@ -42,7 +41,6 @@ def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, durat
                 rec.duration_seconds = duration_seconds
                 db.session.commit()
 
-            # Deduct from wallet
             customer = Customer.query.get(customer_id)
             if customer:
                 customer.balance -= cost
@@ -56,7 +54,6 @@ def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, durat
                 db.session.add(txn)
                 db.session.commit()
 
-            # Deliver
             if delivery_method == 'email':
                 _send_email(delivered_to, transcript, summary, customer)
             else:
@@ -96,7 +93,6 @@ def _whisper_from_url(url):
             frames, _ = audioop.ratecv(frames, sampwidth, nchannels, framerate, 16000, None)
             framerate = 16000
 
-        # חלוקה לחלקים של 10 דקות
         chunk_seconds = 600
         bytes_per_second = framerate * sampwidth * nchannels
         chunk_size = chunk_seconds * bytes_per_second
@@ -104,6 +100,12 @@ def _whisper_from_url(url):
 
         client = OpenAI(api_key=os.environ.get('OPENAI_API_KEY'))
         full_transcript = ''
+
+        try:
+            with open('whisper_prompt.txt', 'r', encoding='utf-8') as pf:
+                whisper_prompt = pf.read().strip()[:800]
+        except:
+            whisper_prompt = 'ישיבה, גמרא, הלכה, רמב"ם, תלמוד, ראשונים, אחרונים, אברכים, בית מדרש, קושיא, תירוץ, חידוש'
 
         for i in range(total_chunks):
             chunk_frames = frames[i * chunk_size:(i + 1) * chunk_size]
@@ -116,8 +118,12 @@ def _whisper_from_url(url):
                 wav_out.writeframes(chunk_frames)
             with open(tmp_path, 'rb') as f:
                 result = client.audio.transcriptions.create(
-    model='whisper-1', file=f, language='he', response_format='text',
-    prompt='ישיבה, כולל, אברכים, בחורים, ראש ישיבה, משגיח, גמרא, הלכה, רמב"ם, תלמוד, מצוות, שבת, תפילה, פרשה, חסידות, מוסר, אגדה, פוסקים, שולחן ערוך, משנה, תוספות, רש"י, ריטב"א, ר"ן, ראשונים, אחרונים, סוגיא, קושיא, תירוץ, חידוש, פלפול, בית מדרש, שיעור, שמועה, יראת שמים, עבודת ה, מידות, תשובה, ענווה, אמונה, ביטחון, דביקות, התבוננות, סנהדרין, בבא מציעא, בבא קמא, כתובות, קידושין, ברכות, עירובין, פסחים, יומא, סוכה, ראש השנה, תענית, מגילה, חגיגה, נדרים, נזיר, זרעים, טהרות, נשים, נזיקין, קדשים, אבות, דרבנן, דאורייתא, חיוב, פטור, אסור, מותר, כשר, פסול, טהור, טמא, צדיק, רשע, בינוני, גן עדן, גיהנם, עולם הבא, משיח, גאולה, בית המקדש, כהן, לוי, ישראל, תפילין, מזוזה, ציצית, לולב, אתרוג, מנורה, שופר, מקווה, שחיטה, כשרות, חלב, בשר, נבלה, טריפה, ערלה, שמיטה, יובל, צדקה, חסד, אמת, שלום, כבוד, ביטול, השתוות, הכנעה, קבלת עול, זהירות, זריזות, נקיות, פרישות, טהרה, חסידות, ענווה, יראה, אהבה')
+                    model='whisper-1',
+                    file=f,
+                    language='he',
+                    response_format='text',
+                    prompt=whisper_prompt
+                )
             os.remove(tmp_path)
             full_transcript += result + ' '
             log.info(f"חלק {i+1}/{total_chunks} תומלל")
@@ -127,6 +133,7 @@ def _whisper_from_url(url):
     except Exception as e:
         log.error(f"Whisper error: {e}")
         return None
+
 def _summarize(transcript):
     try:
         import anthropic
