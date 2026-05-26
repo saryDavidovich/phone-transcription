@@ -1,0 +1,42 @@
+{% extends 'admin/base.html' %}
+{% block title %}הוספת לקוח חדש{% endblock %}
+{% block page_title %}➕ הוספת לקוח חדש{% endblock %}
+{% block content %}
+<div class="grid-2">
+  <div class="card">
+    <form method="POST" action="/admin/customers/add">
+      <div class="form-group">
+        <label class="form-label">מספר טלפון *</label>
+        <input class="form-input" name="phone" placeholder="0501234567" required>
+      </div>
+      <div class="form-group">
+        <label class="form-label">שם</label>
+        <input class="form-input" name="name" placeholder="שם הלקוח">
+      </div>
+      <div class="form-group">
+        <label class="form-label">מייל</label>
+        <input class="form-input" name="email" type="email" placeholder="example@gmail.com">
+      </div>
+      <div class="form-group">
+        <label class="form-label">פקס</label>
+        <input class="form-input" name="fax" placeholder="מספר פקס">
+      </div>
+      <div class="form-group">
+        <label class="form-label">יתרה ראשונית (₪)</label>
+        <input class="form-input" name="balance" type="number" step="0.01" min="0" placeholder="0.00" value="0">
+      </div>
+      <div class="form-group">
+        <label class="form-label">שיטת משלוח</label>
+        <select class="form-input" name="delivery_method">
+          <option value="email">מייל</option>
+          <option value="fax">פקס</option>
+        </select>
+      </div>
+      <div style="display:flex;gap:12px;margin-top:20px">
+        <button class="btn btn-primary" type="submit">✅ הוסף לקוח</button>
+        <a href="/admin/customers" class="btn btn-danger">ביטול</a>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}
