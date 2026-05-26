@@ -11,3 +11,5 @@ werkzeug>=3.0
 ffmpeg-python
 pydub
 sendgrid
+openpyxl
+python-docx
