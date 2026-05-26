@@ -9,7 +9,10 @@ def create_app():
     app = Flask(__name__)
     
     app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'change-this')
-    app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:///transcription.db')
+    database_url = os.environ.get('DATABASE_URL', 'sqlite:///transcription.db')
+if database_url.startswith('postgres://'):
+    database_url = database_url.replace('postgres://', 'postgresql://', 1)
+app.config['SQLALCHEMY_DATABASE_URI'] = database_url
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
     
     app.config['PRICE_PER_30MIN'] = float(os.environ.get('PRICE_PER_30MIN', '5.0'))
