@@ -76,20 +76,14 @@ def _get_setting(key, default=''):
 
 def _whisper_from_url(url):
     try:
-        r = requests.get(url, timeout=60)
+        r = requests.get(url, timeout=120)
         r.raise_for_status()
         content = r.content
         log.info(f"Downloaded {len(content)} bytes from {url}")
         log.info(f"Content preview: {content[:200]}")
 
-        # ימות שולח WAV בפורמט PCM 8000Hz 16bit מונו
-        # Whisper צריך לפחות 16000Hz — נמיר את הקובץ
-        import wave, audioop, io
+        import wave, audioop, io, math
 
-        with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as f:
-            tmp_path = f.name
-
-        # קריאת ה-WAV המקורי
         with wave.open(io.BytesIO(content)) as wav_in:
             frames = wav_in.readframes(wav_in.getnframes())
             sampwidth = wav_in.getsampwidth()
@@ -98,31 +92,41 @@ def _whisper_from_url(url):
 
         log.info(f"WAV: {framerate}Hz, {sampwidth*8}bit, {nchannels}ch")
 
-        # המרה מ-8000Hz ל-16000Hz
         if framerate != 16000:
             frames, _ = audioop.ratecv(frames, sampwidth, nchannels, framerate, 16000, None)
             framerate = 16000
 
-        # שמירת WAV חדש
-        with wave.open(tmp_path, 'wb') as wav_out:
-            wav_out.setnchannels(nchannels)
-            wav_out.setsampwidth(sampwidth)
-            wav_out.setframerate(framerate)
-            wav_out.writeframes(frames)
+        # חלוקה לחלקים של 10 דקות
+        chunk_seconds = 600
+        bytes_per_second = framerate * sampwidth * nchannels
+        chunk_size = chunk_seconds * bytes_per_second
+        total_chunks = math.ceil(len(frames) / chunk_size)
 
         client = OpenAI(api_key=os.environ.get('OPENAI_API_KEY'))
-        with open(tmp_path, 'rb') as f:
-            result = client.audio.transcriptions.create(
-                model='whisper-1', file=f, language='he', response_format='text'
-            )
-        os.remove(tmp_path)
-        log.info("Whisper הצליח!")
-        return result
+        full_transcript = ''
+
+        for i in range(total_chunks):
+            chunk_frames = frames[i * chunk_size:(i + 1) * chunk_size]
+            with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as f:
+                tmp_path = f.name
+            with wave.open(tmp_path, 'wb') as wav_out:
+                wav_out.setnchannels(nchannels)
+                wav_out.setsampwidth(sampwidth)
+                wav_out.setframerate(framerate)
+                wav_out.writeframes(chunk_frames)
+            with open(tmp_path, 'rb') as f:
+                result = client.audio.transcriptions.create(
+                    model='whisper-1', file=f, language='he', response_format='text'
+                )
+            os.remove(tmp_path)
+            full_transcript += result + ' '
+            log.info(f"חלק {i+1}/{total_chunks} תומלל")
+
+        return full_transcript.strip()
 
     except Exception as e:
         log.error(f"Whisper error: {e}")
         return None
-
 def _summarize(transcript):
     try:
         import anthropic
