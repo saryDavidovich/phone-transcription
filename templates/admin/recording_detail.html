@@ -1,6 +1,13 @@
 {% extends 'admin/base.html' %}
 {% block title %}הקלטה #{{ recording.id }}{% endblock %}
-{% block page_title %}הקלטה #{{ recording.id }}{% endblock %}
+{% block page_title %}
+הקלטה #{{ recording.id }}
+<div style="display:flex;gap:8px;margin-top:12px">
+  <a href="/admin/recordings/{{ recording.id }}/play-audio" target="_blank" class="btn btn-primary">▶️ האזן להקלטה</a>
+  <a href="/admin/recordings/{{ recording.id }}/download-audio" class="btn btn-success">📥 הורד שמע</a>
+  <a href="/admin/recordings/{{ recording.id }}/download-word" class="btn btn-primary">📄 הורד וורד</a>
+</div>
+{% endblock %}
 {% block content %}
 <div class="grid-3" style="margin-bottom:20px">
   <div class="stat-card">
