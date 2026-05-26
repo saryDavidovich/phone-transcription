@@ -116,8 +116,9 @@ def _whisper_from_url(url):
                 wav_out.writeframes(chunk_frames)
             with open(tmp_path, 'rb') as f:
                 result = client.audio.transcriptions.create(
-                    model='whisper-1', file=f, language='he', response_format='text'
-                )
+    model='whisper-1', file=f, language='he', response_format='text',
+    prompt='שיחה בעברית. תמלל בצורה מדויקת כולל מילות קישור.'
+)
             os.remove(tmp_path)
             full_transcript += result + ' '
             log.info(f"חלק {i+1}/{total_chunks} תומלל")
