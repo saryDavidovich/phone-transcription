@@ -1,10 +1,11 @@
-from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify
+from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify, send_file, make_response
 from flask_login import login_user, logout_user, login_required, current_user
 from werkzeug.security import check_password_hash
 from app import db, login_manager
 from models import Customer, Recording, Transaction, Settings, AdminUser
 from datetime import datetime, timedelta
 from sqlalchemy import func
+import io
 
 admin_bp = Blueprint('admin', __name__)
 
@@ -93,6 +94,103 @@ def customers():
     customers = query.order_by(Customer.created_at.desc()).paginate(page=page, per_page=50)
     return render_template('admin/customers.html', customers=customers, search=search)
 
+# ===== 1. הוספת לקוח ידנית =====
+@admin_bp.route('/customers/add', methods=['GET', 'POST'])
+@login_required
+def add_customer():
+    if request.method == 'POST':
+        phone = request.form.get('phone', '').strip()
+        name = request.form.get('name', '').strip()
+        email = request.form.get('email', '').strip()
+        fax = request.form.get('fax', '').strip()
+        balance = float(request.form.get('balance', 0) or 0)
+        delivery_method = request.form.get('delivery_method', 'email')
+
+        if not phone:
+            flash('מספר טלפון הוא שדה חובה')
+            return render_template('admin/add_customer.html')
+
+        existing = Customer.query.filter_by(phone=phone).first()
+        if existing:
+            flash('לקוח עם מספר טלפון זה כבר קיים')
+            return render_template('admin/add_customer.html')
+
+        customer = Customer(
+            phone=phone,
+            name=name,
+            email=email,
+            fax=fax,
+            balance=balance,
+            delivery_method=delivery_method
+        )
+        db.session.add(customer)
+        db.session.commit()
+
+        if balance > 0:
+            txn = Transaction(
+                customer_id=customer.id,
+                amount=balance,
+                type='credit',
+                description='יתרה ראשונית'
+            )
+            db.session.add(txn)
+            db.session.commit()
+
+        flash(f'לקוח {phone} נוסף בהצלחה')
+        return redirect(url_for('admin.customer_detail', id=customer.id))
+
+    return render_template('admin/add_customer.html')
+
+# ===== 2. הורדת אקסל עם כל נתוני הלקוחות =====
+@admin_bp.route('/customers/export/excel')
+@login_required
+def export_customers_excel():
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = 'לקוחות'
+
+    headers = ['ID', 'טלפון', 'שם', 'מייל', 'פקס', 'יתרה', 'שיטת משלוח', 'חסום', 'תאריך הצטרפות']
+    ws.append(headers)
+
+    # עיצוב כותרות
+    for cell in ws[1]:
+        cell.font = Font(bold=True, color='FFFFFF')
+        cell.fill = PatternFill(start_color='2563EB', end_color='2563EB', fill_type='solid')
+        cell.alignment = Alignment(horizontal='center')
+
+    customers = Customer.query.order_by(Customer.created_at.desc()).all()
+    for c in customers:
+        ws.append([
+            c.id,
+            c.phone,
+            c.name or '',
+            c.email or '',
+            c.fax or '',
+            round(c.balance, 2),
+            c.delivery_method or '',
+            'כן' if c.is_blocked else 'לא',
+            c.created_at.strftime('%d/%m/%Y %H:%M') if c.created_at else ''
+        ])
+
+    # רוחב עמודות
+    for col in ws.columns:
+        max_length = max(len(str(cell.value or '')) for cell in col)
+        ws.column_dimensions[col[0].column_letter].width = max(max_length + 2, 12)
+
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+
+    return send_file(
+        output,
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        as_attachment=True,
+        download_name=f'customers_{datetime.now().strftime("%Y%m%d")}.xlsx'
+    )
+
 @admin_bp.route('/customers/<int:id>')
 @login_required
 def customer_detail(id):
@@ -155,16 +253,112 @@ def recording_detail(id):
     recording = Recording.query.get_or_404(id)
     return render_template('admin/recording_detail.html', recording=recording)
 
+# ===== 3. הורדת קובץ שמע של ההקלטה =====
+@admin_bp.route('/recordings/<int:id>/download-audio')
+@login_required
+def download_audio(id):
+    import requests as req
+    recording = Recording.query.get_or_404(id)
+
+    yemot_username = __import__('os').environ.get('YEMOT_USERNAME', '')
+    yemot_password = __import__('os').environ.get('YEMOT_PASSWORD', '')
+
+    # בניית URL להורדה
+    call_id = recording.call_id or ''
+    # מחפש את נתיב ההקלטה מה-call_id
+    rec_url = f'https://www.call2all.co.il/ym/api/DownloadFile?username={yemot_username}&password={yemot_password}&path=ivr2:/recordings/{call_id}.wav'
+
+    try:
+        r = req.get(rec_url, timeout=60)
+        r.raise_for_status()
+        return send_file(
+            io.BytesIO(r.content),
+            mimetype='audio/wav',
+            as_attachment=True,
+            download_name=f'recording_{id}.wav'
+        )
+    except Exception as e:
+        flash(f'שגיאה בהורדת ההקלטה: {e}')
+        return redirect(url_for('admin.recording_detail', id=id))
+
+# ===== 4. האזנה להקלטה =====
+@admin_bp.route('/recordings/<int:id>/play-audio')
+@login_required
+def play_audio(id):
+    import requests as req
+    import os
+    recording = Recording.query.get_or_404(id)
+
+    yemot_username = os.environ.get('YEMOT_USERNAME', '')
+    yemot_password = os.environ.get('YEMOT_PASSWORD', '')
+
+    call_id = recording.call_id or ''
+    rec_url = f'https://www.call2all.co.il/ym/api/DownloadFile?username={yemot_username}&password={yemot_password}&path=ivr2:/recordings/{call_id}.wav'
+
+    try:
+        r = req.get(rec_url, timeout=60)
+        r.raise_for_status()
+        response = make_response(r.content)
+        response.headers['Content-Type'] = 'audio/wav'
+        response.headers['Content-Disposition'] = 'inline'
+        return response
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+
+# ===== 5. הורדת קובץ וורד עם התמלול =====
+@admin_bp.route('/recordings/<int:id>/download-word')
+@login_required
+def download_word(id):
+    from docx import Document
+    from docx.shared import Pt, RGBColor
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+
+    recording = Recording.query.get_or_404(id)
+    customer = Customer.query.get(recording.customer_id)
+
+    doc = Document()
+
+    # כותרת
+    title = doc.add_heading('תמלול שיחה', 0)
+    title.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+
+    # פרטים
+    doc.add_paragraph(f'לקוח: {customer.name or customer.phone if customer else ""}').alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    doc.add_paragraph(f'תאריך: {recording.created_at.strftime("%d/%m/%Y %H:%M") if recording.created_at else ""}').alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    doc.add_paragraph(f'משך: {recording.duration_seconds // 60} דקות').alignment = WD_ALIGN_PARAGRAPH.RIGHT
+
+    doc.add_paragraph('─' * 50)
+
+    # סיכום
+    if recording.summary:
+        doc.add_heading('סיכום', level=1).alignment = WD_ALIGN_PARAGRAPH.RIGHT
+        p = doc.add_paragraph(recording.summary)
+        p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+
+    # תמלול מלא
+    doc.add_heading('תמלול מלא', level=1).alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    p = doc.add_paragraph(recording.transcript or 'אין תמלול')
+    p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+
+    output = io.BytesIO()
+    doc.save(output)
+    output.seek(0)
+
+    return send_file(
+        output,
+        mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        as_attachment=True,
+        download_name=f'transcript_{id}.docx'
+    )
+
 @admin_bp.route('/reports')
 @login_required
 def reports():
-    # Monthly revenue
     monthly = db.session.query(
         func.strftime('%Y-%m', Transaction.created_at).label('month'),
         func.sum(Transaction.amount).label('revenue')
     ).filter(Transaction.type == 'charge').group_by('month').order_by('month').all()
 
-    # Top customers by spend
     top_customers = db.session.query(
         Customer,
         func.sum(Transaction.amount).label('total_spend')
@@ -201,7 +395,6 @@ def settings():
 @admin_bp.route('/api/stats')
 @login_required
 def api_stats():
-    """JSON stats for dashboard charts"""
     last_30 = []
     for i in range(29, -1, -1):
         day = datetime.utcnow().date() - timedelta(days=i)
