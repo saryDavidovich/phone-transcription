@@ -17,12 +17,16 @@ def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, durat
     with app.app_context():
         try:
             rec = Recording.query.filter_by(call_id=call_id).first()
-            if rec:
-                rec.status = 'transcribing'
-                db.session.commit()
+if rec:
+    rec.status = 'transcribing'
+    db.session.commit()
 
-            transcript = _whisper_from_url(rec_url)
+db.session.remove()
 
+transcript = _whisper_from_url(rec_url)
+
+db.session.remove()
+rec = Recording.query.filter_by(call_id=call_id).first()
             if not transcript:
                 if rec: rec.status = 'error'; db.session.commit()
                 return
