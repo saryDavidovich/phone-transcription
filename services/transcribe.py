@@ -34,7 +34,8 @@ def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, durat
                     db.session.commit()
                 return
 
-            summary = _summarize(transcript)
+            # תיקון + סיכום ביחד בקריאה אחת ל-Claude
+            transcript, summary = _summarize(transcript)
 
             price_per_30min = float(_get_setting('price_per_30min', '5.0'))
             cost = (duration_seconds / 1800) * price_per_30min
@@ -145,14 +146,62 @@ def _summarize(transcript):
     try:
         import anthropic
         client = anthropic.Anthropic(api_key=os.environ.get('ANTHROPIC_API_KEY'))
+
+        try:
+            with open('claude_terms.txt', 'r', encoding='utf-8') as f:
+                terms = f.read().strip()
+        except:
+            terms = 'רבי, תורה, גמרא, משנה, הלכה, שבת, תפילה, ישיבה, חסידות, קבלה, תשובה, מצווה, ברכה, קדושה, ראש ישיבה, בית מדרש, חברותא, קושיא, תירוץ, חידוש, פלפול'
+
+        prompt = f"""אתה מומחה לתמלול שיעורי תורה בעברית. קיבלת תמלול אוטומטי שנעשה על ידי Whisper ויש בו שגיאות.
+
+רשימת מושגים תורניים — השתמש בהם לתיקון:
+{terms[:4000]}
+
+בצע שתי משימות:
+
+1. תקן את התמלול:
+   - החלף מילים שגויות במונחים הנכונים לפי ההקשר התורני
+   - כאשר מילה נשמעת דומה למונח תורני — העדף את המונח התורני
+   - שמור על כל המשמעות והתוכן המקורי
+   - אל תוסיף תוכן שלא היה בתמלול
+   - שמור על מבנה הפסקאות
+
+2. סכם ב-3-4 נקודות קצרות בעברית את עיקרי הדברים
+
+החזר בפורמט הבא בדיוק, ללא שום טקסט נוסף:
+FIXED:
+[הטקסט המתוקן המלא]
+
+SUMMARY:
+[הסיכום ב-3-4 נקודות]
+
+תמלול לתיקון:
+{transcript}"""
+
         msg = client.messages.create(
             model='claude-sonnet-4-20250514',
-            max_tokens=300,
-            messages=[{'role':'user','content':f'סכם ב-3-4 נקודות בעברית:\n\n{transcript}'}]
+            max_tokens=4096,
+            messages=[{'role': 'user', 'content': prompt}]
         )
-        return msg.content[0].text
-    except:
-        return ''
+
+        response = msg.content[0].text.strip()
+
+        if 'FIXED:' in response and 'SUMMARY:' in response:
+            parts = response.split('SUMMARY:')
+            fixed_transcript = parts[0].replace('FIXED:', '').strip()
+            summary = parts[1].strip()
+        else:
+            log.warning("Claude response format unexpected, using fallback")
+            fixed_transcript = transcript
+            summary = response[:500]
+
+        log.info("Claude תיקון וסיכום הושלמו")
+        return fixed_transcript, summary
+
+    except Exception as e:
+        log.error(f"Claude error: {e}")
+        return transcript, ''
 
 def _send_email(to, transcript, summary, customer):
     try:
