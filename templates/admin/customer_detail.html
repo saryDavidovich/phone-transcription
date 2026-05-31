@@ -30,6 +30,13 @@
         <label class="form-label">פקס</label>
         <input class="form-input" name="fax" value="{{ customer.fax or '' }}">
       </div>
+      <div class="form-group">
+        <label class="form-label">שיטת משלוח</label>
+        <select class="form-input" name="delivery_method">
+          <option value="email" {% if customer.delivery_method == 'email' %}selected{% endif %}>מייל</option>
+          <option value="fax" {% if customer.delivery_method == 'fax' %}selected{% endif %}>פקס</option>
+        </select>
+      </div>
       <button class="btn btn-primary" type="submit">💾 שמור פרטים</button>
     </form>
   </div>
