@@ -34,7 +34,9 @@ def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, durat
                     db.session.commit()
                 return
 
-            summary = ''
+            # תיקון + סיכום ביחד בקריאה אחת ל-Claude
+            transcript, summary = _summarize(transcript)
+            
             price_per_30min = float(_get_setting('price_per_30min', '5.0'))
             cost = (duration_seconds / 1800) * price_per_30min
             cost = round(cost, 2)
