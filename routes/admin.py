@@ -236,6 +236,7 @@ def update_customer(id):
     customer.name = request.form.get('name', customer.name)
     customer.email = request.form.get('email', customer.email)
     customer.fax = request.form.get('fax', customer.fax)
+    customer.delivery_method = request.form.get('delivery_method', customer.delivery_method)
     db.session.commit()
     flash('פרטי לקוח עודכנו')
     return redirect(url_for('admin.customer_detail', id=id))
