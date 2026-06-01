@@ -98,7 +98,6 @@ def _soferai_from_url(url):
 
         client = SoferAI(api_key=os.environ.get('SOFERAI_API_KEY'))
 
-        # מוריד את הקובץ ומעביר כ-base64
         r = requests.get(url, timeout=120)
         r.raise_for_status()
         log.info(f"Downloaded {len(r.content)} bytes for Sofer.ai")
@@ -118,24 +117,22 @@ def _soferai_from_url(url):
         transcription_id = response
         log.info(f"Sofer.ai transcription created: {transcription_id}")
 
-        # polling כל 15 שניות עד 10 דקות
         for attempt in range(40):
-    time.sleep(15)
-    status = client.transcribe.get_transcription_status(
-        transcription_id=transcription_id
-    )
-    log.info(f"Sofer.ai status: {status.status} (attempt {attempt+1})")
+            time.sleep(15)
+            status = client.transcribe.get_transcription_status(
+                transcription_id=transcription_id
+            )
+            log.info(f"Sofer.ai status: {status.status} (attempt {attempt+1})")
 
-    if status.status.upper() == 'COMPLETED':
-        result = client.transcribe.get_transcription(
-            transcription_id=transcription_id
-        )
-        log.info("Sofer.ai transcription completed")
-        return result.text
+            if status.status.upper() == 'COMPLETED':
+                result = client.transcribe.get_transcription(
+                    transcription_id=transcription_id
+                )
+                log.info("Sofer.ai transcription completed")
+                return result.text
 
-    elif status.status.upper() in ('FAILED', 'ERROR', 'INSUFFICIENT_FUNDS'):
-        log.error(f"Sofer.ai failed: {status.status}")
-        return None
+            elif status.status.upper() in ('FAILED', 'ERROR', 'INSUFFICIENT_FUNDS'):
+                log.error(f"Sofer.ai failed: {status.status}")
                 return None
 
         log.error("Sofer.ai timeout")
