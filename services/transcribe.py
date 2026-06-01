@@ -120,21 +120,22 @@ def _soferai_from_url(url):
 
         # polling כל 15 שניות עד 10 דקות
         for attempt in range(40):
-            time.sleep(15)
-            status = client.transcribe.get_transcription_status(
-                transcription_id=transcription_id
-            )
-            log.info(f"Sofer.ai status: {status.status} (attempt {attempt+1})")
+    time.sleep(15)
+    status = client.transcribe.get_transcription_status(
+        transcription_id=transcription_id
+    )
+    log.info(f"Sofer.ai status: {status.status} (attempt {attempt+1})")
 
-            if status.status == 'completed':
-                result = client.transcribe.get_transcription(
-                    transcription_id=transcription_id
-                )
-                log.info("Sofer.ai transcription completed")
-                return result.text
+    if status.status.upper() == 'COMPLETED':
+        result = client.transcribe.get_transcription(
+            transcription_id=transcription_id
+        )
+        log.info("Sofer.ai transcription completed")
+        return result.text
 
-            elif status.status in ('failed', 'error'):
-                log.error(f"Sofer.ai failed: {status.status}")
+    elif status.status.upper() in ('FAILED', 'ERROR', 'INSUFFICIENT_FUNDS'):
+        log.error(f"Sofer.ai failed: {status.status}")
+        return None
                 return None
 
         log.error("Sofer.ai timeout")
