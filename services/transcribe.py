@@ -1,4 +1,4 @@
-import os, requests, logging, threading, tempfile, time
+import os, requests, logging, threading, tempfile, time, math
 from openai import OpenAI
 
 log = logging.getLogger(__name__)
@@ -27,12 +27,17 @@ def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, durat
 
             if tier == 'premium':
                 log.info(f"Using Sofer.ai for customer {customer_id}")
-                transcript_raw = _soferai_from_url(rec_url)
+                transcript_raw, actual_duration = _soferai_from_url(rec_url)
                 transcript_fixed = transcript_raw
             else:
                 log.info(f"Using Whisper for customer {customer_id}")
-                transcript_raw = _whisper_from_url(rec_url)
+                transcript_raw, actual_duration = _whisper_from_url(rec_url)
                 transcript_fixed = _fix_transcript(transcript_raw) if transcript_raw else None
+
+            # משתמשים במשך האמיתי מהקובץ אם duration_seconds הוא 0
+            if actual_duration and actual_duration > 0:
+                duration_seconds = actual_duration
+                log.info(f"Actual duration from file: {duration_seconds}s")
 
             db.session.remove()
             rec = Recording.query.filter_by(call_id=call_id).first()
@@ -47,10 +52,11 @@ def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, durat
                 price_per_20min = float(_get_setting('price_per_20min_premium', '1.90'))
             else:
                 price_per_20min = float(_get_setting('price_per_20min_basic', '0.90'))
-            import math
-            units = math.ceil(duration_seconds / 1200)  # כל 20 דקות שהתחילו
+
+            units = math.ceil(duration_seconds / 1200)
             cost = units * price_per_20min
             cost = round(cost, 2)
+
             if rec:
                 rec.transcript = transcript_fixed
                 rec.summary = transcript_raw if tier == 'basic' else ''
@@ -74,9 +80,9 @@ def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, durat
 
             if delivery_method == 'email':
                 if tier == 'premium':
-                    _send_email_premium(delivered_to, transcript_fixed, customer)
+                    _send_email_premium(delivered_to, transcript_fixed, customer, rec_url, duration_seconds)
                 else:
-                    _send_email(delivered_to, transcript_raw, transcript_fixed, customer)
+                    _send_email(delivered_to, transcript_raw, transcript_fixed, customer, rec_url, duration_seconds)
             else:
                 log.info(f"Fax delivery to {delivered_to} - configure Interfax")
 
@@ -94,7 +100,7 @@ def _get_setting(key, default=''):
 
 def _soferai_from_url(url):
     try:
-        import base64
+        import base64, wave, io
         from soferai import SoferAI
         from soferai.transcribe import TranscriptionRequestInfo
 
@@ -103,6 +109,14 @@ def _soferai_from_url(url):
         r = requests.get(url, timeout=120)
         r.raise_for_status()
         log.info(f"Downloaded {len(r.content)} bytes for Sofer.ai")
+
+        # חישוב משך מהקובץ
+        actual_duration = 0
+        try:
+            with wave.open(io.BytesIO(r.content)) as wav_in:
+                actual_duration = wav_in.getnframes() // wav_in.getframerate()
+        except Exception as e:
+            log.warning(f"Could not read duration: {e}")
 
         base64_audio = base64.b64encode(r.content).decode('utf-8')
 
@@ -131,18 +145,18 @@ def _soferai_from_url(url):
                     transcription_id=transcription_id
                 )
                 log.info("Sofer.ai transcription completed")
-                return result.text
+                return result.text, actual_duration
 
             elif status.status.upper() in ('FAILED', 'ERROR', 'INSUFFICIENT_FUNDS'):
                 log.error(f"Sofer.ai failed: {status.status}")
-                return None
+                return None, actual_duration
 
         log.error("Sofer.ai timeout")
-        return None
+        return None, actual_duration
 
     except Exception as e:
         log.error(f"Sofer.ai error: {e}")
-        return None
+        return None, 0
 
 def _whisper_from_url(url):
     try:
@@ -152,15 +166,16 @@ def _whisper_from_url(url):
         log.info(f"Downloaded {len(content)} bytes from {url}")
         log.info(f"Content preview: {content[:200]}")
 
-        import wave, audioop, io, math
+        import wave, audioop, io
 
         with wave.open(io.BytesIO(content)) as wav_in:
             frames = wav_in.readframes(wav_in.getnframes())
             sampwidth = wav_in.getsampwidth()
             nchannels = wav_in.getnchannels()
             framerate = wav_in.getframerate()
+            actual_duration = wav_in.getnframes() // framerate
 
-        log.info(f"WAV: {framerate}Hz, {sampwidth*8}bit, {nchannels}ch")
+        log.info(f"WAV: {framerate}Hz, {sampwidth*8}bit, {nchannels}ch, {actual_duration}s")
 
         if framerate != 16000:
             frames, _ = audioop.ratecv(frames, sampwidth, nchannels, framerate, 16000, None)
@@ -201,11 +216,11 @@ def _whisper_from_url(url):
             full_transcript += result + ' '
             log.info(f"חלק {i+1}/{total_chunks} תומלל")
 
-        return full_transcript.strip()
+        return full_transcript.strip(), actual_duration
 
     except Exception as e:
         log.error(f"Whisper error: {e}")
-        return None
+        return None, 0
 
 def _fix_transcript(transcript):
     try:
@@ -255,15 +270,19 @@ def _fix_transcript(transcript):
         log.error(f"Claude error: {e}")
         return transcript
 
-def _send_email(to, transcript_raw, transcript_fixed, customer):
+def _send_email(to, transcript_raw, transcript_fixed, customer, rec_url, duration_seconds):
     try:
         import sendgrid
         from sendgrid.helpers.mail import Mail
         name = customer.name if hasattr(customer, 'name') and customer.name else customer.phone if customer else ''
 
+        minutes = duration_seconds // 60
+        seconds = duration_seconds % 60
+        duration_str = f"{minutes}:{seconds:02d}"
+
         html = f'''<div dir="rtl" style="font-family:Arial,sans-serif;max-width:600px;margin:auto">
 <h2 style="color:#1d4ed8">תמלול שיחה</h2>
-<p style="color:#6b7280">לקוח: <b>{name}</b></p>
+<p style="color:#6b7280">לקוח: <b>{name}</b> | משך: <b>{duration_str}</b></p>
 
 <div style="background:#f0fdf4;border-right:4px solid #10b981;padding:16px;margin:16px 0;border-radius:8px">
 <h3 style="margin:0 0 12px;color:#065f46">✨ תמלול מעובד</h3>
@@ -273,6 +292,11 @@ def _send_email(to, transcript_raw, transcript_fixed, customer):
 <div style="background:#f9fafb;border-right:4px solid #9ca3af;padding:16px;margin:16px 0;border-radius:8px">
 <h3 style="margin:0 0 12px;color:#6b7280">📝 תמלול מקורי (Whisper)</h3>
 <div style="line-height:1.8;white-space:pre-wrap;color:#6b7280;font-size:13px">{transcript_raw}</div>
+</div>
+
+<div style="background:#fff7ed;border-right:4px solid #f97316;padding:16px;margin:16px 0;border-radius:8px">
+<h3 style="margin:0 0 8px;color:#9a3412">🎧 האזנה להקלטה</h3>
+<a href="{rec_url}" style="color:#ea580c;word-break:break-all">{rec_url}</a>
 </div>
 
 </div>'''
@@ -289,19 +313,28 @@ def _send_email(to, transcript_raw, transcript_fixed, customer):
     except Exception as e:
         log.error(f"Email error: {e}")
 
-def _send_email_premium(to, transcript, customer):
+def _send_email_premium(to, transcript, customer, rec_url, duration_seconds):
     try:
         import sendgrid
         from sendgrid.helpers.mail import Mail
         name = customer.name if hasattr(customer, 'name') and customer.name else customer.phone if customer else ''
 
+        minutes = duration_seconds // 60
+        seconds = duration_seconds % 60
+        duration_str = f"{minutes}:{seconds:02d}"
+
         html = f'''<div dir="rtl" style="font-family:Arial,sans-serif;max-width:600px;margin:auto">
 <h2 style="color:#7c3aed">תמלול שיחה — מסלול מקצועי</h2>
-<p style="color:#6b7280">לקוח: <b>{name}</b></p>
+<p style="color:#6b7280">לקוח: <b>{name}</b> | משך: <b>{duration_str}</b></p>
 
 <div style="background:#faf5ff;border-right:4px solid #7c3aed;padding:16px;margin:16px 0;border-radius:8px">
 <h3 style="margin:0 0 12px;color:#581c87">⭐ תמלול מקצועי (Sofer.ai)</h3>
 <div style="line-height:1.8;white-space:pre-wrap">{transcript}</div>
+</div>
+
+<div style="background:#fff7ed;border-right:4px solid #f97316;padding:16px;margin:16px 0;border-radius:8px">
+<h3 style="margin:0 0 8px;color:#9a3412">🎧 האזנה להקלטה</h3>
+<a href="{rec_url}" style="color:#ea580c;word-break:break-all">{rec_url}</a>
 </div>
 
 </div>'''
