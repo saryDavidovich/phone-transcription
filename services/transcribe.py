@@ -3,10 +3,10 @@ from openai import OpenAI
 
 log = logging.getLogger(__name__)
 
-def transcribe_async(call_id, rec_url, customer_id, delivery_method, delivered_to, duration_seconds):
+def transcribe_async(call_id, rec_url, customer_id, delivery_method, delivered_to, duration_seconds, transcription_tier='basic'):
     t = threading.Thread(
         target=_process,
-        args=(call_id, rec_url, customer_id, delivery_method, delivered_to, duration_seconds),
+        args=(call_id, rec_url, customer_id, delivery_method, delivered_to, duration_seconds, transcription_tier),
         daemon=True
     )
     t.start()
