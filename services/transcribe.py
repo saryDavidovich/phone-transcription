@@ -43,10 +43,11 @@ def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, durat
                     db.session.commit()
                 return
 
-            price_per_30min = float(_get_setting('price_per_30min', '5.0'))
             if tier == 'premium':
-                price_per_30min = float(_get_setting('price_per_30min_premium', str(float(_get_setting('price_per_30min', '5.0')) * 2)))
-            cost = (duration_seconds / 1800) * price_per_30min
+                price_per_20min = float(_get_setting('price_per_20min_premium', '1.90'))
+            else:
+                price_per_20min = float(_get_setting('price_per_20min_basic', '0.90'))
+            cost = (duration_seconds / 1200) * price_per_20min
             cost = round(cost, 2)
 
             if rec:
