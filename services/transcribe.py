@@ -24,8 +24,7 @@ def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, durat
             db.session.remove()
 
             # בדיקת tier של הלקוח
-            customer = Customer.query.get(customer_id)
-            tier = getattr(customer, 'transcription_tier', 'basic') or 'basic'
+            tier = transcription_tier
 
             if tier == 'premium':
                 log.info(f"Using Sofer.ai for customer {customer_id}")
