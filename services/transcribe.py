@@ -47,9 +47,10 @@ def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, durat
                 price_per_20min = float(_get_setting('price_per_20min_premium', '1.90'))
             else:
                 price_per_20min = float(_get_setting('price_per_20min_basic', '0.90'))
-            cost = (duration_seconds / 1200) * price_per_20min
+            import math
+            units = math.ceil(duration_seconds / 1200)  # כל 20 דקות שהתחילו
+            cost = units * price_per_20min
             cost = round(cost, 2)
-
             if rec:
                 rec.transcript = transcript_fixed
                 rec.summary = transcript_raw if tier == 'basic' else ''
