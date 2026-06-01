@@ -44,10 +44,20 @@ def create_app():
     
     with app.app_context():
         db.create_all()
+        _migrate_db()
         _create_default_admin()
     
     logging.basicConfig(level=logging.INFO)
     return app
+
+def _migrate_db():
+    try:
+        with db.engine.connect() as conn:
+            conn.execute(db.text("ALTER TABLE customers ADD COLUMN IF NOT EXISTS transcription_tier VARCHAR(10) DEFAULT 'basic'"))
+            conn.commit()
+        logging.getLogger(__name__).info("Migration: transcription_tier column ready")
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"Migration skipped: {e}")
 
 def _create_default_admin():
     try:
