@@ -46,7 +46,8 @@ def transcribe():
     call_id = data.get('call_id', str(uuid.uuid4()))
     duration = data.get('duration', 0)
     delivery_method = data.get('delivery_method', 'email')
-    delivered_to = data.get('delivered_to', '')
+delivered_to = data.get('delivered_to', '')
+transcription_tier = data.get('transcription_tier', 'basic')
 
     customer = Customer.query.filter_by(phone=phone).first()
     if not customer:
@@ -73,5 +74,5 @@ def transcribe():
     db.session.add(rec)
     db.session.commit()
 
-    transcribe_async(call_id, rec_url, customer.id, delivery_method, delivered_to, duration)
+    transcribe_async(call_id, rec_url, customer.id, delivery_method, delivered_to, duration, transcription_tier)
     return jsonify({'ok': True, 'call_id': call_id})
