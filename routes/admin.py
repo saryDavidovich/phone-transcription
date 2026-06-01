@@ -94,7 +94,6 @@ def customers():
     customers = query.order_by(Customer.created_at.desc()).paginate(page=page, per_page=50)
     return render_template('admin/customers.html', customers=customers, search=search)
 
-# ===== 1. הוספת לקוח ידנית =====
 @admin_bp.route('/customers/add', methods=['GET', 'POST'])
 @login_required
 def add_customer():
@@ -141,7 +140,6 @@ def add_customer():
 
     return render_template('admin/add_customer.html')
 
-# ===== 2. הורדת אקסל עם כל נתוני הלקוחות =====
 @admin_bp.route('/customers/export/excel')
 @login_required
 def export_customers_excel():
@@ -155,7 +153,6 @@ def export_customers_excel():
     headers = ['ID', 'טלפון', 'שם', 'מייל', 'פקס', 'יתרה', 'שיטת משלוח', 'חסום', 'תאריך הצטרפות']
     ws.append(headers)
 
-    # עיצוב כותרות
     for cell in ws[1]:
         cell.font = Font(bold=True, color='FFFFFF')
         cell.fill = PatternFill(start_color='2563EB', end_color='2563EB', fill_type='solid')
@@ -175,7 +172,6 @@ def export_customers_excel():
             c.created_at.strftime('%d/%m/%Y %H:%M') if c.created_at else ''
         ])
 
-    # רוחב עמודות
     for col in ws.columns:
         max_length = max(len(str(cell.value or '')) for cell in col)
         ws.column_dimensions[col[0].column_letter].width = max(max_length + 2, 12)
@@ -254,7 +250,6 @@ def recording_detail(id):
     recording = Recording.query.get_or_404(id)
     return render_template('admin/recording_detail.html', recording=recording)
 
-# ===== 3. הורדת קובץ שמע של ההקלטה =====
 @admin_bp.route('/recordings/<int:id>/download-audio')
 @login_required
 def download_audio(id):
@@ -264,9 +259,7 @@ def download_audio(id):
     yemot_username = __import__('os').environ.get('YEMOT_USERNAME', '')
     yemot_password = __import__('os').environ.get('YEMOT_PASSWORD', '')
 
-    # בניית URL להורדה
     call_id = recording.call_id or ''
-    # מחפש את נתיב ההקלטה מה-call_id
     rec_url = f'https://www.call2all.co.il/ym/api/DownloadFile?username={yemot_username}&password={yemot_password}&path=ivr2:/recordings/{call_id}.wav'
 
     try:
@@ -282,7 +275,6 @@ def download_audio(id):
         flash(f'שגיאה בהורדת ההקלטה: {e}')
         return redirect(url_for('admin.recording_detail', id=id))
 
-# ===== 4. האזנה להקלטה =====
 @admin_bp.route('/recordings/<int:id>/play-audio')
 @login_required
 def play_audio(id):
@@ -306,7 +298,6 @@ def play_audio(id):
     except Exception as e:
         return jsonify({'error': str(e)}), 400
 
-# ===== 5. הורדת קובץ וורד עם התמלול =====
 @admin_bp.route('/recordings/<int:id>/download-word')
 @login_required
 def download_word(id):
@@ -319,24 +310,19 @@ def download_word(id):
 
     doc = Document()
 
-    # כותרת
     title = doc.add_heading('תמלול שיחה', 0)
     title.alignment = WD_ALIGN_PARAGRAPH.RIGHT
 
-    # פרטים
     doc.add_paragraph(f'לקוח: {customer.name or customer.phone if customer else ""}').alignment = WD_ALIGN_PARAGRAPH.RIGHT
     doc.add_paragraph(f'תאריך: {recording.created_at.strftime("%d/%m/%Y %H:%M") if recording.created_at else ""}').alignment = WD_ALIGN_PARAGRAPH.RIGHT
     doc.add_paragraph(f'משך: {recording.duration_seconds // 60} דקות').alignment = WD_ALIGN_PARAGRAPH.RIGHT
-
     doc.add_paragraph('─' * 50)
 
-    # סיכום
     if recording.summary:
         doc.add_heading('סיכום', level=1).alignment = WD_ALIGN_PARAGRAPH.RIGHT
         p = doc.add_paragraph(recording.summary)
         p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
 
-    # תמלול מלא
     doc.add_heading('תמלול מלא', level=1).alignment = WD_ALIGN_PARAGRAPH.RIGHT
     p = doc.add_paragraph(recording.transcript or 'אין תמלול')
     p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
@@ -356,9 +342,9 @@ def download_word(id):
 @login_required
 def reports():
     monthly = db.session.query(
-    func.to_char(Transaction.created_at, 'YYYY-MM').label('month'),
-    func.sum(Transaction.amount).label('revenue')
-).filter(Transaction.type == 'charge').group_by('month').order_by('month').all()
+        func.to_char(Transaction.created_at, 'YYYY-MM').label('month'),
+        func.sum(Transaction.amount).label('revenue')
+    ).filter(Transaction.type == 'charge').group_by('month').order_by('month').all()
     top_customers = db.session.query(
         Customer,
         func.sum(Transaction.amount).label('total_spend')
@@ -373,7 +359,8 @@ def reports():
 @login_required
 def settings():
     if request.method == 'POST':
-        set_setting('price_per_30min', request.form.get('price_per_30min', '5'))
+        set_setting('price_per_20min_basic', request.form.get('price_per_20min_basic', '0.90'))
+        set_setting('price_per_20min_premium', request.form.get('price_per_20min_premium', '1.90'))
         set_setting('min_balance', request.form.get('min_balance', '5'))
         set_setting('max_recording_seconds', request.form.get('max_recording_seconds', '1800'))
         set_setting('welcome_new', request.form.get('welcome_new', ''))
@@ -383,7 +370,8 @@ def settings():
         return redirect(url_for('admin.settings'))
 
     current_settings = {
-        'price_per_30min': get_setting('price_per_30min', '5'),
+        'price_per_20min_basic': get_setting('price_per_20min_basic', '0.90'),
+        'price_per_20min_premium': get_setting('price_per_20min_premium', '1.90'),
         'min_balance': get_setting('min_balance', '5'),
         'max_recording_seconds': get_setting('max_recording_seconds', '1800'),
         'welcome_new': get_setting('welcome_new', 'שלום וברוכים הבאים למערכת התמלול.'),
