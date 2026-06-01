@@ -13,3 +13,4 @@ pydub
 sendgrid
 openpyxl
 python-docx
+soferai
