@@ -23,27 +23,27 @@ def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, durat
 
             db.session.remove()
 
-            transcript = _whisper_from_url(rec_url)
+            transcript_raw = _whisper_from_url(rec_url)
 
             db.session.remove()
             rec = Recording.query.filter_by(call_id=call_id).first()
 
-            if not transcript:
+            if not transcript_raw:
                 if rec:
                     rec.status = 'error'
                     db.session.commit()
                 return
 
-            # תיקון + סיכום ביחד בקריאה אחת ל-Claude
-            transcript, summary = _summarize(transcript)
-            
+            # תיקון עם Claude — שומרים גם את המקור
+            transcript_fixed = _fix_transcript(transcript_raw)
+
             price_per_30min = float(_get_setting('price_per_30min', '5.0'))
             cost = (duration_seconds / 1800) * price_per_30min
             cost = round(cost, 2)
 
             if rec:
-                rec.transcript = transcript
-                rec.summary = summary
+                rec.transcript = transcript_fixed
+                rec.summary = transcript_raw  # שומרים את המקור בשדה summary
                 rec.status = 'transcribed'
                 rec.cost = cost
                 rec.duration_seconds = duration_seconds
@@ -63,7 +63,7 @@ def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, durat
                 db.session.commit()
 
             if delivery_method == 'email':
-                _send_email(delivered_to, transcript, summary, customer)
+                _send_email(delivered_to, transcript_raw, transcript_fixed, customer)
             else:
                 log.info(f"Fax delivery to {delivered_to} - configure Interfax")
 
@@ -142,7 +142,7 @@ def _whisper_from_url(url):
         log.error(f"Whisper error: {e}")
         return None
 
-def _summarize(transcript):
+def _fix_transcript(transcript):
     try:
         import anthropic
         client = anthropic.Anthropic(api_key=os.environ.get('ANTHROPIC_API_KEY'))
@@ -158,23 +158,15 @@ def _summarize(transcript):
 רשימת מושגים תורניים — השתמש בהם לתיקון:
 {terms[:4000]}
 
-בצע שתי משימות:
+תקן את התמלול:
+- החלף מילים שגויות במונחים הנכונים לפי ההקשר התורני
+- כאשר מילה נשמעת דומה למונח תורני — העדף את המונח התורני
+- שמור על כל המשמעות והתוכן המקורי
+- אל תוסיף תוכן שלא היה בתמלול
+- שמור על מבנה הפסקאות
+- החזר רק את הטקסט המתוקן, ללא הסברים או כותרות
 
-1. תקן את התמלול:
-   - החלף מילים שגויות במונחים הנכונים לפי ההקשר התורני
-   - כאשר מילה נשמעת דומה למונח תורני — העדף את המונח התורני
-   - שמור על כל המשמעות והתוכן המקורי
-   - אל תוסיף תוכן שלא היה בתמלול
-   - שמור על מבנה הפסקאות
-
-2. סכם ב-3-4 נקודות קצרות בעברית את עיקרי הדברים
-
-החזר בפורמט הבא בדיוק, ללא שום טקסט נוסף:
-FIXED:
-[הטקסט המתוקן המלא]
-
-SUMMARY:
-[הסיכום ב-3-4 נקודות]
+אם התמלול גרוע מאוד ואינך יכול לתקן — החזר את הטקסט המקורי כמות שהוא, ללא שום הערות.
 
 תמלול לתיקון:
 {transcript}"""
@@ -185,40 +177,42 @@ SUMMARY:
             messages=[{'role': 'user', 'content': prompt}]
         )
 
-        response = msg.content[0].text.strip()
+        fixed = msg.content[0].text.strip()
 
-        if 'FIXED:' in response and 'SUMMARY:' in response:
-            parts = response.split('SUMMARY:')
-            fixed_transcript = parts[0].replace('FIXED:', '').strip()
-            summary = parts[1].strip()
-        else:
-            log.warning("Claude response format unexpected, using fallback")
-            fixed_transcript = transcript
-            summary = response[:500]
+        # אם Claude החזיר טקסט קצר מדי — החזר את המקור
+        if len(fixed) < len(transcript) * 0.3:
+            log.warning("Claude returned too short response, using original")
+            return transcript
 
-        log.info("Claude תיקון וסיכום הושלמו")
-        return fixed_transcript, summary
+        log.info("Claude תיקון הושלם")
+        return fixed
 
     except Exception as e:
         log.error(f"Claude error: {e}")
-        return transcript, ''
+        return transcript
 
-def _send_email(to, transcript, summary, customer):
+def _send_email(to, transcript_raw, transcript_fixed, customer):
     try:
         import sendgrid
         from sendgrid.helpers.mail import Mail
         name = customer.name if hasattr(customer, 'name') and customer.name else customer.phone if customer else ''
-        summary_html = ''
-        if summary:
-            lines = ''.join(f'<li>{l.strip()}</li>' for l in summary.split('\n') if l.strip())
-            summary_html = f'<div style="background:#f0f7ff;border-right:4px solid #2563eb;padding:16px;margin:16px 0;border-radius:6px"><strong>סיכום:</strong><ul style="margin:8px 0 0;padding-right:20px">{lines}</ul></div>'
+
         html = f'''<div dir="rtl" style="font-family:Arial,sans-serif;max-width:600px;margin:auto">
 <h2 style="color:#1d4ed8">תמלול שיחה</h2>
 <p style="color:#6b7280">לקוח: <b>{name}</b></p>
-{summary_html}
-<h3>תמלול מלא:</h3>
-<div style="background:#f9fafb;border:1px solid #e5e7eb;padding:16px;border-radius:8px;line-height:1.8;white-space:pre-wrap">{transcript}</div>
+
+<div style="background:#f0fdf4;border-right:4px solid #10b981;padding:16px;margin:16px 0;border-radius:8px">
+<h3 style="margin:0 0 12px;color:#065f46">✨ תמלול מעובד</h3>
+<div style="line-height:1.8;white-space:pre-wrap">{transcript_fixed}</div>
+</div>
+
+<div style="background:#f9fafb;border-right:4px solid #9ca3af;padding:16px;margin:16px 0;border-radius:8px">
+<h3 style="margin:0 0 12px;color:#6b7280">📝 תמלול מקורי (Whisper)</h3>
+<div style="line-height:1.8;white-space:pre-wrap;color:#6b7280;font-size:13px">{transcript_raw}</div>
+</div>
+
 </div>'''
+
         sg = sendgrid.SendGridAPIClient(api_key=os.environ.get('SENDGRID_API_KEY'))
         message = Mail(
             from_email=os.environ.get('SENDGRID_FROM_EMAIL', os.environ.get('GMAIL_USER', '')),
