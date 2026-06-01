@@ -23,13 +23,12 @@ def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, durat
 
             db.session.remove()
 
-            # בדיקת tier של הלקוח
             tier = transcription_tier
 
             if tier == 'premium':
                 log.info(f"Using Sofer.ai for customer {customer_id}")
                 transcript_raw = _soferai_from_url(rec_url)
-                transcript_fixed = transcript_raw  # Sofer.ai כבר מתוקן
+                transcript_fixed = transcript_raw
             else:
                 log.info(f"Using Whisper for customer {customer_id}")
                 transcript_raw = _whisper_from_url(rec_url)
@@ -92,62 +91,53 @@ def _get_setting(key, default=''):
     return s.value if s else default
 
 def _soferai_from_url(url):
-    """תמלול דרך Sofer.ai — מוריד את הקובץ ומעלה ל-API"""
     try:
-        import io
+        import base64
         from soferai import SoferAI
         from soferai.transcribe import TranscriptionRequestInfo
 
         client = SoferAI(api_key=os.environ.get('SOFERAI_API_KEY'))
 
-        # הורדת הקובץ מימות
+        # מוריד את הקובץ ומעביר כ-base64
         r = requests.get(url, timeout=120)
         r.raise_for_status()
         log.info(f"Downloaded {len(r.content)} bytes for Sofer.ai")
 
-        # העלאת הקובץ ל-Sofer.ai
-        file_obj = io.BytesIO(r.content)
-        file_obj.name = 'recording.wav'
+        base64_audio = base64.b64encode(r.content).decode('utf-8')
 
-        upload_response = client.files.upload(file=file_obj)
-        file_id = upload_response.id
-        log.info(f"Sofer.ai file uploaded: {file_id}")
-
-        # יצירת בקשת תמלול
-        batch_response = client.batch_transcribe.create_batch_transcription(
-            batch_file_id=file_id,
+        response = client.transcribe.create_transcription(
+            audio_file=base64_audio,
             info=TranscriptionRequestInfo(
-                model="v1",
-                primary_language="he",
-                hebrew_word_format=["he"],
+                model='v1',
+                primary_language='he',
+                hebrew_word_format=['he'],
                 num_speakers=1,
-            ),
-            batch_title="shiur",
-            processing_mode="standard",
+            )
         )
-        batch_id = batch_response.id
-        log.info(f"Sofer.ai batch created: {batch_id}")
 
-        # המתנה לתוצאה — polling כל 15 שניות עד 10 דקות
+        transcription_id = response
+        log.info(f"Sofer.ai transcription created: {transcription_id}")
+
+        # polling כל 15 שניות עד 10 דקות
         for attempt in range(40):
             time.sleep(15)
-            status_response = client.batch_transcribe.get_batch_transcription(batch_id)
-            status = status_response.status
-            log.info(f"Sofer.ai status: {status} (attempt {attempt+1})")
+            status = client.transcribe.get_transcription_status(
+                transcription_id=transcription_id
+            )
+            log.info(f"Sofer.ai status: {status.status} (attempt {attempt+1})")
 
-            if status == 'completed':
-                # שליפת הטקסט
-                transcript_text = ''
-                for segment in status_response.transcription.segments:
-                    transcript_text += segment.text + ' '
+            if status.status == 'completed':
+                result = client.transcribe.get_transcription(
+                    transcription_id=transcription_id
+                )
                 log.info("Sofer.ai transcription completed")
-                return transcript_text.strip()
+                return result.text
 
-            elif status in ('failed', 'error'):
-                log.error(f"Sofer.ai transcription failed: {status}")
+            elif status.status in ('failed', 'error'):
+                log.error(f"Sofer.ai failed: {status.status}")
                 return None
 
-        log.error("Sofer.ai timeout after 10 minutes")
+        log.error("Sofer.ai timeout")
         return None
 
     except Exception as e:
