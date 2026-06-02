@@ -292,21 +292,62 @@ def _fix_transcript(transcript):
 def _build_word_doc(name, duration_str, transcript_fixed, transcript_raw=None):
     from docx import Document
     from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.oxml.ns import qn
+    from docx.oxml import OxmlElement
+    from docx.shared import Pt, RGBColor
     import io
 
+    def set_rtl(paragraph):
+        paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+        pPr = paragraph._p.get_or_add_pPr()
+        bidi = OxmlElement('w:bidi')
+        pPr.append(bidi)
+
+    def add_footer(doc):
+        section = doc.sections[0]
+        footer = section.footer
+        footer_para = footer.paragraphs[0]
+        footer_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        # הגדרת RTL לפוטר
+        pPr = footer_para._p.get_or_add_pPr()
+        bidi = OxmlElement('w:bidi')
+        pPr.append(bidi)
+        run = footer_para.add_run('נערך ע"י מערכת תמלולפון 03-3131795')
+        run.font.size = Pt(9)
+        run.font.color.rgb = RGBColor(0x99, 0x99, 0x99)
+
     doc = Document()
+
+    # הגדרת RTL לכל המסמך
+    section = doc.sections[0]
+    sectPr = section._sectPr
+    bidi_doc = OxmlElement('w:bidi')
+    sectPr.append(bidi_doc)
+
+    # הוספת פוטר
+    add_footer(doc)
+
     title = doc.add_heading('תמלול שיחה', 0)
-    title.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-    doc.add_paragraph(f'לקוח: {name} | משך: {duration_str}').alignment = WD_ALIGN_PARAGRAPH.RIGHT
-    doc.add_paragraph('─' * 50)
-    doc.add_heading('תמלול מעובד', level=1).alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    set_rtl(title)
+
+    p_info = doc.add_paragraph(f'לקוח: {name} | משך: {duration_str}')
+    set_rtl(p_info)
+
+    set_rtl(doc.add_paragraph('─' * 50))
+
+    h1 = doc.add_heading('תמלול מעובד', level=1)
+    set_rtl(h1)
+
     p = doc.add_paragraph(transcript_fixed or '')
-    p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    set_rtl(p)
+
     if transcript_raw:
-        doc.add_paragraph('─' * 50)
-        doc.add_heading('תמלול מקורי', level=1).alignment = WD_ALIGN_PARAGRAPH.RIGHT
+        set_rtl(doc.add_paragraph('─' * 50))
+        h2 = doc.add_heading('תמלול מקורי', level=1)
+        set_rtl(h2)
         p2 = doc.add_paragraph(transcript_raw)
-        p2.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+        set_rtl(p2)
+
     buf = io.BytesIO()
     doc.save(buf)
     buf.seek(0)
