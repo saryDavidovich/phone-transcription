@@ -34,7 +34,6 @@ def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, durat
                 transcript_raw, actual_duration = _whisper_from_url(rec_url)
                 transcript_fixed = _fix_transcript(transcript_raw) if transcript_raw else None
 
-            # משתמשים במשך האמיתי מהקובץ אם duration_seconds הוא 0
             if actual_duration and actual_duration > 0:
                 duration_seconds = actual_duration
                 log.info(f"Actual duration from file: {duration_seconds}s")
@@ -100,7 +99,7 @@ def _get_setting(key, default=''):
 
 def _soferai_from_url(url):
     try:
-        import base64, wave, io
+        import base64, wave, audioop, io
         from soferai import SoferAI
         from soferai.transcribe import TranscriptionRequestInfo
 
@@ -110,15 +109,36 @@ def _soferai_from_url(url):
         r.raise_for_status()
         log.info(f"Downloaded {len(r.content)} bytes for Sofer.ai")
 
-        # חישוב משך מהקובץ
         actual_duration = 0
         try:
             with wave.open(io.BytesIO(r.content)) as wav_in:
-                actual_duration = wav_in.getnframes() // wav_in.getframerate()
-        except Exception as e:
-            log.warning(f"Could not read duration: {e}")
+                frames = wav_in.readframes(wav_in.getnframes())
+                sampwidth = wav_in.getsampwidth()
+                nchannels = wav_in.getnchannels()
+                framerate = wav_in.getframerate()
+                actual_duration = wav_in.getnframes() // framerate
 
-        base64_audio = base64.b64encode(r.content).decode('utf-8')
+            log.info(f"Original WAV: {framerate}Hz, {sampwidth*8}bit, {nchannels}ch, {actual_duration}s")
+
+            # Upsampling ל-16000Hz
+            if framerate != 16000:
+                frames, _ = audioop.ratecv(frames, sampwidth, nchannels, framerate, 16000, None)
+                framerate = 16000
+                log.info("Upsampled to 16000Hz for Sofer.ai")
+
+            output_buffer = io.BytesIO()
+            with wave.open(output_buffer, 'wb') as wav_out:
+                wav_out.setnchannels(nchannels)
+                wav_out.setsampwidth(sampwidth)
+                wav_out.setframerate(framerate)
+                wav_out.writeframes(frames)
+            audio_content = output_buffer.getvalue()
+
+        except Exception as e:
+            log.warning(f"Could not process WAV: {e}, using original")
+            audio_content = r.content
+
+        base64_audio = base64.b64encode(audio_content).decode('utf-8')
 
         response = client.transcribe.create_transcription(
             audio_file=base64_audio,
