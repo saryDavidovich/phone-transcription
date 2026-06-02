@@ -1,6 +1,6 @@
 import os
 import logging
-from flask import Flask
+from flask import Flask, send_from_directory
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager
 db = SQLAlchemy()
@@ -41,6 +41,12 @@ def create_app():
     app.register_blueprint(admin_bp, url_prefix='/admin')
     app.register_blueprint(payment_bp, url_prefix='/payment')
     app.register_blueprint(api_bp, url_prefix='/api')
+
+    # Route ציבורי לקבצי פקס זמניים
+    @app.route('/static/fax_tmp/<filename>')
+    def fax_file(filename):
+        fax_dir = os.path.join(app.root_path, 'static', 'fax_tmp')
+        return send_from_directory(fax_dir, filename)
     
     with app.app_context():
         db.create_all()
