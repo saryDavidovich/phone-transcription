@@ -120,7 +120,6 @@ def _soferai_from_url(url):
 
             log.info(f"Original WAV: {framerate}Hz, {sampwidth*8}bit, {nchannels}ch, {actual_duration}s")
 
-            # Upsampling ל-16000Hz
             if framerate != 16000:
                 frames, _ = audioop.ratecv(frames, sampwidth, nchannels, framerate, 16000, None)
                 framerate = 16000
@@ -290,15 +289,41 @@ def _fix_transcript(transcript):
         log.error(f"Claude error: {e}")
         return transcript
 
+def _build_word_doc(name, duration_str, transcript_fixed, transcript_raw=None):
+    from docx import Document
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    import io
+
+    doc = Document()
+    title = doc.add_heading('תמלול שיחה', 0)
+    title.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    doc.add_paragraph(f'לקוח: {name} | משך: {duration_str}').alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    doc.add_paragraph('─' * 50)
+    doc.add_heading('תמלול מעובד', level=1).alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    p = doc.add_paragraph(transcript_fixed or '')
+    p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    if transcript_raw:
+        doc.add_paragraph('─' * 50)
+        doc.add_heading('תמלול מקורי', level=1).alignment = WD_ALIGN_PARAGRAPH.RIGHT
+        p2 = doc.add_paragraph(transcript_raw)
+        p2.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    buf = io.BytesIO()
+    doc.save(buf)
+    buf.seek(0)
+    return buf.read()
+
 def _send_email(to, transcript_raw, transcript_fixed, customer, rec_url, duration_seconds):
     try:
-        import sendgrid
-        from sendgrid.helpers.mail import Mail
-        name = customer.name if hasattr(customer, 'name') and customer.name else customer.phone if customer else ''
+        import sendgrid, base64
+        from sendgrid.helpers.mail import Mail, Attachment, FileContent, FileName, FileType, Disposition
 
+        name = customer.name if hasattr(customer, 'name') and customer.name else customer.phone if customer else ''
         minutes = duration_seconds // 60
         seconds = duration_seconds % 60
         duration_str = f"{minutes}:{seconds:02d}"
+
+        word_bytes = _build_word_doc(name, duration_str, transcript_fixed, transcript_raw)
+        word_b64 = base64.b64encode(word_bytes).decode('utf-8')
 
         html = f'''<div dir="rtl" style="font-family:Arial,sans-serif;max-width:600px;margin:auto">
 <h2 style="color:#1d4ed8">תמלול שיחה</h2>
@@ -310,13 +335,12 @@ def _send_email(to, transcript_raw, transcript_fixed, customer, rec_url, duratio
 </div>
 
 <div style="background:#f9fafb;border-right:4px solid #9ca3af;padding:16px;margin:16px 0;border-radius:8px">
-<h3 style="margin:0 0 12px;color:#6b7280">📝 תמלול מקורי (Whisper)</h3>
+<h3 style="margin:0 0 12px;color:#6b7280">📝 תמלול מקורי</h3>
 <div style="line-height:1.8;white-space:pre-wrap;color:#6b7280;font-size:13px">{transcript_raw}</div>
 </div>
 
 <div style="background:#fff7ed;border-right:4px solid #f97316;padding:16px;margin:16px 0;border-radius:8px">
-<h3 style="margin:0 0 8px;color:#9a3412">🎧 האזנה להקלטה</h3>
-<a href="{rec_url}" style="color:#ea580c;word-break:break-all">{rec_url}</a>
+<a href="{rec_url}" style="color:#ea580c;font-weight:600;font-size:15px;text-decoration:none">⬇️ להורדת ההקלטה לחצו כאן</a>
 </div>
 
 </div>'''
@@ -328,6 +352,12 @@ def _send_email(to, transcript_raw, transcript_fixed, customer, rec_url, duratio
             subject=f'תמלול שיחה - {name}',
             html_content=html
         )
+        message.attachment = Attachment(
+            FileContent(word_b64),
+            FileName(f'תמלול_{name}.docx'),
+            FileType('application/vnd.openxmlformats-officedocument.wordprocessingml.document'),
+            Disposition('attachment')
+        )
         sg.send(message)
         log.info(f"Email sent to {to}")
     except Exception as e:
@@ -335,26 +365,28 @@ def _send_email(to, transcript_raw, transcript_fixed, customer, rec_url, duratio
 
 def _send_email_premium(to, transcript, customer, rec_url, duration_seconds):
     try:
-        import sendgrid
-        from sendgrid.helpers.mail import Mail
-        name = customer.name if hasattr(customer, 'name') and customer.name else customer.phone if customer else ''
+        import sendgrid, base64
+        from sendgrid.helpers.mail import Mail, Attachment, FileContent, FileName, FileType, Disposition
 
+        name = customer.name if hasattr(customer, 'name') and customer.name else customer.phone if customer else ''
         minutes = duration_seconds // 60
         seconds = duration_seconds % 60
         duration_str = f"{minutes}:{seconds:02d}"
+
+        word_bytes = _build_word_doc(name, duration_str, transcript)
+        word_b64 = base64.b64encode(word_bytes).decode('utf-8')
 
         html = f'''<div dir="rtl" style="font-family:Arial,sans-serif;max-width:600px;margin:auto">
 <h2 style="color:#7c3aed">תמלול שיחה — מסלול מקצועי</h2>
 <p style="color:#6b7280">לקוח: <b>{name}</b> | משך: <b>{duration_str}</b></p>
 
 <div style="background:#faf5ff;border-right:4px solid #7c3aed;padding:16px;margin:16px 0;border-radius:8px">
-<h3 style="margin:0 0 12px;color:#581c87">⭐ תמלול מקצועי (Sofer.ai)</h3>
+<h3 style="margin:0 0 12px;color:#581c87">⭐ תמלול מקצועי</h3>
 <div style="line-height:1.8;white-space:pre-wrap">{transcript}</div>
 </div>
 
 <div style="background:#fff7ed;border-right:4px solid #f97316;padding:16px;margin:16px 0;border-radius:8px">
-<h3 style="margin:0 0 8px;color:#9a3412">🎧 האזנה להקלטה</h3>
-<a href="{rec_url}" style="color:#ea580c;word-break:break-all">{rec_url}</a>
+<a href="{rec_url}" style="color:#ea580c;font-weight:600;font-size:15px;text-decoration:none">⬇️ להורדת ההקלטה לחצו כאן</a>
 </div>
 
 </div>'''
@@ -365,6 +397,12 @@ def _send_email_premium(to, transcript, customer, rec_url, duration_seconds):
             to_emails=to,
             subject=f'תמלול שיחה מקצועי - {name}',
             html_content=html
+        )
+        message.attachment = Attachment(
+            FileContent(word_b64),
+            FileName(f'תמלול_{name}.docx'),
+            FileType('application/vnd.openxmlformats-officedocument.wordprocessingml.document'),
+            Disposition('attachment')
         )
         sg.send(message)
         log.info(f"Premium email sent to {to}")
