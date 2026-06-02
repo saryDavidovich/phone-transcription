@@ -359,8 +359,6 @@ def _build_pdf_for_fax(name, duration_str, transcript_fixed):
         from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
         from reportlab.lib.enums import TA_RIGHT, TA_CENTER
         from reportlab.lib.units import cm
-        from reportlab.pdfbase import pdfmetrics
-        from reportlab.pdfbase.ttfonts import TTFont
         import io
 
         buf = io.BytesIO()
@@ -399,7 +397,6 @@ def _build_pdf_for_fax(name, duration_str, transcript_fixed):
         story.append(Paragraph('─' * 60, rtl_style))
         story.append(Spacer(1, 0.3*cm))
 
-        # פיצול לפסקאות
         for para in (transcript_fixed or '').split('\n'):
             if para.strip():
                 story.append(Paragraph(para.strip(), rtl_style))
@@ -418,30 +415,24 @@ def _build_pdf_for_fax(name, duration_str, transcript_fixed):
 
 def _send_fax(to_number, transcript_fixed, customer, duration_seconds):
     try:
-        import tempfile, base64
+        import uuid
 
         name = customer.name if hasattr(customer, 'name') and customer.name else customer.phone if customer else ''
         minutes = duration_seconds // 60
         seconds = duration_seconds % 60
         duration_str = f"{minutes}:{seconds:02d}"
 
-        # בניית PDF
         pdf_bytes = _build_pdf_for_fax(name, duration_str, transcript_fixed)
         if not pdf_bytes:
             log.error("Failed to build PDF for fax")
             return
 
-        # שמירה זמנית והעלאה ל-Telnyx
-        with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as f:
-            f.write(pdf_bytes)
-            tmp_path = f.name
-
-        # העלאת ה-PDF ל-Telnyx Storage
         api_key = os.environ.get('TELNYX_API_KEY')
         connection_id = os.environ.get('TELNYX_CONNECTION_ID', '2973595690996860264')
         from_number = os.environ.get('TELNYX_FAX_FROM', '+13644443976')
+        base_url = os.environ.get('APP_BASE_URL', '').rstrip('/')
 
-        # נירמול מספר הפקס לפורמט E.164
+        # נירמול מספר לפורמט E.164
         fax_number = to_number.strip().replace('-', '').replace(' ', '')
         if not fax_number.startswith('+'):
             if fax_number.startswith('0'):
@@ -449,29 +440,18 @@ def _send_fax(to_number, transcript_fixed, customer, duration_seconds):
             else:
                 fax_number = '+972' + fax_number
 
-        # העלאת הקובץ ל-Telnyx
-        with open(tmp_path, 'rb') as f:
-            upload_response = requests.post(
-                'https://api.telnyx.com/v2/files',
-                headers={'Authorization': f'Bearer {api_key}'},
-                files={'file': ('transcript.pdf', f, 'application/pdf')},
-                data={'purpose': 'fax'}
-            )
+        # שמירת PDF זמנית בתיקיית static
+        filename = f"fax_{uuid.uuid4().hex}.pdf"
+        static_dir = os.path.join(os.path.dirname(__file__), '..', 'static', 'fax_tmp')
+        os.makedirs(static_dir, exist_ok=True)
+        pdf_path = os.path.join(static_dir, filename)
 
-        os.remove(tmp_path)
+        with open(pdf_path, 'wb') as f:
+            f.write(pdf_bytes)
 
-        if upload_response.status_code not in (200, 201):
-            log.error(f"Telnyx file upload failed: {upload_response.text}")
-            return
+        media_url = f"{base_url}/static/fax_tmp/{filename}"
+        log.info(f"PDF saved, sending fax to {fax_number} with URL {media_url}")
 
-        file_url = upload_response.json().get('data', {}).get('url')
-        if not file_url:
-            log.error("No file URL returned from Telnyx")
-            return
-
-        log.info(f"PDF uploaded to Telnyx: {file_url}")
-
-        # שליחת הפקס
         fax_response = requests.post(
             'https://api.telnyx.com/v2/faxes',
             headers={
@@ -482,7 +462,7 @@ def _send_fax(to_number, transcript_fixed, customer, duration_seconds):
                 'connection_id': connection_id,
                 'to': fax_number,
                 'from': from_number,
-                'media_url': file_url,
+                'media_url': media_url,
             }
         )
 
@@ -491,6 +471,15 @@ def _send_fax(to_number, transcript_fixed, customer, duration_seconds):
             log.info(f"Fax sent successfully to {fax_number}, fax_id: {fax_id}")
         else:
             log.error(f"Fax send failed: {fax_response.text}")
+
+        # מחיקת הקובץ אחרי 10 דקות
+        def cleanup():
+            time.sleep(600)
+            try:
+                os.remove(pdf_path)
+            except:
+                pass
+        threading.Thread(target=cleanup, daemon=True).start()
 
     except Exception as e:
         log.error(f"Fax error: {e}")
