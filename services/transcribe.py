@@ -359,31 +359,51 @@ def _build_pdf_for_fax(name, duration_str, transcript_fixed):
         from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
         from reportlab.lib.enums import TA_RIGHT, TA_CENTER
         from reportlab.lib.units import cm
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.ttfonts import TTFont
         import io
+
+        font_paths = [
+            '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+            '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf',
+            '/usr/share/fonts/truetype/freefont/FreeSans.ttf',
+            '/usr/share/fonts/TTF/DejaVuSans.ttf',
+        ]
+        font_registered = False
+        for font_path in font_paths:
+            if os.path.exists(font_path):
+                pdfmetrics.registerFont(TTFont('Hebrew', font_path))
+                font_registered = True
+                log.info(f"Font registered: {font_path}")
+                break
+
+        if not font_registered:
+            log.warning("No Hebrew font found, using default")
+
+        font_name = 'Hebrew' if font_registered else 'Helvetica'
 
         buf = io.BytesIO()
         doc = SimpleDocTemplate(buf, pagesize=A4,
                                 rightMargin=2*cm, leftMargin=2*cm,
                                 topMargin=2*cm, bottomMargin=2*cm)
 
-        styles = getSampleStyleSheet()
         rtl_style = ParagraphStyle(
             'RTL',
-            parent=styles['Normal'],
+            fontName=font_name,
             alignment=TA_RIGHT,
             fontSize=11,
             leading=18,
-            wordWrap='RTL',
         )
         title_style = ParagraphStyle(
             'Title',
-            parent=styles['Heading1'],
+            fontName=font_name,
             alignment=TA_RIGHT,
             fontSize=16,
+            spaceAfter=12,
         )
         footer_style = ParagraphStyle(
             'Footer',
-            parent=styles['Normal'],
+            fontName=font_name,
             alignment=TA_CENTER,
             fontSize=8,
             textColor='grey',
@@ -394,7 +414,6 @@ def _build_pdf_for_fax(name, duration_str, transcript_fixed):
         story.append(Spacer(1, 0.3*cm))
         story.append(Paragraph(f'לקוח: {name} | משך: {duration_str}', rtl_style))
         story.append(Spacer(1, 0.5*cm))
-        story.append(Paragraph('─' * 60, rtl_style))
         story.append(Spacer(1, 0.3*cm))
 
         for para in (transcript_fixed or '').split('\n'):
@@ -432,7 +451,6 @@ def _send_fax(to_number, transcript_fixed, customer, duration_seconds):
         from_number = os.environ.get('TELNYX_FAX_FROM', '+13644443976')
         base_url = os.environ.get('APP_BASE_URL', '').rstrip('/')
 
-        # נירמול מספר לפורמט E.164
         fax_number = to_number.strip().replace('-', '').replace(' ', '')
         if not fax_number.startswith('+'):
             if fax_number.startswith('0'):
@@ -440,7 +458,6 @@ def _send_fax(to_number, transcript_fixed, customer, duration_seconds):
             else:
                 fax_number = '+972' + fax_number
 
-        # שמירת PDF זמנית בתיקיית static
         filename = f"fax_{uuid.uuid4().hex}.pdf"
         static_dir = os.path.join(os.path.dirname(__file__), '..', 'static', 'fax_tmp')
         os.makedirs(static_dir, exist_ok=True)
@@ -469,10 +486,11 @@ def _send_fax(to_number, transcript_fixed, customer, duration_seconds):
         if fax_response.status_code in (200, 201, 202):
             fax_id = fax_response.json().get('data', {}).get('id')
             log.info(f"Fax sent successfully to {fax_number}, fax_id: {fax_id}")
+            # בדיקת סטטוס אחרי 60 שניות
+            threading.Thread(target=_check_fax_status, args=(fax_id, api_key), daemon=True).start()
         else:
             log.error(f"Fax send failed: {fax_response.text}")
 
-        # מחיקת הקובץ אחרי 10 דקות
         def cleanup():
             time.sleep(600)
             try:
@@ -483,6 +501,20 @@ def _send_fax(to_number, transcript_fixed, customer, duration_seconds):
 
     except Exception as e:
         log.error(f"Fax error: {e}")
+
+def _check_fax_status(fax_id, api_key):
+    time.sleep(60)
+    try:
+        r = requests.get(
+            f'https://api.telnyx.com/v2/faxes/{fax_id}',
+            headers={'Authorization': f'Bearer {api_key}'}
+        )
+        data = r.json().get('data', {})
+        status = data.get('status')
+        failure_reason = data.get('failure_reason', '')
+        log.info(f"Fax {fax_id} status: {status} | reason: {failure_reason}")
+    except Exception as e:
+        log.error(f"Fax status check error: {e}")
 
 def _send_email(to, transcript_raw, transcript_fixed, customer, rec_url, duration_seconds):
     try:
