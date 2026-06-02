@@ -82,8 +82,10 @@ def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, durat
                     _send_email_premium(delivered_to, transcript_fixed, customer, rec_url, duration_seconds)
                 else:
                     _send_email(delivered_to, transcript_raw, transcript_fixed, customer, rec_url, duration_seconds)
+            elif delivery_method == 'fax':
+                _send_fax(delivered_to, transcript_fixed, customer, duration_seconds)
             else:
-                log.info(f"Fax delivery to {delivered_to} - configure Interfax")
+                log.info(f"Unknown delivery method: {delivery_method}")
 
             if rec:
                 rec.status = 'delivered'
@@ -308,7 +310,6 @@ def _build_word_doc(name, duration_str, transcript_fixed, transcript_raw=None):
         footer = section.footer
         footer_para = footer.paragraphs[0]
         footer_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        # הגדרת RTL לפוטר
         pPr = footer_para._p.get_or_add_pPr()
         bidi = OxmlElement('w:bidi')
         pPr.append(bidi)
@@ -318,13 +319,11 @@ def _build_word_doc(name, duration_str, transcript_fixed, transcript_raw=None):
 
     doc = Document()
 
-    # הגדרת RTL לכל המסמך
     section = doc.sections[0]
     sectPr = section._sectPr
     bidi_doc = OxmlElement('w:bidi')
     sectPr.append(bidi_doc)
 
-    # הוספת פוטר
     add_footer(doc)
 
     title = doc.add_heading('תמלול שיחה', 0)
@@ -352,6 +351,149 @@ def _build_word_doc(name, duration_str, transcript_fixed, transcript_raw=None):
     doc.save(buf)
     buf.seek(0)
     return buf.read()
+
+def _build_pdf_for_fax(name, duration_str, transcript_fixed):
+    try:
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+        from reportlab.lib.enums import TA_RIGHT, TA_CENTER
+        from reportlab.lib.units import cm
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.ttfonts import TTFont
+        import io
+
+        buf = io.BytesIO()
+        doc = SimpleDocTemplate(buf, pagesize=A4,
+                                rightMargin=2*cm, leftMargin=2*cm,
+                                topMargin=2*cm, bottomMargin=2*cm)
+
+        styles = getSampleStyleSheet()
+        rtl_style = ParagraphStyle(
+            'RTL',
+            parent=styles['Normal'],
+            alignment=TA_RIGHT,
+            fontSize=11,
+            leading=18,
+            wordWrap='RTL',
+        )
+        title_style = ParagraphStyle(
+            'Title',
+            parent=styles['Heading1'],
+            alignment=TA_RIGHT,
+            fontSize=16,
+        )
+        footer_style = ParagraphStyle(
+            'Footer',
+            parent=styles['Normal'],
+            alignment=TA_CENTER,
+            fontSize=8,
+            textColor='grey',
+        )
+
+        story = []
+        story.append(Paragraph('תמלול שיחה', title_style))
+        story.append(Spacer(1, 0.3*cm))
+        story.append(Paragraph(f'לקוח: {name} | משך: {duration_str}', rtl_style))
+        story.append(Spacer(1, 0.5*cm))
+        story.append(Paragraph('─' * 60, rtl_style))
+        story.append(Spacer(1, 0.3*cm))
+
+        # פיצול לפסקאות
+        for para in (transcript_fixed or '').split('\n'):
+            if para.strip():
+                story.append(Paragraph(para.strip(), rtl_style))
+                story.append(Spacer(1, 0.2*cm))
+
+        story.append(Spacer(1, 1*cm))
+        story.append(Paragraph('נערך ע"י מערכת תמלולפון 03-3131795', footer_style))
+
+        doc.build(story)
+        buf.seek(0)
+        return buf.read()
+
+    except Exception as e:
+        log.error(f"PDF build error: {e}")
+        return None
+
+def _send_fax(to_number, transcript_fixed, customer, duration_seconds):
+    try:
+        import tempfile, base64
+
+        name = customer.name if hasattr(customer, 'name') and customer.name else customer.phone if customer else ''
+        minutes = duration_seconds // 60
+        seconds = duration_seconds % 60
+        duration_str = f"{minutes}:{seconds:02d}"
+
+        # בניית PDF
+        pdf_bytes = _build_pdf_for_fax(name, duration_str, transcript_fixed)
+        if not pdf_bytes:
+            log.error("Failed to build PDF for fax")
+            return
+
+        # שמירה זמנית והעלאה ל-Telnyx
+        with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as f:
+            f.write(pdf_bytes)
+            tmp_path = f.name
+
+        # העלאת ה-PDF ל-Telnyx Storage
+        api_key = os.environ.get('TELNYX_API_KEY')
+        connection_id = os.environ.get('TELNYX_CONNECTION_ID', '2973595690996860264')
+        from_number = os.environ.get('TELNYX_FAX_FROM', '+13644443976')
+
+        # נירמול מספר הפקס לפורמט E.164
+        fax_number = to_number.strip().replace('-', '').replace(' ', '')
+        if not fax_number.startswith('+'):
+            if fax_number.startswith('0'):
+                fax_number = '+972' + fax_number[1:]
+            else:
+                fax_number = '+972' + fax_number
+
+        # העלאת הקובץ ל-Telnyx
+        with open(tmp_path, 'rb') as f:
+            upload_response = requests.post(
+                'https://api.telnyx.com/v2/files',
+                headers={'Authorization': f'Bearer {api_key}'},
+                files={'file': ('transcript.pdf', f, 'application/pdf')},
+                data={'purpose': 'fax'}
+            )
+
+        os.remove(tmp_path)
+
+        if upload_response.status_code not in (200, 201):
+            log.error(f"Telnyx file upload failed: {upload_response.text}")
+            return
+
+        file_url = upload_response.json().get('data', {}).get('url')
+        if not file_url:
+            log.error("No file URL returned from Telnyx")
+            return
+
+        log.info(f"PDF uploaded to Telnyx: {file_url}")
+
+        # שליחת הפקס
+        fax_response = requests.post(
+            'https://api.telnyx.com/v2/faxes',
+            headers={
+                'Authorization': f'Bearer {api_key}',
+                'Content-Type': 'application/json'
+            },
+            json={
+                'connection_id': connection_id,
+                'to': fax_number,
+                'from': from_number,
+                'media_url': file_url,
+            }
+        )
+
+        if fax_response.status_code in (200, 201, 202):
+            fax_id = fax_response.json().get('data', {}).get('id')
+            log.info(f"Fax sent successfully to {fax_number}, fax_id: {fax_id}")
+        else:
+            log.error(f"Fax send failed: {fax_response.text}")
+
+    except Exception as e:
+        log.error(f"Fax error: {e}")
 
 def _send_email(to, transcript_raw, transcript_fixed, customer, rec_url, duration_seconds):
     try:
