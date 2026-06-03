@@ -83,23 +83,45 @@
 
 <div style="margin-top:20px" class="table-card">
   <div class="table-header"><span class="table-title">🎧 הקלטות</span></div>
+  <form method="POST" action="/admin/customers/{{ customer.id }}/send-recordings">
   <table>
-    <thead><tr><th>תאריך</th><th>משך</th><th>עלות</th><th>יעד</th><th>סטטוס</th></tr></thead>
+    <thead><tr>
+      <th><input type="checkbox" id="selectAll" onclick="toggleAll(this)"></th>
+      <th>תאריך</th><th>משך</th><th>עלות</th><th>יעד</th><th>סטטוס</th>
+    </tr></thead>
     <tbody>
       {% for rec in recordings %}
-      <tr onclick="location='/admin/recordings/{{rec.id}}'" style="cursor:pointer">
-        <td>{{ (rec.created_at + timedelta(hours=3)).strftime('%d/%m/%Y %H:%M') }}</td>
-        <td>{{ rec.duration_seconds // 60 }}:{{ '%02d'%(rec.duration_seconds % 60) }}</td>
-        <td>₪{{ "%.2f"|format(rec.cost) }}</td>
-        <td>{{ rec.delivered_to or '—' }}</td>
-        <td>{% if rec.status == 'delivered' %}<span class="badge badge-green">נשלח</span>
-            {% elif rec.status == 'error' %}<span class="badge badge-red">שגיאה</span>
-            {% else %}<span class="badge badge-gray">{{ rec.status }}</span>{% endif %}</td>
+      <tr>
+        <td><input type="checkbox" name="recording_ids" value="{{ rec.id }}"></td>
+        <td onclick="location='/admin/recordings/{{rec.id}}'" style="cursor:pointer">{{ (rec.created_at + timedelta(hours=3)).strftime('%d/%m/%Y %H:%M') }}</td>
+        <td onclick="location='/admin/recordings/{{rec.id}}'" style="cursor:pointer">{{ rec.duration_seconds // 60 }}:{{ '%02d'%(rec.duration_seconds % 60) }}</td>
+        <td onclick="location='/admin/recordings/{{rec.id}}'" style="cursor:pointer">₪{{ "%.2f"|format(rec.cost) }}</td>
+        <td onclick="location='/admin/recordings/{{rec.id}}'" style="cursor:pointer">{{ rec.delivered_to or '—' }}</td>
+        <td onclick="location='/admin/recordings/{{rec.id}}'" style="cursor:pointer">
+          {% if rec.status == 'delivered' %}<span class="badge badge-green">נשלח</span>
+          {% elif rec.status == 'error' %}<span class="badge badge-red">שגיאה</span>
+          {% else %}<span class="badge badge-gray">{{ rec.status }}</span>{% endif %}
+        </td>
       </tr>
       {% endfor %}
     </tbody>
   </table>
+  <div style="padding:16px;display:flex;gap:12px;align-items:center;border-top:1px solid #2d3561">
+    <select name="send_method" class="form-input" style="width:150px">
+      <option value="email">📧 מייל</option>
+      <option value="fax">📠 פקס</option>
+    </select>
+    <input class="form-input" name="send_to" placeholder="כתובת מייל / מספר פקס" style="width:250px" value="{{ customer.email or customer.fax or '' }}">
+    <button class="btn btn-primary" type="submit">📤 שלח נבחרים</button>
+  </div>
+  </form>
 </div>
+
+<script>
+function toggleAll(cb) {
+  document.querySelectorAll('input[name="recording_ids"]').forEach(c => c.checked = cb.checked);
+}
+</script>
 
 <div style="margin-top:20px" class="table-card">
   <div class="table-header"><span class="table-title">💳 עסקאות</span></div>
