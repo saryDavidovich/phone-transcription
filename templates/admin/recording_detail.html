@@ -3,10 +3,26 @@
 {% block page_title %}
 הקלטה #{{ recording.id }}
 <div style="display:flex;gap:8px;margin-top:12px">
-  <a href="/admin/recordings/{{ recording.id }}/play-audio" target="_blank" class="btn btn-primary">▶️ האזן להקלטה</a>
-  <a href="/admin/recordings/{{ recording.id }}/download-audio" class="btn btn-success">📥 הורד שמע</a>
-  <a href="/admin/recordings/{{ recording.id }}/download-word" class="btn btn-primary">📄 הורד וורד</a>
+  <button onclick="downloadFile('/admin/recordings/{{ recording.id }}/play-audio', 'recording_{{ recording.id }}.wav')" class="btn btn-primary">▶️ הורד והאזן</button>
+  <button onclick="downloadFile('/admin/recordings/{{ recording.id }}/download-audio', 'recording_{{ recording.id }}.wav')" class="btn btn-success">📥 הורד שמע</button>
+  <button onclick="downloadFile('/admin/recordings/{{ recording.id }}/download-word', 'תמלול_{{ recording.id }}.docx')" class="btn btn-primary">📄 הורד וורד</button>
 </div>
+<script>
+function downloadFile(url, filename) {
+  fetch(url)
+    .then(res => res.blob())
+    .then(blob => {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(a.href);
+    })
+    .catch(err => alert('שגיאה בהורדה: ' + err));
+}
+</script>
 {% endblock %}
 {% block content %}
 <div class="grid-3" style="margin-bottom:20px">
