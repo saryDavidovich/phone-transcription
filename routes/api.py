@@ -58,7 +58,6 @@ def transcribe():
     if not delivery_method:
         delivery_method = customer.delivery_method or 'email'
 
-    # תיקון בעיה 2 — מניעת כפילות
     existing = Recording.query.filter_by(call_id=call_id).first()
     if existing:
         return jsonify({'ok': True, 'call_id': call_id})
@@ -76,3 +75,61 @@ def transcribe():
 
     transcribe_async(call_id, rec_url, customer.id, delivery_method, delivered_to, duration, transcription_tier)
     return jsonify({'ok': True, 'call_id': call_id})
+
+@api_bp.route('/extract-email-local', methods=['POST'])
+def extract_email_local():
+    import os, requests as req
+    data = request.json
+    rec_url = data.get('rec_url')
+
+    if not rec_url:
+        return jsonify({'local_part': ''}), 400
+
+    try:
+        # הורדת ההקלטה
+        r = req.get(rec_url, timeout=30)
+        r.raise_for_status()
+
+        import tempfile
+        with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as f:
+            f.write(r.content)
+            tmp_path = f.name
+
+        # תמלול עם Whisper
+        from openai import OpenAI
+        client = OpenAI(api_key=os.environ.get('OPENAI_API_KEY'))
+        with open(tmp_path, 'rb') as f:
+            result = client.audio.transcriptions.create(
+                model='whisper-1',
+                file=f,
+                language='he',
+                response_format='text'
+            )
+        os.remove(tmp_path)
+
+        transcript = result.strip()
+
+        # חילוץ שם המייל עם Claude
+        import anthropic
+        claude = anthropic.Anthropic(api_key=os.environ.get('ANTHROPIC_API_KEY'))
+        msg = claude.messages.create(
+            model='claude-sonnet-4-5',
+            max_tokens=100,
+            messages=[{
+                'role': 'user',
+                'content': f'''המשתמש הקליט את שם המייל שלו (החלק לפני ה-@).
+התמלול הוא: "{transcript}"
+החזר רק את שם המייל באנגלית קטנה, ללא רווחים, ללא @ ללא סיומת דומיין.
+לדוגמה אם אמר "יוסי כהן" החזר "yossycohen".
+אם אמר "david123" החזר "david123".
+החזר רק את הטקסט עצמו ללא שום הסבר.'''
+            }]
+        )
+
+        local_part = msg.content[0].text.strip().lower()
+        local_part = ''.join(c for c in local_part if c.isalnum() or c in '._-')
+
+        return jsonify({'local_part': local_part, 'transcript': transcript})
+
+    except Exception as e:
+        return jsonify({'local_part': '', 'error': str(e)}), 500
