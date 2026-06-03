@@ -15,6 +15,10 @@
             {% if customer.is_blocked %}✅ בטל חסימה{% else %}🚫 חסום{% endif %}
           </button>
         </form>
+        <form method="POST" action="/admin/customers/{{ customer.id }}/delete"
+              onsubmit="return confirm('האם אתה בטוח שרוצה למחוק את הלקוח? פעולה זו אינה הפיכה!')">
+          <button class="btn btn-danger">🗑️ מחק לקוח</button>
+        </form>
       </div>
     </div>
     <form method="POST" action="/admin/customers/{{ customer.id }}/update">
@@ -60,6 +64,20 @@
         <button class="btn btn-success" type="submit">✅ זכה לקוח</button>
       </form>
     </div>
+    <div class="card">
+      <div style="font-size:14px;font-weight:600;margin-bottom:16px">➖ חיוב ידני</div>
+      <form method="POST" action="/admin/customers/{{ customer.id }}/charge">
+        <div class="form-group">
+          <label class="form-label">סכום (₪)</label>
+          <input class="form-input" name="amount" type="number" step="0.01" min="0" placeholder="0.00">
+        </div>
+        <div class="form-group">
+          <label class="form-label">סיבה</label>
+          <input class="form-input" name="reason" placeholder="חיוב ידני על ידי מנהל">
+        </div>
+        <button class="btn btn-danger" type="submit">💳 חייב לקוח</button>
+      </form>
+    </div>
   </div>
 </div>
 
@@ -70,7 +88,7 @@
     <tbody>
       {% for rec in recordings %}
       <tr onclick="location='/admin/recordings/{{rec.id}}'" style="cursor:pointer">
-        <td>{{ rec.created_at.strftime('%d/%m/%Y %H:%M') }}</td>
+        <td>{{ (rec.created_at + timedelta(hours=3)).strftime('%d/%m/%Y %H:%M') }}</td>
         <td>{{ rec.duration_seconds // 60 }}:{{ '%02d'%(rec.duration_seconds % 60) }}</td>
         <td>₪{{ "%.2f"|format(rec.cost) }}</td>
         <td>{{ rec.delivered_to or '—' }}</td>
@@ -90,7 +108,7 @@
     <tbody>
       {% for txn in transactions %}
       <tr>
-        <td>{{ txn.created_at.strftime('%d/%m/%Y %H:%M') }}</td>
+        <td>{{ (txn.created_at + timedelta(hours=3)).strftime('%d/%m/%Y %H:%M') }}</td>
         <td style="color:{% if txn.amount > 0 %}#10b981{% else %}#ef4444{% endif %}">
           {% if txn.amount > 0 %}+{% endif %}₪{{ "%.2f"|format(txn.amount) }}
         </td>
