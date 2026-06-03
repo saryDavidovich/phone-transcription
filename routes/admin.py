@@ -194,7 +194,8 @@ def customer_detail(id):
     recordings = Recording.query.filter_by(customer_id=id).order_by(Recording.created_at.desc()).all()
     transactions = Transaction.query.filter_by(customer_id=id).order_by(Transaction.created_at.desc()).all()
     return render_template('admin/customer_detail.html',
-        customer=customer, recordings=recordings, transactions=transactions)
+        customer=customer, recordings=recordings, transactions=transactions,
+        timedelta=timedelta)
 
 @admin_bp.route('/customers/<int:id>/block', methods=['POST'])
 @login_required
@@ -205,6 +206,20 @@ def block_customer(id):
     status = 'נחסם' if customer.is_blocked else 'בוטל חסם'
     flash(f'לקוח {status} בהצלחה')
     return redirect(url_for('admin.customer_detail', id=id))
+
+@admin_bp.route('/customers/<int:id>/delete', methods=['POST'])
+@login_required
+def delete_customer(id):
+    customer = Customer.query.get_or_404(id)
+    # מחיקת עסקאות
+    Transaction.query.filter_by(customer_id=id).delete()
+    # מחיקת הקלטות
+    Recording.query.filter_by(customer_id=id).delete()
+    # מחיקת הלקוח
+    db.session.delete(customer)
+    db.session.commit()
+    flash(f'לקוח {customer.phone} נמחק בהצלחה')
+    return redirect(url_for('admin.customers'))
 
 @admin_bp.route('/customers/<int:id>/credit', methods=['POST'])
 @login_required
@@ -225,6 +240,25 @@ def credit_customer(id):
         flash(f'לקוח זוכה ב-{amount:.2f} ₪')
     return redirect(url_for('admin.customer_detail', id=id))
 
+@admin_bp.route('/customers/<int:id>/charge', methods=['POST'])
+@login_required
+def charge_customer(id):
+    customer = Customer.query.get_or_404(id)
+    amount = float(request.form.get('amount', 0))
+    reason = request.form.get('reason', 'חיוב ידני')
+    if amount > 0:
+        customer.balance -= amount
+        txn = Transaction(
+            customer_id=id,
+            amount=-amount,
+            type='debit',
+            description=reason
+        )
+        db.session.add(txn)
+        db.session.commit()
+        flash(f'לקוח חויב ב-{amount:.2f} ₪')
+    return redirect(url_for('admin.customer_detail', id=id))
+
 @admin_bp.route('/customers/<int:id>/update', methods=['POST'])
 @login_required
 def update_customer(id):
@@ -242,7 +276,7 @@ def update_customer(id):
 def recordings():
     page = request.args.get('page', 1, type=int)
     recordings = Recording.query.order_by(Recording.created_at.desc()).paginate(page=page, per_page=50)
-    return render_template('admin/recordings.html', recordings=recordings)
+    return render_template('admin/recordings.html', recordings=recordings, timedelta=timedelta)
 
 @admin_bp.route('/recordings/<int:id>')
 @login_required
@@ -337,6 +371,20 @@ def download_word(id):
         as_attachment=True,
         download_name=f'transcript_{id}.docx'
     )
+
+@admin_bp.route('/recordings/cleanup', methods=['POST'])
+@login_required
+def cleanup_old_recordings():
+    cutoff = datetime.utcnow() - timedelta(days=30)
+    old = Recording.query.filter(Recording.created_at < cutoff).all()
+    count = 0
+    for rec in old:
+        rec.transcript = None
+        rec.summary = None
+        count += 1
+    db.session.commit()
+    flash(f'נמחקו תמלולים של {count} הקלטות ישנות')
+    return redirect(url_for('admin.recordings'))
 
 @admin_bp.route('/reports')
 @login_required
