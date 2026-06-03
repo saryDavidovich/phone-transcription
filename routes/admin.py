@@ -211,11 +211,8 @@ def block_customer(id):
 @login_required
 def delete_customer(id):
     customer = Customer.query.get_or_404(id)
-    # מחיקת עסקאות
     Transaction.query.filter_by(customer_id=id).delete()
-    # מחיקת הקלטות
     Recording.query.filter_by(customer_id=id).delete()
-    # מחיקת הלקוח
     db.session.delete(customer)
     db.session.commit()
     flash(f'לקוח {customer.phone} נמחק בהצלחה')
@@ -269,6 +266,42 @@ def update_customer(id):
     customer.delivery_method = request.form.get('delivery_method', customer.delivery_method)
     db.session.commit()
     flash('פרטי לקוח עודכנו')
+    return redirect(url_for('admin.customer_detail', id=id))
+
+@admin_bp.route('/customers/<int:id>/send-recordings', methods=['POST'])
+@login_required
+def send_recordings(id):
+    import os
+    from services.transcribe import _send_email, _send_fax
+    customer = Customer.query.get_or_404(id)
+    recording_ids = request.form.getlist('recording_ids')
+    send_method = request.form.get('send_method', 'email')
+    send_to = request.form.get('send_to', '').strip()
+
+    if not recording_ids:
+        flash('לא נבחרו הקלטות')
+        return redirect(url_for('admin.customer_detail', id=id))
+
+    if not send_to:
+        flash('יש להזין כתובת מייל או מספר פקס')
+        return redirect(url_for('admin.customer_detail', id=id))
+
+    sent = 0
+    for rec_id in recording_ids:
+        rec = Recording.query.get(int(rec_id))
+        if not rec or not rec.transcript:
+            continue
+        try:
+            rec_url = f'https://www.call2all.co.il/ym/api/DownloadFile?token={os.environ.get("YEMOT_TOKEN","")}&path=ivr2:/recordings/{rec.call_id}.wav'
+            if send_method == 'email':
+                _send_email(send_to, rec.summary, rec.transcript, customer, rec_url, rec.duration_seconds)
+            else:
+                _send_fax(send_to, rec.transcript, customer, rec.duration_seconds)
+            sent += 1
+        except Exception as e:
+            flash(f'שגיאה בשליחת הקלטה {rec_id}: {e}')
+
+    flash(f'נשלחו {sent} הקלטות בהצלחה')
     return redirect(url_for('admin.customer_detail', id=id))
 
 @admin_bp.route('/recordings')
