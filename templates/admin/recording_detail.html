@@ -9,8 +9,11 @@
 </div>
 <script>
 function downloadFile(url, filename) {
-  fetch(url)
-    .then(res => res.blob())
+  fetch(url, { credentials: 'include' })
+    .then(res => {
+      if (!res.ok) throw new Error('שגיאת שרת: ' + res.status);
+      return res.blob();
+    })
     .then(blob => {
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
@@ -18,7 +21,7 @@ function downloadFile(url, filename) {
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
-      URL.revokeObjectURL(a.href);
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
     })
     .catch(err => alert('שגיאה בהורדה: ' + err));
 }
