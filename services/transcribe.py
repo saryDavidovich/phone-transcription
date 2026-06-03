@@ -486,7 +486,6 @@ def _send_fax(to_number, transcript_fixed, customer, duration_seconds):
         if fax_response.status_code in (200, 201, 202):
             fax_id = fax_response.json().get('data', {}).get('id')
             log.info(f"Fax sent successfully to {fax_number}, fax_id: {fax_id}")
-            # בדיקת סטטוס אחרי 60 שניות
             threading.Thread(target=_check_fax_status, args=(fax_id, api_key), daemon=True).start()
         else:
             log.error(f"Fax send failed: {fax_response.text}")
@@ -535,12 +534,12 @@ def _send_email(to, transcript_raw, transcript_fixed, customer, rec_url, duratio
 
 <div style="background:#f0fdf4;border-right:4px solid #10b981;padding:16px;margin:16px 0;border-radius:8px">
 <h3 style="margin:0 0 12px;color:#065f46">✨ תמלול מעובד</h3>
-<div style="line-height:1.8;white-space:pre-wrap">{transcript_fixed}</div>
+<div style="line-height:1.8;white-space:pre-wrap;text-align:justify">{transcript_fixed}</div>
 </div>
 
 <div style="background:#f9fafb;border-right:4px solid #9ca3af;padding:16px;margin:16px 0;border-radius:8px">
 <h3 style="margin:0 0 12px;color:#6b7280">📝 תמלול מקורי</h3>
-<div style="line-height:1.8;white-space:pre-wrap;color:#6b7280;font-size:13px">{transcript_raw}</div>
+<div style="line-height:1.8;white-space:pre-wrap;text-align:justify;color:#6b7280;font-size:13px">{transcript_raw}</div>
 </div>
 
 <div style="background:#fff7ed;border-right:4px solid #f97316;padding:16px;margin:16px 0;border-radius:8px">
@@ -586,7 +585,7 @@ def _send_email_premium(to, transcript, customer, rec_url, duration_seconds):
 
 <div style="background:#faf5ff;border-right:4px solid #7c3aed;padding:16px;margin:16px 0;border-radius:8px">
 <h3 style="margin:0 0 12px;color:#581c87">⭐ תמלול מקצועי</h3>
-<div style="line-height:1.8;white-space:pre-wrap">{transcript}</div>
+<div style="line-height:1.8;white-space:pre-wrap;text-align:justify">{transcript}</div>
 </div>
 
 <div style="background:#fff7ed;border-right:4px solid #f97316;padding:16px;margin:16px 0;border-radius:8px">
