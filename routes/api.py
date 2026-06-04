@@ -75,7 +75,23 @@ def transcribe():
 
     transcribe_async(call_id, rec_url, customer.id, delivery_method, delivered_to, duration, transcription_tier)
     return jsonify({'ok': True, 'call_id': call_id})
-
+@api_bp.route('/manager-message', methods=['POST'])
+def receive_manager_message():
+    from models import ManagerMessage
+    data = request.json
+    msg = ManagerMessage(
+        phone           = data.get('phone', ''),
+        name            = data.get('name', ''),
+        email           = data.get('email', ''),
+        fax             = data.get('fax', ''),
+        delivery_method = data.get('delivery_method', ''),
+        call_id         = data.get('call_id', ''),
+        rec_url         = data.get('rec_url', ''),
+        status          = 'new'
+    )
+    db.session.add(msg)
+    db.session.commit()
+    return jsonify({'ok': True, 'id': msg.id})
 @api_bp.route('/extract-email-local', methods=['POST'])
 def extract_email_local():
     import os, requests as req
