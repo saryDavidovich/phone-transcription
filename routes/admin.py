@@ -490,12 +490,14 @@ def manager_messages():
 @admin_bp.route('/messages/<int:id>/play')
 @login_required
 def play_manager_message(id):
-    import requests as req, os
+    import requests as req
     msg = ManagerMessage.query.get_or_404(id)
-    yemot_username = os.environ.get('YEMOT_USERNAME', '')
-    yemot_password = os.environ.get('YEMOT_PASSWORD', '')
-    call_id = msg.call_id or ''
-    rec_url = f'https://www.call2all.co.il/ym/api/DownloadFile?username={yemot_username}&password={yemot_password}&path=ivr2:/manager_messages/{call_id}.wav'
+
+    # השתמש ב-rec_url שנשמר ישירות מימות
+    rec_url = msg.rec_url
+    if not rec_url:
+        return jsonify({'error': 'אין הקלטה'}), 404
+
     try:
         r = req.get(rec_url, timeout=60)
         r.raise_for_status()
@@ -505,7 +507,6 @@ def play_manager_message(id):
         return response
     except Exception as e:
         return jsonify({'error': str(e)}), 400
-
 
 @admin_bp.route('/messages/<int:id>/status', methods=['POST'])
 @login_required
