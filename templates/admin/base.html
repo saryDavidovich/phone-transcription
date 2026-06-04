@@ -182,6 +182,10 @@ textarea.form-input { resize:vertical; min-height:80px; }
     <a href="/admin/settings" class="nav-item {% if request.endpoint == 'admin.settings' %}active{% endif %}">
       <span class="nav-icon">⚙️</span> הגדרות
     </a>
+    <div class="nav-section">תקשורת</div>
+    <a href="/admin/messages" class="nav-item {% if request.endpoint == 'admin.manager_messages' %}active{% endif %}">
+      <span class="nav-icon">📬</span> הודעות למנהל
+    </a>
   </nav>
   <div class="sidebar-bottom">
     <a href="/admin/logout" class="logout-btn">
