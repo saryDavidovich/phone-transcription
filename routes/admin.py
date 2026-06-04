@@ -2,7 +2,7 @@ from flask import Blueprint, render_template, request, redirect, url_for, flash,
 from flask_login import login_user, logout_user, login_required, current_user
 from werkzeug.security import check_password_hash
 from app import db, login_manager
-from models import Customer, Recording, Transaction, Settings, AdminUser
+from models import Customer, Recording, Transaction, Settings, AdminUser, ManagerMessage
 from datetime import datetime, timedelta
 from sqlalchemy import func
 import io
@@ -476,3 +476,53 @@ def api_stats():
         ).count()
         last_30.append({'date': str(day), 'revenue': float(revenue), 'recordings': recordings})
     return jsonify(last_30)
+@admin_bp.route('/messages')
+@login_required
+def manager_messages():
+    status_filter = request.args.get('status', '')
+    query = ManagerMessage.query
+    if status_filter:
+        query = query.filter_by(status=status_filter)
+    messages = query.order_by(ManagerMessage.created_at.desc()).all()
+    return render_template('admin/manager_messages.html', messages=messages, status_filter=status_filter)
+
+
+@admin_bp.route('/messages/<int:id>/play')
+@login_required
+def play_manager_message(id):
+    import requests as req, os
+    msg = ManagerMessage.query.get_or_404(id)
+    yemot_username = os.environ.get('YEMOT_USERNAME', '')
+    yemot_password = os.environ.get('YEMOT_PASSWORD', '')
+    call_id = msg.call_id or ''
+    rec_url = f'https://www.call2all.co.il/ym/api/DownloadFile?username={yemot_username}&password={yemot_password}&path=ivr2:/manager_messages/{call_id}.wav'
+    try:
+        r = req.get(rec_url, timeout=60)
+        r.raise_for_status()
+        response = make_response(r.content)
+        response.headers['Content-Type'] = 'audio/wav'
+        response.headers['Content-Disposition'] = 'inline'
+        return response
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+
+
+@admin_bp.route('/messages/<int:id>/status', methods=['POST'])
+@login_required
+def update_message_status(id):
+    msg = ManagerMessage.query.get_or_404(id)
+    msg.status     = request.form.get('status', msg.status)
+    msg.admin_note = request.form.get('admin_note', msg.admin_note)
+    db.session.commit()
+    flash('סטטוס עודכן בהצלחה')
+    return redirect(url_for('admin.manager_messages'))
+
+
+@admin_bp.route('/messages/<int:id>/delete', methods=['POST'])
+@login_required
+def delete_manager_message(id):
+    msg = ManagerMessage.query.get_or_404(id)
+    db.session.delete(msg)
+    db.session.commit()
+    flash('הפניה נמחקה')
+    return redirect(url_for('admin.manager_messages'))
