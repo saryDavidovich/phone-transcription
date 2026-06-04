@@ -60,3 +60,17 @@ class CallSession(db.Model):
     call_id = db.Column(db.String(100), unique=True, nullable=False, index=True)
     step = db.Column(db.String(50), default='')
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+class ManagerMessage(db.Model):
+    __tablename__ = 'manager_messages'
+    id          = db.Column(db.Integer, primary_key=True)
+    phone       = db.Column(db.String(20), nullable=False)
+    name        = db.Column(db.String(100))
+    email       = db.Column(db.String(200))
+    fax         = db.Column(db.String(20))
+    delivery_method = db.Column(db.String(10))
+    call_id     = db.Column(db.String(100))
+    rec_url     = db.Column(db.String(500))
+    status      = db.Column(db.String(30), default='new')
+    admin_note  = db.Column(db.Text)
+    created_at  = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at  = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
