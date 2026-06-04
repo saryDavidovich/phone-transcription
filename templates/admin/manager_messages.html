@@ -1,0 +1,155 @@
+{% extends "admin/base.html" %}
+{% block title %}הודעות למנהל{% endblock %}
+{% block content %}
+<div class="container-fluid py-4" dir="rtl">
+
+  <div class="d-flex justify-content-between align-items-center mb-4">
+    <h2>📬 הודעות למנהל</h2>
+    <!-- פילטר סטטוס -->
+    <div class="btn-group">
+      <a href="{{ url_for('admin.manager_messages') }}"
+         class="btn btn-sm {{ 'btn-primary' if not status_filter else 'btn-outline-primary' }}">הכל</a>
+      <a href="{{ url_for('admin.manager_messages', status='new') }}"
+         class="btn btn-sm {{ 'btn-warning' if status_filter=='new' else 'btn-outline-warning' }}">חדש</a>
+      <a href="{{ url_for('admin.manager_messages', status='in_progress') }}"
+         class="btn btn-sm {{ 'btn-info' if status_filter=='in_progress' else 'btn-outline-info' }}">בטיפול</a>
+      <a href="{{ url_for('admin.manager_messages', status='done') }}"
+         class="btn btn-sm {{ 'btn-success' if status_filter=='done' else 'btn-outline-success' }}">טופל</a>
+    </div>
+  </div>
+
+  {% with messages = get_flashed_messages() %}
+    {% if messages %}
+      {% for msg in messages %}
+        <div class="alert alert-success alert-dismissible fade show">{{ msg }}
+          <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+      {% endfor %}
+    {% endif %}
+  {% endwith %}
+
+  {% if not messages %}
+    <div class="alert alert-info">אין הודעות</div>
+  {% else %}
+  <div class="table-responsive">
+  <table class="table table-hover align-middle">
+    <thead class="table-dark">
+      <tr>
+        <th>#</th>
+        <th>תאריך</th>
+        <th>טלפון</th>
+        <th>שם</th>
+        <th>מייל</th>
+        <th>פקס</th>
+        <th>שיטת שליחה</th>
+        <th>הקשבה</th>
+        <th>סטטוס</th>
+        <th>פעולות</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for msg in messages %}
+    <tr class="{{ 'table-warning' if msg.status == 'new' else ('table-info' if msg.status == 'in_progress' else '') }}">
+      <td>{{ msg.id }}</td>
+      <td>{{ msg.created_at.strftime('%d/%m/%Y %H:%M') }}</td>
+      <td><strong>{{ msg.phone }}</strong></td>
+      <td>{{ msg.name or '—' }}</td>
+      <td>{{ msg.email or '—' }}</td>
+      <td>{{ msg.fax or '—' }}</td>
+      <td>
+        {% if msg.delivery_method == 'email' %}
+          <span class="badge bg-primary">מייל</span>
+        {% elif msg.delivery_method == 'fax' %}
+          <span class="badge bg-secondary">פקס</span>
+        {% else %}
+          <span class="badge bg-light text-dark">—</span>
+        {% endif %}
+      </td>
+
+      <!-- כפתור האזנה -->
+      <td>
+        {% if msg.call_id %}
+        <audio controls preload="none" style="height:32px; min-width:200px;">
+          <source src="{{ url_for('admin.play_manager_message', id=msg.id) }}" type="audio/wav">
+        </audio>
+        {% else %}
+          <span class="text-muted">אין הקלטה</span>
+        {% endif %}
+      </td>
+
+      <!-- סטטוס -->
+      <td>
+        {% if msg.status == 'new' %}
+          <span class="badge bg-warning text-dark">חדש</span>
+        {% elif msg.status == 'in_progress' %}
+          <span class="badge bg-info">בטיפול</span>
+        {% else %}
+          <span class="badge bg-success">טופל</span>
+        {% endif %}
+        {% if msg.admin_note %}
+          <br><small class="text-muted">{{ msg.admin_note }}</small>
+        {% endif %}
+      </td>
+
+      <!-- פעולות -->
+      <td>
+        <div class="d-flex gap-1 flex-wrap">
+
+          <!-- עדכון סטטוס -->
+          <button class="btn btn-sm btn-outline-secondary"
+                  data-bs-toggle="modal"
+                  data-bs-target="#statusModal{{ msg.id }}">
+            ✏️ עדכן
+          </button>
+
+          <!-- מחיקה -->
+          <form method="POST"
+                action="{{ url_for('admin.delete_manager_message', id=msg.id) }}"
+                onsubmit="return confirm('למחוק פניה זו?')">
+            <button type="submit" class="btn btn-sm btn-outline-danger">🗑️ מחק</button>
+          </form>
+
+        </div>
+      </td>
+    </tr>
+
+    <!-- Modal עדכון סטטוס -->
+    <div class="modal fade" id="statusModal{{ msg.id }}" tabindex="-1">
+      <div class="modal-dialog">
+        <div class="modal-content" dir="rtl">
+          <div class="modal-header">
+            <h5 class="modal-title">עדכון סטטוס — {{ msg.phone }}</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+          </div>
+          <form method="POST" action="{{ url_for('admin.update_message_status', id=msg.id) }}">
+            <div class="modal-body">
+              <div class="mb-3">
+                <label class="form-label">סטטוס</label>
+                <select name="status" class="form-select">
+                  <option value="new"         {{ 'selected' if msg.status == 'new' }}>חדש</option>
+                  <option value="in_progress" {{ 'selected' if msg.status == 'in_progress' }}>בטיפול</option>
+                  <option value="done"        {{ 'selected' if msg.status == 'done' }}>טופל</option>
+                </select>
+              </div>
+              <div class="mb-3">
+                <label class="form-label">הערת מנהל</label>
+                <textarea name="admin_note" class="form-control" rows="3">{{ msg.admin_note or '' }}</textarea>
+              </div>
+            </div>
+            <div class="modal-footer">
+              <button type="submit" class="btn btn-primary">שמור</button>
+              <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">ביטול</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+    <!-- /Modal -->
+
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}
