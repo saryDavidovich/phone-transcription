@@ -495,11 +495,14 @@ def play_manager_message(id):
     if not msg.rec_url:
         return jsonify({'error': 'אין הקלטה'}), 404
     try:
-        r = req.get(msg.rec_url, timeout=60)
+        r = req.get(msg.rec_url, timeout=120, stream=False)
         r.raise_for_status()
-        b64 = base64.b64encode(r.content).decode('utf-8')
+        content = r.content
+        print(f"DEBUG audio size: {len(content)} bytes", flush=True)
+        b64 = base64.b64encode(content).decode('utf-8')
         return jsonify({'audio': b64})
     except Exception as e:
+        print(f"DEBUG error: {e}", flush=True)
         return jsonify({'error': str(e)}), 400
 @admin_bp.route('/messages/<int:id>/status', methods=['POST'])
 @login_required
