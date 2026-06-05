@@ -490,26 +490,16 @@ def manager_messages():
 @admin_bp.route('/messages/<int:id>/play')
 @login_required
 def play_manager_message(id):
-    import requests as req
+    import requests as req, base64
     msg = ManagerMessage.query.get_or_404(id)
-    rec_url = msg.rec_url
-    print(f"DEBUG play_manager_message id={id} rec_url={rec_url}", flush=True)
-    
-    if not rec_url:
+    if not msg.rec_url:
         return jsonify({'error': 'אין הקלטה'}), 404
-
     try:
-        r = req.get(rec_url, timeout=60)
-        print(f"DEBUG response status={r.status_code}", flush=True)
+        r = req.get(msg.rec_url, timeout=60)
         r.raise_for_status()
-        response = make_response(r.content)
-        response.headers['Content-Type'] = 'audio/wav'
-        response.headers['Content-Disposition'] = 'inline; filename="message.wav"'
-        response.headers['Accept-Ranges'] = 'bytes'
-        response.headers['Cache-Control'] = 'no-cache'
-        return response
+        b64 = base64.b64encode(r.content).decode('utf-8')
+        return jsonify({'audio': b64})
     except Exception as e:
-        print(f"DEBUG error={e}", flush=True)
         return jsonify({'error': str(e)}), 400
 @admin_bp.route('/messages/<int:id>/status', methods=['POST'])
 @login_required
