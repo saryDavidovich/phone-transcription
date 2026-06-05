@@ -504,7 +504,9 @@ def play_manager_message(id):
         r.raise_for_status()
         response = make_response(r.content)
         response.headers['Content-Type'] = 'audio/wav'
-        response.headers['Content-Disposition'] = 'inline'
+        response.headers['Content-Disposition'] = 'inline; filename="message.wav"'
+        response.headers['Accept-Ranges'] = 'bytes'
+        response.headers['Cache-Control'] = 'no-cache'
         return response
     except Exception as e:
         print(f"DEBUG error={e}", flush=True)
