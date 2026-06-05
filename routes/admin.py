@@ -493,7 +493,6 @@ def play_manager_message(id):
     import requests as req
     msg = ManagerMessage.query.get_or_404(id)
 
-    # השתמש ב-rec_url שנשמר ישירות מימות
     rec_url = msg.rec_url
     if not rec_url:
         return jsonify({'error': 'אין הקלטה'}), 404
@@ -507,7 +506,6 @@ def play_manager_message(id):
         return response
     except Exception as e:
         return jsonify({'error': str(e)}), 400
-
 @admin_bp.route('/messages/<int:id>/status', methods=['POST'])
 @login_required
 def update_message_status(id):
