@@ -528,3 +528,13 @@ def delete_manager_message(id):
     db.session.commit()
     flash('הפניה נמחקה')
     return redirect(url_for('admin.manager_messages'))
+@admin_bp.route('/messages/debug')
+@login_required
+def debug_messages():
+    from models import ManagerMessage
+    msgs = ManagerMessage.query.all()
+    return jsonify([{
+        'id': m.id,
+        'call_id': m.call_id,
+        'rec_url': m.rec_url
+    } for m in msgs])
