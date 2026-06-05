@@ -5,7 +5,6 @@
 
   <div class="d-flex justify-content-between align-items-center mb-4">
     <h2>📬 הודעות למנהל</h2>
-    <!-- פילטר סטטוס -->
     <div class="btn-group">
       <a href="{{ url_for('admin.manager_messages') }}"
          class="btn btn-sm {{ 'btn-primary' if not status_filter else 'btn-outline-primary' }}">הכל</a>
@@ -68,10 +67,9 @@
 
       <!-- כפתור האזנה -->
       <td>
-        {% if msg.call_id %}
-        <audio controls preload="none" style="height:32px; min-width:200px;">
-          <source src="{{ url_for('admin.play_manager_message', id=msg.id) }}" type="audio/wav">
-        </audio>
+        {% if msg.rec_url %}
+        <button onclick="playAudio(this, {{ msg.id }})" class="btn btn-sm btn-outline-info">▶️ האזן</button>
+        <audio id="audio-{{ msg.id }}" controls style="height:32px; min-width:200px; display:none;"></audio>
         {% else %}
           <span class="text-muted">אין הקלטה</span>
         {% endif %}
@@ -94,21 +92,16 @@
       <!-- פעולות -->
       <td>
         <div class="d-flex gap-1 flex-wrap">
-
-          <!-- עדכון סטטוס -->
           <button class="btn btn-sm btn-outline-secondary"
                   data-bs-toggle="modal"
                   data-bs-target="#statusModal{{ msg.id }}">
             ✏️ עדכן
           </button>
-
-          <!-- מחיקה -->
           <form method="POST"
                 action="{{ url_for('admin.delete_manager_message', id=msg.id) }}"
                 onsubmit="return confirm('למחוק פניה זו?')">
             <button type="submit" class="btn btn-sm btn-outline-danger">🗑️ מחק</button>
           </form>
-
         </div>
       </td>
     </tr>
@@ -152,4 +145,33 @@
   </div>
   {% endif %}
 </div>
+
+<script>
+function playAudio(btn, id) {
+    const audio = document.getElementById('audio-' + id);
+    if (audio.src && audio.src !== window.location.href) {
+        audio.style.display = 'inline';
+        audio.play();
+        return;
+    }
+    btn.textContent = '⏳ טוען...';
+    btn.disabled = true;
+    fetch('/admin/messages/' + id + '/play')
+        .then(r => {
+            if (!r.ok) throw new Error('שגיאה ' + r.status);
+            return r.blob();
+        })
+        .then(blob => {
+            audio.src = URL.createObjectURL(blob);
+            audio.style.display = 'inline';
+            audio.play();
+            btn.style.display = 'none';
+        })
+        .catch(e => {
+            btn.textContent = '❌ שגיאה';
+            btn.disabled = false;
+            console.error(e);
+        });
+}
+</script>
 {% endblock %}
