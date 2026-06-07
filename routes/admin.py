@@ -490,22 +490,18 @@ def manager_messages():
 @admin_bp.route('/messages/<int:id>/play')
 @login_required
 def play_manager_message(id):
-    import requests as req
-    from flask import Response
+    import requests as req, io
     msg = ManagerMessage.query.get_or_404(id)
     if not msg.rec_url:
         return jsonify({'error': 'אין הקלטה'}), 404
     try:
-        r = req.get(msg.rec_url, timeout=120, stream=True)
+        r = req.get(msg.rec_url, timeout=120, stream=False)
         r.raise_for_status()
-        def generate():
-            for chunk in r.iter_content(chunk_size=4096):
-                if chunk:
-                    yield chunk
-        return Response(
-            generate(),
-            mimetype='audio/wav',
-            headers={'Content-Disposition': 'inline'}
+        return send_file(
+            io.BytesIO(r.content),
+            mimetype='application/octet-stream',
+            as_attachment=False,
+            download_name='message.wav'
         )
     except Exception as e:
         return jsonify({'error': str(e)}), 400
