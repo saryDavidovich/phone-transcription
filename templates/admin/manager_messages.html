@@ -160,7 +160,9 @@ function playAudio(btn, id) {
         .then(r => r.json())
         .then(data => {
             if (data.error) throw new Error(data.error);
+            console.log('audio base64 length:', data.audio.length);
             const byteCharacters = atob(data.audio);
+            console.log('decoded bytes:', byteCharacters.length);
             const byteArrays = [];
             for (let offset = 0; offset < byteCharacters.length; offset += 512) {
                 const slice = byteCharacters.slice(offset, offset + 512);
