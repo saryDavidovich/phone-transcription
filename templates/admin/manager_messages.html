@@ -157,8 +157,20 @@ function playAudio(btn, id) {
     btn.textContent = '⏳ טוען...';
     btn.disabled = true;
     fetch('/admin/messages/' + id + '/play')
-        .then(r => r.blob())
-        .then(blob => {
+        .then(r => r.json())
+        .then(data => {
+            if (data.error) throw new Error(data.error);
+            const byteCharacters = atob(data.audio);
+            const byteArrays = [];
+            for (let offset = 0; offset < byteCharacters.length; offset += 512) {
+                const slice = byteCharacters.slice(offset, offset + 512);
+                const byteNumbers = new Array(slice.length);
+                for (let i = 0; i < slice.length; i++) {
+                    byteNumbers[i] = slice.charCodeAt(i);
+                }
+                byteArrays.push(new Uint8Array(byteNumbers));
+            }
+            const blob = new Blob(byteArrays, {type: 'audio/wav'});
             audio.src = URL.createObjectURL(blob);
             audio.style.display = 'inline';
             audio.play();
