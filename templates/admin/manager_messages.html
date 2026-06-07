@@ -159,7 +159,8 @@ function playAudio(btn, id) {
     fetch('/admin/messages/' + id + '/play')
         .then(r => r.blob())
         .then(blob => {
-            audio.src = URL.createObjectURL(blob);
+            const audioBlob = new Blob([blob], {type: 'audio/wav'});
+            audio.src = URL.createObjectURL(audioBlob);
             audio.style.display = 'inline';
             audio.play();
             btn.style.display = 'none';
@@ -167,7 +168,6 @@ function playAudio(btn, id) {
         .catch(e => {
             btn.textContent = '❌ שגיאה';
             btn.disabled = false;
-            console.error(e);
         });
 }
 </script>
