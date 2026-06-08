@@ -29,6 +29,8 @@ class Recording(db.Model):
     status = db.Column(db.String(30), default='recording')
     delivery_method = db.Column(db.String(10))
     delivered_to = db.Column(db.String(200))
+    soferai_batch_id = db.Column(db.String(100))
+    rec_url          = db.Column(db.String(500))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
 class Transaction(db.Model):
