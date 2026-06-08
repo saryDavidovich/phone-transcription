@@ -19,6 +19,7 @@ def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, durat
             rec = Recording.query.filter_by(call_id=call_id).first()
             if rec:
                 rec.status = 'transcribing'
+                rec.rec_url = rec_url  # שמור את ה-URL לשימוש מאוחר יותר
                 db.session.commit()
 
             db.session.remove()
@@ -26,9 +27,29 @@ def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, durat
             tier = transcription_tier
 
             if tier == 'premium':
-                log.info(f"Using Sofer.ai for customer {customer_id}")
-                transcript_raw, actual_duration = _soferai_from_url(rec_url)
-                transcript_fixed = transcript_raw
+                log.info(f"Using Sofer.ai BATCH for customer {customer_id}")
+                # שולחים ל-Sofer.ai וחוזרים מיד עם batch_id
+                batch_id, actual_duration = _soferai_submit_batch(rec_url, call_id)
+
+                if batch_id:
+                    db.session.remove()
+                    rec = Recording.query.filter_by(call_id=call_id).first()
+                    if rec:
+                        rec.soferai_batch_id = batch_id
+                        rec.status = 'soferai_pending'
+                        if actual_duration:
+                            rec.duration_seconds = actual_duration
+                        db.session.commit()
+                    log.info(f"Sofer.ai batch submitted: {batch_id}, waiting for completion")
+                    return  # יוצאים — ה-scheduler יטפל בהמשך
+                else:
+                    db.session.remove()
+                    rec = Recording.query.filter_by(call_id=call_id).first()
+                    if rec:
+                        rec.status = 'error'
+                        db.session.commit()
+                    return
+
             else:
                 log.info(f"Using Whisper for customer {customer_id}")
                 transcript_raw, actual_duration = _whisper_from_url(rec_url)
@@ -47,18 +68,14 @@ def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, durat
                     db.session.commit()
                 return
 
-            if tier == 'premium':
-                price_per_20min = float(_get_setting('price_per_20min_premium', '1.90'))
-            else:
-                price_per_20min = float(_get_setting('price_per_20min_basic', '0.90'))
-
+            price_per_20min = float(_get_setting('price_per_20min_basic', '0.90'))
             units = math.ceil(duration_seconds / 1200)
             cost = units * price_per_20min
             cost = round(cost, 2)
 
             if rec:
                 rec.transcript = transcript_fixed
-                rec.summary = transcript_raw if tier == 'basic' else ''
+                rec.summary = transcript_raw
                 rec.status = 'transcribed'
                 rec.cost = cost
                 rec.duration_seconds = duration_seconds
@@ -71,21 +88,16 @@ def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, durat
                     customer_id=customer_id,
                     amount=-cost,
                     type='debit',
-                    description=f'תמלול {duration_seconds//60} דקות ({tier})',
+                    description=f'תמלול {duration_seconds//60} דקות (basic)',
                     recording_id=rec.id if rec else None
                 )
                 db.session.add(txn)
                 db.session.commit()
 
             if delivery_method == 'email':
-                if tier == 'premium':
-                    _send_email_premium(delivered_to, transcript_fixed, customer, rec_url, duration_seconds)
-                else:
-                    _send_email(delivered_to, transcript_raw, transcript_fixed, customer, rec_url, duration_seconds)
+                _send_email(delivered_to, transcript_raw, transcript_fixed, customer, rec_url, duration_seconds)
             elif delivery_method == 'fax':
                 _send_fax(delivered_to, transcript_fixed, customer, duration_seconds)
-            else:
-                log.info(f"Unknown delivery method: {delivery_method}")
 
             if rec:
                 rec.status = 'delivered'
@@ -94,90 +106,208 @@ def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, durat
         except Exception as e:
             log.error(f"Error processing {call_id}: {e}")
 
+
+def _soferai_submit_batch(rec_url, call_id):
+    """שולח ל-Sofer.ai Batch API וחוזר מיד עם batch_id"""
+    try:
+        import wave, audioop, io
+        from soferai import SoferAI
+        from soferai.batch_transcribe import BatchTranscriptionRequestInfo, BatchAudioSource
+
+        client = SoferAI(api_key=os.environ.get('SOFERAI_API_KEY'))
+
+        # הורד את הקובץ כדי לדעת את המשך ואת ה-sample rate
+        r = requests.get(rec_url, timeout=300)
+        r.raise_for_status()
+        log.info(f"Downloaded {len(r.content)} bytes for Sofer.ai batch")
+
+        actual_duration = 0
+        audio_url_to_use = rec_url  # ברירת מחדל — ה-URL המקורי
+
+        try:
+            with wave.open(io.BytesIO(r.content)) as wav_in:
+                framerate = wav_in.getframerate()
+                actual_duration = wav_in.getnframes() // framerate
+                sampwidth = wav_in.getsampwidth()
+                nchannels = wav_in.getnchannels()
+
+            log.info(f"Original WAV: {framerate}Hz, {actual_duration}s")
+
+            # אם צריך upsampling — נעלה קובץ זמני לשרת שלנו
+            if framerate != 16000:
+                log.info("Need upsampling — uploading converted file")
+                with wave.open(io.BytesIO(r.content)) as wav_in:
+                    frames = wav_in.readframes(wav_in.getnframes())
+
+                frames, _ = audioop.ratecv(frames, sampwidth, nchannels, framerate, 16000, None)
+
+                output_buffer = io.BytesIO()
+                with wave.open(output_buffer, 'wb') as wav_out:
+                    wav_out.setnchannels(nchannels)
+                    wav_out.setsampwidth(sampwidth)
+                    wav_out.setframerate(16000)
+                    wav_out.writeframes(frames)
+
+                # שמור קובץ זמני ושלח כ-base64 בדרך הישנה אם אין URL
+                # לבינתיים — נשתמש ב-URL המקורי וניתן ל-Sofer.ai לטפל
+                audio_url_to_use = rec_url
+                log.info("Using original URL (Sofer.ai handles resampling)")
+
+        except Exception as e:
+            log.warning(f"Could not read WAV metadata: {e}")
+
+        # שלח ל-Sofer.ai Batch API
+        response = client.batch_transcribe.create_batch_transcription(
+            info=BatchTranscriptionRequestInfo(
+                model='v1',
+                primary_language='he',
+                hebrew_word_format=['he'],
+                num_speakers=1,
+            ),
+            processing_mode='express',
+            audio_sources=[
+                BatchAudioSource(
+                    audio_url=audio_url_to_use,
+                    client_item_id=call_id,
+                )
+            ],
+            batch_title=f'תמלול {call_id[:8]}',
+        )
+
+        batch_id = str(response.batch_id)
+        log.info(f"Sofer.ai batch created: {batch_id} for call {call_id}")
+        return batch_id, actual_duration
+
+    except Exception as e:
+        log.error(f"Sofer.ai batch submit error: {e}")
+        return None, 0
+
+
+def check_soferai_batches():
+    """Scheduler — בודק כל 5 דקות אם יש batch שהסתיים"""
+    from app import app, db
+    from models import Recording, Customer, Transaction
+
+    with app.app_context():
+        try:
+            pending = Recording.query.filter_by(status='soferai_pending').all()
+            if not pending:
+                return
+
+            log.info(f"Checking {len(pending)} pending Sofer.ai batches")
+
+            from soferai import SoferAI
+            client = SoferAI(api_key=os.environ.get('SOFERAI_API_KEY'))
+
+            # קבץ לפי batch_id
+            batches = {}
+            for rec in pending:
+                if rec.soferai_batch_id:
+                    if rec.soferai_batch_id not in batches:
+                        batches[rec.soferai_batch_id] = []
+                    batches[rec.soferai_batch_id].append(rec)
+
+            for batch_id, recs in batches.items():
+                try:
+                    import uuid
+                    status = client.batch_transcribe.get_batch_status(
+                        batch_id=uuid.UUID(batch_id)
+                    )
+                    log.info(f"Batch {batch_id}: {status.status} ({status.completed_count}/{status.total_count})")
+
+                    if status.status.upper() == 'COMPLETED':
+                        for rec in recs:
+                            _finalize_soferai_recording(rec, client, db)
+
+                    elif status.status.upper() in ('FAILED', 'ERROR'):
+                        for rec in recs:
+                            rec.status = 'error'
+                        db.session.commit()
+
+                except Exception as e:
+                    log.error(f"Error checking batch {batch_id}: {e}")
+
+        except Exception as e:
+            log.error(f"Scheduler error: {e}")
+
+
+def _finalize_soferai_recording(rec, client, db):
+    """מסיים תמלול שחזר מ-Sofer.ai"""
+    from models import Customer, Transaction
+    try:
+        import uuid
+        # קבל את התמלול לפי client_item_id = call_id
+        transcription = client.batch_transcribe.get_batch_transcription_by_client_item_id(
+            batch_id=uuid.UUID(rec.soferai_batch_id),
+            client_item_id=rec.call_id
+        )
+
+        transcript_text = transcription.text if hasattr(transcription, 'text') else ''
+        if not transcript_text:
+            rec.status = 'error'
+            db.session.commit()
+            return
+
+        duration_seconds = rec.duration_seconds or 0
+
+        price_per_20min = float(_get_setting('price_per_20min_premium', '1.90'))
+        units = math.ceil(duration_seconds / 1200) if duration_seconds > 0 else 1
+        cost = round(units * price_per_20min, 2)
+
+        rec.transcript = transcript_text
+        rec.summary = ''
+        rec.status = 'transcribed'
+        rec.cost = cost
+        db.session.commit()
+
+        customer = Customer.query.get(rec.customer_id)
+        if customer:
+            customer.balance -= cost
+            txn = Transaction(
+                customer_id=rec.customer_id,
+                amount=-cost,
+                type='debit',
+                description=f'תמלול {duration_seconds//60} דקות (premium)',
+                recording_id=rec.id
+            )
+            db.session.add(txn)
+            db.session.commit()
+
+        # שלח ללקוח
+        rec_url = rec.rec_url or ''
+        if rec.delivery_method == 'email':
+            _send_email_premium(rec.delivered_to, transcript_text, customer, rec_url, duration_seconds)
+        elif rec.delivery_method == 'fax':
+            _send_fax(rec.delivered_to, transcript_text, customer, duration_seconds)
+
+        rec.status = 'delivered'
+        db.session.commit()
+        log.info(f"Sofer.ai recording {rec.call_id} finalized and delivered")
+
+    except Exception as e:
+        log.error(f"Error finalizing recording {rec.call_id}: {e}")
+
+
+def start_soferai_scheduler():
+    """מפעיל scheduler שרץ כל 5 דקות"""
+    def run():
+        while True:
+            time.sleep(300)  # 5 דקות
+            try:
+                check_soferai_batches()
+            except Exception as e:
+                log.error(f"Scheduler loop error: {e}")
+
+    t = threading.Thread(target=run, daemon=True)
+    t.start()
+    log.info("Sofer.ai batch scheduler started")
+
+
 def _get_setting(key, default=''):
     from models import Settings
     s = Settings.query.filter_by(key=key).first()
     return s.value if s else default
 
-def _soferai_from_url(url):
-    try:
-        import base64, wave, audioop, io
-        from soferai import SoferAI
-        from soferai.transcribe import TranscriptionRequestInfo
-
-        client = SoferAI(api_key=os.environ.get('SOFERAI_API_KEY'))
-
-        r = requests.get(url, timeout=120)
-        r.raise_for_status()
-        log.info(f"Downloaded {len(r.content)} bytes for Sofer.ai")
-
-        actual_duration = 0
-        try:
-            with wave.open(io.BytesIO(r.content)) as wav_in:
-                frames = wav_in.readframes(wav_in.getnframes())
-                sampwidth = wav_in.getsampwidth()
-                nchannels = wav_in.getnchannels()
-                framerate = wav_in.getframerate()
-                actual_duration = wav_in.getnframes() // framerate
-
-            log.info(f"Original WAV: {framerate}Hz, {sampwidth*8}bit, {nchannels}ch, {actual_duration}s")
-
-            if framerate != 16000:
-                frames, _ = audioop.ratecv(frames, sampwidth, nchannels, framerate, 16000, None)
-                framerate = 16000
-                log.info("Upsampled to 16000Hz for Sofer.ai")
-
-            output_buffer = io.BytesIO()
-            with wave.open(output_buffer, 'wb') as wav_out:
-                wav_out.setnchannels(nchannels)
-                wav_out.setsampwidth(sampwidth)
-                wav_out.setframerate(framerate)
-                wav_out.writeframes(frames)
-            audio_content = output_buffer.getvalue()
-
-        except Exception as e:
-            log.warning(f"Could not process WAV: {e}, using original")
-            audio_content = r.content
-
-        base64_audio = base64.b64encode(audio_content).decode('utf-8')
-
-        response = client.transcribe.create_transcription(
-            audio_file=base64_audio,
-            info=TranscriptionRequestInfo(
-                model='v1',
-                primary_language='he',
-                hebrew_word_format=['he'],
-                num_speakers=1,
-            )
-        )
-
-        transcription_id = response
-        log.info(f"Sofer.ai transcription created: {transcription_id}")
-
-        for attempt in range(40):
-            time.sleep(15)
-            status = client.transcribe.get_transcription_status(
-                transcription_id=transcription_id
-            )
-            log.info(f"Sofer.ai status: {status.status} (attempt {attempt+1})")
-
-            if status.status.upper() == 'COMPLETED':
-                result = client.transcribe.get_transcription(
-                    transcription_id=transcription_id
-                )
-                log.info("Sofer.ai transcription completed")
-                return result.text, actual_duration
-
-            elif status.status.upper() in ('FAILED', 'ERROR', 'INSUFFICIENT_FUNDS'):
-                log.error(f"Sofer.ai failed: {status.status}")
-                return None, actual_duration
-
-        log.error("Sofer.ai timeout")
-        return None, actual_duration
-
-    except Exception as e:
-        log.error(f"Sofer.ai error: {e}")
-        return None, 0
 
 def _whisper_from_url(url):
     try:
@@ -243,6 +373,7 @@ def _whisper_from_url(url):
         log.error(f"Whisper error: {e}")
         return None, 0
 
+
 def _fix_transcript(transcript):
     try:
         import anthropic
@@ -291,10 +422,10 @@ def _fix_transcript(transcript):
         log.error(f"Claude error: {e}")
         return transcript
 
+
 def _build_word_doc(name, duration_str, transcript_fixed, transcript_raw=None):
     from docx import Document
     from docx.enum.text import WD_ALIGN_PARAGRAPH
-    from docx.oxml.ns import qn
     from docx.oxml import OxmlElement
     from docx.shared import Pt, RGBColor
     import io
@@ -318,25 +449,19 @@ def _build_word_doc(name, duration_str, transcript_fixed, transcript_raw=None):
         run.font.color.rgb = RGBColor(0x99, 0x99, 0x99)
 
     doc = Document()
-
     section = doc.sections[0]
     sectPr = section._sectPr
     bidi_doc = OxmlElement('w:bidi')
     sectPr.append(bidi_doc)
-
     add_footer(doc)
 
     title = doc.add_heading('תמלול שיחה', 0)
     set_rtl(title)
-
     p_info = doc.add_paragraph(f'לקוח: {name} | משך: {duration_str}')
     set_rtl(p_info)
-
     set_rtl(doc.add_paragraph('─' * 50))
-
     h1 = doc.add_heading('תמלול מעובד', level=1)
     set_rtl(h1)
-
     p = doc.add_paragraph(transcript_fixed or '')
     set_rtl(p)
 
@@ -352,10 +477,11 @@ def _build_word_doc(name, duration_str, transcript_fixed, transcript_raw=None):
     buf.seek(0)
     return buf.read()
 
+
 def _build_pdf_for_fax(name, duration_str, transcript_fixed):
     try:
         from reportlab.lib.pagesizes import A4
-        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.styles import ParagraphStyle
         from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
         from reportlab.lib.enums import TA_RIGHT, TA_CENTER
         from reportlab.lib.units import cm
@@ -374,47 +500,23 @@ def _build_pdf_for_fax(name, duration_str, transcript_fixed):
             if os.path.exists(font_path):
                 pdfmetrics.registerFont(TTFont('Hebrew', font_path))
                 font_registered = True
-                log.info(f"Font registered: {font_path}")
                 break
 
-        if not font_registered:
-            log.warning("No Hebrew font found, using default")
-
         font_name = 'Hebrew' if font_registered else 'Helvetica'
-
         buf = io.BytesIO()
         doc = SimpleDocTemplate(buf, pagesize=A4,
                                 rightMargin=2*cm, leftMargin=2*cm,
                                 topMargin=2*cm, bottomMargin=2*cm)
 
-        rtl_style = ParagraphStyle(
-            'RTL',
-            fontName=font_name,
-            alignment=TA_RIGHT,
-            fontSize=11,
-            leading=18,
-        )
-        title_style = ParagraphStyle(
-            'Title',
-            fontName=font_name,
-            alignment=TA_RIGHT,
-            fontSize=16,
-            spaceAfter=12,
-        )
-        footer_style = ParagraphStyle(
-            'Footer',
-            fontName=font_name,
-            alignment=TA_CENTER,
-            fontSize=8,
-            textColor='grey',
-        )
+        rtl_style = ParagraphStyle('RTL', fontName=font_name, alignment=TA_RIGHT, fontSize=11, leading=18)
+        title_style = ParagraphStyle('Title', fontName=font_name, alignment=TA_RIGHT, fontSize=16, spaceAfter=12)
+        footer_style = ParagraphStyle('Footer', fontName=font_name, alignment=TA_CENTER, fontSize=8, textColor='grey')
 
         story = []
         story.append(Paragraph('תמלול שיחה', title_style))
         story.append(Spacer(1, 0.3*cm))
         story.append(Paragraph(f'לקוח: {name} | משך: {duration_str}', rtl_style))
         story.append(Spacer(1, 0.5*cm))
-        story.append(Spacer(1, 0.3*cm))
 
         for para in (transcript_fixed or '').split('\n'):
             if para.strip():
@@ -423,7 +525,6 @@ def _build_pdf_for_fax(name, duration_str, transcript_fixed):
 
         story.append(Spacer(1, 1*cm))
         story.append(Paragraph('נערך ע"י מערכת תמלולפון 03-3131795', footer_style))
-
         doc.build(story)
         buf.seek(0)
         return buf.read()
@@ -432,10 +533,10 @@ def _build_pdf_for_fax(name, duration_str, transcript_fixed):
         log.error(f"PDF build error: {e}")
         return None
 
+
 def _send_fax(to_number, transcript_fixed, customer, duration_seconds):
     try:
         import uuid
-
         name = customer.name if hasattr(customer, 'name') and customer.name else customer.phone if customer else ''
         minutes = duration_seconds // 60
         seconds = duration_seconds % 60
@@ -467,25 +568,15 @@ def _send_fax(to_number, transcript_fixed, customer, duration_seconds):
             f.write(pdf_bytes)
 
         media_url = f"{base_url}/static/fax_tmp/{filename}"
-        log.info(f"PDF saved, sending fax to {fax_number} with URL {media_url}")
-
         fax_response = requests.post(
             'https://api.telnyx.com/v2/faxes',
-            headers={
-                'Authorization': f'Bearer {api_key}',
-                'Content-Type': 'application/json'
-            },
-            json={
-                'connection_id': connection_id,
-                'to': fax_number,
-                'from': from_number,
-                'media_url': media_url,
-            }
+            headers={'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'},
+            json={'connection_id': connection_id, 'to': fax_number, 'from': from_number, 'media_url': media_url}
         )
 
         if fax_response.status_code in (200, 201, 202):
             fax_id = fax_response.json().get('data', {}).get('id')
-            log.info(f"Fax sent successfully to {fax_number}, fax_id: {fax_id}")
+            log.info(f"Fax sent to {fax_number}, fax_id: {fax_id}")
             threading.Thread(target=_check_fax_status, args=(fax_id, api_key), daemon=True).start()
         else:
             log.error(f"Fax send failed: {fax_response.text}")
@@ -501,19 +592,17 @@ def _send_fax(to_number, transcript_fixed, customer, duration_seconds):
     except Exception as e:
         log.error(f"Fax error: {e}")
 
+
 def _check_fax_status(fax_id, api_key):
     time.sleep(60)
     try:
-        r = requests.get(
-            f'https://api.telnyx.com/v2/faxes/{fax_id}',
-            headers={'Authorization': f'Bearer {api_key}'}
-        )
+        r = requests.get(f'https://api.telnyx.com/v2/faxes/{fax_id}',
+                         headers={'Authorization': f'Bearer {api_key}'})
         data = r.json().get('data', {})
-        status = data.get('status')
-        failure_reason = data.get('failure_reason', '')
-        log.info(f"Fax {fax_id} status: {status} | reason: {failure_reason}")
+        log.info(f"Fax {fax_id} status: {data.get('status')} | reason: {data.get('failure_reason', '')}")
     except Exception as e:
         log.error(f"Fax status check error: {e}")
+
 
 def _send_email(to, transcript_raw, transcript_fixed, customer, rec_url, duration_seconds):
     try:
@@ -531,21 +620,17 @@ def _send_email(to, transcript_raw, transcript_fixed, customer, rec_url, duratio
         html = f'''<div dir="rtl" style="font-family:Arial,sans-serif;max-width:600px;margin:auto">
 <h2 style="color:#1d4ed8">תמלול שיחה</h2>
 <p style="color:#6b7280">לקוח: <b>{name}</b> | משך: <b>{duration_str}</b></p>
-
 <div style="background:#f0fdf4;border-right:4px solid #10b981;padding:16px;margin:16px 0;border-radius:8px">
 <h3 style="margin:0 0 12px;color:#065f46">✨ תמלול מעובד</h3>
 <div style="line-height:1.8;white-space:pre-wrap;text-align:justify">{transcript_fixed}</div>
 </div>
-
 <div style="background:#f9fafb;border-right:4px solid #9ca3af;padding:16px;margin:16px 0;border-radius:8px">
 <h3 style="margin:0 0 12px;color:#6b7280">📝 תמלול מקורי</h3>
 <div style="line-height:1.8;white-space:pre-wrap;text-align:justify;color:#6b7280;font-size:13px">{transcript_raw}</div>
 </div>
-
 <div style="background:#fff7ed;border-right:4px solid #f97316;padding:16px;margin:16px 0;border-radius:8px">
 <a href="{rec_url}" style="color:#ea580c;font-weight:600;font-size:15px;text-decoration:none">⬇️ להורדת ההקלטה לחצו כאן</a>
 </div>
-
 </div>'''
 
         sg = sendgrid.SendGridAPIClient(api_key=os.environ.get('SENDGRID_API_KEY'))
@@ -566,6 +651,7 @@ def _send_email(to, transcript_raw, transcript_fixed, customer, rec_url, duratio
     except Exception as e:
         log.error(f"Email error: {e}")
 
+
 def _send_email_premium(to, transcript, customer, rec_url, duration_seconds):
     try:
         import sendgrid, base64
@@ -582,16 +668,13 @@ def _send_email_premium(to, transcript, customer, rec_url, duration_seconds):
         html = f'''<div dir="rtl" style="font-family:Arial,sans-serif;max-width:600px;margin:auto">
 <h2 style="color:#7c3aed">תמלול שיחה — מסלול מקצועי</h2>
 <p style="color:#6b7280">לקוח: <b>{name}</b> | משך: <b>{duration_str}</b></p>
-
 <div style="background:#faf5ff;border-right:4px solid #7c3aed;padding:16px;margin:16px 0;border-radius:8px">
 <h3 style="margin:0 0 12px;color:#581c87">⭐ תמלול מקצועי</h3>
 <div style="line-height:1.8;white-space:pre-wrap;text-align:justify">{transcript}</div>
 </div>
-
 <div style="background:#fff7ed;border-right:4px solid #f97316;padding:16px;margin:16px 0;border-radius:8px">
 <a href="{rec_url}" style="color:#ea580c;font-weight:600;font-size:15px;text-decoration:none">⬇️ להורדת ההקלטה לחצו כאן</a>
 </div>
-
 </div>'''
 
         sg = sendgrid.SendGridAPIClient(api_key=os.environ.get('SENDGRID_API_KEY'))
