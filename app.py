@@ -53,10 +53,9 @@ def create_app():
         db.create_all()
         _migrate_db()
         _create_default_admin()
-
-    # הפעלת scheduler לבדיקת תמלולי Sofer.ai
-    from services.transcribe import start_soferai_scheduler
-    start_soferai_scheduler()
+        # הפעלת scheduler לבדיקת תמלולי Sofer.ai
+        from services.transcribe import start_soferai_scheduler
+        start_soferai_scheduler()
 
     logging.basicConfig(level=logging.INFO)
     return app
