@@ -110,78 +110,56 @@ def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, durat
 def _soferai_submit_batch(rec_url, call_id):
     """שולח ל-Sofer.ai Batch API וחוזר מיד עם batch_id"""
     try:
-        import wave, audioop, io
-        from soferai import SoferAI
-        from soferai.batch_transcribe import BatchTranscriptionRequestInfo, BatchAudioSource
+        import wave, io
 
-        client = SoferAI(api_key=os.environ.get('SOFERAI_API_KEY'))
+        api_key = os.environ.get('SOFERAI_API_KEY')
 
-        # הורד את הקובץ כדי לדעת את המשך ואת ה-sample rate
         r = requests.get(rec_url, timeout=300)
         r.raise_for_status()
         log.info(f"Downloaded {len(r.content)} bytes for Sofer.ai batch")
 
         actual_duration = 0
-        audio_url_to_use = rec_url  # ברירת מחדל — ה-URL המקורי
-
         try:
             with wave.open(io.BytesIO(r.content)) as wav_in:
-                framerate = wav_in.getframerate()
-                actual_duration = wav_in.getnframes() // framerate
-                sampwidth = wav_in.getsampwidth()
-                nchannels = wav_in.getnchannels()
-
-            log.info(f"Original WAV: {framerate}Hz, {actual_duration}s")
-
-            # אם צריך upsampling — נעלה קובץ זמני לשרת שלנו
-            if framerate != 16000:
-                log.info("Need upsampling — uploading converted file")
-                with wave.open(io.BytesIO(r.content)) as wav_in:
-                    frames = wav_in.readframes(wav_in.getnframes())
-
-                frames, _ = audioop.ratecv(frames, sampwidth, nchannels, framerate, 16000, None)
-
-                output_buffer = io.BytesIO()
-                with wave.open(output_buffer, 'wb') as wav_out:
-                    wav_out.setnchannels(nchannels)
-                    wav_out.setsampwidth(sampwidth)
-                    wav_out.setframerate(16000)
-                    wav_out.writeframes(frames)
-
-                # שמור קובץ זמני ושלח כ-base64 בדרך הישנה אם אין URL
-                # לבינתיים — נשתמש ב-URL המקורי וניתן ל-Sofer.ai לטפל
-                audio_url_to_use = rec_url
-                log.info("Using original URL (Sofer.ai handles resampling)")
-
+                actual_duration = wav_in.getnframes() // wav_in.getframerate()
+            log.info(f"Duration: {actual_duration}s")
         except Exception as e:
             log.warning(f"Could not read WAV metadata: {e}")
 
-        # שלח ל-Sofer.ai Batch API
-        response = client.batch_transcribe.create_batch_transcription(
-            info=BatchTranscriptionRequestInfo(
-                model='v1',
-                primary_language='he',
-                hebrew_word_format=['he'],
-                num_speakers=1,
-            ),
-            processing_mode='express',
-            audio_sources=[
-                BatchAudioSource(
-                    audio_url=audio_url_to_use,
-                    client_item_id=call_id,
-                )
-            ],
-            batch_title=f'תמלול {call_id[:8]}',
+        response = requests.post(
+            'https://api.sofer.ai/v1/transcriptions/batch',
+            headers={
+                'Authorization': f'Bearer {api_key}',
+                'Content-Type': 'application/json'
+            },
+            json={
+                'info': {
+                    'model': 'v1',
+                    'primary_language': 'he',
+                    'hebrew_word_format': ['he'],
+                    'num_speakers': 1,
+                },
+                'processing_mode': 'express',
+                'audio_sources': [
+                    {
+                        'audio_url': rec_url,
+                        'client_item_id': call_id,
+                    }
+                ],
+                'batch_title': f'תמלול {call_id[:8]}',
+            },
+            timeout=60
         )
 
-        batch_id = str(response.batch_id)
+        response.raise_for_status()
+        data = response.json()
+        batch_id = data.get('batch_id')
         log.info(f"Sofer.ai batch created: {batch_id} for call {call_id}")
         return batch_id, actual_duration
 
     except Exception as e:
         log.error(f"Sofer.ai batch submit error: {e}")
         return None, 0
-
 
 def check_soferai_batches():
     """Scheduler — בודק כל 5 דקות אם יש batch שהסתיים"""
