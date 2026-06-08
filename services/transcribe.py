@@ -137,8 +137,8 @@ def _soferai_submit_batch(rec_url, call_id, language='he'):
                 'info': {
                     'model': 'v1',
                     'primary_language': language,
-                    'hebrew_word_format': ['he'],
-                    'num_speakers': 1,
+                    'hebrew_word_format': ['yi'] if language == 'yi' else (['he'] if language == 'he' else []),
+                    'auto_detect_speakers': True,
                 },
                 'processing_mode': 'express',
                 'audio_sources': [
