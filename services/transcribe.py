@@ -296,11 +296,11 @@ def start_soferai_scheduler():
             try:
                 check_soferai_batches()
             except Exception as e:
-                log.error(f"Scheduler loop error: {e}")
+                print(f"Scheduler loop error: {e}", flush=True)
 
     t = threading.Thread(target=run, daemon=True)
     t.start()
-    log.info("Sofer.ai batch scheduler started")
+    print("Sofer.ai batch scheduler started", flush=True)
 
 
 def _get_setting(key, default=''):
