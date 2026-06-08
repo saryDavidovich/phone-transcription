@@ -213,21 +213,46 @@ def _finalize_soferai_recording(rec, client, db):
     """מסיים תמלול שחזר מ-Sofer.ai"""
     from models import Customer, Transaction
     try:
-        import uuid
-        # קבל את התמלול לפי client_item_id = call_id
-        transcription = client.batch_transcribe.get_batch_transcription_by_client_item_id(
-            batch_id=uuid.UUID(rec.soferai_batch_id),
-            client_item_id=rec.call_id
-        )
+        api_key = os.environ.get('SOFERAI_API_KEY')
 
-        transcript_text = transcription.text if hasattr(transcription, 'text') else ''
+        # קבל את סטטוס ה-batch כדי למצוא את ה-transcription_id
+        r = requests.get(
+            f'https://api.sofer.ai/v1/transcriptions/batch/{rec.soferai_batch_id}/status',
+            headers={'Authorization': f'Bearer {api_key}'},
+            timeout=60
+        )
+        r.raise_for_status()
+        batch_data = r.json()
+
+        # מצא את ה-transcription לפי client_item_id
+        transcription_id = None
+        for t in batch_data.get('transcriptions', []):
+            if t.get('client_item_id') == rec.call_id:
+                transcription_id = t.get('id')
+                break
+
+        if not transcription_id:
+            log.error(f"Could not find transcription for call {rec.call_id}")
+            rec.status = 'error'
+            db.session.commit()
+            return
+
+        # קבל את התמלול המלא
+        r2 = requests.get(
+            f'https://api.sofer.ai/v1/transcriptions/{transcription_id}',
+            headers={'Authorization': f'Bearer {api_key}'},
+            timeout=60
+        )
+        r2.raise_for_status()
+        transcript_data = r2.json()
+        transcript_text = transcript_data.get('text', '')
+
         if not transcript_text:
             rec.status = 'error'
             db.session.commit()
             return
 
         duration_seconds = rec.duration_seconds or 0
-
         price_per_20min = float(_get_setting('price_per_20min_premium', '1.90'))
         units = math.ceil(duration_seconds / 1200) if duration_seconds > 0 else 1
         cost = round(units * price_per_20min, 2)
@@ -251,7 +276,6 @@ def _finalize_soferai_recording(rec, client, db):
             db.session.add(txn)
             db.session.commit()
 
-        # שלח ללקוח
         rec_url = rec.rec_url or ''
         if rec.delivery_method == 'email':
             _send_email_premium(rec.delivered_to, transcript_text, customer, rec_url, duration_seconds)
