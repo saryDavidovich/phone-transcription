@@ -3,6 +3,9 @@ from openai import OpenAI
 
 log = logging.getLogger(__name__)
 
+# מגביל מקסימום 5 תמלולי Whisper במקביל — השאר ממתינים בתור
+_whisper_semaphore = threading.Semaphore(5)
+
 def transcribe_async(call_id, rec_url, customer_id, delivery_method, delivered_to, duration_seconds, transcription_tier='basic'):
     t = threading.Thread(
         target=_process,
@@ -19,7 +22,7 @@ def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, durat
             rec = Recording.query.filter_by(call_id=call_id).first()
             if rec:
                 rec.status = 'transcribing'
-                rec.rec_url = rec_url  # שמור את ה-URL לשימוש מאוחר יותר
+                rec.rec_url = rec_url
                 db.session.commit()
 
             db.session.remove()
@@ -28,7 +31,6 @@ def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, durat
 
             if tier == 'premium':
                 log.info(f"Using Sofer.ai BATCH for customer {customer_id}")
-                # שולחים ל-Sofer.ai וחוזרים מיד עם batch_id
                 batch_id, actual_duration = _soferai_submit_batch(rec_url, call_id)
 
                 if batch_id:
@@ -41,7 +43,7 @@ def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, durat
                             rec.duration_seconds = actual_duration
                         db.session.commit()
                     log.info(f"Sofer.ai batch submitted: {batch_id}, waiting for completion")
-                    return  # יוצאים — ה-scheduler יטפל בהמשך
+                    return
                 else:
                     db.session.remove()
                     rec = Recording.query.filter_by(call_id=call_id).first()
@@ -52,7 +54,8 @@ def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, durat
 
             else:
                 log.info(f"Using Whisper for customer {customer_id}")
-                transcript_raw, actual_duration = _whisper_from_url(rec_url)
+                with _whisper_semaphore:
+                    transcript_raw, actual_duration = _whisper_from_url(rec_url)
                 transcript_fixed = _fix_transcript(transcript_raw) if transcript_raw else None
 
             if actual_duration and actual_duration > 0:
@@ -108,7 +111,6 @@ def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, durat
 
 
 def _soferai_submit_batch(rec_url, call_id):
-    """שולח ל-Sofer.ai Batch API וחוזר מיד עם batch_id"""
     try:
         import wave, io
 
@@ -161,10 +163,10 @@ def _soferai_submit_batch(rec_url, call_id):
         log.error(f"Sofer.ai batch submit error: {e}")
         return None, 0
 
+
 def check_soferai_batches():
-    """Scheduler — בודק כל 5 דקות אם יש batch שהסתיים"""
     from app import app, db
-    from models import Recording, Customer, Transaction
+    from models import Recording
 
     with app.app_context():
         try:
@@ -174,10 +176,8 @@ def check_soferai_batches():
 
             log.info(f"Checking {len(pending)} pending Sofer.ai batches")
 
-            from soferai import SoferAI
-            client = SoferAI(api_key=os.environ.get('SOFERAI_API_KEY'))
+            api_key = os.environ.get('SOFERAI_API_KEY')
 
-            # קבץ לפי batch_id
             batches = {}
             for rec in pending:
                 if rec.soferai_batch_id:
@@ -187,17 +187,24 @@ def check_soferai_batches():
 
             for batch_id, recs in batches.items():
                 try:
-                    import uuid
-                    status = client.batch_transcribe.get_batch_status(
-                        batch_id=uuid.UUID(batch_id)
+                    r = requests.get(
+                        f'https://api.sofer.ai/v1/transcriptions/batch/{batch_id}/status',
+                        headers={'Authorization': f'Bearer {api_key}'},
+                        timeout=60
                     )
-                    log.info(f"Batch {batch_id}: {status.status} ({status.completed_count}/{status.total_count})")
+                    r.raise_for_status()
+                    status_data = r.json()
+                    status = status_data.get('status', '').upper()
+                    completed = status_data.get('completed_count', 0)
+                    total = status_data.get('total_count', 0)
 
-                    if status.status.upper() == 'COMPLETED':
+                    log.info(f"Batch {batch_id}: {status} ({completed}/{total})")
+
+                    if status == 'COMPLETED':
                         for rec in recs:
-                            _finalize_soferai_recording(rec, client, db)
+                            _finalize_soferai_recording(rec, api_key, db)
 
-                    elif status.status.upper() in ('FAILED', 'ERROR'):
+                    elif status in ('FAILED', 'ERROR'):
                         for rec in recs:
                             rec.status = 'error'
                         db.session.commit()
@@ -209,13 +216,9 @@ def check_soferai_batches():
             log.error(f"Scheduler error: {e}")
 
 
-def _finalize_soferai_recording(rec, client, db):
-    """מסיים תמלול שחזר מ-Sofer.ai"""
+def _finalize_soferai_recording(rec, api_key, db):
     from models import Customer, Transaction
     try:
-        api_key = os.environ.get('SOFERAI_API_KEY')
-
-        # קבל את סטטוס ה-batch כדי למצוא את ה-transcription_id
         r = requests.get(
             f'https://api.sofer.ai/v1/transcriptions/batch/{rec.soferai_batch_id}/status',
             headers={'Authorization': f'Bearer {api_key}'},
@@ -224,7 +227,6 @@ def _finalize_soferai_recording(rec, client, db):
         r.raise_for_status()
         batch_data = r.json()
 
-        # מצא את ה-transcription לפי client_item_id
         transcription_id = None
         for t in batch_data.get('transcriptions', []):
             if t.get('client_item_id') == rec.call_id:
@@ -237,7 +239,6 @@ def _finalize_soferai_recording(rec, client, db):
             db.session.commit()
             return
 
-        # קבל את התמלול המלא
         r2 = requests.get(
             f'https://api.sofer.ai/v1/transcriptions/{transcription_id}',
             headers={'Authorization': f'Bearer {api_key}'},
@@ -283,8 +284,7 @@ def _finalize_soferai_recording(rec, client, db):
             _send_fax(rec.delivered_to, transcript_text, customer, duration_seconds)
 
         rec.status = 'delivered'
-        rec.soferai_batch_id = None  # מנקה כדי שלא יבדוק שוב
-        db.session.commit()
+        rec.soferai_batch_id = None
         db.session.commit()
         log.info(f"Sofer.ai recording {rec.call_id} finalized and delivered")
 
@@ -292,21 +292,7 @@ def _finalize_soferai_recording(rec, client, db):
         log.error(f"Error finalizing recording {rec.call_id}: {e}")
 
 
-_scheduler_started = False
-
 def start_soferai_scheduler():
-    """מפעיל scheduler — רק ב-worker אחד, בודק כל 10 דקות"""
-    import fcntl
-
-    lock_file = os.path.join(tempfile.gettempdir(), 'soferai_scheduler.lock')
-
-    try:
-        f = open(lock_file, 'w')
-        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except (IOError, OSError):
-        print("Sofer.ai scheduler already running in another worker, skipping", flush=True)
-        return
-
     def run():
         while True:
             time.sleep(300)
@@ -317,7 +303,8 @@ def start_soferai_scheduler():
 
     t = threading.Thread(target=run, daemon=True)
     t.start()
-    print("Sofer.ai batch scheduler started", flush=True)
+    print("Sofer.ai batch scheduler started (every 5 minutes)", flush=True)
+
 
 def _get_setting(key, default=''):
     from models import Settings
@@ -331,7 +318,6 @@ def _whisper_from_url(url):
         r.raise_for_status()
         content = r.content
         log.info(f"Downloaded {len(content)} bytes from {url}")
-        log.info(f"Content preview: {content[:200]}")
 
         import wave, audioop, io
 
