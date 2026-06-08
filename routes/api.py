@@ -48,6 +48,7 @@ def transcribe():
     delivery_method = data.get('delivery_method', 'email')
     delivered_to = data.get('delivered_to', '')
     transcription_tier = data.get('transcription_tier', 'basic')
+    language = data.get('language', 'he')  # ברירת מחדל עברית
 
     customer = Customer.query.filter_by(phone=phone).first()
     if not customer:
@@ -73,8 +74,9 @@ def transcribe():
     db.session.add(rec)
     db.session.commit()
 
-    transcribe_async(call_id, rec_url, customer.id, delivery_method, delivered_to, duration, transcription_tier)
+    transcribe_async(call_id, rec_url, customer.id, delivery_method, delivered_to, duration, transcription_tier, language)
     return jsonify({'ok': True, 'call_id': call_id})
+
 @api_bp.route('/manager-message', methods=['POST'])
 def receive_manager_message():
     from models import ManagerMessage
@@ -92,6 +94,7 @@ def receive_manager_message():
     db.session.add(msg)
     db.session.commit()
     return jsonify({'ok': True, 'id': msg.id})
+
 @api_bp.route('/extract-email-local', methods=['POST'])
 def extract_email_local():
     import os, requests as req
@@ -102,7 +105,6 @@ def extract_email_local():
         return jsonify({'local_part': ''}), 400
 
     try:
-        # הורדת ההקלטה
         r = req.get(rec_url, timeout=30)
         r.raise_for_status()
 
@@ -111,7 +113,6 @@ def extract_email_local():
             f.write(r.content)
             tmp_path = f.name
 
-        # תמלול עם Whisper
         from openai import OpenAI
         client = OpenAI(api_key=os.environ.get('OPENAI_API_KEY'))
         with open(tmp_path, 'rb') as f:
@@ -125,7 +126,6 @@ def extract_email_local():
 
         transcript = result.strip()
 
-        # חילוץ שם המייל עם Claude
         import anthropic
         claude = anthropic.Anthropic(api_key=os.environ.get('ANTHROPIC_API_KEY'))
         msg = claude.messages.create(
