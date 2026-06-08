@@ -295,12 +295,17 @@ def _finalize_soferai_recording(rec, client, db):
 _scheduler_started = False
 
 def start_soferai_scheduler():
-    """מפעיל scheduler שרץ כל 5 דקות — רק פעם אחת"""
-    global _scheduler_started
-    if _scheduler_started:
-        print("Sofer.ai scheduler already running, skipping", flush=True)
+    """מפעיל scheduler — רק ב-worker אחד"""
+    import fcntl
+
+    lock_file = os.path.join(tempfile.gettempdir(), 'soferai_scheduler.lock')
+
+    try:
+        f = open(lock_file, 'w')
+        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except (IOError, OSError):
+        print("Sofer.ai scheduler already running in another worker, skipping", flush=True)
         return
-    _scheduler_started = True
 
     def run():
         while True:
