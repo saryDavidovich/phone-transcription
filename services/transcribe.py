@@ -283,6 +283,8 @@ def _finalize_soferai_recording(rec, client, db):
             _send_fax(rec.delivered_to, transcript_text, customer, duration_seconds)
 
         rec.status = 'delivered'
+        rec.soferai_batch_id = None  # מנקה כדי שלא יבדוק שוב
+        db.session.commit()
         db.session.commit()
         log.info(f"Sofer.ai recording {rec.call_id} finalized and delivered")
 
@@ -290,11 +292,19 @@ def _finalize_soferai_recording(rec, client, db):
         log.error(f"Error finalizing recording {rec.call_id}: {e}")
 
 
+_scheduler_started = False
+
 def start_soferai_scheduler():
-    """מפעיל scheduler שרץ כל 5 דקות"""
+    """מפעיל scheduler שרץ כל 5 דקות — רק פעם אחת"""
+    global _scheduler_started
+    if _scheduler_started:
+        print("Sofer.ai scheduler already running, skipping", flush=True)
+        return
+    _scheduler_started = True
+
     def run():
         while True:
-            time.sleep(300)  # 5 דקות
+            time.sleep(300)
             try:
                 check_soferai_batches()
             except Exception as e:
@@ -303,7 +313,6 @@ def start_soferai_scheduler():
     t = threading.Thread(target=run, daemon=True)
     t.start()
     print("Sofer.ai batch scheduler started", flush=True)
-
 
 def _get_setting(key, default=''):
     from models import Settings
