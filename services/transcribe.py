@@ -295,7 +295,7 @@ def _finalize_soferai_recording(rec, client, db):
 _scheduler_started = False
 
 def start_soferai_scheduler():
-    """מפעיל scheduler — רק ב-worker אחד"""
+    """מפעיל scheduler — רק ב-worker אחד, בודק כל 10 דקות"""
     import fcntl
 
     lock_file = os.path.join(tempfile.gettempdir(), 'soferai_scheduler.lock')
