@@ -6,15 +6,14 @@ log = logging.getLogger(__name__)
 # מגביל מקסימום 5 תמלולי Whisper במקביל — השאר ממתינים בתור
 _whisper_semaphore = threading.Semaphore(5)
 
-def transcribe_async(call_id, rec_url, customer_id, delivery_method, delivered_to, duration_seconds, transcription_tier='basic'):
+def transcribe_async(call_id, rec_url, customer_id, delivery_method, delivered_to, duration_seconds, transcription_tier='basic', language='he'):
     t = threading.Thread(
         target=_process,
-        args=(call_id, rec_url, customer_id, delivery_method, delivered_to, duration_seconds, transcription_tier),
-        daemon=True
+        args=(call_id, rec_url, customer_id, delivery_method, delivered_to, duration_seconds, transcription_tier, language),
     )
     t.start()
 
-def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, duration_seconds, transcription_tier='basic'):
+def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, duration_seconds, transcription_tier='basic', language='he'):
     from app import app, db
     from models import Recording, Customer, Transaction
     with app.app_context():
@@ -31,8 +30,8 @@ def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, durat
 
             if tier == 'premium':
                 log.info(f"Using Sofer.ai BATCH for customer {customer_id}")
-                batch_id, actual_duration = _soferai_submit_batch(rec_url, call_id)
-
+                batch_id, actual_duration = _soferai_submit_batch(rec_url, call_id, language)
+                
                 if batch_id:
                     db.session.remove()
                     rec = Recording.query.filter_by(call_id=call_id).first()
@@ -110,7 +109,7 @@ def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, durat
             log.error(f"Error processing {call_id}: {e}")
 
 
-def _soferai_submit_batch(rec_url, call_id):
+def _soferai_submit_batch(rec_url, call_id, language='he'):
     try:
         import wave, io
 
@@ -137,7 +136,7 @@ def _soferai_submit_batch(rec_url, call_id):
             json={
                 'info': {
                     'model': 'v1',
-                    'primary_language': 'he',
+                    'primary_language': language,
                     'hebrew_word_format': ['he'],
                     'num_speakers': 1,
                 },
