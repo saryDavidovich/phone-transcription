@@ -16,3 +16,4 @@ python-docx
 soferai
 reportlab
 scipy
+google-genai
