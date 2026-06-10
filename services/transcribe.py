@@ -268,7 +268,7 @@ def _gemini_from_url(url, language='he', output_language='he'):
         log.info(f"Gemini transcription completed, {len(transcript)} chars")
 
         # אם ביקשו פלט בעברית אבל הקלט ביידיש — תרגם בקריאה נפרדת
-       if language == 'yi' and output_language == 'he':
+        if language == 'yi' and output_language == 'he':
             log.info("Translating Yiddish to Hebrew...")
             for attempt in range(5):
                 try:
