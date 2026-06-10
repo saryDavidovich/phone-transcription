@@ -13,7 +13,8 @@ def transcribe_async(call_id, rec_url, customer_id, delivery_method, delivered_t
     )
     t.start()
 
-def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, duration_seconds, transcription_tier='basic', language='he', output_language='he'):    from app import app, db
+def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, duration_seconds, transcription_tier='basic', language='he', output_language='he'):
+    from app import app, db
     from models import Recording, Customer, Transaction
     with app.app_context():
         try:
