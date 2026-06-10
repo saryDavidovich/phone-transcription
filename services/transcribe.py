@@ -28,7 +28,12 @@ def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, durat
 
             tier = transcription_tier
 
-            if tier == 'premium':
+            if tier == 'gemini':
+                log.info(f"Using Gemini for customer {customer_id}")
+                transcript_raw, actual_duration = _gemini_from_url(rec_url, language)
+                transcript_fixed = transcript_raw
+
+            elif tier == 'premium':
                 log.info(f"Using Sofer.ai BATCH for customer {customer_id}")
                 batch_id, actual_duration = _soferai_submit_batch(rec_url, call_id, language)
                 
@@ -162,7 +167,54 @@ def _soferai_submit_batch(rec_url, call_id, language='he'):
         log.error(f"Sofer.ai batch submit error: {e}")
         return None, 0
 
+def _gemini_from_url(url, language='he'):
+    try:
+        import wave, io
+        from google import genai
+        from google.genai import types as gtypes
 
+        api_key = os.environ.get('GOOGLE_API_KEY')
+        client = genai.Client(api_key=api_key)
+
+        r = requests.get(url, timeout=300)
+        r.raise_for_status()
+        log.info(f"Downloaded {len(r.content)} bytes for Gemini")
+
+        actual_duration = 0
+        try:
+            with wave.open(io.BytesIO(r.content)) as wav_in:
+                actual_duration = wav_in.getnframes() // wav_in.getframerate()
+            log.info(f"Duration: {actual_duration}s")
+        except Exception as e:
+            log.warning(f"Could not read WAV metadata: {e}")
+
+        lang_prompt = {
+            'he': 'בעברית. שמור על מינוח תורני נכון, ארמית, ראשי תיבות וגרסאות.',
+            'yi': 'ביידיש. שמור על מינוח תורני נכון וראשי תיבות.',
+            'en': 'in English.'
+        }.get(language, 'בעברית.')
+
+        prompt = f'תמלל את קובץ השמע הזה {lang_prompt} החזר רק את הטקסט המתומלל ללא הערות.'
+
+        response = client.models.generate_content(
+            model='gemini-2.0-flash',
+            contents=[
+                prompt,
+                gtypes.Part.from_bytes(
+                    data=r.content,
+                    mime_type='audio/wav',
+                ),
+            ],
+        )
+
+        transcript = response.text.strip()
+        log.info(f"Gemini transcription completed, {len(transcript)} chars")
+        return transcript, actual_duration
+
+    except Exception as e:
+        log.error(f"Gemini error: {e}")
+        return None, 0
+        
 def check_soferai_batches():
     from app import app, db
     from models import Recording
