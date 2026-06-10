@@ -6,15 +6,14 @@ log = logging.getLogger(__name__)
 # מגביל מקסימום 5 תמלולי Whisper במקביל — השאר ממתינים בתור
 _whisper_semaphore = threading.Semaphore(5)
 
-def transcribe_async(call_id, rec_url, customer_id, delivery_method, delivered_to, duration_seconds, transcription_tier='basic', language='he'):
+def transcribe_async(call_id, rec_url, customer_id, delivery_method, delivered_to, duration_seconds, transcription_tier='basic', language='he', output_language='he'):
     t = threading.Thread(
         target=_process,
-        args=(call_id, rec_url, customer_id, delivery_method, delivered_to, duration_seconds, transcription_tier, language),
+        args=(call_id, rec_url, customer_id, delivery_method, delivered_to, duration_seconds, transcription_tier, language, output_language),
     )
     t.start()
 
-def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, duration_seconds, transcription_tier='basic', language='he'):
-    from app import app, db
+def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, duration_seconds, transcription_tier='basic', language='he', output_language='he'):    from app import app, db
     from models import Recording, Customer, Transaction
     with app.app_context():
         try:
@@ -30,7 +29,7 @@ def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, durat
 
             if tier == 'gemini':
                 log.info(f"Using Gemini for customer {customer_id}")
-                transcript_raw, actual_duration = _gemini_from_url(rec_url, language)
+                transcript_raw, actual_duration = _gemini_from_url(rec_url, language, output_language)
                 transcript_fixed = transcript_raw
 
             elif tier == 'premium':
@@ -167,9 +166,9 @@ def _soferai_submit_batch(rec_url, call_id, language='he'):
         log.error(f"Sofer.ai batch submit error: {e}")
         return None, 0
 
-def _gemini_from_url(url, language='he'):
+def _gemini_from_url(url, language='he', output_language='he'):
     try:
-        import wave, io
+        import wave, audioop, io
         from google import genai
         from google.genai import types as gtypes
 
@@ -181,27 +180,71 @@ def _gemini_from_url(url, language='he'):
         log.info(f"Downloaded {len(r.content)} bytes for Gemini")
 
         actual_duration = 0
+        audio_content = r.content
+
         try:
             with wave.open(io.BytesIO(r.content)) as wav_in:
-                actual_duration = wav_in.getnframes() // wav_in.getframerate()
-            log.info(f"Duration: {actual_duration}s")
+                frames = wav_in.readframes(wav_in.getnframes())
+                sampwidth = wav_in.getsampwidth()
+                nchannels = wav_in.getnchannels()
+                framerate = wav_in.getframerate()
+                actual_duration = wav_in.getnframes() // framerate
+
+            log.info(f"Duration: {actual_duration}s, framerate: {framerate}Hz")
+
+            # upsampling ל-16000Hz לשיפור איכות
+            if framerate != 16000:
+                frames, _ = audioop.ratecv(frames, sampwidth, nchannels, framerate, 16000, None)
+                framerate = 16000
+                log.info("Upsampled to 16000Hz for Gemini")
+
+                output_buffer = io.BytesIO()
+                with wave.open(output_buffer, 'wb') as wav_out:
+                    wav_out.setnchannels(nchannels)
+                    wav_out.setsampwidth(sampwidth)
+                    wav_out.setframerate(16000)
+                    wav_out.writeframes(frames)
+                audio_content = output_buffer.getvalue()
+
         except Exception as e:
-            log.warning(f"Could not read WAV metadata: {e}")
+            log.warning(f"Could not process WAV: {e}, using original")
 
-        lang_prompt = {
-            'he': 'בעברית. שמור על מינוח תורני נכון, ארמית, ראשי תיבות וגרסאות.',
-            'yi': 'ביידיש. שמור על מינוח תורני נכון וראשי תיבות.',
-            'en': 'in English.'
-        }.get(language, 'בעברית.')
+        # שפת הקלט
+        input_lang_map = {
+            'he': 'עברית',
+            'yi': 'יידיש',
+            'en': 'English'
+        }
+        # שפת הפלט
+        output_lang_map = {
+            'he': 'עברית',
+            'yi': 'יידיש',
+            'en': 'English'
+        }
 
-        prompt = f'תמלל את קובץ השמע הזה {lang_prompt} החזר רק את הטקסט המתומלל ללא הערות.'
+        input_lang_name = input_lang_map.get(language, 'עברית')
+        output_lang_name = output_lang_map.get(output_language, 'עברית')
+
+        if output_language == 'he':
+            output_instruction = 'כתוב את התמלול בעברית בלבד. אל תשתמש באותיות לטיניות.'
+        elif output_language == 'yi':
+            output_instruction = 'שרייב די טראנסקריפציע אויף יידיש בלעבד.'
+        else:
+            output_instruction = 'Write the transcription in English only.'
+
+        prompt = f"""תמלל את קובץ השמע הזה.
+שפת הדובר: {input_lang_name}.
+{output_instruction}
+חשוב מאוד: תמלל כל מילה ומילה — אל תדלג על אף מילה, אפילו אם הקול לא ברור.
+שמור על מינוח תורני נכון, ארמית, ראשי תיבות וגרסאות.
+החזר רק את הטקסט המתומלל ללא הערות נוספות."""
 
         response = client.models.generate_content(
             model='gemini-3.5-flash',
             contents=[
                 prompt,
                 gtypes.Part.from_bytes(
-                    data=r.content,
+                    data=audio_content,
                     mime_type='audio/wav',
                 ),
             ],
