@@ -266,6 +266,22 @@ def _gemini_from_url(url, language='he', output_language='he'):
 
         transcript = response.text.strip()
         log.info(f"Gemini transcription completed, {len(transcript)} chars")
+
+        # אם ביקשו פלט בעברית אבל הקלט ביידיש — תרגם בקריאה נפרדת
+        if language == 'yi' and output_language == 'he':
+            log.info("Translating Yiddish to Hebrew...")
+            translate_response = client.models.generate_content(
+                model='gemini-3.5-flash',
+                contents=[f"""תרגם את הטקסט הבא מיידיש לעברית תקנית.
+ביטויים ופסוקים בעברית/ארמית — השאר כפי שהם.
+החזר רק את הטקסט המתורגם ללא הערות.
+
+טקסט לתרגום:
+{transcript}"""],
+            )
+            transcript = translate_response.text.strip()
+            log.info(f"Translation completed, {len(transcript)} chars")
+
         return transcript, actual_duration
 
     except Exception as e:
