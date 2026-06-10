@@ -253,20 +253,28 @@ def _gemini_from_url(url, language='he', output_language='he'):
 - אל תסכם, אל תקצר, אל תדלג על חלקים.
 - שמור על מינוח תורני נכון, ארמית, ראשי תיבות וגרסאות.
 - החזר רק את הטקסט המתומלל ללא הערות נוספות."""
-        response = client.models.generate_content(
-            model='gemini-3.5-flash',
-            contents=[
-                prompt,
-                gtypes.Part.from_bytes(
-                    data=audio_content,
-                    mime_type='audio/wav',
-                ),
-            ],
-        )
-
-        transcript = response.text.strip()
-        log.info(f"Gemini transcription completed, {len(transcript)} chars")
-
+        transcript = None
+        for attempt in range(5):
+            try:
+                response = client.models.generate_content(
+                    model='gemini-3.5-flash',
+                    contents=[
+                        prompt,
+                        gtypes.Part.from_bytes(
+                            data=audio_content,
+                            mime_type='audio/wav',
+                        ),
+                    ],
+                )
+                transcript = response.text.strip()
+                log.info(f"Gemini transcription completed, {len(transcript)} chars")
+                break
+            except Exception as ge:
+                log.warning(f"Gemini attempt {attempt+1} failed: {ge}")
+                if attempt < 4:
+                    time.sleep(15)
+                else:
+                    raise
         # אם ביקשו פלט בעברית אבל הקלט ביידיש — תרגם בקריאה נפרדת
         if language == 'yi' and output_language == 'he':
             log.info("Translating Yiddish to Hebrew...")
