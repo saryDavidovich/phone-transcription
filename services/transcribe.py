@@ -168,6 +168,7 @@ def _soferai_submit_batch(rec_url, call_id, language='he'):
         return None, 0
 
 def _gemini_from_url(url, language='he', output_language='he'):
+    log.info(f"Gemini: language={language}, output_language={output_language}")
     try:
         import wave, audioop, io
         from google import genai
