@@ -197,7 +197,7 @@ def _gemini_from_url(url, language='he'):
         prompt = f'תמלל את קובץ השמע הזה {lang_prompt} החזר רק את הטקסט המתומלל ללא הערות.'
 
         response = client.models.generate_content(
-            model='gemini-2.0-flash',
+            model='gemini-1.5-flash',
             contents=[
                 prompt,
                 gtypes.Part.from_bytes(
