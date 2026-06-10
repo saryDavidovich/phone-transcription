@@ -48,7 +48,8 @@ def transcribe():
     delivery_method = data.get('delivery_method', 'email')
     delivered_to = data.get('delivered_to', '')
     transcription_tier = data.get('transcription_tier', 'basic')
-    language = data.get('language', 'he')  # ברירת מחדל עברית
+    language = data.get('language', 'he')
+    output_language = data.get('output_language', 'he')
 
     customer = Customer.query.filter_by(phone=phone).first()
     if not customer:
@@ -74,7 +75,7 @@ def transcribe():
     db.session.add(rec)
     db.session.commit()
 
-    transcribe_async(call_id, rec_url, customer.id, delivery_method, delivered_to, duration, transcription_tier, language)
+    transcribe_async(call_id, rec_url, customer.id, delivery_method, delivered_to, duration, transcription_tier, language, output_language)
     return jsonify({'ok': True, 'call_id': call_id})
 
 @api_bp.route('/manager-message', methods=['POST'])
