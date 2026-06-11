@@ -190,7 +190,7 @@ Return ONLY the domain, nothing else.''',
     except Exception as e:
         return jsonify({'local_part': '', 'error': str(e)}), 500
 
-@api_bp.route('/manager-message-callid/<int:msg_id>', methods=['GET'])
+@api_bp.route('/get-msg/<int:msg_id>', methods=['GET'])
 def get_manager_message_callid(msg_id):
     from models import ManagerMessage
     msg = ManagerMessage.query.get_or_404(msg_id)
