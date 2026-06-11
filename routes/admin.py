@@ -535,3 +535,78 @@ def debug_messages():
         'call_id': m.call_id,
         'rec_url': m.rec_url
     } for m in msgs])
+
+@admin_bp.route('/test-transcribe', methods=['GET', 'POST'])
+@login_required
+def test_transcribe():
+    if request.method == 'POST':
+        import os, uuid, tempfile
+        from services.transcribe import _gemini_from_url, finalize_alefbot_recording, _send_email, _send_fax
+
+        file = request.files.get('audio_file')
+        tier = request.form.get('tier', 'gemini')
+        language = request.form.get('language', 'he')
+        output_language = request.form.get('output_language', 'he')
+        send_method = request.form.get('send_method', 'email')
+        send_to = request.form.get('send_to', '')
+        customer_id = request.form.get('customer_id', '')
+
+        if not file:
+            flash('יש להעלות קובץ')
+            return redirect(url_for('admin.test_transcribe'))
+
+        # שמור קובץ זמנית
+        tmp = tempfile.NamedTemporaryFile(suffix='.wav', delete=False)
+        file.save(tmp.name)
+        tmp.close()
+
+        # בנה URL זמני מה-static
+        import shutil
+        static_dir = os.path.join(os.path.dirname(__file__), '..', 'static', 'fax_tmp')
+        os.makedirs(static_dir, exist_ok=True)
+        filename = f"test_{uuid.uuid4().hex}.wav"
+        dest_path = os.path.join(static_dir, filename)
+        shutil.copy(tmp.name, dest_path)
+        os.remove(tmp.name)
+
+        base_url = os.environ.get('APP_BASE_URL', '').rstrip('/')
+        rec_url = f"{base_url}/static/fax_tmp/{filename}"
+
+        customer = Customer.query.get(int(customer_id)) if customer_id else None
+
+        try:
+            if tier == 'gemini':
+                transcript, duration = _gemini_from_url(rec_url, language, output_language)
+            else:
+                # AlefBot — שלח ישירות
+                from services.transcribe import _alefbot_submit
+                job_id, duration = _alefbot_submit(rec_url, f"test_{uuid.uuid4().hex[:8]}")
+                flash(f'אלף בוט קיבל את הקובץ — job_id: {job_id}. התמלול יגיע ב-webhook.')
+                return redirect(url_for('admin.test_transcribe'))
+
+            if not transcript:
+                flash('התמלול נכשל')
+                return redirect(url_for('admin.test_transcribe'))
+
+            if send_to and customer:
+                if send_method == 'email':
+                    _send_email(send_to, transcript, customer, rec_url, duration)
+                    flash(f'תמלול נשלח למייל: {send_to}')
+                else:
+                    _send_fax(send_to, transcript, customer, duration)
+                    flash(f'תמלול נשלח לפקס: {send_to}')
+            else:
+                flash('התמלול הושלם — לא נשלח (לא הוזן לקוח/כתובת)')
+
+            return render_template('admin/test_transcribe.html',
+                transcript=transcript,
+                duration=duration,
+                customers=Customer.query.order_by(Customer.name).all()
+            )
+
+        except Exception as e:
+            flash(f'שגיאה: {e}')
+            return redirect(url_for('admin.test_transcribe'))
+
+    customers = Customer.query.order_by(Customer.name).all()
+    return render_template('admin/test_transcribe.html', transcript=None, customers=customers)
