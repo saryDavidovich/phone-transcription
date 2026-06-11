@@ -183,6 +183,7 @@ def extract_email_domain():
         )
         domain = response.text.strip().lower()
         domain = ''.join(c for c in domain if c.isalnum() or c in '.-')
+        print(f"DEBUG domain: raw='{response.text}' clean='{domain}'", flush=True)
         return jsonify({'local_part': domain})
 
     except Exception as e:
