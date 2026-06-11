@@ -78,6 +78,35 @@ def transcribe():
     transcribe_async(call_id, rec_url, customer.id, delivery_method, delivered_to, duration, transcription_tier, language, output_language)
     return jsonify({'ok': True, 'call_id': call_id})
 
+@api_bp.route('/alefbot-webhook', methods=['POST'])
+def alefbot_webhook():
+    from services.transcribe import finalize_alefbot_recording
+    import requests as req
+    import os
+    data = request.json
+    if not data:
+        return jsonify({'ok': False}), 400
+
+    status = data.get('status', '')
+    call_id = data.get('client_reference', '')
+    job_id = data.get('job_id', '')
+
+    if status == 'completed' and call_id and job_id:
+        api_key = os.environ.get('ALEFBOT_API_KEY')
+        try:
+            r = req.get(
+                f'https://alef-bot.top/api/v1/transcriptions/{job_id}/artifact?format=txt',
+                headers={'Authorization': f'Bearer {api_key}'},
+                timeout=60
+            )
+            r.raise_for_status()
+            transcript = r.text.strip()
+            finalize_alefbot_recording(call_id, transcript)
+        except Exception as e:
+            return jsonify({'ok': False, 'error': str(e)}), 500
+
+    return jsonify({'ok': True})
+
 @api_bp.route('/manager-message', methods=['POST'])
 def receive_manager_message():
     from models import ManagerMessage
@@ -99,6 +128,8 @@ def receive_manager_message():
 @api_bp.route('/extract-email-local', methods=['POST'])
 def extract_email_local():
     import os, requests as req
+    from google import genai
+    from google.genai import types as gtypes
     data = request.json
     rec_url = data.get('rec_url')
 
@@ -109,44 +140,17 @@ def extract_email_local():
         r = req.get(rec_url, timeout=30)
         r.raise_for_status()
 
-        import tempfile
-        with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as f:
-            f.write(r.content)
-            tmp_path = f.name
-
-        from openai import OpenAI
-        client = OpenAI(api_key=os.environ.get('OPENAI_API_KEY'))
-        with open(tmp_path, 'rb') as f:
-            result = client.audio.transcriptions.create(
-                model='whisper-1',
-                file=f,
-                language='he',
-                response_format='text'
-            )
-        os.remove(tmp_path)
-
-        transcript = result.strip()
-
-        import anthropic
-        claude = anthropic.Anthropic(api_key=os.environ.get('ANTHROPIC_API_KEY'))
-        msg = claude.messages.create(
-            model='claude-sonnet-4-5',
-            max_tokens=100,
-            messages=[{
-                'role': 'user',
-                'content': f'''המשתמש הקליט את שם המייל שלו (החלק לפני ה-@).
-התמלול הוא: "{transcript}"
-החזר רק את שם המייל באנגלית קטנה, ללא רווחים, ללא @ ללא סיומת דומיין.
-לדוגמה אם אמר "יוסי כהן" החזר "yossycohen".
-אם אמר "david123" החזר "david123".
-החזר רק את הטקסט עצמו ללא שום הסבר.'''
-            }]
+        client = genai.Client(api_key=os.environ.get('GOOGLE_API_KEY'))
+        response = client.models.generate_content(
+            model='gemini-3.5-flash',
+            contents=[
+                'המשתמש הקליט את שם המייל שלו (החלק לפני ה-@). החזר רק את שם המייל באנגלית קטנה, ללא רווחים, ללא @ ללא סיומת דומיין. לדוגמה אם אמר "יוסי כהן" החזר "yossycohen". החזר רק את הטקסט עצמו ללא שום הסבר.',
+                gtypes.Part.from_bytes(data=r.content, mime_type='audio/wav'),
+            ],
         )
-
-        local_part = msg.content[0].text.strip().lower()
+        local_part = response.text.strip().lower()
         local_part = ''.join(c for c in local_part if c.isalnum() or c in '._-')
-
-        return jsonify({'local_part': local_part, 'transcript': transcript})
+        return jsonify({'local_part': local_part})
 
     except Exception as e:
         return jsonify({'local_part': '', 'error': str(e)}), 500
