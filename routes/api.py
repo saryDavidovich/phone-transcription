@@ -154,3 +154,36 @@ def extract_email_local():
 
     except Exception as e:
         return jsonify({'local_part': '', 'error': str(e)}), 500
+
+@api_bp.route('/extract-email-domain', methods=['POST'])
+def extract_email_domain():
+    import os, requests as req
+    from google import genai
+    from google.genai import types as gtypes
+    data = request.json
+    rec_url = data.get('rec_url')
+
+    if not rec_url:
+        return jsonify({'local_part': ''}), 400
+
+    try:
+        r = req.get(rec_url, timeout=30)
+        r.raise_for_status()
+
+        client = genai.Client(api_key=os.environ.get('GOOGLE_API_KEY'))
+        response = client.models.generate_content(
+            model='gemini-3.5-flash',
+            contents=[
+                '''המשתמש הקליט את סיומת המייל שלו (החלק אחרי ה-@).
+הוא אמר אותיות באנגלית ונקודה — לדוגמה "G M A I L נקודה C O M".
+החזר את הסיומת המלאה באנגלית קטנה כולל נקודה — לדוגמה "gmail.com".
+החזר רק את הסיומת עצמה ללא שום הסבר.''',
+                gtypes.Part.from_bytes(data=r.content, mime_type='audio/wav'),
+            ],
+        )
+        domain = response.text.strip().lower()
+        domain = ''.join(c for c in domain if c.isalnum() or c in '.-')
+        return jsonify({'local_part': domain})
+
+    except Exception as e:
+        return jsonify({'local_part': '', 'error': str(e)}), 500
