@@ -1,0 +1,67 @@
+{% extends 'admin/base.html' %}
+{% block title %}בדיקת תמלול{% endblock %}
+{% block page_title %}🧪 בדיקת תמלול{% endblock %}
+{% block content %}
+<div class="card" dir="rtl">
+  <form method="POST" enctype="multipart/form-data">
+    <div class="grid-2">
+      <div class="form-group">
+        <label class="form-label">קובץ שמע (WAV/MP3)</label>
+        <input class="form-input" type="file" name="audio_file" accept="audio/*" required>
+      </div>
+      <div class="form-group">
+        <label class="form-label">שיטת תמלול</label>
+        <select class="form-input" name="tier">
+          <option value="gemini">Gemini (רגיל)</option>
+          <option value="premium">אלף בוט (מקצועי)</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">שפת הקלטה</label>
+        <select class="form-input" name="language">
+          <option value="he">עברית</option>
+          <option value="yi">יידיש</option>
+          <option value="en">אנגלית</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">שפת פלט</label>
+        <select class="form-input" name="output_language">
+          <option value="he">עברית</option>
+          <option value="yi">יידיש</option>
+          <option value="en">אנגלית</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">שלח לקוח</label>
+        <select class="form-input" name="customer_id">
+          <option value="">— ללא שליחה —</option>
+          {% for c in customers %}
+          <option value="{{ c.id }}">{{ c.name or c.phone }} ({{ c.phone }})</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">שיטת שליחה</label>
+        <select class="form-input" name="send_method">
+          <option value="email">מייל</option>
+          <option value="fax">פקס</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">כתובת מייל / פקס לשליחה</label>
+        <input class="form-input" type="text" name="send_to" placeholder="email@example.com">
+      </div>
+    </div>
+    <button class="btn btn-primary" type="submit">▶️ תמלל</button>
+    <a href="{{ url_for('admin.settings') }}" class="btn" style="margin-right:8px">חזרה</a>
+  </form>
+</div>
+
+{% if transcript %}
+<div class="card" style="margin-top:24px" dir="rtl">
+  <div style="font-size:16px;font-weight:700;margin-bottom:12px">✅ תוצאת תמלול ({{ duration }} שניות)</div>
+  <div style="background:#f9fafb;border-right:4px solid #10b981;padding:16px;border-radius:8px;line-height:1.8;white-space:pre-wrap">{{ transcript }}</div>
+</div>
+{% endif %}
+{% endblock %}
