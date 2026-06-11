@@ -572,7 +572,9 @@ def test_transcribe():
         base_url = os.environ.get('APP_BASE_URL', '').rstrip('/')
         rec_url = f"{base_url}/static/fax_tmp/{filename}"
 
-        customer = Customer.query.get(int(customer_id)) if customer_id else None
+        customer = Customer.query.get(int(customer_id)) if customer_id and customer_id.isdigit() else None
+        if customer and not send_to:
+            send_to = customer.email if send_method == 'email' else customer.fax
 
         try:
             if tier == 'gemini':
