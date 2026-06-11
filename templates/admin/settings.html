@@ -9,12 +9,12 @@
       <div class="form-group">
         <label class="form-label">מחיר תמלול רגיל ל-20 דקות (₪)</label>
         <input class="form-input" name="price_per_20min_basic" type="number" step="0.01" value="{{ settings.price_per_20min_basic }}">
-        <div style="font-size:11px;color:#4a5568;margin-top:4px">Whisper + Claude</div>
+        <div style="font-size:11px;color:#4a5568;margin-top:4px">Gemini</div>
       </div>
       <div class="form-group">
         <label class="form-label">מחיר תמלול מקצועי ל-20 דקות (₪)</label>
         <input class="form-input" name="price_per_20min_premium" type="number" step="0.01" value="{{ settings.price_per_20min_premium }}">
-        <div style="font-size:11px;color:#4a5568;margin-top:4px">Sofer.ai</div>
+        <div style="font-size:11px;color:#4a5568;margin-top:4px">אלף בוט</div>
       </div>
       <div class="form-group">
         <label class="form-label">יתרה מינימלית להקלטה (₪)</label>
@@ -46,4 +46,9 @@
     <button class="btn btn-primary" type="submit" style="font-size:15px;padding:12px 24px">💾 שמור הגדרות</button>
   </div>
 </form>
+
+<div class="card" style="margin-top:24px">
+  <div style="font-size:16px;font-weight:700;margin-bottom:20px">🧪 בדיקת תמלול — העלאת קובץ</div>
+  <a href="{{ url_for('admin.test_transcribe') }}" class="btn btn-primary">פתח עמוד בדיקת תמלול</a>
+</div>
 {% endblock %}
