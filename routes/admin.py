@@ -294,7 +294,7 @@ def send_recordings(id):
         try:
             rec_url = f'https://www.call2all.co.il/ym/api/DownloadFile?token={os.environ.get("YEMOT_TOKEN","")}&path=ivr2:/recordings/{rec.call_id}.wav'
             if send_method == 'email':
-                _send_email(send_to, rec.summary, rec.transcript, customer, rec_url, rec.duration_seconds)
+                _send_email(send_to, rec.transcript, customer, rec_url, rec.duration_seconds)
             else:
                 _send_fax(send_to, rec.transcript, customer, rec.duration_seconds)
             sent += 1
