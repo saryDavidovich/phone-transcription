@@ -61,7 +61,7 @@ def _migrate_db():
     try:
         with db.engine.connect() as conn:
             conn.execute(db.text("ALTER TABLE customers ADD COLUMN IF NOT EXISTS transcription_tier VARCHAR(10) DEFAULT 'basic'"))
-            conn.execute(db.text("ALTER TABLE recordings ADD COLUMN IF NOT EXISTS soferai_batch_id VARCHAR(100)"))
+            conn.execute(db.text("ALTER TABLE recordings ADD COLUMN IF NOT EXISTS alefbot_job_id VARCHAR(100)"))
             conn.execute(db.text("ALTER TABLE recordings ADD COLUMN IF NOT EXISTS rec_url VARCHAR(500)"))
             conn.commit()
         logging.getLogger(__name__).info("Migration: all columns ready")
