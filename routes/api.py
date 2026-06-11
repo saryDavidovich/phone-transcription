@@ -174,10 +174,11 @@ def extract_email_domain():
         response = client.models.generate_content(
             model='gemini-3.5-flash',
             contents=[
-                '''המשתמש הקליט את סיומת המייל שלו (החלק אחרי ה-@).
-הוא אמר אותיות באנגלית ונקודה — לדוגמה "G M A I L נקודה C O M".
-החזר את הסיומת המלאה באנגלית קטנה כולל נקודה — לדוגמה "gmail.com".
-החזר רק את הסיומת עצמה ללא שום הסבר.''',
+                '''The user recorded their email domain letter by letter in English.
+For example they said "G M A I L dot C O M" or "G M A I L נקודה C O M".
+Return the full domain in lowercase including the dot extension.
+Examples: "gmail.com", "yahoo.com", "walla.co.il"
+Return ONLY the domain, nothing else.''',
                 gtypes.Part.from_bytes(data=r.content, mime_type='audio/wav'),
             ],
         )
