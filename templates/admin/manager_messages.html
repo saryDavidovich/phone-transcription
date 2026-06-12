@@ -76,18 +76,18 @@
       </td>
 
       <!-- סטטוס + הערה inline -->
-      <td>
-        <form method="POST" action="{{ url_for('admin.update_message_status', id=msg.id) }}" class="d-flex flex-column gap-1">
-          <div class="d-flex gap-1">
-          <select name="status" class="form-select form-select-sm" onchange="this.form.submit()" style="font-size:11px;width:80px;flex-shrink:0">
-            <option value="new"         {{ 'selected' if msg.status == 'new' }}>חדש</option>
-            <option value="in_progress" {{ 'selected' if msg.status == 'in_progress' }}>בטיפול</option>
-            <option value="done"        {{ 'selected' if msg.status == 'done' }}>טופל</option>
-          </select>
-          <input type="text" name="admin_note" class="form-control form-control-sm"
-                 placeholder="הערה..." value="{{ msg.admin_note or '' }}"
-                 style="font-size:11px"
-                 onblur="this.form.submit()">
+      <td style="min-width:300px">
+        <form method="POST" action="{{ url_for('admin.update_message_status', id=msg.id) }}">
+          <div class="d-flex gap-1 align-items-center">
+            <select name="status" class="form-select form-select-sm" onchange="this.form.submit()" style="font-size:11px;width:85px;flex-shrink:0">
+              <option value="new"         {{ 'selected' if msg.status == 'new' }}>חדש</option>
+              <option value="in_progress" {{ 'selected' if msg.status == 'in_progress' }}>בטיפול</option>
+              <option value="done"        {{ 'selected' if msg.status == 'done' }}>טופל</option>
+            </select>
+            <input type="text" name="admin_note" class="form-control form-control-sm flex-grow-1"
+                   placeholder="הערה..." value="{{ msg.admin_note or '' }}"
+                   style="font-size:11px"
+                   onblur="this.form.submit()">
           </div>
         </form>
       </td>
