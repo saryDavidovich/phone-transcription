@@ -64,7 +64,7 @@
       <td><strong>{{ msg.id }}</strong></td>
 
       <!-- תאריך -->
-      <td style="font-size:11px">{{ msg.created_at.strftime('%d/%m %H:%M') }}</td>
+      <td style="font-size:11px">{{ (msg.created_at + timedelta(hours=3)).strftime('%d/%m %H:%M') }}</td>
 
       <!-- טלפון -->
       <td><strong>{{ msg.phone }}</strong></td>
@@ -78,7 +78,8 @@
       <!-- סטטוס + הערה inline -->
       <td>
         <form method="POST" action="{{ url_for('admin.update_message_status', id=msg.id) }}" class="d-flex flex-column gap-1">
-          <select name="status" class="form-select form-select-sm" onchange="this.form.submit()" style="font-size:11px">
+          <div class="d-flex gap-1">
+          <select name="status" class="form-select form-select-sm" onchange="this.form.submit()" style="font-size:11px;width:80px;flex-shrink:0">
             <option value="new"         {{ 'selected' if msg.status == 'new' }}>חדש</option>
             <option value="in_progress" {{ 'selected' if msg.status == 'in_progress' }}>בטיפול</option>
             <option value="done"        {{ 'selected' if msg.status == 'done' }}>טופל</option>
@@ -87,6 +88,7 @@
                  placeholder="הערה..." value="{{ msg.admin_note or '' }}"
                  style="font-size:11px"
                  onblur="this.form.submit()">
+          </div>
         </form>
       </td>
 
