@@ -3,17 +3,27 @@
 {% block content %}
 <div class="container-fluid py-4" dir="rtl">
 
-  <div class="d-flex justify-content-between align-items-center mb-4">
+  <div class="d-flex justify-content-between align-items-center mb-3">
     <h2>📬 הודעות למנהל</h2>
-    <div class="btn-group">
-      <a href="{{ url_for('admin.manager_messages') }}"
-         class="btn btn-sm {{ 'btn-primary' if not status_filter else 'btn-outline-primary' }}">הכל</a>
-      <a href="{{ url_for('admin.manager_messages', status='new') }}"
-         class="btn btn-sm {{ 'btn-warning' if status_filter=='new' else 'btn-outline-warning' }}">חדש</a>
-      <a href="{{ url_for('admin.manager_messages', status='in_progress') }}"
-         class="btn btn-sm {{ 'btn-info' if status_filter=='in_progress' else 'btn-outline-info' }}">בטיפול</a>
-      <a href="{{ url_for('admin.manager_messages', status='done') }}"
-         class="btn btn-sm {{ 'btn-success' if status_filter=='done' else 'btn-outline-success' }}">טופל</a>
+    <div class="d-flex gap-2 align-items-center">
+      <!-- פילטר סטטוס -->
+      <div class="btn-group btn-group-sm">
+        <a href="{{ url_for('admin.manager_messages') }}" class="btn {{ 'btn-primary' if not status_filter else 'btn-outline-primary' }}">הכל</a>
+        <a href="{{ url_for('admin.manager_messages', status='new') }}" class="btn {{ 'btn-warning' if status_filter=='new' else 'btn-outline-warning' }}">חדש</a>
+        <a href="{{ url_for('admin.manager_messages', status='in_progress') }}" class="btn {{ 'btn-info' if status_filter=='in_progress' else 'btn-outline-info' }}">בטיפול</a>
+        <a href="{{ url_for('admin.manager_messages', status='done') }}" class="btn {{ 'btn-success' if status_filter=='done' else 'btn-outline-success' }}">טופל</a>
+      </div>
+      <!-- פעולות מרובות -->
+      <div class="d-flex gap-1" id="bulk-actions" style="display:none!important">
+        <select id="bulk-status" class="form-select form-select-sm" style="width:120px">
+          <option value="">שנה סטטוס...</option>
+          <option value="new">חדש</option>
+          <option value="in_progress">בטיפול</option>
+          <option value="done">טופל</option>
+        </select>
+        <button onclick="bulkUpdateStatus()" class="btn btn-sm btn-primary">✔ עדכן</button>
+        <button onclick="bulkDelete()" class="btn btn-sm btn-danger">🗑 מחק</button>
+      </div>
     </div>
   </div>
 
@@ -31,114 +41,63 @@
     <div class="alert alert-info">אין הודעות</div>
   {% else %}
   <div class="table-responsive">
-  <table class="table table-hover align-middle">
+  <table class="table table-hover align-middle table-sm" style="font-size:13px">
     <thead class="table-dark">
       <tr>
-        <th>#</th>
-        <th>תאריך</th>
-        <th>טלפון</th>
-        <th>שם</th>
-        <th>מייל</th>
-        <th>פקס</th>
-        <th>שיטת שליחה</th>
-        <th>הקשבה</th>
-        <th>סטטוס</th>
-        <th>פעולות</th>
+        <th style="width:32px"><input type="checkbox" id="select-all" onchange="toggleAll(this)"></th>
+        <th style="width:40px">#</th>
+        <th style="width:120px">תאריך</th>
+        <th style="width:110px">טלפון</th>
+        <th>שם / מייל</th>
+        <th style="width:160px">סטטוס + הערה</th>
+        <th style="width:60px">פעולה</th>
       </tr>
     </thead>
     <tbody>
     {% for msg in messages %}
-    <tr class="{{ 'table-warning' if msg.status == 'new' else ('table-info' if msg.status == 'in_progress' else '') }}">
-      <td>{{ msg.id }}</td>
-      <td>{{ msg.created_at.strftime('%d/%m/%Y %H:%M') }}</td>
+    <tr class="{{ 'table-warning' if msg.status == 'new' else ('table-info' if msg.status == 'in_progress' else '') }}" id="row-{{ msg.id }}">
+
+      <!-- checkbox -->
+      <td><input type="checkbox" class="msg-checkbox" value="{{ msg.id }}" onchange="updateBulkActions()"></td>
+
+      <!-- ID -->
+      <td><strong>{{ msg.id }}</strong></td>
+
+      <!-- תאריך -->
+      <td style="font-size:11px">{{ msg.created_at.strftime('%d/%m %H:%M') }}</td>
+
+      <!-- טלפון -->
       <td><strong>{{ msg.phone }}</strong></td>
-      <td>{{ msg.name or '—' }}</td>
-      <td>{{ msg.email or '—' }}</td>
-      <td>{{ msg.fax or '—' }}</td>
-      <td>
-        {% if msg.delivery_method == 'email' %}
-          <span class="badge bg-primary">מייל</span>
-        {% elif msg.delivery_method == 'fax' %}
-          <span class="badge bg-secondary">פקס</span>
-        {% else %}
-          <span class="badge bg-light text-dark">—</span>
-        {% endif %}
+
+      <!-- שם / מייל -->
+      <td style="font-size:11px">
+        {% if msg.name %}{{ msg.name }}<br>{% endif %}
+        {% if msg.email %}<span class="text-muted">{{ msg.email }}</span>{% endif %}
       </td>
 
-      <!-- כפתור האזנה -->
+      <!-- סטטוס + הערה inline -->
       <td>
-        {% if msg.rec_url %}
-        <button onclick="playAudio(this, {{ msg.id }})" class="btn btn-sm btn-outline-info">▶️ האזן</button>
-        <audio id="audio-{{ msg.id }}" controls style="height:32px; min-width:200px; display:none;"></audio>
-        {% else %}
-          <span class="text-muted">אין הקלטה</span>
-        {% endif %}
+        <form method="POST" action="{{ url_for('admin.update_message_status', id=msg.id) }}" class="d-flex flex-column gap-1">
+          <select name="status" class="form-select form-select-sm" onchange="this.form.submit()" style="font-size:11px">
+            <option value="new"         {{ 'selected' if msg.status == 'new' }}>חדש</option>
+            <option value="in_progress" {{ 'selected' if msg.status == 'in_progress' }}>בטיפול</option>
+            <option value="done"        {{ 'selected' if msg.status == 'done' }}>טופל</option>
+          </select>
+          <input type="text" name="admin_note" class="form-control form-control-sm"
+                 placeholder="הערה..." value="{{ msg.admin_note or '' }}"
+                 style="font-size:11px"
+                 onblur="this.form.submit()">
+        </form>
       </td>
 
-      <!-- סטטוס -->
+      <!-- מחק -->
       <td>
-        {% if msg.status == 'new' %}
-          <span class="badge bg-warning text-dark">חדש</span>
-        {% elif msg.status == 'in_progress' %}
-          <span class="badge bg-info">בטיפול</span>
-        {% else %}
-          <span class="badge bg-success">טופל</span>
-        {% endif %}
-        {% if msg.admin_note %}
-          <br><small class="text-muted">{{ msg.admin_note }}</small>
-        {% endif %}
-      </td>
-
-      <!-- פעולות -->
-      <td>
-        <div class="d-flex gap-1 flex-wrap">
-          <button class="btn btn-sm btn-outline-secondary"
-                  data-bs-toggle="modal"
-                  data-bs-target="#statusModal{{ msg.id }}">
-            ✏️ עדכן
-          </button>
-          <form method="POST"
-                action="{{ url_for('admin.delete_manager_message', id=msg.id) }}"
-                onsubmit="return confirm('למחוק פניה זו?')">
-            <button type="submit" class="btn btn-sm btn-outline-danger">🗑️ מחק</button>
-          </form>
-        </div>
+        <form method="POST" action="{{ url_for('admin.delete_manager_message', id=msg.id) }}"
+              onsubmit="return confirm('למחוק?')">
+          <button type="submit" class="btn btn-sm btn-outline-danger px-1">🗑</button>
+        </form>
       </td>
     </tr>
-
-    <!-- Modal עדכון סטטוס -->
-    <div class="modal fade" id="statusModal{{ msg.id }}" tabindex="-1">
-      <div class="modal-dialog">
-        <div class="modal-content" dir="rtl">
-          <div class="modal-header">
-            <h5 class="modal-title">עדכון סטטוס — {{ msg.phone }}</h5>
-            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-          </div>
-          <form method="POST" action="{{ url_for('admin.update_message_status', id=msg.id) }}">
-            <div class="modal-body">
-              <div class="mb-3">
-                <label class="form-label">סטטוס</label>
-                <select name="status" class="form-select">
-                  <option value="new"         {{ 'selected' if msg.status == 'new' }}>חדש</option>
-                  <option value="in_progress" {{ 'selected' if msg.status == 'in_progress' }}>בטיפול</option>
-                  <option value="done"        {{ 'selected' if msg.status == 'done' }}>טופל</option>
-                </select>
-              </div>
-              <div class="mb-3">
-                <label class="form-label">הערת מנהל</label>
-                <textarea name="admin_note" class="form-control" rows="3">{{ msg.admin_note or '' }}</textarea>
-              </div>
-            </div>
-            <div class="modal-footer">
-              <button type="submit" class="btn btn-primary">שמור</button>
-              <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">ביטול</button>
-            </div>
-          </form>
-        </div>
-      </div>
-    </div>
-    <!-- /Modal -->
-
     {% endfor %}
     </tbody>
   </table>
@@ -147,28 +106,42 @@
 </div>
 
 <script>
-function playAudio(btn, id) {
-    const audio = document.getElementById('audio-' + id);
-    if (audio.src && audio.src !== window.location.href) {
-        audio.style.display = 'inline';
-        audio.play();
-        return;
-    }
-    btn.textContent = '⏳ טוען...';
-    btn.disabled = true;
-    fetch('/admin/messages/' + id + '/play')
-        .then(r => r.blob())
-        .then(blob => {
-            const audioBlob = new Blob([blob], {type: 'audio/wav'});
-            audio.src = URL.createObjectURL(audioBlob);
-            audio.style.display = 'inline';
-            audio.play();
-            btn.style.display = 'none';
-        })
-        .catch(e => {
-            btn.textContent = '❌ שגיאה';
-            btn.disabled = false;
-        });
+function toggleAll(cb) {
+    document.querySelectorAll('.msg-checkbox').forEach(c => c.checked = cb.checked);
+    updateBulkActions();
+}
+
+function updateBulkActions() {
+    const checked = document.querySelectorAll('.msg-checkbox:checked').length;
+    const bulk = document.getElementById('bulk-actions');
+    bulk.style.display = checked > 0 ? 'flex' : 'none';
+}
+
+function getCheckedIds() {
+    return Array.from(document.querySelectorAll('.msg-checkbox:checked')).map(c => c.value);
+}
+
+function bulkUpdateStatus() {
+    const status = document.getElementById('bulk-status').value;
+    if (!status) return alert('בחר סטטוס');
+    const ids = getCheckedIds();
+    if (!ids.length) return;
+    fetch('/admin/messages/bulk-status', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ids, status})
+    }).then(() => location.reload());
+}
+
+function bulkDelete() {
+    const ids = getCheckedIds();
+    if (!ids.length) return;
+    if (!confirm(`למחוק ${ids.length} הודעות?`)) return;
+    fetch('/admin/messages/bulk-delete', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ids})
+    }).then(() => location.reload());
 }
 </script>
 {% endblock %}
