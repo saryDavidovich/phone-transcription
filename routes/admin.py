@@ -484,7 +484,7 @@ def manager_messages():
     if status_filter:
         query = query.filter_by(status=status_filter)
     messages = query.order_by(ManagerMessage.created_at.desc()).all()
-    return render_template('admin/manager_messages.html', messages=messages, status_filter=status_filter)
+    return render_template('admin/manager_messages.html', messages=messages, status_filter=status_filter, timedelta=timedelta)
 
 
 @admin_bp.route('/messages/<int:id>/play')
