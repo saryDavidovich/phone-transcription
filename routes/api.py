@@ -111,17 +111,17 @@ def alefbot_webhook():
 def receive_manager_message():
     from models import ManagerMessage
     data = request.json
-    msg = ManagerMessage(
-        phone           = data.get('phone', ''),
-        name            = data.get('name', ''),
-        email           = data.get('email', ''),
-        fax             = data.get('fax', ''),
-        delivery_method = data.get('delivery_method', ''),
-        call_id         = data.get('call_id', ''),
-        rec_url         = data.get('rec_url', ''),
-        status          = 'new'
-    )
-    db.session.add(msg)
+    call_id = data.get('call_id', '')
+    msg = ManagerMessage.query.filter_by(call_id=call_id).first()
+    if not msg:
+        msg = ManagerMessage(call_id=call_id, status='new')
+        db.session.add(msg)
+    msg.phone = data.get('phone', '')
+    msg.name = data.get('name', '')
+    msg.email = data.get('email', '')
+    msg.fax = data.get('fax', '')
+    msg.delivery_method = data.get('delivery_method', '')
+    msg.rec_url = data.get('rec_url', '')
     db.session.commit()
     return jsonify({'ok': True, 'id': msg.id})
 
@@ -195,3 +195,15 @@ def get_manager_message_callid(msg_id):
     from models import ManagerMessage
     msg = ManagerMessage.query.get_or_404(msg_id)
     return jsonify({'call_id': msg.call_id, 'phone': msg.phone})
+@api_bp.route('/manager-message-reserve', methods=['POST'])
+def reserve_manager_message():
+    from models import ManagerMessage
+    data = request.json
+    msg = ManagerMessage(
+        phone   = data.get('phone', ''),
+        call_id = data.get('call_id', ''),
+        status  = 'new'
+    )
+    db.session.add(msg)
+    db.session.commit()
+    return jsonify({'id': msg.id})
