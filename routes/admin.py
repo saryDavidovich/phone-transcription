@@ -612,3 +612,27 @@ def test_transcribe():
 
     customers = Customer.query.order_by(Customer.name).all()
     return render_template('admin/test_transcribe.html', transcript=None, customers=customers)
+@admin_bp.route('/messages/bulk-status', methods=['POST'])
+@login_required
+def bulk_update_status():
+    data = request.json
+    ids = data.get('ids', [])
+    status = data.get('status', '')
+    for msg_id in ids:
+        msg = ManagerMessage.query.get(int(msg_id))
+        if msg:
+            msg.status = status
+    db.session.commit()
+    return jsonify({'ok': True})
+
+@admin_bp.route('/messages/bulk-delete', methods=['POST'])
+@login_required
+def bulk_delete_messages():
+    data = request.json
+    ids = data.get('ids', [])
+    for msg_id in ids:
+        msg = ManagerMessage.query.get(int(msg_id))
+        if msg:
+            db.session.delete(msg)
+    db.session.commit()
+    return jsonify({'ok': True})
