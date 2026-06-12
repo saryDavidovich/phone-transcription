@@ -84,10 +84,11 @@
               <option value="in_progress" {{ 'selected' if msg.status == 'in_progress' }}>בטיפול</option>
               <option value="done"        {{ 'selected' if msg.status == 'done' }}>טופל</option>
             </select>
-            <input type="text" name="admin_note" class="form-control form-control-sm flex-grow-1"
-                   placeholder="הערה..." value="{{ msg.admin_note or '' }}"
-                   style="font-size:11px"
-                   onblur="this.form.submit()">
+            <textarea name="admin_note" class="form-control flex-grow-1"
+                      placeholder="הערה..."
+                      rows="2"
+                      style="font-size:12px;min-width:200px;resize:vertical"
+                      onblur="this.form.submit()">{{ msg.admin_note or '' }}</textarea>
           </div>
         </form>
       </td>
