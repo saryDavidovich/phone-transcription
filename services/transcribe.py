@@ -485,7 +485,7 @@ def _build_pdf_for_fax(name, duration_str, transcript_fixed):
         return None
 
 
-def _rasterize_pdf_for_fax(pdf_bytes, dpi=150):
+def _rasterize_pdf_for_fax(pdf_bytes, dpi=200):
     """ממיר PDF מבוסס-טקסט ל-PDF מבוסס-תמונה (גווני אפור), כדי להבטיח תאימות עם שערי פקס."""
     try:
         import fitz  # PyMuPDF
