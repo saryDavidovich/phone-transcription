@@ -1,0 +1,3 @@
+# מתקין LibreOffice (soffice) - נדרש להמרת Word ל-PDF לצורך שליחת פקס
+[phases.setup]
+nixPkgs = ['...', 'libreoffice-fresh']
