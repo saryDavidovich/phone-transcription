@@ -37,11 +37,13 @@ def create_app():
     from routes.admin import admin_bp
     from routes.payment import payment_bp
     from routes.api import api_bp
+    from routes.email_inbound import email_bp
     
     app.register_blueprint(ivr_bp, url_prefix='/ivr')
     app.register_blueprint(admin_bp, url_prefix='/admin')
     app.register_blueprint(payment_bp, url_prefix='/payment')
     app.register_blueprint(api_bp, url_prefix='/api')
+    app.register_blueprint(email_bp, url_prefix='/api')
 
     # Route ציבורי לקבצי פקס זמניים
     @app.route('/static/fax_tmp/<filename>')
@@ -94,3 +96,5 @@ def _create_default_admin():
 app = create_app()
 if __name__ == '__main__':
     app.run(debug=False, host='0.0.0.0', port=5000)
+
+
