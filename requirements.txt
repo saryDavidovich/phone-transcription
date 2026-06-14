@@ -18,3 +18,4 @@ reportlab
 scipy
 google-genai
 python-bidi
+pymupdf
