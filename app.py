@@ -63,6 +63,15 @@ def _migrate_db():
             conn.execute(db.text("ALTER TABLE customers ADD COLUMN IF NOT EXISTS transcription_tier VARCHAR(10) DEFAULT 'basic'"))
             conn.execute(db.text("ALTER TABLE recordings ADD COLUMN IF NOT EXISTS alefbot_job_id VARCHAR(100)"))
             conn.execute(db.text("ALTER TABLE recordings ADD COLUMN IF NOT EXISTS rec_url VARCHAR(500)"))
+            # שדות סטטוס פקס (ימות המשיח) - שייכים ל-recordings, לא ל-customers
+            conn.execute(db.text("ALTER TABLE recordings ADD COLUMN IF NOT EXISTS fax_campaign_id VARCHAR(64)"))
+            conn.execute(db.text("ALTER TABLE recordings ADD COLUMN IF NOT EXISTS fax_status VARCHAR(32)"))
+            conn.execute(db.text("ALTER TABLE recordings ADD COLUMN IF NOT EXISTS fax_status_note TEXT"))
+            conn.execute(db.text("CREATE INDEX IF NOT EXISTS ix_recordings_fax_campaign_id ON recordings (fax_campaign_id)"))
+            # ניקוי - עמודות פקס שנוספו בטעות ל-customers בעבר
+            conn.execute(db.text("ALTER TABLE customers DROP COLUMN IF EXISTS fax_campaign_id"))
+            conn.execute(db.text("ALTER TABLE customers DROP COLUMN IF EXISTS fax_status"))
+            conn.execute(db.text("ALTER TABLE customers DROP COLUMN IF EXISTS fax_status_note"))
             conn.commit()
         logging.getLogger(__name__).info("Migration: all columns ready")
     except Exception as e:
