@@ -471,11 +471,42 @@ def _build_pdf_for_fax(name, duration_str, transcript_fixed):
         story.append(Paragraph(rtl('נערך ע"י מערכת תמלולפון 03-3131795'), footer_style))
         doc.build(story)
         buf.seek(0)
-        return buf.read()
+        pdf_bytes = buf.read()
+
+        # רסטריזציה - הופך את העברית לפיקסלים (תמונה) בתוך ה-PDF.
+        # נחוץ כי שערי פקס (כמו ימות המשיח) לא תמיד תומכים בפונטים מוטמעים
+        # שאינם לטיניים, ומציגים אותם כריבועים שחורים.
+        return _rasterize_pdf_for_fax(pdf_bytes)
 
     except Exception as e:
         log.error(f"PDF build error: {e}")
         return None
+
+
+def _rasterize_pdf_for_fax(pdf_bytes, dpi=150):
+    """ממיר PDF מבוסס-טקסט ל-PDF מבוסס-תמונה (גווני אפור), כדי להבטיח תאימות עם שערי פקס."""
+    try:
+        import fitz  # PyMuPDF
+        import io
+
+        src = fitz.open(stream=pdf_bytes, filetype='pdf')
+        out = fitz.open()
+        for page in src:
+            pix = page.get_pixmap(dpi=dpi, colorspace=fitz.csGRAY)
+            rect = page.rect
+            new_page = out.new_page(width=rect.width, height=rect.height)
+            new_page.insert_image(rect, pixmap=pix)
+
+        buf = io.BytesIO()
+        out.save(buf, deflate=True, deflate_images=True)
+        out.close()
+        src.close()
+        buf.seek(0)
+        return buf.read()
+
+    except Exception as e:
+        log.error(f"PDF rasterize error: {e}, sending non-rasterized PDF")
+        return pdf_bytes
 
 
 def _normalize_israeli_phone(raw):
@@ -650,28 +681,4 @@ def _send_email(to, transcript, customer, rec_url, duration_seconds):
 <h2 style="color:#1d4ed8">תמלול שיחה</h2>
 <p style="color:#6b7280">לקוח: <b>{name}</b> | משך: <b>{duration_str}</b></p>
 <div style="background:#f0fdf4;border-right:4px solid #10b981;padding:16px;margin:16px 0;border-radius:8px">
-<h3 style="margin:0 0 12px;color:#065f46">✨ תמלול</h3>
-<div style="line-height:1.8;white-space:pre-wrap;text-align:justify">{transcript}</div>
-</div>
-<div style="background:#fff7ed;border-right:4px solid #f97316;padding:16px;margin:16px 0;border-radius:8px">
-<a href="{rec_url}" style="color:#ea580c;font-weight:600;font-size:15px;text-decoration:none">⬇️ להורדת ההקלטה לחצו כאן</a>
-</div>
-</div>'''
-
-        sg = sendgrid.SendGridAPIClient(api_key=os.environ.get('SENDGRID_API_KEY'))
-        message = Mail(
-            from_email=os.environ.get('SENDGRID_FROM_EMAIL', os.environ.get('GMAIL_USER', '')),
-            to_emails=to,
-            subject=f'תמלול שיחה - {name}',
-            html_content=html
-        )
-        message.attachment = Attachment(
-            FileContent(word_b64),
-            FileName(f'תמלול_{name}.docx'),
-            FileType('application/vnd.openxmlformats-officedocument.wordprocessingml.document'),
-            Disposition('attachment')
-        )
-        sg.send(message)
-        log.info(f"Email sent to {to}")
-    except Exception as e:
-        log.error(f"Email error: {e}")
+<h3 style="margin:0 0 12px;c
