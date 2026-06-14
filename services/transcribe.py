@@ -98,7 +98,7 @@ def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, durat
             if delivery_method == 'email':
                 _send_email(delivered_to, transcript_fixed, customer, rec_url, duration_seconds)
             elif delivery_method == 'fax':
-                _send_fax(delivered_to, transcript_fixed, customer, duration_seconds)
+                _send_fax(delivered_to, transcript_fixed, customer, duration_seconds, call_id)
 
             if rec:
                 rec.status = 'delivered'
@@ -215,7 +215,7 @@ def finalize_alefbot_recording(call_id, transcript_text):
             if rec.delivery_method == 'email':
                 _send_email(rec.delivered_to, transcript_text, customer, rec_url, duration_seconds)
             elif rec.delivery_method == 'fax':
-                _send_fax(rec.delivered_to, transcript_text, customer, duration_seconds)
+                _send_fax(rec.delivered_to, transcript_text, customer, duration_seconds, call_id)
 
             rec.status = 'delivered'
             db.session.commit()
@@ -408,6 +408,11 @@ def _build_word_doc(name, duration_str, transcript_fixed, transcript_raw=None):
 
 
 def _build_pdf_for_fax(name, duration_str, transcript_fixed):
+    """
+    בונה PDF עם תמלול בעברית עבור שליחת פקס.
+    משתמש בפונט Noto Sans Hebrew המוטמע ברפו (static/fonts) ובחיתוך bidi
+    כדי שהעברית תוצג בכיוון נכון (RTL) ב-reportlab.
+    """
     try:
         from reportlab.lib.pagesizes import A4
         from reportlab.lib.styles import ParagraphStyle
@@ -416,13 +421,16 @@ def _build_pdf_for_fax(name, duration_str, transcript_fixed):
         from reportlab.lib.units import cm
         from reportlab.pdfbase import pdfmetrics
         from reportlab.pdfbase.ttfonts import TTFont
+        from bidi.algorithm import get_display
         import io
 
+        # פונט עברי מוטמע ברפו - לא תלוי בפונטים שמותקנים על השרת
+        repo_font_path = os.path.join(os.path.dirname(__file__), '..', 'static', 'fonts', 'NotoSansHebrew-Regular.ttf')
         font_paths = [
+            repo_font_path,
             '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
             '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf',
             '/usr/share/fonts/truetype/freefont/FreeSans.ttf',
-            '/usr/share/fonts/TTF/DejaVuSans.ttf',
         ]
         font_registered = False
         for font_path in font_paths:
@@ -432,6 +440,13 @@ def _build_pdf_for_fax(name, duration_str, transcript_fixed):
                 break
 
         font_name = 'Hebrew' if font_registered else 'Helvetica'
+        if not font_registered:
+            log.warning("No Hebrew font found, falling back to Helvetica (Hebrew text may not render)")
+
+        def rtl(text):
+            """מסדר טקסט לתצוגה נכונה (bidi) - נחוץ עם reportlab כדי שעברית תוצג ב-RTL."""
+            return get_display(text or '')
+
         buf = io.BytesIO()
         doc = SimpleDocTemplate(buf, pagesize=A4,
                                 rightMargin=2*cm, leftMargin=2*cm,
@@ -442,18 +457,18 @@ def _build_pdf_for_fax(name, duration_str, transcript_fixed):
         footer_style = ParagraphStyle('Footer', fontName=font_name, alignment=TA_CENTER, fontSize=8, textColor='grey')
 
         story = []
-        story.append(Paragraph('תמלול שיחה', title_style))
+        story.append(Paragraph(rtl('תמלול שיחה'), title_style))
         story.append(Spacer(1, 0.3*cm))
-        story.append(Paragraph(f'לקוח: {name} | משך: {duration_str}', rtl_style))
+        story.append(Paragraph(rtl(f'לקוח: {name} | משך: {duration_str}'), rtl_style))
         story.append(Spacer(1, 0.5*cm))
 
         for para in (transcript_fixed or '').split('\n'):
             if para.strip():
-                story.append(Paragraph(para.strip(), rtl_style))
+                story.append(Paragraph(rtl(para.strip()), rtl_style))
                 story.append(Spacer(1, 0.2*cm))
 
         story.append(Spacer(1, 1*cm))
-        story.append(Paragraph('נערך ע"י מערכת תמלולפון 03-3131795', footer_style))
+        story.append(Paragraph(rtl('נערך ע"י מערכת תמלולפון 03-3131795'), footer_style))
         doc.build(story)
         buf.seek(0)
         return buf.read()
@@ -463,9 +478,23 @@ def _build_pdf_for_fax(name, duration_str, transcript_fixed):
         return None
 
 
-def _send_fax(to_number, transcript_fixed, customer, duration_seconds):
+def _normalize_israeli_phone(raw):
+    """מנקה ומנרמל מספר טלפון ישראלי לפורמט מקומי (05XXXXXXXX / 0XXXXXXXXX)."""
+    phone = (raw or '').strip().replace('-', '').replace(' ', '')
+    if phone.startswith('+972'):
+        phone = '0' + phone[4:]
+    elif phone.startswith('972'):
+        phone = '0' + phone[3:]
+    return phone
+
+
+def _send_fax(to_number, transcript_fixed, customer, duration_seconds, call_id=None):
+    """
+    שולח את התמלול כפקס באמצעות ה-API של ימות המשיח (SendFax).
+    מעלה את ה-PDF בעצמו (pdfFile=UPLOAD) ומבקש דוח מסירה ל-deliveryUrl,
+    כדי שסטטוס השליחה יתעדכן ויוצג בממשק הניהול.
+    """
     try:
-        import uuid
         name = customer.name if hasattr(customer, 'name') and customer.name else customer.phone if customer else ''
         minutes = duration_seconds // 60
         seconds = duration_seconds % 60
@@ -476,61 +505,132 @@ def _send_fax(to_number, transcript_fixed, customer, duration_seconds):
             log.error("Failed to build PDF for fax")
             return
 
-        api_key = os.environ.get('TELNYX_API_KEY')
-        connection_id = os.environ.get('TELNYX_CONNECTION_ID', '2973595690996860264')
-        from_number = os.environ.get('TELNYX_FAX_FROM', '+13644443976')
+        yemot_token = os.environ.get('YEMOT_TOKEN')
+        if not yemot_token:
+            log.error("YEMOT_TOKEN not configured - cannot send fax")
+            return
+
+        caller_id = os.environ.get('YEMOT_FAX_CALLER_ID', '')
         base_url = os.environ.get('APP_BASE_URL', '').rstrip('/')
 
-        fax_number = to_number.strip().replace('-', '').replace(' ', '')
-        if not fax_number.startswith('+'):
-            if fax_number.startswith('0'):
-                fax_number = '+972' + fax_number[1:]
-            else:
-                fax_number = '+972' + fax_number
+        # מספר היעד הוא מה שהלקוח הזין במערכת הטלפונית (to_number)
+        fax_number = _normalize_israeli_phone(to_number)
 
-        filename = f"fax_{uuid.uuid4().hex}.pdf"
-        static_dir = os.path.join(os.path.dirname(__file__), '..', 'static', 'fax_tmp')
-        os.makedirs(static_dir, exist_ok=True)
-        pdf_path = os.path.join(static_dir, filename)
+        files = {
+            'fileToUpload': (f'transcript_{call_id or "fax"}.pdf', pdf_bytes, 'application/pdf'),
+        }
+        data = {
+            'token': yemot_token,
+            'pdfFile': 'UPLOAD',
+            'phone': fax_number,
+        }
+        if caller_id:
+            data['callerId'] = caller_id
+        if base_url and call_id:
+            data['deliveryUrl'] = f'{base_url}/api/fax-delivery-webhook'
 
-        with open(pdf_path, 'wb') as f:
-            f.write(pdf_bytes)
-
-        media_url = f"{base_url}/static/fax_tmp/{filename}"
-        fax_response = requests.post(
-            'https://api.telnyx.com/v2/faxes',
-            headers={'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'},
-            json={'connection_id': connection_id, 'to': fax_number, 'from': from_number, 'media_url': media_url}
+        response = requests.post(
+            'https://www.call2all.co.il/ym/api/SendFax',
+            data=data,
+            files=files,
+            timeout=120,
         )
+        result = response.json() if response.headers.get('content-type', '').startswith('application/json') else {}
 
-        if fax_response.status_code in (200, 201, 202):
-            fax_id = fax_response.json().get('data', {}).get('id')
-            log.info(f"Fax sent to {fax_number}, fax_id: {fax_id}")
-            threading.Thread(target=_check_fax_status, args=(fax_id, api_key), daemon=True).start()
+        if result.get('responseStatus') == 'OK':
+            campaign_id = result.get('CampaignId')
+            log.info(f"Fax queued via Yemot to {fax_number}, CampaignId: {campaign_id}")
+            if call_id and campaign_id:
+                _save_fax_campaign(call_id, campaign_id)
         else:
-            log.error(f"Fax send failed: {fax_response.text}")
-
-        def cleanup():
-            time.sleep(600)
-            try:
-                os.remove(pdf_path)
-            except:
-                pass
-        threading.Thread(target=cleanup, daemon=True).start()
+            log.error(f"Yemot SendFax failed: {response.text}")
+            if call_id:
+                _update_fax_status(call_id, status='error', note=response.text[:500])
 
     except Exception as e:
         log.error(f"Fax error: {e}")
+        if call_id:
+            _update_fax_status(call_id, status='error', note=str(e)[:500])
 
 
-def _check_fax_status(fax_id, api_key):
-    time.sleep(60)
-    try:
-        r = requests.get(f'https://api.telnyx.com/v2/faxes/{fax_id}',
-                         headers={'Authorization': f'Bearer {api_key}'})
-        data = r.json().get('data', {})
-        log.info(f"Fax {fax_id} status: {data.get('status')} | reason: {data.get('failure_reason', '')}")
-    except Exception as e:
-        log.error(f"Fax status check error: {e}")
+def _save_fax_campaign(call_id, campaign_id):
+    from app import app, db
+    from models import Recording
+    with app.app_context():
+        try:
+            db.session.remove()
+            rec = Recording.query.filter_by(call_id=call_id).first()
+            if rec:
+                rec.fax_campaign_id = campaign_id
+                rec.fax_status = 'sent'
+                db.session.commit()
+        except Exception as e:
+            log.error(f"_save_fax_campaign error: {e}")
+
+
+def _update_fax_status(call_id, status, note=''):
+    from app import app, db
+    from models import Recording
+    with app.app_context():
+        try:
+            db.session.remove()
+            rec = Recording.query.filter_by(call_id=call_id).first()
+            if rec:
+                rec.fax_status = status
+                if note:
+                    rec.fax_status_note = note
+                db.session.commit()
+        except Exception as e:
+            log.error(f"_update_fax_status error: {e}")
+
+
+def handle_fax_delivery_webhook(data):
+    """
+    מטפל ב-callback של deliveryUrl מימות המשיח עבור SendFax.
+    מעדכן את סטטוס הפקס של ההקלטה המתאימה (לפי CampaignId) כדי שיוצג בממשק הניהול.
+
+    שדות אפשריים מימות:
+    - CampaignId
+    - Delivery: Answer / NoAnswer / End
+    - DIALSTATUS (אם Delivery=NoAnswer)
+    - status (אם Delivery=End) - SUCCESS במקרה של מסירה מוצלחת
+    """
+    from app import app, db
+    from models import Recording
+
+    campaign_id = data.get('CampaignId', '')
+    delivery = data.get('Delivery', '')
+    end_status = data.get('status', '')
+    dial_status = data.get('DIALSTATUS', '')
+
+    if not campaign_id:
+        return
+
+    with app.app_context():
+        try:
+            db.session.remove()
+            rec = Recording.query.filter_by(fax_campaign_id=campaign_id).first()
+            if not rec:
+                log.warning(f"Fax delivery webhook: no recording for CampaignId {campaign_id}")
+                return
+
+            if delivery == 'Answer':
+                rec.fax_status = 'sending'
+            elif delivery == 'NoAnswer':
+                rec.fax_status = 'no_answer'
+                rec.fax_status_note = dial_status
+            elif delivery == 'End':
+                if end_status == 'SUCCESS':
+                    rec.fax_status = 'delivered'
+                else:
+                    rec.fax_status = 'failed'
+                    rec.fax_status_note = end_status
+
+            db.session.commit()
+            log.info(f"Fax status updated for CampaignId {campaign_id}: {rec.fax_status}")
+
+        except Exception as e:
+            log.error(f"handle_fax_delivery_webhook error: {e}")
 
 
 def _send_email(to, transcript, customer, rec_url, duration_seconds):
