@@ -425,9 +425,11 @@ def _build_pdf_for_fax(name, duration_str, transcript_fixed):
         import io
 
         # פונט עברי מוטמע ברפו - לא תלוי בפונטים שמותקנים על השרת
-        repo_font_path = os.path.join(os.path.dirname(__file__), '..', 'static', 'fonts', 'NotoSansHebrew-Regular.ttf')
+        repo_font_path = os.path.join(os.path.dirname(__file__), '..', 'static', 'NotoSansHebrew-Regular.ttf')
+        repo_font_path_alt = os.path.join(os.path.dirname(__file__), '..', 'static', 'fonts', 'NotoSansHebrew-Regular.ttf')
         font_paths = [
             repo_font_path,
+            repo_font_path_alt,
             '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
             '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf',
             '/usr/share/fonts/truetype/freefont/FreeSans.ttf',
