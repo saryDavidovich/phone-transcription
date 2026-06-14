@@ -16,9 +16,6 @@ class Customer(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     recordings = db.relationship('Recording', backref='customer', lazy=True)
     transactions = db.relationship('Transaction', backref='customer', lazy=True)
-    fax_campaign_id = db.Column(db.String(64), nullable=True, index=True)
-    fax_status = db.Column(db.String(32), nullable=True)
-    fax_status_note = db.Column(db.Text, nullable=True)
 
 class Recording(db.Model):
     __tablename__ = 'recordings'
@@ -34,6 +31,9 @@ class Recording(db.Model):
     delivered_to = db.Column(db.String(200))
     alefbot_job_id = db.Column(db.String(100))
     rec_url = db.Column(db.String(500))
+    fax_campaign_id = db.Column(db.String(64), nullable=True, index=True)
+    fax_status = db.Column(db.String(32), nullable=True)
+    fax_status_note = db.Column(db.Text, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
 class Transaction(db.Model):
