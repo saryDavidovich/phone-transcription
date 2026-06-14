@@ -19,3 +19,4 @@ scipy
 google-genai
 python-bidi
 pymupdf
+mutagen
