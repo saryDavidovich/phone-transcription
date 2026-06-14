@@ -372,6 +372,18 @@ def _build_word_doc(name, duration_str, transcript_fixed, transcript_raw=None):
         bidi = OxmlElement('w:bidi')
         pPr.append(bidi)
 
+    def add_bottom_border(paragraph):
+        from docx.oxml.ns import qn
+        pPr = paragraph._p.get_or_add_pPr()
+        pBdr = OxmlElement('w:pBdr')
+        bottom = OxmlElement('w:bottom')
+        bottom.set(qn('w:val'), 'single')
+        bottom.set(qn('w:sz'), '6')
+        bottom.set(qn('w:space'), '4')
+        bottom.set(qn('w:color'), '999999')
+        pBdr.append(bottom)
+        pPr.append(pBdr)
+        
     def add_footer(doc):
         section = doc.sections[0]
         footer = section.footer
@@ -380,9 +392,9 @@ def _build_word_doc(name, duration_str, transcript_fixed, transcript_raw=None):
         pPr = footer_para._p.get_or_add_pPr()
         bidi = OxmlElement('w:bidi')
         pPr.append(bidi)
-        run = footer_para.add_run('נערך ע"י מערכת תמלולפון 03-3131795')
-        run.font.size = Pt(9)
-        run.font.color.rgb = RGBColor(0x99, 0x99, 0x99)
+        run = footer_para.add_run('הופק באמצעות מערכת תמלולפון 03-3131795')
+        run.font.size = Pt(11)
+        run.font.color.rgb = RGBColor(0x80, 0x80, 0x80)
 
     doc = Document()
     section = doc.sections[0]
@@ -395,7 +407,7 @@ def _build_word_doc(name, duration_str, transcript_fixed, transcript_raw=None):
     set_rtl(title)
     p_info = doc.add_paragraph(f'לקוח: {name} | משך: {duration_str}')
     set_rtl(p_info)
-    set_rtl(doc.add_paragraph('─' * 50))
+    add_bottom_border(p_info)
     h1 = doc.add_heading('תמלול', level=1)
     set_rtl(h1)
     p = doc.add_paragraph(transcript_fixed or '')
