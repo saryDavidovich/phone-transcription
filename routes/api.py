@@ -194,6 +194,14 @@ def get_manager_message_callid(msg_id):
     from models import ManagerMessage
     msg = ManagerMessage.query.get_or_404(msg_id)
     return jsonify({'call_id': msg.call_id, 'phone': msg.phone})
+@api_bp.route('/fax-delivery-webhook', methods=['POST'])
+def fax_delivery_webhook():
+    """מקבל דוח מסירה מימות המשיח (SendFax deliveryUrl) ומעדכן את סטטוס הפקס."""
+    from services.transcribe import handle_fax_delivery_webhook
+    data = request.form.to_dict() if request.form else (request.json or {})
+    handle_fax_delivery_webhook(data)
+    return jsonify({'ok': True})
+
 @api_bp.route('/manager-message-reserve', methods=['POST'])
 def reserve_manager_message():
     from models import ManagerMessage
