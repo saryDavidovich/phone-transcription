@@ -580,6 +580,10 @@ def test_transcribe():
             transcript_variants = None  # רשימת (כותרת, טקסט) להשוואה בתבנית, לטיירים נסיוניים
             if tier == 'gemini':
                 transcript, duration = _gemini_from_url(rec_url, language, output_language)
+            elif tier == 'gemini_pro_solo':
+                # נסיוני - פעימה אחת בלבד עם Gemini 3.1 Pro + פרומפט הגייה אשכנזית-חסידית
+                from services.transcribe import _gemini_pro_solo
+                transcript, duration = _gemini_pro_solo(rec_url, language, output_language)
             elif tier == 'gemini_review':
                 # נסיוני - תמלול מקצועי מבוסס Gemini עם מעבר תיקון שני (במקום אלף בוט)
                 from services.transcribe import _gemini_review_pass
