@@ -30,8 +30,10 @@ routes/email_inbound.py
 
 import os
 import re
+import time
 import uuid
 import logging
+import threading
 from urllib.parse import quote
 
 from flask import Blueprint, request, jsonify, send_from_directory
@@ -60,6 +62,48 @@ TRANSCRIBE_INBOUND_EMAIL = os.environ.get('TRANSCRIBE_INBOUND_EMAIL', '033131795
 # תיקייה לשמירת קבצי אודיו שהתקבלו במייל (משם הם מוגשים חזרה כ-rec_url)
 RECORDINGS_EMAIL_DIR = os.environ.get('RECORDINGS_EMAIL_DIR', 'recordings_email')
 os.makedirs(RECORDINGS_EMAIL_DIR, exist_ok=True)
+
+# מחיקה אוטומטית של קבצי הקלטה שהתקבלו במייל - לאחר כמה ימים נחשבים "ישנים"
+RECORDINGS_EMAIL_MAX_AGE_DAYS = float(os.environ.get('RECORDINGS_EMAIL_MAX_AGE_DAYS', '2'))
+# בדיקת ניקוי מתבצעת לכל היותר פעם בכמה שעות (לא בכל בקשה)
+_CLEANUP_INTERVAL_SECONDS = 6 * 60 * 60
+_last_cleanup_time = 0
+_cleanup_lock = threading.Lock()
+
+
+def _cleanup_old_email_recordings():
+    """מוחק קבצים ב-RECORDINGS_EMAIL_DIR שעברו את גיל המקסימום.
+    רץ ברקע (thread נפרד) כדי לא לעכב את תגובת ה-webhook."""
+    try:
+        now = time.time()
+        max_age_seconds = RECORDINGS_EMAIL_MAX_AGE_DAYS * 24 * 60 * 60
+        removed = 0
+        for fname in os.listdir(RECORDINGS_EMAIL_DIR):
+            fpath = os.path.join(RECORDINGS_EMAIL_DIR, fname)
+            try:
+                if not os.path.isfile(fpath):
+                    continue
+                if now - os.path.getmtime(fpath) > max_age_seconds:
+                    os.remove(fpath)
+                    removed += 1
+            except OSError as e:
+                log.warning(f"email-inbound cleanup: failed to remove {fpath}: {e}")
+        if removed:
+            log.info(f"email-inbound cleanup: removed {removed} old recording file(s)")
+    except Exception as e:
+        log.warning(f"email-inbound cleanup error: {e}")
+
+
+def _maybe_run_cleanup():
+    """מריץ ניקוי לכל היותר פעם ב-_CLEANUP_INTERVAL_SECONDS, ברקע."""
+    global _last_cleanup_time
+    now = time.time()
+    with _cleanup_lock:
+        if now - _last_cleanup_time < _CLEANUP_INTERVAL_SECONDS:
+            return
+        _last_cleanup_time = now
+    threading.Thread(target=_cleanup_old_email_recordings, daemon=True).start()
+
 
 TIER_MAP = {
     'רגיל': 'gemini',
@@ -186,6 +230,8 @@ def email_inbound():
     from app import app, db
     from models import Customer, Recording
 
+    _maybe_run_cleanup()
+
     sender_email = _extract_sender_email(request.form.get('from', ''))
     subject = request.form.get('subject', '')
 
@@ -241,6 +287,9 @@ def email_inbound():
 
         duration_seconds = _estimate_duration_seconds(filepath)
 
+        # שם הקובץ המקורי כפי שנשלח במייל (ישמש כותרת בתמלול שיחזור)
+        original_filename = audio_file.filename or filename
+
         call_id = f"email-{uuid.uuid4().hex}"
         rec = Recording(
             customer_id=customer.id,
@@ -250,6 +299,7 @@ def email_inbound():
             delivery_method='email',
             delivered_to=customer.email,
             rec_url=rec_url,
+            source_filename=original_filename,
         )
         db.session.add(rec)
         db.session.commit()
