@@ -172,7 +172,10 @@ def email_inbound():
 
     parsed = _parse_subject(subject)
     if not parsed:
+        body_text = (request.form.get('text') or request.form.get('html') or '').strip()
         log.warning(f"email-inbound: שורת נושא לא תקינה '{subject}' מאת {sender_email}")
+        if body_text:
+            log.warning(f"email-inbound: תוכן ההודעה: {body_text[:2000]}")
         # אין למי לענות (אין מספר טלפון תקין) - רק לוג, בלי תגובה
         return jsonify({'status': 'ignored', 'reason': 'invalid_subject'}), 200
 
