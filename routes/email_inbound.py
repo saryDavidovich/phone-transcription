@@ -35,9 +35,21 @@ import logging
 
 from flask import Blueprint, request, jsonify, send_from_directory
 
-from services.transcribe_service import _normalize_israeli_phone, transcribe_async
+from services.transcribe_service import transcribe_async
 
 log = logging.getLogger(__name__)
+
+
+def _normalize_israeli_phone(raw):
+    """מנקה ומנרמל מספר טלפון ישראלי לפורמט מקומי (05XXXXXXXX / 0XXXXXXXXX).
+    מוגדרת כאן מקומית (במקום import) כדי לא להיות תלויה במבנה הפנימי
+    של services/transcribe_service.py."""
+    phone = (raw or '').strip().replace('-', '').replace(' ', '')
+    if phone.startswith('+972'):
+        phone = '0' + phone[4:]
+    elif phone.startswith('972'):
+        phone = '0' + phone[3:]
+    return phone
 
 email_bp = Blueprint('email_inbound', __name__)
 
