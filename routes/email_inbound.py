@@ -131,6 +131,21 @@ def _extract_sender_email(from_header):
     return addr.strip().lower()
 
 
+_STYLE_SCRIPT_RE = re.compile(r'<(style|script)[^>]*>.*?</\1>', re.IGNORECASE | re.DOTALL)
+_TAG_RE = re.compile(r'<[^>]+>')
+_WHITESPACE_RE = re.compile(r'\s+')
+
+
+def _strip_html(html):
+    """מסיר <style>/<script> ותגי HTML, ומחזיר טקסט נקי - שימושי ללוגים/דיבאג."""
+    if not html:
+        return ''
+    text = _STYLE_SCRIPT_RE.sub(' ', html)
+    text = _TAG_RE.sub(' ', text)
+    text = _WHITESPACE_RE.sub(' ', text)
+    return text.strip()
+
+
 def _estimate_duration_seconds(filepath):
     """מנסה לחשב משך אודיו (בשניות) ללא תלות בפורמט, לצורך חיוב התחלתי."""
     try:
@@ -172,7 +187,9 @@ def email_inbound():
 
     parsed = _parse_subject(subject)
     if not parsed:
-        body_text = (request.form.get('text') or request.form.get('html') or '').strip()
+        raw_text = request.form.get('text') or ''
+        raw_html = request.form.get('html') or ''
+        body_text = raw_text.strip() or _strip_html(raw_html)
         log.warning(f"email-inbound: שורת נושא לא תקינה '{subject}' מאת {sender_email}")
         if body_text:
             log.warning(f"email-inbound: תוכן ההודעה: {body_text[:2000]}")
