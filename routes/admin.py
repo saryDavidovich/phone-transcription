@@ -579,6 +579,11 @@ def test_transcribe():
         try:
             if tier == 'gemini':
                 transcript, duration = _gemini_from_url(rec_url, language, output_language)
+                transcript_raw_first_pass = None
+            elif tier == 'gemini_review':
+                # נסיוני - תמלול מקצועי מבוסס Gemini עם מעבר תיקון שני (במקום אלף בוט)
+                from services.transcribe import _gemini_review_pass
+                transcript, duration, transcript_raw_first_pass = _gemini_review_pass(rec_url, language, output_language)
             else:
                 # AlefBot — שלח ישירות
                 from services.transcribe import _alefbot_submit
@@ -603,6 +608,7 @@ def test_transcribe():
             return render_template('admin/test_transcribe.html',
                 transcript=transcript,
                 duration=duration,
+                transcript_raw_first_pass=transcript_raw_first_pass,
                 customers=Customer.query.order_by(Customer.name).all()
             )
 
@@ -611,7 +617,7 @@ def test_transcribe():
             return redirect(url_for('admin.test_transcribe'))
 
     customers = Customer.query.order_by(Customer.name).all()
-    return render_template('admin/test_transcribe.html', transcript=None, customers=customers)
+    return render_template('admin/test_transcribe.html', transcript=None, transcript_raw_first_pass=None, customers=customers)
 @admin_bp.route('/messages/bulk-status', methods=['POST'])
 @login_required
 def bulk_update_status():
