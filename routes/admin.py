@@ -577,13 +577,40 @@ def test_transcribe():
             send_to = customer.email if send_method == 'email' else customer.fax
 
         try:
+            transcript_variants = None  # רשימת (כותרת, טקסט) להשוואה בתבנית, לטיירים נסיוניים
             if tier == 'gemini':
                 transcript, duration = _gemini_from_url(rec_url, language, output_language)
-                transcript_raw_first_pass = None
             elif tier == 'gemini_review':
                 # נסיוני - תמלול מקצועי מבוסס Gemini עם מעבר תיקון שני (במקום אלף בוט)
                 from services.transcribe import _gemini_review_pass
                 transcript, duration, transcript_raw_first_pass = _gemini_review_pass(rec_url, language, output_language)
+                if transcript_raw_first_pass:
+                    transcript_variants = [
+                        ('לפני תיקון (תמלול ראשוני)', transcript_raw_first_pass),
+                        ('אחרי תיקון (גרסה סופית)', transcript),
+                    ]
+            elif tier == 'gemini_dual_flash':
+                # נסיוני - שני תמלולים עצמאיים + מיזוג ע"י Flash (במקום אלף בוט)
+                from services.transcribe import _gemini_dual_transcribe_and_merge
+                transcript, duration, transcript_a, transcript_b = _gemini_dual_transcribe_and_merge(
+                    rec_url, language, output_language, merge_model='gemini-3.5-flash')
+                if transcript_a:
+                    variants = [('תמלול א\' (עצמאי)', transcript_a)]
+                    if transcript_b:
+                        variants.append(('תמלול ב\' (עצמאי)', transcript_b))
+                    variants.append(('אחרי מיזוג - Flash (גרסה סופית)', transcript))
+                    transcript_variants = variants
+            elif tier == 'gemini_dual_pro':
+                # נסיוני - שני תמלולים עצמאיים + מיזוג ע"י Pro (במקום אלף בוט)
+                from services.transcribe import _gemini_dual_transcribe_and_merge
+                transcript, duration, transcript_a, transcript_b = _gemini_dual_transcribe_and_merge(
+                    rec_url, language, output_language, merge_model='gemini-3.1-pro-preview')
+                if transcript_a:
+                    variants = [('תמלול א\' (עצמאי)', transcript_a)]
+                    if transcript_b:
+                        variants.append(('תמלול ב\' (עצמאי)', transcript_b))
+                    variants.append(('אחרי מיזוג - Pro (גרסה סופית)', transcript))
+                    transcript_variants = variants
             else:
                 # AlefBot — שלח ישירות
                 from services.transcribe import _alefbot_submit
@@ -608,7 +635,7 @@ def test_transcribe():
             return render_template('admin/test_transcribe.html',
                 transcript=transcript,
                 duration=duration,
-                transcript_raw_first_pass=transcript_raw_first_pass,
+                transcript_variants=transcript_variants,
                 customers=Customer.query.order_by(Customer.name).all()
             )
 
@@ -617,7 +644,7 @@ def test_transcribe():
             return redirect(url_for('admin.test_transcribe'))
 
     customers = Customer.query.order_by(Customer.name).all()
-    return render_template('admin/test_transcribe.html', transcript=None, transcript_raw_first_pass=None, customers=customers)
+    return render_template('admin/test_transcribe.html', transcript=None, transcript_variants=None, customers=customers)
 @admin_bp.route('/messages/bulk-status', methods=['POST'])
 @login_required
 def bulk_update_status():
