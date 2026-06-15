@@ -35,7 +35,7 @@ import logging
 
 from flask import Blueprint, request, jsonify, send_from_directory
 
-from services.transcribe_service import transcribe_async
+from services.transcribe import transcribe_async
 
 log = logging.getLogger(__name__)
 
