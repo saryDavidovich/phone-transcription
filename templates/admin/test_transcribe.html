@@ -15,6 +15,8 @@
           <option value="gemini">Gemini (רגיל)</option>
           <option value="premium">אלף בוט (מקצועי)</option>
           <option value="gemini_review">🧪 Gemini + מעבר תיקון (נסיוני - מקצועי חדש)</option>
+          <option value="gemini_dual_flash">🧪 2 תמלולים + מיזוג Flash (נסיוני - מקצועי חדש)</option>
+          <option value="gemini_dual_pro">🧪 2 תמלולים + מיזוג Pro (נסיוני - מקצועי חדש)</option>
         </select>
       </div>
       <div class="form-group">
@@ -60,18 +62,16 @@
 </div>
 
 {% if transcript %}
-{% if transcript_raw_first_pass %}
+{% if transcript_variants %}
 <div class="card" style="margin-top:24px" dir="rtl">
-  <div style="font-size:16px;font-weight:700;margin-bottom:12px">🧪 השוואה - תמלול ראשוני לפני/אחרי מעבר תיקון</div>
-  <div class="grid-2">
+  <div style="font-size:16px;font-weight:700;margin-bottom:12px">🧪 השוואת תמלולים ({{ duration }} שניות)</div>
+  <div class="grid-{{ transcript_variants|length if transcript_variants|length <= 3 else 3 }}">
+    {% for label, text in transcript_variants %}
     <div>
-      <div style="font-weight:700;margin-bottom:8px;color:#6b7280">לפני תיקון (תמלול ראשוני)</div>
-      <div style="background:#f9fafb;border-right:4px solid #9ca3af;padding:16px;border-radius:8px;line-height:1.8;white-space:pre-wrap;color:#1a202c;text-align:right;direction:rtl">{{ transcript_raw_first_pass }}</div>
+      <div style="font-weight:700;margin-bottom:8px;color:{{ '#065f46' if loop.last else '#6b7280' }}">{{ label }}</div>
+      <div style="background:{{ '#f0fdf4' if loop.last else '#f9fafb' }};border-right:4px solid {{ '#10b981' if loop.last else '#9ca3af' }};padding:16px;border-radius:8px;line-height:1.8;white-space:pre-wrap;color:#1a202c;text-align:right;direction:rtl">{{ text }}</div>
     </div>
-    <div>
-      <div style="font-weight:700;margin-bottom:8px;color:#065f46">אחרי תיקון (גרסה סופית)</div>
-      <div style="background:#f0fdf4;border-right:4px solid #10b981;padding:16px;border-radius:8px;line-height:1.8;white-space:pre-wrap;color:#1a202c;text-align:right;direction:rtl">{{ transcript }}</div>
-    </div>
+    {% endfor %}
   </div>
 </div>
 {% else %}
