@@ -354,6 +354,133 @@ def _gemini_from_url(url, language='he', output_language='he'):
         return None, 0
 
 
+def _gemini_pro_solo(url, language='he', output_language='he'):
+    """
+    גרסה נסיונית - תמלול בפעימה אחת בלבד באמצעות Gemini 3.1 Pro (gemini-3.1-pro-preview),
+    עם פרומפט מורחב שמדגיש זיהוי הגייה אשכנזית-חסידית של עברית/ארמית.
+
+    למשל: דובר אומר "בוריך אתוה" (הגייה אשכנזית) -> יש לתמלל "ברוך אתה" (כתיב עברי תקני),
+    ולא להעתיק את ההגייה כפי שנשמעת.
+
+    נגיש רק דרך ממשק הניהול (בדיקת תמלול), לא דרך ה-IVR או המייל.
+
+    מחזיר: (transcript, actual_duration)
+    """
+    log.info(f"Gemini Pro solo: language={language}, output_language={output_language}")
+    try:
+        from google import genai
+        from google.genai import types as gtypes
+
+        api_key = os.environ.get('GOOGLE_API_KEY')
+        client = genai.Client(api_key=api_key)
+
+        audio_content, actual_duration = _download_and_prepare_audio(url)
+
+        input_lang_map = {'he': 'עברית', 'yi': 'יידיש', 'en': 'English'}
+        input_lang_name = input_lang_map.get(language, 'עברית')
+
+        if output_language == 'he':
+            output_instruction = 'כתוב את התמלול בעברית בלבד. אל תשתמש באותיות לטיניות.'
+        elif output_language == 'yi':
+            output_instruction = 'שרייב די טראנסקריפציע אויף יידיש בלעבד.'
+        else:
+            output_instruction = 'Write the transcription in English only.'
+
+        if language == 'yi' and output_language == 'yi':
+            yiddish_instruction = """
+הדובר מדבר יידיש אשכנזית חסידית. שים לב:
+- ישנם ביטויים, פסוקים וציטוטים בעברית/ארמית בהגייה אשכנזית — השאר אותם כפי שנאמרו בעברית, אל תתרגם ליידיש.
+- מילים עבריות כמו "תורה", "שבת", "גמרא", "רבי" — כתוב בעברית.
+- רק המשפטים שנאמרו ביידיש — כתוב ביידיש."""
+        elif language == 'yi' and output_language == 'he':
+            yiddish_instruction = """
+הדובר מדבר יידיש אשכנזית חסידית. תרגם הכל לעברית תקנית.
+ביטויים ופסוקים בעברית/ארמית — כתוב בעברית כפי שהם.
+אל תשאיר אף מילה ביידיש — תרגם הכל לעברית."""
+        else:
+            yiddish_instruction = ''
+
+        pronunciation_instruction = """
+הוראה קריטית - זיהוי הגייה אשכנזית-חסידית של עברית וארמית:
+הדובר/השומעים עשויים לצטט פסוקים, תפילות, משניות, גמרא וביטויים חז"ליים בהגייה אשכנזית-חסידית מסורתית,
+שנשמעת אחרת מהעברית הישראלית המודרנית. עליך לזהות זאת ולתמלל בכתיב העברי/ארמי התקני והמדויק
+של אותו מקור (לא לפי איך שזה נשמע, אלא לפי איך שזה כתוב במקור).
+
+דוגמאות להמרת הגייה אשכנזית -> כתיב תקני (חובה לזהות תבניות כאלה ולתקן):
+- "בוריך אתוה" / "בורוך אתאה" -> "ברוך אתה"
+- "אדוינוי" / "אדונוי" -> "אדני" (כפי שמופיע בנוסח, ולא לכתוב "ה' " אם המקור כותב את השם המלא)
+- "אלוקיינו" / "אלוקיינו מלך העוילום" -> "אלוקינו מלך העולם" (לפי הניקוד/כתיב המקובל בסידור)
+- "כשם שעוסו ניסים" -> "כשם שעשו נסים"
+- "תוירה" / "תויירה" -> "תורה"
+- תנועות "וי"/"וא" שמייצגות "ה"/"ו" קמוצה/חולם בהגייה אשכנזית (כגון "שולוים" -> "שלום", "כוחיל" -> "כחל" וכו') - תמלל לפי הכתיב העברי הנכון של המילה, לא לפי התעתיק הפונטי.
+- ת' רפה שנשמעת כ-"ס" (כגון "שבת" -> נשמע "שבס") - תמלל "שבת" (הכתיב הנכון), לא "שבס".
+
+חשוב: זה חל **רק** על קטעי לשון הקודש (עברית/ארמית) שמצוטטים בתוך הדיבור (פסוקים, ברכות, מאמרי חז"ל,
+שמות ומושגים תורניים) - לא על דיבור חולין רגיל. במקרה של ספק, בחר את הכתיב התקני/המקורי המוכר
+של אותו מקור (כפי שהוא מופיע בתנ"ך/משנה/גמרא/סידור), ולא תעתיק פונטי של ההגייה."""
+
+        prompt = f"""תמלל את קובץ השמע הזה במדויק.
+שפת הדובר: {input_lang_name}.
+{output_instruction}
+{yiddish_instruction}
+{pronunciation_instruction}
+חשוב ביותר — תמלול מדויק ומלא:
+- תמלל כל מילה ומילה ללא יוצא מן הכלל.
+- אל תדלג על אף מילה, אפילו אם הקול לא ברור — כתוב את מה שנשמע גם אם אינך בטוח.
+- אל תסכם, אל תקצר, אל תדלג על חלקים.
+- שמור על מינוח תורני נכון, ארמית, ראשי תיבות וגרסאות.
+- החזר רק את הטקסט המתומלל ללא הערות נוספות."""
+
+        transcript = None
+        for attempt in range(5):
+            try:
+                response = client.models.generate_content(
+                    model='gemini-3.1-pro-preview',
+                    contents=[
+                        prompt,
+                        gtypes.Part.from_bytes(data=audio_content, mime_type='audio/wav'),
+                    ],
+                )
+                transcript = response.text.strip()
+                log.info(f"Gemini Pro solo transcription completed, {len(transcript)} chars")
+                break
+            except Exception as ge:
+                log.warning(f"Gemini Pro solo attempt {attempt+1} failed: {ge}")
+                if attempt < 4:
+                    time.sleep(15)
+                else:
+                    raise
+
+        if language == 'yi' and output_language == 'he' and transcript:
+            log.info("Translating Yiddish to Hebrew (Pro solo)...")
+            for attempt in range(5):
+                try:
+                    translate_response = client.models.generate_content(
+                        model='gemini-3.1-pro-preview',
+                        contents=[f"""תרגם את הטקסט הבא מיידיש לעברית תקנית.
+ביטויים ופסוקים בעברית/ארמית — השאר כפי שהם.
+החזר רק את הטקסט המתורגם ללא הערות.
+
+טקסט לתרגום:
+{transcript}"""],
+                    )
+                    transcript = translate_response.text.strip()
+                    log.info(f"Translation completed (Pro solo), {len(transcript)} chars")
+                    break
+                except Exception as te:
+                    log.warning(f"Translation attempt {attempt+1} failed (Pro solo): {te}")
+                    if attempt < 4:
+                        time.sleep(10)
+                    else:
+                        log.error("Translation failed after 5 attempts (Pro solo), using original")
+
+        return transcript, actual_duration
+
+    except Exception as e:
+        log.error(f"Gemini Pro solo error: {e}")
+        return None, 0
+
+
 def _download_and_prepare_audio(url):
     """מוריד את קובץ האודיו ומבצע upsample ל-16kHz אם צריך. מחזיר (audio_bytes, actual_duration)."""
     import wave, audioop, io
