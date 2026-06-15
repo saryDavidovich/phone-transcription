@@ -32,6 +32,7 @@ import os
 import re
 import uuid
 import logging
+from urllib.parse import quote
 
 from flask import Blueprint, request, jsonify, send_from_directory
 
@@ -52,6 +53,9 @@ def _normalize_israeli_phone(raw):
     return phone
 
 email_bp = Blueprint('email_inbound', __name__)
+
+# כתובת המייל הציבורית שאליה לקוחות שולחים הקלטות לתמלול
+TRANSCRIBE_INBOUND_EMAIL = os.environ.get('TRANSCRIBE_INBOUND_EMAIL', '033131795@sheasystem.com')
 
 # תיקייה לשמירת קבצי אודיו שהתקבלו במייל (משם הם מוגשים חזרה כ-rec_url)
 RECORDINGS_EMAIL_DIR = os.environ.get('RECORDINGS_EMAIL_DIR', 'recordings_email')
@@ -342,3 +346,117 @@ def _send_guidance_email(to_email, reason, phone=''):
         log.info(f"Guidance email sent to {to_email} (reason: {reason})")
     except Exception as e:
         log.error(f"Failed to send guidance email to {to_email}: {e}")
+
+
+@email_bp.route('/send-email-instructions', methods=['POST'])
+def send_email_instructions():
+    """
+    נקרא מה-IVR (שלוחה 5, מקש 1). שולח לכתובת המייל הרשומה של הלקוח
+    הוראות מפורטות ומעוצבות + קישורי mailto מוכנים לשליחת הקלטה לתמלול במייל.
+    """
+    from app import app
+    from models import Customer
+
+    data = request.get_json(silent=True) or {}
+    phone = _normalize_israeli_phone(data.get('phone', ''))
+
+    if not phone:
+        return jsonify({'status': 'error', 'reason': 'missing_phone'}), 400
+
+    with app.app_context():
+        customer = Customer.query.filter_by(phone=phone).first()
+
+        if not customer or not (customer.email or '').strip():
+            log.info(f"send-email-instructions: אין כתובת מייל רשומה ל-{phone}")
+            return jsonify({'status': 'no_email'}), 200
+
+        _send_instructions_email(customer.email, customer.phone, customer.name)
+        return jsonify({'status': 'sent'}), 200
+
+
+def _mailto_link(phone, extra=''):
+    subject = phone if not extra else f'{phone} {extra}'
+    return f"mailto:{TRANSCRIBE_INBOUND_EMAIL}?subject={quote(subject)}"
+
+
+def _send_instructions_email(to_email, phone, name=''):
+    options = [
+        ('תמלול רגיל, עברית', ''),
+        ('תמלול רגיל, יידיש → עברית', 'רגיל יידיש עברית'),
+        ('תמלול רגיל, יידיש → יידיש', 'רגיל יידיש יידיש'),
+        ('תמלול רגיל, אנגלית → עברית', 'רגיל אנגלית עברית'),
+        ('תמלול מקצועי, עברית', 'מקצועי'),
+    ]
+
+    rows_html = ''
+    for label, extra in options:
+        subject_display = phone if not extra else f'{phone} {extra}'
+        link = _mailto_link(phone, extra)
+        rows_html += f'''
+<tr>
+<td style="padding:10px;border:1px solid #e5e7eb">{label}</td>
+<td style="padding:10px;border:1px solid #e5e7eb;font-family:monospace">{subject_display}</td>
+<td style="padding:10px;border:1px solid #e5e7eb;text-align:center">
+<a href="{link}" style="background:#2563eb;color:#fff;text-decoration:none;padding:8px 16px;border-radius:6px;font-weight:600;display:inline-block">פתח מייל מוכן</a>
+</td>
+</tr>'''
+
+    html = f'''<div dir="rtl" style="font-family:Arial,sans-serif;max-width:640px;margin:auto;color:#111827">
+<h2 style="color:#1d4ed8">שליחת הקלטה לתמלול במייל</h2>
+<p>שלום {name or ''},</p>
+<p style="line-height:1.8">
+ניתן לשלוח הקלטה לתמלול גם באמצעות מייל, בלי להתקשר למערכת.
+פשוט שולחים מייל עם <b>קובץ ההקלטה מצורף</b> לכתובת:
+</p>
+<div style="background:#eff6ff;border-right:4px solid #2563eb;padding:14px;margin:14px 0;border-radius:8px;font-size:18px;font-weight:700;text-align:center;direction:ltr">
+{TRANSCRIBE_INBOUND_EMAIL}
+</div>
+<p style="line-height:1.8">
+ב<b>שורת הנושא</b> (Subject) של המייל כותבים את מספר הטלפון שלך - <b dir="ltr" style="font-family:monospace">{phone}</b>.
+אפשר גם להוסיף אחרי המספר, מופרד ברווחים, את סוג התמלול (רגיל / מקצועי) ואת שפת ההקלטה ושפת הפלט הרצויה (עברית / יידיש / אנגלית).
+</p>
+<p style="line-height:1.8">
+התמלול יישלח בחזרה <b>לאותה כתובת מייל</b> שממנה נשלחה ההקלטה. שימוש זה מתאפשר רק מכתובת המייל הרשומה במערכת
+(<span dir="ltr" style="font-family:monospace">{to_email}</span>), ובתנאי שיש יתרה בארנק - החיוב מתבצע לפי מספר הטלפון שצוין בנושא.
+</p>
+
+<h3 style="color:#1d4ed8;margin-top:24px">דוגמאות מוכנות לשימוש</h3>
+<p style="line-height:1.8">
+הלחצנים הבאים פותחים טיוטת מייל חדשה עם הכתובת ושורת הנושא ממולאות מראש - צריך רק <b>לצרף את קובץ ההקלטה</b> ולשלוח.
+</p>
+<table style="width:100%;border-collapse:collapse;margin:14px 0;font-size:14px">
+<thead>
+<tr style="background:#f3f4f6">
+<th style="padding:10px;border:1px solid #e5e7eb;text-align:right">סוג תמלול</th>
+<th style="padding:10px;border:1px solid #e5e7eb;text-align:right">שורת הנושא</th>
+<th style="padding:10px;border:1px solid #e5e7eb;text-align:center">פתיחת מייל</th>
+</tr>
+</thead>
+<tbody>
+{rows_html}
+</tbody>
+</table>
+
+<p style="color:#6b7280;font-size:13px;line-height:1.8">
+שים לב: לחיצה על "פתח מייל מוכן" תפתח את תוכנת המייל המוגדרת כברירת מחדל במכשיר שלך (Gmail, Outlook וכו'),
+עם הכתובת ושורת הנושא ממולאות. יש לצרף את קובץ ההקלטה באופן רגיל ולשלוח.
+</p>
+
+<p style="color:#6b7280;font-size:13px;margin-top:24px">מערכת תמלולפון 03-3131795</p>
+</div>'''
+
+    try:
+        import sendgrid
+        from sendgrid.helpers.mail import Mail
+
+        sg = sendgrid.SendGridAPIClient(api_key=os.environ.get('SENDGRID_API_KEY'))
+        message = Mail(
+            from_email=os.environ.get('SENDGRID_FROM_EMAIL', os.environ.get('GMAIL_USER', '')),
+            to_emails=to_email,
+            subject='תמלולפון - הוראות לשליחת הקלטה לתמלול במייל',
+            html_content=html,
+        )
+        sg.send(message)
+        log.info(f"Instructions email sent to {to_email}")
+    except Exception as e:
+        log.error(f"Failed to send instructions email to {to_email}: {e}")
