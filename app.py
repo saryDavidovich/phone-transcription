@@ -65,6 +65,7 @@ def _migrate_db():
             conn.execute(db.text("ALTER TABLE customers ADD COLUMN IF NOT EXISTS transcription_tier VARCHAR(10) DEFAULT 'basic'"))
             conn.execute(db.text("ALTER TABLE recordings ADD COLUMN IF NOT EXISTS alefbot_job_id VARCHAR(100)"))
             conn.execute(db.text("ALTER TABLE recordings ADD COLUMN IF NOT EXISTS rec_url VARCHAR(500)"))
+            conn.execute(db.text("ALTER TABLE recordings ADD COLUMN IF NOT EXISTS source_filename VARCHAR(255)"))
             # שדות סטטוס פקס (ימות המשיח) - שייכים ל-recordings, לא ל-customers
             conn.execute(db.text("ALTER TABLE recordings ADD COLUMN IF NOT EXISTS fax_campaign_id VARCHAR(64)"))
             conn.execute(db.text("ALTER TABLE recordings ADD COLUMN IF NOT EXISTS fax_status VARCHAR(32)"))
@@ -96,5 +97,3 @@ def _create_default_admin():
 app = create_app()
 if __name__ == '__main__':
     app.run(debug=False, host='0.0.0.0', port=5000)
-
-
