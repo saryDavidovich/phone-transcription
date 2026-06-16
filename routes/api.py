@@ -214,3 +214,14 @@ def reserve_manager_message():
     db.session.add(msg)
     db.session.commit()
     return jsonify({'id': msg.id})
+
+@api_bp.route('/settings', methods=['GET'])
+def get_public_settings():
+    """מחזיר הגדרות מחיר ציבוריות ל-IVR"""
+    from routes.admin import get_setting
+    return jsonify({
+        'price_per_20min_basic': get_setting('price_per_20min_basic', '0.90'),
+        'price_per_20min_premium': get_setting('price_per_20min_premium', '1.90'),
+        'price_per_20min_video': get_setting('price_per_20min_video', '1.50'),
+        'min_balance': get_setting('min_balance', '5'),
+    })
