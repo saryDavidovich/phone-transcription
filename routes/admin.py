@@ -442,6 +442,7 @@ def settings():
     if request.method == 'POST':
         set_setting('price_per_20min_basic', request.form.get('price_per_20min_basic', '0.90'))
         set_setting('price_per_20min_premium', request.form.get('price_per_20min_premium', '1.90'))
+        set_setting('price_per_20min_video', request.form.get('price_per_20min_video', '1.50'))
         set_setting('min_balance', request.form.get('min_balance', '5'))
         set_setting('max_recording_seconds', request.form.get('max_recording_seconds', '1800'))
         set_setting('welcome_new', request.form.get('welcome_new', ''))
@@ -453,6 +454,7 @@ def settings():
     current_settings = {
         'price_per_20min_basic': get_setting('price_per_20min_basic', '0.90'),
         'price_per_20min_premium': get_setting('price_per_20min_premium', '1.90'),
+        'price_per_20min_video': get_setting('price_per_20min_video', '1.50'),
         'min_balance': get_setting('min_balance', '5'),
         'max_recording_seconds': get_setting('max_recording_seconds', '1800'),
         'welcome_new': get_setting('welcome_new', 'שלום וברוכים הבאים למערכת התמלול.'),
@@ -579,7 +581,7 @@ def test_transcribe():
         try:
             transcript_variants = None  # רשימת (כותרת, טקסט) להשוואה בתבנית, לטיירים נסיוניים
             if tier == 'gemini':
-                transcript, duration = _gemini_from_url(rec_url, language, output_language)
+                transcript, duration, _ = _gemini_from_url(rec_url, language, output_language)
             elif tier == 'gemini_pro_solo':
                 # נסיוני - פעימה אחת בלבד עם Gemini 3.1 Pro + פרומפט הגייה אשכנזית-חסידית
                 from services.transcribe import _gemini_pro_solo
