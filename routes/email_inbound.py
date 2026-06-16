@@ -459,9 +459,9 @@ def _ocr_worker(filepath, original_filename, customer_id, customer_email, phone)
 
 
 def _gemini_ocr(filepath, original_filename):
-    """שולח תמונה/PDF ל-Gemini ומחזיר את הטקסט המזוהה (OCR)."""
+    """שולח תמונה/PDF ל-Gemini ומחזיר את הטקסט המזוהה (OCR).
+    PDF מעובד עמוד-עמוד כדי לשפר דיוק בכתב יד עברי צפוף."""
     try:
-        import base64
         from google import genai
         from google.genai import types as gtypes
 
@@ -469,77 +469,127 @@ def _gemini_ocr(filepath, original_filename):
         client = genai.Client(api_key=api_key)
 
         ext = os.path.splitext(original_filename or filepath)[1].lstrip('.').lower()
-        mime_map = {
-            'jpg': 'image/jpeg', 'jpeg': 'image/jpeg',
-            'png': 'image/png', 'gif': 'image/gif',
-            'webp': 'image/webp', 'tiff': 'image/tiff',
-            'tif': 'image/tiff', 'bmp': 'image/bmp',
-            'pdf': 'application/pdf',
-        }
-        mime_type = mime_map.get(ext, 'image/jpeg')
 
-        with open(filepath, 'rb') as f:
-            file_bytes = f.read()
+        OCR_PROMPT = """אתה מערכת OCR מדויקת לכתב יד עברי.
+משימתך: להעתיק את הטקסט הכתוב בתמונה בדיוק מוחלט, תו אחר תו.
 
-        file_size = len(file_bytes)
-        log.info(f"Gemini OCR: {original_filename}, {file_size} bytes, mime={mime_type}")
+כללים מחייבים:
+1. העתק כל מילה בדיוק כפי שהיא כתובה - אפילו אם יש בה שגיאת כתיב.
+2. אל תתקן, אל תשנה, אל תפרש ואל תוסיף מילים שאינן בתמונה.
+3. אם מילה אינה קריאה - כתוב [?] במקומה.
+4. אם קטע שלם אינו קריא - כתוב [לא קריא].
+5. שמור על כל סימני הפיסוק, מרכאות, סוגריים, קווים, מספרים - בדיוק כפי שמופיעים.
+6. שמור על מבנה השורות והפסקאות.
+7. אל תוסיף כותרות, הסברים, או הערות - רק הטקסט עצמו.
 
-        prompt = """קרא את כל הטקסט המופיע בתמונה/מסמך זה בדיוק מלא.
+התחל ישירות בטקסט המועתק:"""
 
-הנחיות:
-- העתק את הטקסט כפי שהוא כתוב, תו בתו, ללא תיקון שגיאות כתיב.
-- שמור על מבנה השורות והפסקאות כפי שהן מופיעות במסמך.
-- אם יש טבלאות, שמור על מבנה הטבלה.
-- אם יש מספרים, סמלים, ניקוד - כתוב אותם בדיוק.
-- אם חלק מהטקסט אינו קריא, כתוב [לא קריא] במקומו.
-- החזר רק את הטקסט עצמו, ללא הערות, הסברים, או הקדמות."""
+        # PDF - עיבוד עמוד-עמוד
+        if ext == 'pdf':
+            import fitz  # PyMuPDF
+            all_pages_text = []
 
-        for attempt in range(3):
-            try:
-                if file_size > 18 * 1024 * 1024:
-                    # קובץ גדול - Files API
-                    import tempfile
-                    with tempfile.NamedTemporaryFile(suffix=f'.{ext}', delete=False) as tmp:
-                        tmp.write(file_bytes)
-                        tmp_path = tmp.name
+            doc = fitz.open(filepath)
+            log.info(f"Gemini OCR: PDF has {len(doc)} pages")
+
+            for page_num in range(len(doc)):
+                page = doc[page_num]
+                # המרת עמוד לתמונה ברזולוציה גבוהה
+                mat = fitz.Matrix(2.5, 2.5)  # zoom x2.5 לבהירות
+                pix = page.get_pixmap(matrix=mat)
+                img_bytes = pix.tobytes("png")
+
+                log.info(f"Gemini OCR: processing page {page_num+1}/{len(doc)}, {len(img_bytes)} bytes")
+
+                page_text = None
+                for attempt in range(3):
                     try:
-                        uploaded = client.files.upload(file=tmp_path, config={'mime_type': mime_type})
-                        import time as _time
-                        waited = 0
-                        while str(uploaded.state) not in ('FileState.ACTIVE', 'ACTIVE') and waited < 120:
-                            _time.sleep(3)
-                            waited += 3
-                            uploaded = client.files.get(name=uploaded.name)
                         response = client.models.generate_content(
                             model='gemini-3.5-flash',
-                            contents=[prompt, uploaded],
+                            contents=[
+                                OCR_PROMPT,
+                                gtypes.Part.from_bytes(data=img_bytes, mime_type='image/png'),
+                            ],
                         )
-                        client.files.delete(name=uploaded.name)
-                    finally:
+                        page_text = response.text.strip()
+                        log.info(f"OCR page {page_num+1}: {len(page_text)} chars")
+                        break
+                    except Exception as ge:
+                        log.warning(f"OCR page {page_num+1} attempt {attempt+1} failed: {ge}")
+                        if attempt < 2:
+                            import time as _time
+                            _time.sleep(8)
+
+                if page_text:
+                    all_pages_text.append(f"--- עמוד {page_num+1} ---\n{page_text}")
+                else:
+                    all_pages_text.append(f"--- עמוד {page_num+1} ---\n[לא קריא]")
+
+            doc.close()
+            result = '\n\n'.join(all_pages_text)
+            log.info(f"Gemini OCR completed (PDF, {len(doc)} pages): {len(result)} chars")
+            return result
+
+        else:
+            # תמונה רגילה
+            mime_map = {
+                'jpg': 'image/jpeg', 'jpeg': 'image/jpeg',
+                'png': 'image/png', 'gif': 'image/gif',
+                'webp': 'image/webp', 'tiff': 'image/tiff',
+                'tif': 'image/tiff', 'bmp': 'image/bmp',
+            }
+            mime_type = mime_map.get(ext, 'image/jpeg')
+
+            with open(filepath, 'rb') as f:
+                file_bytes = f.read()
+
+            file_size = len(file_bytes)
+            log.info(f"Gemini OCR: {original_filename}, {file_size} bytes, mime={mime_type}")
+
+            for attempt in range(3):
+                try:
+                    if file_size > 18 * 1024 * 1024:
+                        import tempfile, time as _time
+                        with tempfile.NamedTemporaryFile(suffix=f'.{ext}', delete=False) as tmp:
+                            tmp.write(file_bytes)
+                            tmp_path = tmp.name
                         try:
-                            os.remove(tmp_path)
-                        except Exception:
-                            pass
-                else:
-                    response = client.models.generate_content(
-                        model='gemini-3.5-flash',
-                        contents=[
-                            prompt,
-                            gtypes.Part.from_bytes(data=file_bytes, mime_type=mime_type),
-                        ],
-                    )
+                            uploaded = client.files.upload(file=tmp_path, config={'mime_type': mime_type})
+                            waited = 0
+                            while str(uploaded.state) not in ('FileState.ACTIVE', 'ACTIVE') and waited < 120:
+                                _time.sleep(3)
+                                waited += 3
+                                uploaded = client.files.get(name=uploaded.name)
+                            response = client.models.generate_content(
+                                model='gemini-3.5-flash',
+                                contents=[OCR_PROMPT, uploaded],
+                            )
+                            client.files.delete(name=uploaded.name)
+                        finally:
+                            try:
+                                os.remove(tmp_path)
+                            except Exception:
+                                pass
+                    else:
+                        response = client.models.generate_content(
+                            model='gemini-3.5-flash',
+                            contents=[
+                                OCR_PROMPT,
+                                gtypes.Part.from_bytes(data=file_bytes, mime_type=mime_type),
+                            ],
+                        )
 
-                result = response.text.strip()
-                log.info(f"Gemini OCR completed: {len(result)} chars")
-                return result
+                    result = response.text.strip()
+                    log.info(f"Gemini OCR completed: {len(result)} chars")
+                    return result
 
-            except Exception as ge:
-                log.warning(f"Gemini OCR attempt {attempt+1} failed: {ge}")
-                if attempt < 2:
-                    import time as _time
-                    _time.sleep(10)
-                else:
-                    raise
+                except Exception as ge:
+                    log.warning(f"Gemini OCR attempt {attempt+1} failed: {ge}")
+                    if attempt < 2:
+                        import time as _time
+                        _time.sleep(10)
+                    else:
+                        raise
 
     except Exception as e:
         log.error(f"Gemini OCR error: {e}")
