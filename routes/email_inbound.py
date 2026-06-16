@@ -233,6 +233,7 @@ def _download_gdrive_file(file_id, dest_dir):
     מחזיר (filepath, original_filename) או (None, None) בכשלון.
     """
     import urllib.parse
+    import requests
 
     # URL להורדה ישירה ללא אימות (עובד לקבצים ציבוריים / anyone with link)
     download_url = f"https://drive.google.com/uc?export=download&id={file_id}&confirm=t"
