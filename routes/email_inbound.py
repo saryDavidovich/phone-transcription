@@ -194,9 +194,14 @@ def _strip_html(html):
     return text.strip()
 
 
-# ביטוי רגולרי לזיהוי קישורי Google Drive (קובץ ותיקייה)
+# ביטוי רגולרי לזיהוי קישורי Google Drive - ישירים או עטופים ב-Google redirect
 _GDRIVE_RE = re.compile(
     r'https://(?:drive|docs)\.google\.com/(?:file/d/|open\?id=|uc\?.*?id=)([\w-]+)',
+    re.IGNORECASE
+)
+# ביטוי לזיהוי Google redirect שמכיל קישור Drive בתוכו
+_GOOGLE_REDIRECT_RE = re.compile(
+    r'https://www\.google\.com/url\?[^\s<>"]*?q=(https://(?:drive|docs)\.google\.com/[^\s<>&"]+)',
     re.IGNORECASE
 )
 
@@ -205,6 +210,18 @@ def _extract_gdrive_file_id(text):
     """מחפש קישור Google Drive בטקסט ומחזיר את ה-file ID, או None אם לא נמצא."""
     if not text:
         return None
+
+    import urllib.parse
+
+    # נסה קודם לחלץ מ-Google redirect (כשGmail עוטף קישורים)
+    redirect_match = _GOOGLE_REDIRECT_RE.search(text)
+    if redirect_match:
+        inner_url = urllib.parse.unquote(redirect_match.group(1))
+        m = _GDRIVE_RE.search(inner_url)
+        if m:
+            return m.group(1)
+
+    # נסה ישירות
     m = _GDRIVE_RE.search(text)
     return m.group(1) if m else None
 
@@ -370,6 +387,7 @@ def email_inbound():
             file_id = _extract_gdrive_file_id(body_text)
 
             if not file_id:
+                log.warning(f"email-inbound: לא נמצא קישור Drive בגוף המייל. תחילת גוף: {body_text[:300]}")
                 _send_guidance_email(sender_email, 'no_attachment', phone=phone)
                 return jsonify({'status': 'rejected', 'reason': 'no_attachment'}), 200
 
