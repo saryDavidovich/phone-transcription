@@ -52,10 +52,10 @@ def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, durat
             else:
                 # gemini או כל ברירת מחדל
                 log.info(f"Using Gemini for customer {customer_id}")
-                transcript_raw, actual_duration = _gemini_from_url(rec_url, language, output_language)
+                transcript_raw, actual_duration, is_video = _gemini_from_url(rec_url, language, output_language)
                 transcript_fixed = transcript_raw
-                price_key = 'price_per_20min_basic'
-                description_tier = 'רגיל'
+                price_key = 'price_per_20min_video' if is_video else 'price_per_20min_basic'
+                description_tier = 'וידאו' if is_video else 'רגיל'
 
             if actual_duration and actual_duration > 0:
                 duration_seconds = actual_duration
@@ -322,66 +322,82 @@ def _gemini_from_url(url, language='he', output_language='he'):
         uploaded_file = None
 
         transcript = None
-        for attempt in range(5):
-            try:
-                if file_size > USE_FILES_API_THRESHOLD:
-                    # קובץ גדול - העלאה דרך Files API
-                    if uploaded_file is None:
-                        log.info(f"File size {file_size} bytes > 18MB, using Files API")
-                        with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
-                            tmp.write(audio_content)
-                            tmp_path = tmp.name
-                        try:
-                            uploaded_file = client.files.upload(
-                                file=tmp_path,
-                                config={'mime_type': mime_type}
-                            )
-                            log.info(f"Files API upload complete: {uploaded_file.name}")
-                        finally:
-                            try:
-                                os.remove(tmp_path)
-                            except Exception:
-                                pass
-
-                    response = client.models.generate_content(
-                        model='gemini-3.5-flash',
-                        contents=[prompt, uploaded_file],
+        try:
+            if file_size > USE_FILES_API_THRESHOLD:
+                # קובץ גדול - העלאה דרך Files API
+                log.info(f"File size {file_size} bytes > 18MB, using Files API")
+                with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
+                    tmp.write(audio_content)
+                    tmp_path = tmp.name
+                try:
+                    uploaded_file = client.files.upload(
+                        file=tmp_path,
+                        config={'mime_type': mime_type}
                     )
-                else:
-                    # קובץ קטן - inline כמו קודם
-                    response = client.models.generate_content(
-                        model='gemini-3.5-flash',
-                        contents=[
-                            prompt,
-                            gtypes.Part.from_bytes(data=audio_content, mime_type=mime_type),
-                        ],
-                    )
-
-                transcript = response.text.strip()
-                log.info(f"Gemini transcription completed, {len(transcript)} chars")
-                break
-            except Exception as ge:
-                log.warning(f"Gemini attempt {attempt+1} failed: {ge}")
-                if attempt < 4:
-                    time.sleep(15)
-                else:
-                    raise
-            finally:
-                # מחיקת הקובץ מ-Files API אחרי השימוש (נמחק ממילא אחרי 48 שעות, אבל עדיף לנקות)
-                if uploaded_file and attempt >= 4:
+                    log.info(f"Files API upload complete: {uploaded_file.name}, state: {uploaded_file.state}")
+                finally:
                     try:
-                        client.files.delete(name=uploaded_file.name)
-                        log.info(f"Files API file deleted: {uploaded_file.name}")
+                        os.remove(tmp_path)
                     except Exception:
                         pass
 
-        # מחיקת הקובץ מ-Files API אחרי תמלול מוצלח
-        if uploaded_file:
-            try:
-                client.files.delete(name=uploaded_file.name)
-                log.info(f"Files API file deleted after success: {uploaded_file.name}")
-            except Exception:
-                pass
+                # המתנה עד שהקובץ במצב ACTIVE (עיבוד Google הסתיים)
+                max_wait = 300  # מקסימום 5 דקות המתנה
+                waited = 0
+                while str(uploaded_file.state) not in ('FileState.ACTIVE', 'ACTIVE') and waited < max_wait:
+                    log.info(f"Waiting for Files API file to be ACTIVE (current: {uploaded_file.state}), waited {waited}s...")
+                    time.sleep(5)
+                    waited += 5
+                    uploaded_file = client.files.get(name=uploaded_file.name)
+
+                if str(uploaded_file.state) not in ('FileState.ACTIVE', 'ACTIVE'):
+                    raise Exception(f"Files API file never became ACTIVE after {max_wait}s, state: {uploaded_file.state}")
+
+                log.info(f"Files API file is ACTIVE after {waited}s, proceeding to transcribe")
+
+                for attempt in range(3):
+                    try:
+                        response = client.models.generate_content(
+                            model='gemini-3.5-flash',
+                            contents=[prompt, uploaded_file],
+                        )
+                        transcript = response.text.strip()
+                        log.info(f"Gemini transcription completed (Files API), {len(transcript)} chars")
+                        break
+                    except Exception as ge:
+                        log.warning(f"Gemini Files API attempt {attempt+1} failed: {ge}")
+                        if attempt < 2:
+                            time.sleep(10)
+                        else:
+                            raise
+            else:
+                # קובץ קטן - inline כמו קודם
+                for attempt in range(5):
+                    try:
+                        response = client.models.generate_content(
+                            model='gemini-3.5-flash',
+                            contents=[
+                                prompt,
+                                gtypes.Part.from_bytes(data=audio_content, mime_type=mime_type),
+                            ],
+                        )
+                        transcript = response.text.strip()
+                        log.info(f"Gemini transcription completed (inline), {len(transcript)} chars")
+                        break
+                    except Exception as ge:
+                        log.warning(f"Gemini inline attempt {attempt+1} failed: {ge}")
+                        if attempt < 4:
+                            time.sleep(15)
+                        else:
+                            raise
+        finally:
+            # מחיקת הקובץ מ-Files API בכל מקרה (הצלחה או כשלון)
+            if uploaded_file:
+                try:
+                    client.files.delete(name=uploaded_file.name)
+                    log.info(f"Files API file deleted: {uploaded_file.name}")
+                except Exception:
+                    pass
 
         if language == 'yi' and output_language == 'he':
             log.info("Translating Yiddish to Hebrew...")
@@ -406,11 +422,11 @@ def _gemini_from_url(url, language='he', output_language='he'):
                     else:
                         log.error("Translation failed after 5 attempts, using original")
 
-        return transcript, actual_duration
+        return transcript, actual_duration, mime_type.startswith('video/')
 
     except Exception as e:
         log.error(f"Gemini error: {e}")
-        return None, 0
+        return None, 0, False
 
 
 def _gemini_pro_solo(url, language='he', output_language='he'):
@@ -586,7 +602,7 @@ def _gemini_review_pass(url, language='he', output_language='he'):
 
     מחזיר: (transcript_final, actual_duration, transcript_raw_first_pass)
     """
-    transcript_raw, actual_duration = _gemini_from_url(url, language, output_language)
+    transcript_raw, actual_duration, _ = _gemini_from_url(url, language, output_language)
     if not transcript_raw:
         return None, 0, None
 
@@ -659,12 +675,12 @@ def _gemini_dual_transcribe_and_merge(url, language='he', output_language='he', 
 
     מחזיר: (transcript_final, actual_duration, transcript_a, transcript_b)
     """
-    transcript_a, actual_duration = _gemini_from_url(url, language, output_language)
+    transcript_a, actual_duration, _ = _gemini_from_url(url, language, output_language)
     if not transcript_a:
         return None, 0, None, None
 
     # תמלול עצמאי שני - "שמיעה" נוספת ונפרדת, בלי לדעת על התמלול הראשון
-    transcript_b, _ = _gemini_from_url(url, language, output_language)
+    transcript_b, _, __ = _gemini_from_url(url, language, output_language)
     if not transcript_b:
         # אם התמלול השני נכשל - נמשיך עם הראשון בלבד (בלי מיזוג)
         return transcript_a, actual_duration, transcript_a, None
