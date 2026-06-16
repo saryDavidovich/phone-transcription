@@ -443,6 +443,7 @@ def settings():
         set_setting('price_per_20min_basic', request.form.get('price_per_20min_basic', '0.90'))
         set_setting('price_per_20min_premium', request.form.get('price_per_20min_premium', '1.90'))
         set_setting('price_per_20min_video', request.form.get('price_per_20min_video', '1.50'))
+        set_setting('price_per_1000_chars_ocr', request.form.get('price_per_1000_chars_ocr', '0.10'))
         set_setting('min_balance', request.form.get('min_balance', '5'))
         set_setting('max_recording_seconds', request.form.get('max_recording_seconds', '1800'))
         set_setting('welcome_new', request.form.get('welcome_new', ''))
@@ -455,6 +456,7 @@ def settings():
         'price_per_20min_basic': get_setting('price_per_20min_basic', '0.90'),
         'price_per_20min_premium': get_setting('price_per_20min_premium', '1.90'),
         'price_per_20min_video': get_setting('price_per_20min_video', '1.50'),
+        'price_per_1000_chars_ocr': get_setting('price_per_1000_chars_ocr', '0.10'),
         'min_balance': get_setting('min_balance', '5'),
         'max_recording_seconds': get_setting('max_recording_seconds', '1800'),
         'welcome_new': get_setting('welcome_new', 'שלום וברוכים הבאים למערכת התמלול.'),
