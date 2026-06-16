@@ -419,11 +419,11 @@ def _ocr_worker(filepath, original_filename, customer_id, customer_email, phone)
         char_count = len(ocr_text)
         log.info(f"OCR completed: {char_count} chars")
 
-        # חיוב לפי תווים
-        price_per_1000_chars = float(get_setting('price_per_1000_chars_ocr', '0.10'))
-        cost = round((char_count / 1000) * price_per_1000_chars, 2)
-
         with app.app_context():
+            # חיוב לפי תווים
+            price_per_1000_chars = float(get_setting('price_per_1000_chars_ocr', '0.10'))
+            cost = round((char_count / 1000) * price_per_1000_chars, 2)
+
             customer = Customer.query.get(customer_id)
             if customer:
                 customer.balance -= cost
