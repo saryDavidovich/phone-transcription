@@ -229,7 +229,7 @@ def finalize_alefbot_recording(call_id, transcript_text):
 def _gemini_from_url(url, language='he', output_language='he'):
     log.info(f"Gemini: language={language}, output_language={output_language}")
     try:
-        import wave, audioop, io
+        import wave, audioop, io, tempfile
         from google import genai
         from google.genai import types as gtypes
 
@@ -242,6 +242,16 @@ def _gemini_from_url(url, language='he', output_language='he'):
 
         actual_duration = 0
         audio_content = r.content
+        file_size = len(audio_content)
+
+        # זיהוי סוג הקובץ לפי כותרת URL
+        url_lower = url.lower().split('?')[0]
+        if url_lower.endswith('.mp4') or url_lower.endswith('.mov') or url_lower.endswith('.avi') or url_lower.endswith('.mkv') or url_lower.endswith('.3gp'):
+            mime_type = 'video/mp4'
+            ext = '.mp4'
+        else:
+            mime_type = 'audio/wav'
+            ext = '.wav'
 
         try:
             with wave.open(io.BytesIO(r.content)) as wav_in:
@@ -252,6 +262,8 @@ def _gemini_from_url(url, language='he', output_language='he'):
                 actual_duration = wav_in.getnframes() // framerate
 
             log.info(f"Duration: {actual_duration}s, framerate: {framerate}Hz")
+            mime_type = 'audio/wav'
+            ext = '.wav'
 
             if framerate != 16000:
                 frames, _ = audioop.ratecv(frames, sampwidth, nchannels, framerate, 16000, None)
@@ -265,6 +277,7 @@ def _gemini_from_url(url, language='he', output_language='he'):
                     wav_out.setframerate(16000)
                     wav_out.writeframes(frames)
                 audio_content = output_buffer.getvalue()
+                file_size = len(audio_content)
 
         except Exception as e:
             log.warning(f"Could not process WAV: {e}, using original")
@@ -304,16 +317,46 @@ def _gemini_from_url(url, language='he', output_language='he'):
 - שמור על מינוח תורני נכון, ארמית, ראשי תיבות וגרסאות.
 - החזר רק את הטקסט המתומלל ללא הערות נוספות."""
 
+        # Files API לקבצים גדולים מ-18MB (שומרים מרווח ביטחון מ-20MB)
+        USE_FILES_API_THRESHOLD = 18 * 1024 * 1024
+        uploaded_file = None
+
         transcript = None
         for attempt in range(5):
             try:
-                response = client.models.generate_content(
-                    model='gemini-3.5-flash',
-                    contents=[
-                        prompt,
-                        gtypes.Part.from_bytes(data=audio_content, mime_type='audio/wav'),
-                    ],
-                )
+                if file_size > USE_FILES_API_THRESHOLD:
+                    # קובץ גדול - העלאה דרך Files API
+                    if uploaded_file is None:
+                        log.info(f"File size {file_size} bytes > 18MB, using Files API")
+                        with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
+                            tmp.write(audio_content)
+                            tmp_path = tmp.name
+                        try:
+                            uploaded_file = client.files.upload(
+                                file=tmp_path,
+                                config={'mime_type': mime_type}
+                            )
+                            log.info(f"Files API upload complete: {uploaded_file.name}")
+                        finally:
+                            try:
+                                os.remove(tmp_path)
+                            except Exception:
+                                pass
+
+                    response = client.models.generate_content(
+                        model='gemini-3.5-flash',
+                        contents=[prompt, uploaded_file],
+                    )
+                else:
+                    # קובץ קטן - inline כמו קודם
+                    response = client.models.generate_content(
+                        model='gemini-3.5-flash',
+                        contents=[
+                            prompt,
+                            gtypes.Part.from_bytes(data=audio_content, mime_type=mime_type),
+                        ],
+                    )
+
                 transcript = response.text.strip()
                 log.info(f"Gemini transcription completed, {len(transcript)} chars")
                 break
@@ -323,6 +366,22 @@ def _gemini_from_url(url, language='he', output_language='he'):
                     time.sleep(15)
                 else:
                     raise
+            finally:
+                # מחיקת הקובץ מ-Files API אחרי השימוש (נמחק ממילא אחרי 48 שעות, אבל עדיף לנקות)
+                if uploaded_file and attempt >= 4:
+                    try:
+                        client.files.delete(name=uploaded_file.name)
+                        log.info(f"Files API file deleted: {uploaded_file.name}")
+                    except Exception:
+                        pass
+
+        # מחיקת הקובץ מ-Files API אחרי תמלול מוצלח
+        if uploaded_file:
+            try:
+                client.files.delete(name=uploaded_file.name)
+                log.info(f"Files API file deleted after success: {uploaded_file.name}")
+            except Exception:
+                pass
 
         if language == 'yi' and output_language == 'he':
             log.info("Translating Yiddish to Hebrew...")
