@@ -317,23 +317,298 @@ def _estimate_duration_seconds(filepath):
     return 0
 
 
-def _pick_audio_file():
-    """מאתר בין קבצי ה-attachments את קובץ האודיו. מעדיף content-type שמתחיל ב-audio."""
+# סוגי קבצי תמונה/PDF הנתמכים ל-OCR
+IMAGE_MIME_TYPES = {
+    'image/jpeg': 'jpg',
+    'image/jpg': 'jpg',
+    'image/png': 'png',
+    'image/gif': 'gif',
+    'image/webp': 'webp',
+    'image/tiff': 'tiff',
+    'image/bmp': 'bmp',
+    'application/pdf': 'pdf',
+}
+
+IMAGE_EXTENSIONS = {'jpg', 'jpeg', 'png', 'gif', 'webp', 'tiff', 'tif', 'bmp', 'pdf'}
+AUDIO_VIDEO_EXTENSIONS = {'mp3', 'wav', 'm4a', 'ogg', 'flac', 'aac', 'opus', 'webm',
+                           'mp4', 'mov', 'avi', 'mkv', '3gp', 'amr'}
+
+
+def _pick_file():
+    """מאתר בין קבצי ה-attachments את הקובץ הרלוונטי.
+    מחזיר (file_object, file_type) כאשר file_type הוא 'audio' או 'image'.
+    מעדיף אודיו/וידאו על פני תמונה/PDF אם שניהם קיימים."""
     if not request.files:
-        return None
+        return None, None
+
+    audio_candidate = None
+    image_candidate = None
 
     for key in request.files:
         f = request.files[key]
-        if f and f.mimetype and f.mimetype.startswith('audio'):
-            return f
+        if not f or not f.filename:
+            continue
 
-    # fallback - אם אין mimetype תקין, קח את הקובץ הראשון שאינו ריק
+        mime = (f.mimetype or '').lower()
+        ext = os.path.splitext(f.filename or '')[1].lstrip('.').lower()
+
+        # זיהוי אודיו/וידאו
+        if mime.startswith('audio') or mime.startswith('video'):
+            audio_candidate = f
+            continue
+        if ext in AUDIO_VIDEO_EXTENSIONS and audio_candidate is None:
+            audio_candidate = f
+            continue
+
+        # זיהוי תמונה/PDF
+        if mime in IMAGE_MIME_TYPES or ext in IMAGE_EXTENSIONS:
+            image_candidate = f
+            continue
+
+    # העדפה: אודיו > תמונה
+    if audio_candidate:
+        return audio_candidate, 'audio'
+    if image_candidate:
+        return image_candidate, 'image'
+
+    # fallback - קובץ ראשון שיש
     for key in request.files:
         f = request.files[key]
         if f and f.filename:
-            return f
+            return f, 'audio'  # ברירת מחדל - תמלול
 
-    return None
+    return None, None
+
+
+def _process_ocr_email(filepath, original_filename, customer, sender_email, phone, db):
+    """
+    מעבד קובץ תמונה/PDF ב-OCR דרך Gemini ושולח את הטקסט חזרה במייל + Word.
+    רץ ב-thread נפרד כדי לא לעכב את תגובת ה-webhook.
+    """
+    import threading
+    t = threading.Thread(
+        target=_ocr_worker,
+        args=(filepath, original_filename, customer.id, customer.email, phone),
+        daemon=True
+    )
+    t.start()
+
+
+def _ocr_worker(filepath, original_filename, customer_id, customer_email, phone):
+    """Worker thread שמבצע OCR ושולח תשובה."""
+    from app import app, db
+    from models import Customer, Transaction
+    from routes.admin import get_setting
+
+    log.info(f"OCR worker started: {original_filename}, customer={customer_id}")
+
+    try:
+        # OCR דרך Gemini
+        ocr_text = _gemini_ocr(filepath, original_filename)
+        if not ocr_text:
+            log.error(f"OCR failed for {original_filename}")
+            _send_ocr_result_email(
+                to=customer_email,
+                original_filename=original_filename,
+                ocr_text=None,
+                char_count=0,
+                cost=0,
+            )
+            return
+
+        char_count = len(ocr_text)
+        log.info(f"OCR completed: {char_count} chars")
+
+        # חיוב לפי תווים
+        price_per_1000_chars = float(get_setting('price_per_1000_chars_ocr', '0.10'))
+        cost = round((char_count / 1000) * price_per_1000_chars, 2)
+
+        with app.app_context():
+            customer = Customer.query.get(customer_id)
+            if customer:
+                customer.balance -= cost
+                txn = Transaction(
+                    customer_id=customer_id,
+                    amount=-cost,
+                    type='debit',
+                    description=f'OCR כתב יד - {original_filename} ({char_count} תווים)',
+                )
+                db.session.add(txn)
+                db.session.commit()
+                log.info(f"OCR charged {cost} to customer {customer_id}, balance={customer.balance}")
+
+        # שליחת תוצאה במייל
+        _send_ocr_result_email(
+            to=customer_email,
+            original_filename=original_filename,
+            ocr_text=ocr_text,
+            char_count=char_count,
+            cost=cost,
+        )
+
+    except Exception as e:
+        log.error(f"OCR worker error: {e}")
+    finally:
+        # מחיקת הקובץ הזמני
+        try:
+            if os.path.exists(filepath):
+                os.remove(filepath)
+                log.info(f"OCR temp file deleted: {filepath}")
+        except Exception:
+            pass
+
+
+def _gemini_ocr(filepath, original_filename):
+    """שולח תמונה/PDF ל-Gemini ומחזיר את הטקסט המזוהה (OCR)."""
+    try:
+        import base64
+        from google import genai
+        from google.genai import types as gtypes
+
+        api_key = os.environ.get('GOOGLE_API_KEY')
+        client = genai.Client(api_key=api_key)
+
+        ext = os.path.splitext(original_filename or filepath)[1].lstrip('.').lower()
+        mime_map = {
+            'jpg': 'image/jpeg', 'jpeg': 'image/jpeg',
+            'png': 'image/png', 'gif': 'image/gif',
+            'webp': 'image/webp', 'tiff': 'image/tiff',
+            'tif': 'image/tiff', 'bmp': 'image/bmp',
+            'pdf': 'application/pdf',
+        }
+        mime_type = mime_map.get(ext, 'image/jpeg')
+
+        with open(filepath, 'rb') as f:
+            file_bytes = f.read()
+
+        file_size = len(file_bytes)
+        log.info(f"Gemini OCR: {original_filename}, {file_size} bytes, mime={mime_type}")
+
+        prompt = """קרא את כל הטקסט המופיע בתמונה/מסמך זה בדיוק מלא.
+
+הנחיות:
+- העתק את הטקסט כפי שהוא כתוב, תו בתו, ללא תיקון שגיאות כתיב.
+- שמור על מבנה השורות והפסקאות כפי שהן מופיעות במסמך.
+- אם יש טבלאות, שמור על מבנה הטבלה.
+- אם יש מספרים, סמלים, ניקוד - כתוב אותם בדיוק.
+- אם חלק מהטקסט אינו קריא, כתוב [לא קריא] במקומו.
+- החזר רק את הטקסט עצמו, ללא הערות, הסברים, או הקדמות."""
+
+        for attempt in range(3):
+            try:
+                if file_size > 18 * 1024 * 1024:
+                    # קובץ גדול - Files API
+                    import tempfile
+                    with tempfile.NamedTemporaryFile(suffix=f'.{ext}', delete=False) as tmp:
+                        tmp.write(file_bytes)
+                        tmp_path = tmp.name
+                    try:
+                        uploaded = client.files.upload(file=tmp_path, config={'mime_type': mime_type})
+                        import time as _time
+                        waited = 0
+                        while str(uploaded.state) not in ('FileState.ACTIVE', 'ACTIVE') and waited < 120:
+                            _time.sleep(3)
+                            waited += 3
+                            uploaded = client.files.get(name=uploaded.name)
+                        response = client.models.generate_content(
+                            model='gemini-3.5-flash',
+                            contents=[prompt, uploaded],
+                        )
+                        client.files.delete(name=uploaded.name)
+                    finally:
+                        try:
+                            os.remove(tmp_path)
+                        except Exception:
+                            pass
+                else:
+                    response = client.models.generate_content(
+                        model='gemini-3.5-flash',
+                        contents=[
+                            prompt,
+                            gtypes.Part.from_bytes(data=file_bytes, mime_type=mime_type),
+                        ],
+                    )
+
+                result = response.text.strip()
+                log.info(f"Gemini OCR completed: {len(result)} chars")
+                return result
+
+            except Exception as ge:
+                log.warning(f"Gemini OCR attempt {attempt+1} failed: {ge}")
+                if attempt < 2:
+                    import time as _time
+                    _time.sleep(10)
+                else:
+                    raise
+
+    except Exception as e:
+        log.error(f"Gemini OCR error: {e}")
+        return None
+
+
+def _send_ocr_result_email(to, original_filename, ocr_text, char_count, cost):
+    """שולח את תוצאת ה-OCR במייל עם מסמך Word מצורף."""
+    try:
+        import sendgrid
+        import base64
+        from sendgrid.helpers.mail import Mail, Attachment, FileContent, FileName, FileType, Disposition
+        from services.transcribe import _build_word_doc
+
+        title = f'זיהוי כתב יד - {original_filename}'
+
+        if not ocr_text:
+            html = f'''<div dir="rtl" style="font-family:Arial,sans-serif;max-width:600px;margin:auto">
+<h2 style="color:#dc2626">שגיאה בזיהוי כתב יד</h2>
+<p>לא הצלחנו לזהות את הטקסט מהקובץ <b>{original_filename}</b>.<br>
+אנא ודאו שהתמונה ברורה ונסו שנית.</p>
+</div>'''
+            message = Mail(
+                from_email=os.environ.get('SENDGRID_FROM_EMAIL', ''),
+                to_emails=to,
+                subject=f'שגיאה בזיהוי כתב יד - {original_filename}',
+                html_content=html
+            )
+            sg = sendgrid.SendGridAPIClient(api_key=os.environ.get('SENDGRID_API_KEY'))
+            sg.send(message)
+            return
+
+        # בניית מסמך Word
+        word_bytes = _build_word_doc(
+            name='',
+            duration_str=f'{char_count} תווים',
+            transcript_fixed=ocr_text,
+            title=title,
+        )
+        word_b64 = base64.b64encode(word_bytes).decode('utf-8')
+
+        html = f'''<div dir="rtl" style="font-family:Arial,sans-serif;max-width:600px;margin:auto">
+<h2 style="color:#1d4ed8">זיהוי כתב יד - {original_filename}</h2>
+<p style="color:#6b7280">תווים שזוהו: <b>{char_count}</b> | עלות: <b>₪{cost}</b></p>
+<div style="background:#f0fdf4;border-right:4px solid #10b981;padding:16px;margin:16px 0;border-radius:8px">
+<h3 style="margin:0 0 12px;color:#065f46">✍️ טקסט מזוהה</h3>
+<div style="line-height:1.8;white-space:pre-wrap;text-align:right;direction:rtl">{ocr_text}</div>
+</div>
+</div>'''
+
+        sg = sendgrid.SendGridAPIClient(api_key=os.environ.get('SENDGRID_API_KEY'))
+        safe_name = os.path.splitext(original_filename)[0][:40] if original_filename else 'ocr'
+        message = Mail(
+            from_email=os.environ.get('SENDGRID_FROM_EMAIL', ''),
+            to_emails=to,
+            subject=f'זיהוי כתב יד - {original_filename}',
+            html_content=html
+        )
+        message.attachment = Attachment(
+            FileContent(word_b64),
+            FileName(f'כתב_יד_{safe_name}.docx'),
+            FileType('application/vnd.openxmlformats-officedocument.wordprocessingml.document'),
+            Disposition('attachment')
+        )
+        sg.send(message)
+        log.info(f"OCR result email sent to {to}")
+
+    except Exception as e:
+        log.error(f"OCR result email error: {e}")
 
 
 @email_bp.route('/email-inbound', methods=['POST'])
@@ -379,10 +654,10 @@ def email_inbound():
             _send_guidance_email(sender_email, 'low_balance', phone=phone)
             return jsonify({'status': 'rejected', 'reason': 'low_balance'}), 200
 
-        audio_file = _pick_audio_file()
+        attached_file, file_type = _pick_file()
         gdrive_filepath = None  # אם הורדנו מ-Drive - לניקוי בשגיאה
 
-        if audio_file is None:
+        if attached_file is None:
             # אין קובץ מצורף - נבדוק אם יש קישור Google Drive בגוף המייל
             body_text = request.form.get('text', '') or _strip_html(request.form.get('html', ''))
             file_id = _extract_gdrive_file_id(body_text)
@@ -400,12 +675,28 @@ def email_inbound():
                 return jsonify({'status': 'rejected', 'reason': 'gdrive_download_failed'}), 200
 
             gdrive_filepath = filepath
+            # זיהוי סוג מ-Drive לפי סיומת
+            drive_ext = os.path.splitext(original_filename or '')[1].lstrip('.').lower()
+            file_type = 'image' if drive_ext in IMAGE_EXTENSIONS else 'audio'
             base_url = os.environ.get('APP_BASE_URL', '').rstrip('/')
             rec_url = f"{base_url}/api/recordings-email/{filename}"
-            duration_seconds = _estimate_duration_seconds(filepath)
+            duration_seconds = _estimate_duration_seconds(filepath) if file_type == 'audio' else 0
+
+        elif file_type == 'image':
+            # --- שמירת קובץ תמונה/PDF ---
+            mime = (attached_file.mimetype or '').lower()
+            ext = IMAGE_MIME_TYPES.get(mime) or \
+                  os.path.splitext(attached_file.filename or '')[1].lstrip('.').lower() or 'jpg'
+            filename = f"{uuid.uuid4().hex}.{ext}"
+            filepath = os.path.join(RECORDINGS_EMAIL_DIR, filename)
+            attached_file.save(filepath)
+            original_filename = attached_file.filename or filename
+            rec_url = ''
+            duration_seconds = 0
 
         else:
             # --- שמירת קובץ האודיו המצורף ---
+            audio_file = attached_file
             ext = AUDIO_EXT_MAP.get(
                 (audio_file.mimetype or '').lower(),
                 (os.path.splitext(audio_file.filename or '')[1].lstrip('.') or 'mp3').lower()
@@ -418,6 +709,18 @@ def email_inbound():
             rec_url = f"{base_url}/api/recordings-email/{filename}"
             duration_seconds = _estimate_duration_seconds(filepath)
             original_filename = audio_file.filename or filename
+
+        # --- ניתוב: OCR או תמלול ---
+        if file_type == 'image':
+            _process_ocr_email(
+                filepath=filepath,
+                original_filename=original_filename,
+                customer=customer,
+                sender_email=sender_email,
+                phone=phone,
+                db=db,
+            )
+            return jsonify({'status': 'accepted', 'type': 'ocr'}), 200
 
         call_id = f"email-{uuid.uuid4().hex}"
         rec = Recording(
