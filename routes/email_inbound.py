@@ -194,6 +194,99 @@ def _strip_html(html):
     return text.strip()
 
 
+# ביטוי רגולרי לזיהוי קישורי Google Drive (קובץ ותיקייה)
+_GDRIVE_RE = re.compile(
+    r'https://(?:drive|docs)\.google\.com/(?:file/d/|open\?id=|uc\?.*?id=)([\w-]+)',
+    re.IGNORECASE
+)
+
+
+def _extract_gdrive_file_id(text):
+    """מחפש קישור Google Drive בטקסט ומחזיר את ה-file ID, או None אם לא נמצא."""
+    if not text:
+        return None
+    m = _GDRIVE_RE.search(text)
+    return m.group(1) if m else None
+
+
+def _download_gdrive_file(file_id, dest_dir):
+    """
+    מוריד קובץ מ-Google Drive לפי file_id לתיקיית dest_dir.
+    מניח שהקובץ משותף כ-"כל מי שיש לו קישור יכול לצפות".
+    מחזיר (filepath, original_filename) או (None, None) בכשלון.
+    """
+    import urllib.parse
+
+    # URL להורדה ישירה ללא אימות (עובד לקבצים ציבוריים / anyone with link)
+    download_url = f"https://drive.google.com/uc?export=download&id={file_id}&confirm=t"
+
+    try:
+        session = requests.Session()
+        # קריאה ראשונה - עשויה להחזיר דף אישור לקבצים גדולים
+        r = session.get(download_url, timeout=60, stream=True, allow_redirects=True)
+        r.raise_for_status()
+
+        content_type = r.headers.get('Content-Type', '')
+
+        # אם קיבלנו HTML - כנראה דף אישור של Drive לקבצים גדולים
+        if 'text/html' in content_type:
+            # נחפש את קישור האישור בתוכן
+            html_text = r.text
+            confirm_match = re.search(r'confirm=([0-9A-Za-z_-]+)', html_text)
+            uuid_match = re.search(r'uuid=([0-9A-Za-z_-]+)', html_text)
+            if confirm_match or uuid_match:
+                params = {'export': 'download', 'id': file_id, 'confirm': 't'}
+                if uuid_match:
+                    params['uuid'] = uuid_match.group(1)
+                r = session.get(
+                    'https://drive.google.com/uc',
+                    params=params,
+                    timeout=300,
+                    stream=True
+                )
+                r.raise_for_status()
+                content_type = r.headers.get('Content-Type', '')
+
+        # קבע סיומת לפי Content-Type
+        ct_to_ext = {
+            'audio/mpeg': 'mp3', 'audio/mp3': 'mp3',
+            'audio/wav': 'wav', 'audio/x-wav': 'wav',
+            'audio/mp4': 'm4a', 'audio/x-m4a': 'm4a',
+            'audio/ogg': 'ogg', 'audio/flac': 'flac',
+            'audio/aac': 'aac', 'audio/opus': 'opus',
+            'video/mp4': 'mp4', 'video/quicktime': 'mov',
+            'video/x-msvideo': 'avi', 'video/x-matroska': 'mkv',
+            'video/3gpp': '3gp', 'application/octet-stream': 'mp3',
+        }
+        ct_base = content_type.split(';')[0].strip().lower()
+        ext = ct_to_ext.get(ct_base, 'mp3')
+
+        # נסה לחלץ שם קובץ מ-Content-Disposition
+        original_filename = None
+        cd = r.headers.get('Content-Disposition', '')
+        fn_match = re.search(r'filename\*?=["\']?(?:UTF-8\'\')?([^"\';\r\n]+)', cd, re.IGNORECASE)
+        if fn_match:
+            original_filename = urllib.parse.unquote(fn_match.group(1).strip())
+        if not original_filename:
+            original_filename = f"gdrive_{file_id}.{ext}"
+
+        # שמור לקובץ
+        dest_filename = f"{uuid.uuid4().hex}.{ext}"
+        dest_path = os.path.join(dest_dir, dest_filename)
+        with open(dest_path, 'wb') as f:
+            for chunk in r.iter_content(chunk_size=1024 * 1024):
+                if chunk:
+                    f.write(chunk)
+
+        size = os.path.getsize(dest_path)
+        log.info(f"Google Drive download: file_id={file_id}, size={size}, ext={ext}, saved={dest_filename}")
+        return dest_path, original_filename, dest_filename
+
+    except Exception as e:
+        log.error(f"Google Drive download failed for file_id={file_id}: {e}")
+        return None, None, None
+
+
 def _estimate_duration_seconds(filepath):
     """מנסה לחשב משך אודיו (בשניות) ללא תלות בפורמט, לצורך חיוב התחלתי."""
     try:
@@ -269,26 +362,43 @@ def email_inbound():
             return jsonify({'status': 'rejected', 'reason': 'low_balance'}), 200
 
         audio_file = _pick_audio_file()
+        gdrive_filepath = None  # אם הורדנו מ-Drive - לניקוי בשגיאה
+
         if audio_file is None:
-            _send_guidance_email(sender_email, 'no_attachment', phone=phone)
-            return jsonify({'status': 'rejected', 'reason': 'no_attachment'}), 200
+            # אין קובץ מצורף - נבדוק אם יש קישור Google Drive בגוף המייל
+            body_text = request.form.get('text', '') or _strip_html(request.form.get('html', ''))
+            file_id = _extract_gdrive_file_id(body_text)
 
-        # --- שמירת קובץ האודיו ---
-        ext = AUDIO_EXT_MAP.get(
-            (audio_file.mimetype or '').lower(),
-            (os.path.splitext(audio_file.filename or '')[1].lstrip('.') or 'mp3').lower()
-        )
-        filename = f"{uuid.uuid4().hex}.{ext}"
-        filepath = os.path.join(RECORDINGS_EMAIL_DIR, filename)
-        audio_file.save(filepath)
+            if not file_id:
+                _send_guidance_email(sender_email, 'no_attachment', phone=phone)
+                return jsonify({'status': 'rejected', 'reason': 'no_attachment'}), 200
 
-        base_url = os.environ.get('APP_BASE_URL', '').rstrip('/')
-        rec_url = f"{base_url}/api/recordings-email/{filename}"
+            log.info(f"email-inbound: לא נמצא קובץ מצורף, מנסה Google Drive file_id={file_id}")
+            filepath, original_filename, filename = _download_gdrive_file(file_id, RECORDINGS_EMAIL_DIR)
 
-        duration_seconds = _estimate_duration_seconds(filepath)
+            if not filepath:
+                _send_guidance_email(sender_email, 'gdrive_download_failed', phone=phone)
+                return jsonify({'status': 'rejected', 'reason': 'gdrive_download_failed'}), 200
 
-        # שם הקובץ המקורי כפי שנשלח במייל (ישמש כותרת בתמלול שיחזור)
-        original_filename = audio_file.filename or filename
+            gdrive_filepath = filepath
+            base_url = os.environ.get('APP_BASE_URL', '').rstrip('/')
+            rec_url = f"{base_url}/api/recordings-email/{filename}"
+            duration_seconds = _estimate_duration_seconds(filepath)
+
+        else:
+            # --- שמירת קובץ האודיו המצורף ---
+            ext = AUDIO_EXT_MAP.get(
+                (audio_file.mimetype or '').lower(),
+                (os.path.splitext(audio_file.filename or '')[1].lstrip('.') or 'mp3').lower()
+            )
+            filename = f"{uuid.uuid4().hex}.{ext}"
+            filepath = os.path.join(RECORDINGS_EMAIL_DIR, filename)
+            audio_file.save(filepath)
+
+            base_url = os.environ.get('APP_BASE_URL', '').rstrip('/')
+            rec_url = f"{base_url}/api/recordings-email/{filename}"
+            duration_seconds = _estimate_duration_seconds(filepath)
+            original_filename = audio_file.filename or filename
 
         call_id = f"email-{uuid.uuid4().hex}"
         rec = Recording(
@@ -358,9 +468,17 @@ _GUIDANCE_MESSAGES = {
 ''',
     'no_attachment': lambda phone: f'''
 לא נמצא קובץ הקלטת אודיו מצורף למייל שנשלח עם הנושא <b>{phone}</b>.<br><br>
-יש לשלוח מייל חדש עם קובץ אודיו (mp3 / wav / m4a / ogg) מצורף, ובשורת הנושא
-לציין את מספר הטלפון (ואופציונלית: סוג תמלול ושפות, למשל
-"0501234567 רגיל יידיש עברית").
+יש לצרף את קובץ ההקלטה למייל, או לשלוח קישור Google Drive לקובץ משותף.<br><br>
+אם הקובץ גדול מ-25MB, ניתן להעלות אותו ל-Google Drive, לשתף אותו
+("כל מי שיש לו קישור יכול לצפות"), ולשלוח את הקישור בגוף המייל (ללא קובץ מצורף).
+''',
+    'gdrive_download_failed': lambda phone: f'''
+לא הצלחנו להוריד את הקובץ מהקישור Google Drive שנשלח במייל עם הנושא <b>{phone}</b>.<br><br>
+אנא ודאו שהקובץ ב-Google Drive משותף כ-<b>"כל מי שיש לו קישור יכול לצפות"</b> ונסו שוב.<br><br>
+<b>כיצד לשתף ב-Google Drive:</b><br>
+1. לחצו על הקובץ ב-Drive → שתף → שנה ל"כל אחד עם הקישור"<br>
+2. העתיקו את הקישור ושלחו אותו בגוף המייל<br>
+3. שורת הנושא: <b>{phone}</b> (כרגיל)
 ''',
 }
 
@@ -432,12 +550,12 @@ def _mailto_link(phone, extra=''):
 def _send_instructions_email(to_email, phone, name=''):
     options = [
         ('תמלול רגיל, עברית', ''),
-        ('תמלול רגיל, יידיש ← עברית', 'רגיל יידיש עברית'),
-        ('תמלול רגיל, יידיש ← יידיש', 'רגיל יידיש יידיש'),
-        ('תמלול רגיל, אנגלית ← עברית', 'רגיל אנגלית עברית'),
+        ('תמלול רגיל, יידיש → עברית', 'רגיל יידיש עברית'),
+        ('תמלול רגיל, יידיש → יידיש', 'רגיל יידיש יידיש'),
+        ('תמלול רגיל, אנגלית → עברית', 'רגיל אנגלית עברית'),
         ('תמלול מקצועי, עברית', 'מקצועי'),
     ]
-    
+
     rows_html = ''
     for label, extra in options:
         subject_display = phone if not extra else f'{phone} {extra}'
@@ -491,6 +609,24 @@ def _send_instructions_email(to_email, phone, name=''):
 שים לב: לחיצה על "פתח מייל מוכן" תפתח את תוכנת המייל המוגדרת כברירת מחדל במכשיר שלך (Gmail, Outlook וכו'),
 עם הכתובת ושורת הנושא ממולאות. יש לצרף את קובץ ההקלטה באופן רגיל ולשלוח.
 </p>
+
+<div style="background:#f0fdf4;border-right:4px solid #10b981;padding:14px;margin:16px 0;border-radius:8px">
+<p style="margin:0 0 8px;font-weight:700;color:#065f46">סוגי קבצים נתמכים לצירוף:</p>
+<p style="margin:0;line-height:2;color:#111827">
+🎵 <b>אודיו:</b> MP3, WAV, M4A, OGG, FLAC, AAC, OPUS, WEBM<br>
+🎬 <b>וידאו:</b> MP4, MOV, AVI, MKV, 3GP<br>
+</p>
+<p style="margin:8px 0 0;font-size:13px;color:#6b7280">ניתן לצרף קובץ אחד בלבד לכל מייל. גודל מקסימלי מומלץ: 25MB.</p>
+</div>
+
+<div style="background:#eff6ff;border-right:4px solid #3b82f6;padding:14px;margin:16px 0;border-radius:8px">
+<p style="margin:0 0 8px;font-weight:700;color:#1e40af">📁 קובץ גדול מ-25MB? שלחו קישור Google Drive</p>
+<p style="margin:0;line-height:1.8;color:#111827;font-size:14px">
+אם הקובץ גדול מדי לצירוף רגיל, העלו אותו ל-Google Drive ושלחו את הקישור בגוף המייל (ללא קובץ מצורף).<br>
+<b>חשוב:</b> הקובץ ב-Drive חייב להיות משותף כ-"כל מי שיש לו קישור יכול לצפות".<br>
+שורת הנושא נשארת זהה (מספר הטלפון + סוג תמלול כרגיל).
+</p>
+</div>
 
 <p style="color:#6b7280;font-size:13px;margin-top:24px">מערכת תמלולפון 03-3131795</p>
 </div>'''
