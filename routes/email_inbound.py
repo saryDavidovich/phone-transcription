@@ -526,8 +526,9 @@ def _gemini_ocr(filepath, original_filename):
                     all_pages_text.append(f"--- עמוד {page_num+1} ---\n[לא קריא]")
 
             doc.close()
+            num_pages = len(all_pages_text)
             result = '\n\n'.join(all_pages_text)
-            log.info(f"Gemini OCR completed (PDF, {len(doc)} pages): {len(result)} chars")
+            log.info(f"Gemini OCR completed (PDF, {num_pages} pages): {len(result)} chars")
             return result
 
         else:
