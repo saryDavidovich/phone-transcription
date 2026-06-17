@@ -458,9 +458,66 @@ def _ocr_worker(filepath, original_filename, customer_id, customer_email, phone)
             pass
 
 
+def _preprocess_image_for_ocr(img_bytes):
+    """
+    עיבוד תמונה לשיפור OCR:
+    - המרה ל-Grayscale
+    - הגברת ניגודיות (contrast boost)
+    - Binarization (שחור-לבן טהור) להסרת רעש רקע
+    מחזיר bytes של PNG מעובד.
+    """
+    try:
+        import io
+        from PIL import Image, ImageEnhance, ImageOps, ImageFilter
+
+        img = Image.open(io.BytesIO(img_bytes)).convert('RGB')
+
+        # Grayscale
+        img = img.convert('L')
+
+        # Contrast boost x2
+        enhancer = ImageEnhance.Contrast(img)
+        img = enhancer.enhance(2.0)
+
+        # Sharpness boost
+        enhancer = ImageEnhance.Sharpness(img)
+        img = enhancer.enhance(1.5)
+
+        # Binarization - Otsu-like threshold
+        # ניקוי רעש רקע תוך שמירה על אותיות שחורות
+        img = img.point(lambda x: 0 if x < 180 else 255, '1')
+        img = img.convert('L')
+
+        output = io.BytesIO()
+        img.save(output, format='PNG')
+        return output.getvalue()
+
+    except Exception as e:
+        log.warning(f"Image preprocessing failed: {e}, using original")
+        return img_bytes
+
+
+def _gemini_ocr_single_pass(client, img_bytes, page_label, gtypes, prompt):
+    """מבצע OCR אחד על תמונה ומחזיר טקסט."""
+    from google.genai import types as _gtypes
+    response = client.models.generate_content(
+        model='gemini-3.5-flash',
+        contents=[
+            prompt,
+            _gtypes.Part.from_bytes(data=img_bytes, mime_type='image/png'),
+        ],
+    )
+    return response.text.strip()
+
+
 def _gemini_ocr(filepath, original_filename):
-    """שולח תמונה/PDF ל-Gemini ומחזיר את הטקסט המזוהה (OCR).
-    PDF מעובד עמוד-עמוד כדי לשפר דיוק בכתב יד עברי צפוף."""
+    """
+    OCR לכתב יד עברי עם ארבעה שיפורים:
+    1. זום גבוה (4x) לבהירות מקסימלית
+    2. פרומפט שמכריח העתקה עיוורת ללא שיפוט לשוני
+    3. עיבוד תמונה (Grayscale + Contrast + Binarization)
+    4. זיהוי כפול + מיזוג בידי Gemini
+    """
     try:
         from google import genai
         from google.genai import types as gtypes
@@ -470,65 +527,121 @@ def _gemini_ocr(filepath, original_filename):
 
         ext = os.path.splitext(original_filename or filepath)[1].lstrip('.').lower()
 
-        OCR_PROMPT = """אתה מערכת OCR מדויקת לכתב יד עברי.
-משימתך: להעתיק את הטקסט הכתוב בתמונה בדיוק מוחלט, תו אחר תו.
+        # פרומפט ראשי - מדגיש העתקה עיוורת ללא שיפוט לשוני
+        OCR_PROMPT = """אתה סורק OCR מכני - אתה מזהה **צורות גרפיות של אותיות** בלבד.
+אין לך שום ידע שפתי. אינך יודע עברית. אינך יודע מה המשמעות של המילים.
+אתה רק מעתיק את מה שאתה רואה, כמו מצלמה שמעתיקה פיקסלים.
 
-כללים מחייבים:
-1. העתק כל מילה בדיוק כפי שהיא כתובה - אפילו אם יש בה שגיאת כתיב.
-2. אל תתקן, אל תשנה, אל תפרש ואל תוסיף מילים שאינן בתמונה.
-3. אם מילה אינה קריאה - כתוב [?] במקומה.
-4. אם קטע שלם אינו קריא - כתוב [לא קריא].
-5. שמור על כל סימני הפיסוק, מרכאות, סוגריים, קווים, מספרים - בדיוק כפי שמופיעים.
-6. שמור על מבנה השורות והפסקאות.
-7. אל תוסיף כותרות, הסברים, או הערות - רק הטקסט עצמו.
+כללים ברזל - הפרתם = כשלון במשימה:
+• העתק כל אות, כל מילה, כל סימן - בדיוק כפי שהם מצוירים בתמונה
+• אסור לך לתקן שגיאות כתיב - אם כתוב "שלבבל" תכתוב "שלבבל"
+• אסור לך להוסיף מילה שאינה בתמונה - אפילו אם המשפט נראה "חסר"
+• אסור לך להסיר מילה שיש בתמונה - אפילו אם נראית "מיותרת"
+• אסור לך לשנות סדר מילים - אפילו אם הסדר נראה "הפוך"
+• אם מילה לא קריאה: כתוב [?]
+• שמור על כל סימני פיסוק, מרכאות, סוגריים, קווים, מספרים
+• שמור על מבנה שורות ופסקאות
+• אל תוסיף כותרות, הסברים, הערות - רק הטקסט עצמו
 
-התחל ישירות בטקסט המועתק:"""
+התחל ישירות:"""
+
+        # פרומפט מיזוג - לשלב שני העתקים
+        MERGE_PROMPT = """לפניך שני עותקים של OCR על אותה תמונה של כתב יד עברי.
+שני הסורקים ביצעו העתקה עיוורת - בלי לשפוט משמעות.
+
+משימתך: לייצר עותק שלישי ומדויק יותר על ידי:
+1. במקומות שהם **זהים** - זה כנראה נכון, השאר כפי שהוא
+2. במקומות שהם **שונים** - בחר את הגרסה שנראית נאמנה יותר לכתב יד (לא "הגיונית" יותר!)
+3. אם שניהם נראים שגויים - כתוב [?]
+4. אל תתקן שגיאות כתיב, אל תוסיף מילים, אל תשנה סדר
+5. החזר רק את הטקסט הממוזג, ללא הערות
+
+עותק א':
+{text_a}
+
+עותק ב':
+{text_b}
+
+טקסט ממוזג:"""
+
+        def process_page_image(page_img_bytes):
+            """מעבד תמונת עמוד: preprocessing + dual OCR + merge."""
+            # עיבוד תמונה
+            processed = _preprocess_image_for_ocr(page_img_bytes)
+
+            # פעימה א' - על התמונה המעובדת
+            text_a = None
+            text_b = None
+            for attempt in range(3):
+                try:
+                    text_a = _gemini_ocr_single_pass(client, processed, 'א', gtypes, OCR_PROMPT)
+                    break
+                except Exception as ge:
+                    log.warning(f"OCR pass A attempt {attempt+1} failed: {ge}")
+                    if attempt < 2:
+                        import time as _t; _t.sleep(8)
+
+            if not text_a:
+                return None
+
+            # פעימה ב' - על התמונה המקורית (לא מעובדת) לקבל נקודת מבט שונה
+            for attempt in range(3):
+                try:
+                    text_b = _gemini_ocr_single_pass(client, page_img_bytes, 'ב', gtypes, OCR_PROMPT)
+                    break
+                except Exception as ge:
+                    log.warning(f"OCR pass B attempt {attempt+1} failed: {ge}")
+                    if attempt < 2:
+                        import time as _t; _t.sleep(8)
+
+            if not text_b:
+                return text_a  # אם פעימה ב' נכשלה, נחזיר פעימה א'
+
+            # מיזוג שני העתקים
+            merge_prompt = MERGE_PROMPT.format(text_a=text_a, text_b=text_b)
+            for attempt in range(3):
+                try:
+                    response = client.models.generate_content(
+                        model='gemini-3.5-flash',
+                        contents=[merge_prompt],
+                    )
+                    merged = response.text.strip()
+                    log.info(f"OCR merge: A={len(text_a)}ch, B={len(text_b)}ch, merged={len(merged)}ch")
+                    return merged
+                except Exception as ge:
+                    log.warning(f"OCR merge attempt {attempt+1} failed: {ge}")
+                    if attempt < 2:
+                        import time as _t; _t.sleep(8)
+
+            return text_a  # fallback לפעימה א'
 
         # PDF - עיבוד עמוד-עמוד
         if ext == 'pdf':
-            import fitz  # PyMuPDF
+            import fitz
             all_pages_text = []
 
             doc = fitz.open(filepath)
-            log.info(f"Gemini OCR: PDF has {len(doc)} pages")
+            num_pages = len(doc)
+            log.info(f"Gemini OCR: PDF has {num_pages} pages")
 
-            for page_num in range(len(doc)):
+            for page_num in range(num_pages):
                 page = doc[page_num]
-                # המרת עמוד לתמונה ברזולוציה גבוהה
-                mat = fitz.Matrix(2.5, 2.5)  # zoom x2.5 לבהירות
+                # זום 4x לבהירות מקסימלית
+                mat = fitz.Matrix(4.0, 4.0)
                 pix = page.get_pixmap(matrix=mat)
                 img_bytes = pix.tobytes("png")
 
-                log.info(f"Gemini OCR: processing page {page_num+1}/{len(doc)}, {len(img_bytes)} bytes")
+                log.info(f"Gemini OCR: processing page {page_num+1}/{num_pages}, {len(img_bytes)} bytes")
 
-                page_text = None
-                for attempt in range(3):
-                    try:
-                        response = client.models.generate_content(
-                            model='gemini-3.5-flash',
-                            contents=[
-                                OCR_PROMPT,
-                                gtypes.Part.from_bytes(data=img_bytes, mime_type='image/png'),
-                            ],
-                        )
-                        page_text = response.text.strip()
-                        log.info(f"OCR page {page_num+1}: {len(page_text)} chars")
-                        break
-                    except Exception as ge:
-                        log.warning(f"OCR page {page_num+1} attempt {attempt+1} failed: {ge}")
-                        if attempt < 2:
-                            import time as _time
-                            _time.sleep(8)
-
+                page_text = process_page_image(img_bytes)
                 if page_text:
                     all_pages_text.append(f"--- עמוד {page_num+1} ---\n{page_text}")
                 else:
                     all_pages_text.append(f"--- עמוד {page_num+1} ---\n[לא קריא]")
 
             doc.close()
-            num_pages = len(all_pages_text)
             result = '\n\n'.join(all_pages_text)
-            log.info(f"Gemini OCR completed (PDF, {num_pages} pages): {len(result)} chars")
+            log.info(f"Gemini OCR completed (PDF, {len(all_pages_text)} pages): {len(result)} chars")
             return result
 
         else:
@@ -539,58 +652,16 @@ def _gemini_ocr(filepath, original_filename):
                 'webp': 'image/webp', 'tiff': 'image/tiff',
                 'tif': 'image/tiff', 'bmp': 'image/bmp',
             }
-            mime_type = mime_map.get(ext, 'image/jpeg')
 
             with open(filepath, 'rb') as f:
                 file_bytes = f.read()
 
-            file_size = len(file_bytes)
-            log.info(f"Gemini OCR: {original_filename}, {file_size} bytes, mime={mime_type}")
-
-            for attempt in range(3):
-                try:
-                    if file_size > 18 * 1024 * 1024:
-                        import tempfile, time as _time
-                        with tempfile.NamedTemporaryFile(suffix=f'.{ext}', delete=False) as tmp:
-                            tmp.write(file_bytes)
-                            tmp_path = tmp.name
-                        try:
-                            uploaded = client.files.upload(file=tmp_path, config={'mime_type': mime_type})
-                            waited = 0
-                            while str(uploaded.state) not in ('FileState.ACTIVE', 'ACTIVE') and waited < 120:
-                                _time.sleep(3)
-                                waited += 3
-                                uploaded = client.files.get(name=uploaded.name)
-                            response = client.models.generate_content(
-                                model='gemini-3.5-flash',
-                                contents=[OCR_PROMPT, uploaded],
-                            )
-                            client.files.delete(name=uploaded.name)
-                        finally:
-                            try:
-                                os.remove(tmp_path)
-                            except Exception:
-                                pass
-                    else:
-                        response = client.models.generate_content(
-                            model='gemini-3.5-flash',
-                            contents=[
-                                OCR_PROMPT,
-                                gtypes.Part.from_bytes(data=file_bytes, mime_type=mime_type),
-                            ],
-                        )
-
-                    result = response.text.strip()
-                    log.info(f"Gemini OCR completed: {len(result)} chars")
-                    return result
-
-                except Exception as ge:
-                    log.warning(f"Gemini OCR attempt {attempt+1} failed: {ge}")
-                    if attempt < 2:
-                        import time as _time
-                        _time.sleep(10)
-                    else:
-                        raise
+            log.info(f"Gemini OCR: {original_filename}, {len(file_bytes)} bytes")
+            result = process_page_image(file_bytes)
+            if result:
+                log.info(f"Gemini OCR completed: {len(result)} chars")
+                return result
+            return None
 
     except Exception as e:
         log.error(f"Gemini OCR error: {e}")
