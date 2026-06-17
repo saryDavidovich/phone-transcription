@@ -20,3 +20,4 @@ google-genai
 python-bidi
 pymupdf
 mutagen
+Pillow
