@@ -26,6 +26,29 @@
         <input class="form-input" name="price_per_1000_chars_ocr" type="number" step="0.01" value="{{ settings.price_per_1000_chars_ocr }}">
         <div style="font-size:11px;color:#4a5568;margin-top:4px">זיהוי טקסט מתמונה/PDF — לקוח שולח תמונת כתב יד במייל</div>
       </div>
+
+      <div class="form-group">
+        <label class="form-label" style="font-size:14px;font-weight:700">🎁 הגדרות בונוס טעינה (מבצע)</label>
+        <div style="font-size:11px;color:#4a5568;margin-bottom:10px">
+          הגדר עד 3 רמות בונוס — לקוח שטוען סכום ≥ הסף יקבל את הבונוס המתאים.
+          לדוגמה: טעינה מ-50 ₪ → בונוס 10 ₪, טעינה מ-100 ₪ → בונוס 25 ₪.
+          השאר ריק אם אין מבצע פעיל.
+        </div>
+        {% for i in range(3) %}
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;align-items:center">
+          <div>
+            <div style="font-size:11px;color:#6b7280;margin-bottom:3px">רמה {{ i+1 }} — סף מינימום (₪)</div>
+            <input class="form-input" name="bonus_threshold_{{ i+1 }}" type="number" step="1"
+              value="{{ settings.bonus_thresholds[i].threshold }}" placeholder="לדוגמה: 50">
+          </div>
+          <div>
+            <div style="font-size:11px;color:#6b7280;margin-bottom:3px">בונוס (₪)</div>
+            <input class="form-input" name="bonus_amount_{{ i+1 }}" type="number" step="1"
+              value="{{ settings.bonus_thresholds[i].amount }}" placeholder="לדוגמה: 10">
+          </div>
+        </div>
+        {% endfor %}
+      </div>
       <div class="form-group">
         <label class="form-label">יתרה מינימלית להקלטה (₪)</label>
         <input class="form-input" name="min_balance" type="number" step="0.01" value="{{ settings.min_balance }}">
