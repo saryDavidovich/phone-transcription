@@ -219,10 +219,14 @@ def reserve_manager_message():
 def get_public_settings():
     """מחזיר הגדרות מחיר ציבוריות ל-IVR"""
     from routes.admin import get_setting
-    return jsonify({
+    settings = {
         'price_per_20min_basic': get_setting('price_per_20min_basic', '0.90'),
         'price_per_20min_premium': get_setting('price_per_20min_premium', '1.90'),
         'price_per_20min_video': get_setting('price_per_20min_video', '1.50'),
         'price_per_1000_chars_ocr': get_setting('price_per_1000_chars_ocr', '0.10'),
         'min_balance': get_setting('min_balance', '5'),
-    })
+    }
+    for i in range(1, 4):
+        settings[f'bonus_threshold_{i}'] = get_setting(f'bonus_threshold_{i}', '')
+        settings[f'bonus_amount_{i}'] = get_setting(f'bonus_amount_{i}', '')
+    return jsonify(settings)
