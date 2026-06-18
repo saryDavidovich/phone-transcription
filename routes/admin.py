@@ -447,6 +447,9 @@ def settings():
         set_setting('yemot_token', request.form.get('yemot_token', ''))
         set_setting('yemot_log_path', request.form.get('yemot_log_path', 'ivr2:/199/LogCreditCardOK.ymgr'))
         set_setting('payment_callback_secret', request.form.get('payment_callback_secret', ''))
+        set_setting('nedarim_mosad_number', request.form.get('nedarim_mosad_number', ''))
+        set_setting('nedarim_api_password', request.form.get('nedarim_api_password', ''))
+        set_setting('nedarim_tamal_type', request.form.get('nedarim_tamal_type', '400'))
         # הגדרות בונוס - עד 3 רמות
         for i in range(1, 4):
             set_setting(f'bonus_threshold_{i}', request.form.get(f'bonus_threshold_{i}', ''))
@@ -467,6 +470,9 @@ def settings():
         'yemot_token': get_setting('yemot_token', ''),
         'yemot_log_path': get_setting('yemot_log_path', 'ivr2:/199/LogCreditCardOK.ymgr'),
         'payment_callback_secret': get_setting('payment_callback_secret', ''),
+        'nedarim_mosad_number': get_setting('nedarim_mosad_number', ''),
+        'nedarim_api_password': get_setting('nedarim_api_password', ''),
+        'nedarim_tamal_type': get_setting('nedarim_tamal_type', '400'),
         'bonus_thresholds': [
             {'threshold': get_setting(f'bonus_threshold_{i}', ''), 'amount': get_setting(f'bonus_amount_{i}', '')}
             for i in range(1, 4)
