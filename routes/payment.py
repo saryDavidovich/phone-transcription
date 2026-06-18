@@ -8,79 +8,96 @@ log = logging.getLogger(__name__)
 @payment_bp.route('/nedarim/callback', methods=['GET', 'POST'])
 def nedarim_callback():
     """
-    Webhook שנדרים פלוס / ימות המשיח שולחים אחרי סליקה מוצלחת.
-    ימות שולחים את הפרמטרים כ-GET או POST.
+    נקרא משלוחה 200 אחרי סליקה מוצלחת.
+    קורא את קובץ הלוג מימות ומעדכן יתרה.
     """
     from app import db
     from models import Customer, Transaction
     from routes.admin import get_setting
+    import requests as req
 
-    # פרמטרים מימות/נדרים
-    # Status/ResponseCode: '000' או 'OK' = הצלחה
-    status = (
-        request.args.get('Status') or
-        request.form.get('Status') or
-        request.args.get('ResponseCode') or
-        request.form.get('ResponseCode') or ''
-    ).upper()
+    log.info(f"Nedarim callback: args={dict(request.args)}")
 
-    # סכום שנסלק
-    amount_str = (
-        request.args.get('Amount') or
-        request.form.get('Amount') or
-        request.args.get('BillingSum') or
-        request.form.get('BillingSum') or '0'
-    )
-
-    # מספר טלפון - ימות שולחים בשדה Description או phone
+    # מספר טלפון - שלוחת API שולחת ApiPhone
     phone = (
+        request.args.get('ApiPhone') or
+        request.form.get('ApiPhone') or
         request.args.get('Phone') or
-        request.args.get('phone') or
-        request.form.get('Phone') or
-        request.form.get('phone') or
-        request.args.get('Description') or
-        request.form.get('Description') or ''
+        request.form.get('Phone') or ''
     ).strip()
 
-    # מספר אישור עסקה
-    approval = (
-        request.args.get('DealSuccessfully') or
-        request.form.get('DealSuccessfully') or
-        request.args.get('Comments') or
-        request.form.get('Comments') or ''
-    )
+    if not phone:
+        log.warning("Nedarim callback: no phone found")
+        return 'go_to_folder=/', 200, {'Content-Type': 'text/plain; charset=utf-8'}
 
-    log.info(f"Nedarim callback: status={status}, amount={amount_str}, phone={phone}, approval={approval}")
-    log.info(f"Full params: {dict(request.args)} | {dict(request.form)}")
+    # קריאת קובץ הלוג מימות
+    yemot_token = get_setting('yemot_token', '')
+    yemot_log_path = get_setting('yemot_log_path', 'ivr2:/199/LogCreditCardOK.ini')
 
-    success = status in ('000', 'OK', '0', 'SUCCESS', 'APPROVED')
+    if not yemot_token:
+        log.error("Nedarim callback: yemot_token not configured in settings")
+        return 'go_to_folder=/', 200, {'Content-Type': 'text/plain; charset=utf-8'}
 
     try:
-        amount = float(amount_str)
-    except ValueError:
-        amount = 0
+        resp = req.get(
+            'https://www.call2all.co.il/ym/api/GetTextFile',
+            params={'token': yemot_token, 'what': yemot_log_path},
+            timeout=10
+        )
+        resp.raise_for_status()
+        contents = resp.json().get('contents', '')
+        log.info(f"Yemot log file read: {len(contents)} chars")
+    except Exception as e:
+        log.error(f"Failed to read yemot log: {e}")
+        return 'go_to_folder=/', 200, {'Content-Type': 'text/plain; charset=utf-8'}
 
-    # אם ימות לא שלחו סכום - קרא מה-pending שנשמר לפני הסליקה
-    if amount <= 0 and phone:
-        from routes.admin import get_setting, set_setting
-        pending = get_setting(f'pending_payment_{phone}', '0')
-        try:
-            amount = float(pending)
-            log.info(f"Using pending amount for phone={phone}: {amount}")
-            set_setting(f'pending_payment_{phone}', '0')  # נקה
-        except ValueError:
-            amount = 0
+    # פענוח הקובץ - פורמט: Field#Value%Field#Value\nField#Value%...
+    amount = 0
+    approval = ''
+    lines = [l.strip() for l in contents.strip().split('\n') if l.strip()]
 
-    if not success or amount <= 0 or not phone:
-        log.warning(f"Nedarim callback rejected: success={success}, amount={amount}, phone={phone}")
-        return jsonify({'status': 'error', 'reason': 'invalid params'}), 400
+    # סריקה מהשורה האחרונה - הסליקה האחרונה של הלקוח
+    for line in reversed(lines):
+        fields = {}
+        for part in line.split('%'):
+            if '#' in part:
+                k, _, v = part.partition('#')
+                fields[k.strip()] = v.strip()
+
+        line_phone = fields.get('Phone', '')
+        line_status = fields.get('Status', '')
+        line_amount = fields.get('BillingSum', '0')
+        line_approval = fields.get('DealSuccessfully', '')
+
+        if line_phone == phone and line_status == 'OK':
+            try:
+                amount = float(line_amount)
+                approval = line_approval
+                log.info(f"Found transaction: phone={phone}, amount={amount}, approval={approval}")
+            except ValueError:
+                pass
+            break
+
+    if amount <= 0:
+        log.warning(f"No valid amount found for phone={phone}")
+        return 'go_to_folder=/', 200, {'Content-Type': 'text/plain; charset=utf-8'}
 
     customer = Customer.query.filter_by(phone=phone).first()
     if not customer:
-        log.warning(f"Nedarim callback: customer not found for phone={phone}")
-        return jsonify({'status': 'error', 'reason': 'customer not found'}), 404
+        log.warning(f"Customer not found for phone={phone}")
+        return 'go_to_folder=/', 200, {'Content-Type': 'text/plain; charset=utf-8'}
 
-    # חישוב בונוס מבצע
+    # בדיקת כפילות לפי מספר אישור
+    if approval:
+        existing = Transaction.query.filter(
+            Transaction.customer_id == customer.id,
+            Transaction.description.contains(f'אישור: {approval}')
+        ).first()
+        if existing:
+            log.warning(f"Transaction {approval} already processed, skipping")
+            return 'go_to_folder=/', 200, {'Content-Type': 'text/plain; charset=utf-8'}
+
+    # חישוב בונוס
     bonus = _calculate_bonus(amount, get_setting)
     total_credit = amount + bonus
 
@@ -88,9 +105,9 @@ def nedarim_callback():
 
     desc = f'טעינת ארנק ₪{amount:.2f}'
     if bonus > 0:
-        desc += f' + בונוס מבצע ₪{bonus:.2f} = סה"כ ₪{total_credit:.2f}'
+        desc += f' + בונוס ₪{bonus:.2f} = סה"כ ₪{total_credit:.2f}'
     if approval:
-        desc += f' (אישור: {approval})'
+        desc += f' | אישור: {approval}'
 
     txn = Transaction(
         customer_id=customer.id,
@@ -101,21 +118,13 @@ def nedarim_callback():
     db.session.add(txn)
     db.session.commit()
 
-    log.info(f"Nedarim payment processed: customer={customer.id}, amount={amount}, bonus={bonus}, new_balance={customer.balance}")
-    return jsonify({'status': 'ok', 'credited': total_credit, 'balance': customer.balance})
+    log.info(f"Payment OK: customer={customer.id}, +{total_credit}, balance={customer.balance}")
+    return 'go_to_folder=/', 200, {'Content-Type': 'text/plain; charset=utf-8'}
 
 
 def _calculate_bonus(amount, get_setting):
-    """
-    מחשב בונוס מבצע לפי הגדרות ממשק הניהול.
-    ניתן להגדיר מספר רמות:
-    bonus_threshold_1=50   # סכום מינימום לבונוס
-    bonus_amount_1=10      # סכום הבונוס
-    bonus_threshold_2=100
-    bonus_amount_2=25
-    """
     bonus = 0.0
-    for i in range(1, 6):  # עד 5 רמות בונוס
+    for i in range(1, 6):
         threshold_str = get_setting(f'bonus_threshold_{i}', '')
         bonus_str = get_setting(f'bonus_amount_{i}', '')
         if not threshold_str or not bonus_str:
@@ -124,7 +133,7 @@ def _calculate_bonus(amount, get_setting):
             threshold = float(threshold_str)
             bonus_amount = float(bonus_str)
             if amount >= threshold:
-                bonus = bonus_amount  # הבונוס הגבוה ביותר שמגיע ללקוח
+                bonus = bonus_amount
         except ValueError:
             continue
     return bonus
@@ -132,17 +141,12 @@ def _calculate_bonus(amount, get_setting):
 
 @payment_bp.route('/pending', methods=['POST'])
 def save_pending():
-    """שומר סכום ממתין לסליקה - נקרא לפני מעבר לשלוחת ימות."""
-    from app import db
     from routes.admin import set_setting
     data = request.json or {}
     phone = data.get('phone', '').strip()
     amount = float(data.get('amount', 0))
-
     if not phone or amount <= 0:
         return jsonify({'status': 'error'}), 400
-
-    # שמירה זמנית לפי מספר טלפון
     set_setting(f'pending_payment_{phone}', str(amount))
     log.info(f"Pending payment saved: phone={phone}, amount={amount}")
     return jsonify({'status': 'ok'})
