@@ -34,10 +34,12 @@ def nedarim_callback():
 
     # מספר טלפון - ימות שולחים בשדה Description או phone
     phone = (
-        request.args.get('Description') or
-        request.form.get('Description') or
+        request.args.get('Phone') or
         request.args.get('phone') or
-        request.form.get('phone') or ''
+        request.form.get('Phone') or
+        request.form.get('phone') or
+        request.args.get('Description') or
+        request.form.get('Description') or ''
     ).strip()
 
     # מספר אישור עסקה
