@@ -31,8 +31,31 @@
         <input class="form-input" name="payment_callback_secret" type="text" value="{{ settings.payment_callback_secret }}" placeholder="לדוגמה: mySecretKey123">
         <div style="font-size:11px;color:#4a5568;margin-top:4px">הגדר סיסמה כלשהי, ועדכן אותה גם בשלוחה 200 בימות בשורה: api_add_0=secret=הסיסמה</div>
       </div>
+      <div class="form-group">
+        <label class="form-label">נתיב קובץ לוג סליקות בימות</label>
         <input class="form-input" name="yemot_log_path" type="text" value="{{ settings.yemot_log_path }}">
-        <div style="font-size:11px;color:#4a5568;margin-top:4px">ברירת מחדל: ivr2:/199/LogCreditCardOK.ini</div>
+        <div style="font-size:11px;color:#4a5568;margin-top:4px">ברירת מחדל: ivr2:/199/LogCreditCardOK.ymgr</div>
+      </div>
+
+      <div style="border-top:2px solid #e2e8f0;margin:20px 0 12px;padding-top:16px">
+        <div style="font-size:14px;font-weight:700;margin-bottom:4px">🧾 הגדרות קבלות - נדרים פלוס</div>
+        <div style="font-size:11px;color:#4a5568">לאחר כל טעינה יופק קבלה אוטומטית ותישלח למייל הלקוח</div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">מספר מוסד בנדרים פלוס (7 ספרות)</label>
+        <input class="form-input" name="nedarim_mosad_number" type="text" value="{{ settings.nedarim_mosad_number }}" placeholder="1234567">
+      </div>
+      <div class="form-group">
+        <label class="form-label">סיסמת API נדרים פלוס</label>
+        <input class="form-input" name="nedarim_api_password" type="password" value="{{ settings.nedarim_api_password }}" placeholder="לבקש ממשרד נדרים פלוס">
+      </div>
+      <div class="form-group">
+        <label class="form-label">סוג קבלה להנפקה</label>
+        <select class="form-input" name="nedarim_tamal_type">
+          <option value="400" {% if settings.nedarim_tamal_type == '400' %}selected{% endif %}>400 - קבלה רגילה</option>
+          <option value="320" {% if settings.nedarim_tamal_type == '320' %}selected{% endif %}>320 - חשבונית מס קבלה</option>
+          <option value="405" {% if settings.nedarim_tamal_type == '405' %}selected{% endif %}>405 - קבלת תרומה (עמותה)</option>
+        </select>
       </div>
         <input class="form-input" name="price_per_1000_chars_ocr" type="number" step="0.01" value="{{ settings.price_per_1000_chars_ocr }}">
         <div style="font-size:11px;color:#4a5568;margin-top:4px">זיהוי טקסט מתמונה/PDF — לקוח שולח תמונת כתב יד במייל</div>
