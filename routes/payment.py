@@ -130,7 +130,132 @@ def nedarim_callback():
     db.session.commit()
 
     log.info(f"Payment OK: customer={customer.id}, +{total_credit}, balance={customer.balance}")
+
+    # הפקת קבלה ושליחה למייל - ב-thread נפרד כדי לא לעכב את ימות
+    if approval and customer.email:
+        import threading
+        t = threading.Thread(
+            target=_issue_receipt_and_send,
+            args=(approval, customer.email, amount, bonus, total_credit, get_setting),
+            daemon=True
+        )
+        t.start()
+
     return 'go_to_folder=/', 200, {'Content-Type': 'text/plain; charset=utf-8'}
+
+
+def _issue_receipt_and_send(approval, customer_email, amount, bonus, total_credit, get_setting):
+    """מפיק קבלה מנדרים פלוס ושולח למייל הלקוח."""
+    import requests as req
+
+    mosad = get_setting('nedarim_mosad_number', '')
+    api_password = get_setting('nedarim_api_password', '')
+    tamal_type = get_setting('nedarim_tamal_type', '400')
+
+    if not mosad or not api_password:
+        log.warning("Receipt: nedarim_mosad_number or nedarim_api_password not configured")
+        return
+
+    # שלב 1: הפקת קבלה
+    try:
+        resp = req.post(
+            'https://matara.pro/nedarimplus/Reports/Tamal3.aspx',
+            data={
+                'Action': 'TamalCreate',
+                'MosadNumber': mosad,
+                'ApiPassword': api_password,
+                'TransactionId': approval,
+                'TamalType': tamal_type,
+            },
+            timeout=15
+        )
+        result = resp.text.strip()
+        log.info(f"Receipt creation: TransactionId={approval}, result={result}")
+        if result != 'OK':
+            log.error(f"Receipt creation failed: {result}")
+            return
+    except Exception as e:
+        log.error(f"Receipt creation error: {e}")
+        return
+
+    # שלב 2: קבלת קישור לקבלה
+    receipt_url = None
+    try:
+        resp = req.post(
+            'https://matara.pro/nedarimplus/Reports/Tamal3.aspx',
+            data={
+                'Action': 'ShowInvoice',
+                'MosadNumber': mosad,
+                'ApiPassword': api_password,
+                'TransactionId': approval,
+            },
+            timeout=15
+        )
+        data = resp.json()
+        if data.get('Result') == 'OK':
+            receipt_url = data.get('Message', '')
+            log.info(f"Receipt URL: {receipt_url}")
+        else:
+            log.error(f"ShowInvoice failed: {data}")
+    except Exception as e:
+        log.error(f"ShowInvoice error: {e}")
+
+    # שלב 3: שליחת מייל ללקוח
+    _send_receipt_email(
+        to=customer_email,
+        amount=amount,
+        bonus=bonus,
+        total_credit=total_credit,
+        approval=approval,
+        receipt_url=receipt_url,
+    )
+
+
+def _send_receipt_email(to, amount, bonus, total_credit, approval, receipt_url):
+    """שולח מייל אישור טעינה עם קישור לקבלה."""
+    try:
+        import os
+        import sendgrid
+        from sendgrid.helpers.mail import Mail
+
+        bonus_row = ''
+        if bonus > 0:
+            bonus_row = f'<tr><td style="padding:6px 0;color:#6b7280">בונוס מבצע</td><td style="padding:6px 0;text-align:left;color:#10b981"><b>+₪{bonus:.2f}</b></td></tr>'
+
+        receipt_btn = ''
+        if receipt_url:
+            receipt_btn = f'''
+<div style="text-align:center;margin:20px 0">
+  <a href="{receipt_url}" style="background:#1d4ed8;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:700">
+    📄 הצגת קבלה רשמית
+  </a>
+</div>'''
+
+        html = f'''<div dir="rtl" style="font-family:Arial,sans-serif;max-width:520px;margin:auto;background:#f9fafb;padding:24px;border-radius:12px">
+<div style="background:#fff;border-radius:10px;padding:24px;box-shadow:0 1px 4px rgba(0,0,0,0.08)">
+  <h2 style="color:#1d4ed8;margin:0 0 16px">✅ הארנק נטען בהצלחה</h2>
+  <table style="width:100%;border-top:1px solid #e5e7eb;margin-bottom:8px">
+    <tr><td style="padding:6px 0;color:#6b7280">סכום שנסלק</td><td style="padding:6px 0;text-align:left"><b>₪{amount:.2f}</b></td></tr>
+    {bonus_row}
+    <tr style="border-top:1px solid #e5e7eb"><td style="padding:8px 0;font-weight:700">סה"כ זוכה לארנק</td><td style="padding:8px 0;text-align:left;font-weight:700;color:#1d4ed8">₪{total_credit:.2f}</td></tr>
+  </table>
+  <div style="font-size:12px;color:#9ca3af;margin-bottom:16px">מספר אישור: {approval}</div>
+  {receipt_btn}
+</div>
+<div style="text-align:center;font-size:11px;color:#9ca3af;margin-top:12px">תמלולפון 03-3131795</div>
+</div>'''
+
+        sg = sendgrid.SendGridAPIClient(api_key=os.environ.get('SENDGRID_API_KEY'))
+        message = Mail(
+            from_email=os.environ.get('SENDGRID_FROM_EMAIL', ''),
+            to_emails=to,
+            subject=f'הארנק נטען - ₪{total_credit:.2f} | תמלולפון',
+            html_content=html
+        )
+        sg.send(message)
+        log.info(f"Receipt email sent to {to}")
+    except Exception as e:
+        log.error(f"Receipt email error: {e}")
 
 
 def _calculate_bonus(amount, get_setting):
