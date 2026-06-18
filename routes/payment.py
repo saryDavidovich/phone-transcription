@@ -58,6 +58,17 @@ def nedarim_callback():
     except ValueError:
         amount = 0
 
+    # אם ימות לא שלחו סכום - קרא מה-pending שנשמר לפני הסליקה
+    if amount <= 0 and phone:
+        from routes.admin import get_setting, set_setting
+        pending = get_setting(f'pending_payment_{phone}', '0')
+        try:
+            amount = float(pending)
+            log.info(f"Using pending amount for phone={phone}: {amount}")
+            set_setting(f'pending_payment_{phone}', '0')  # נקה
+        except ValueError:
+            amount = 0
+
     if not success or amount <= 0 or not phone:
         log.warning(f"Nedarim callback rejected: success={success}, amount={amount}, phone={phone}")
         return jsonify({'status': 'error', 'reason': 'invalid params'}), 400
@@ -115,3 +126,21 @@ def _calculate_bonus(amount, get_setting):
         except ValueError:
             continue
     return bonus
+
+
+@payment_bp.route('/pending', methods=['POST'])
+def save_pending():
+    """שומר סכום ממתין לסליקה - נקרא לפני מעבר לשלוחת ימות."""
+    from app import db
+    from routes.admin import set_setting
+    data = request.json or {}
+    phone = data.get('phone', '').strip()
+    amount = float(data.get('amount', 0))
+
+    if not phone or amount <= 0:
+        return jsonify({'status': 'error'}), 400
+
+    # שמירה זמנית לפי מספר טלפון
+    set_setting(f'pending_payment_{phone}', str(amount))
+    log.info(f"Pending payment saved: phone={phone}, amount={amount}")
+    return jsonify({'status': 'ok'})
