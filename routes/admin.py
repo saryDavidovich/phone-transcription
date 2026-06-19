@@ -444,6 +444,7 @@ def settings():
         set_setting('price_per_20min_premium', request.form.get('price_per_20min_premium', '1.90'))
         set_setting('price_per_20min_video', request.form.get('price_per_20min_video', '1.50'))
         set_setting('price_per_1000_chars_ocr', request.form.get('price_per_1000_chars_ocr', '0.10'))
+        set_setting('ocr_engine', request.form.get('ocr_engine', 'gemini'))
         set_setting('yemot_token', request.form.get('yemot_token', ''))
         set_setting('yemot_log_path', request.form.get('yemot_log_path', 'ivr2:/199/LogCreditCardOK.ymgr'))
         set_setting('payment_callback_secret', request.form.get('payment_callback_secret', ''))
@@ -467,6 +468,7 @@ def settings():
         'price_per_20min_premium': get_setting('price_per_20min_premium', '1.90'),
         'price_per_20min_video': get_setting('price_per_20min_video', '1.50'),
         'price_per_1000_chars_ocr': get_setting('price_per_1000_chars_ocr', '0.10'),
+        'ocr_engine': get_setting('ocr_engine', 'gemini'),
         'yemot_token': get_setting('yemot_token', ''),
         'yemot_log_path': get_setting('yemot_log_path', 'ivr2:/199/LogCreditCardOK.ymgr'),
         'payment_callback_secret': get_setting('payment_callback_secret', ''),
