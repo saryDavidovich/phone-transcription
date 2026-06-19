@@ -57,6 +57,17 @@
           <option value="405" {% if settings.nedarim_tamal_type == '405' %}selected{% endif %}>405 - קבלת תרומה (עמותה)</option>
         </select>
       </div>
+      <div class="form-group">
+        <label class="form-label">מנוע OCR לכתב יד</label>
+        <select class="form-input" name="ocr_engine">
+          <option value="gemini" {% if settings.ocr_engine == 'gemini' %}selected{% endif %}>Gemini Flash (זול, ברירת מחדל)</option>
+          <option value="claude" {% if settings.ocr_engine == 'claude' %}selected{% endif %}>Claude Opus (איכות גבוהה)</option>
+          <option value="gpt4o" {% if settings.ocr_engine == 'gpt4o' %}selected{% endif %}>GPT-4o (איכות גבוהה)</option>
+        </select>
+        <div style="font-size:11px;color:#4a5568;margin-top:4px">Claude ו-GPT-4o מומלצים לכתב יד עברי — עלות גבוהה יותר</div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">מחיר OCR כתב יד לכל 1,000 תווים (₪)</label>
         <input class="form-input" name="price_per_1000_chars_ocr" type="number" step="0.01" value="{{ settings.price_per_1000_chars_ocr }}">
         <div style="font-size:11px;color:#4a5568;margin-top:4px">זיהוי טקסט מתמונה/PDF — לקוח שולח תמונת כתב יד במייל</div>
       </div>
