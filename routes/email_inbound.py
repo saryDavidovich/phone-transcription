@@ -403,8 +403,11 @@ def _ocr_worker(filepath, original_filename, customer_id, customer_email, phone)
     log.info(f"OCR worker started: {original_filename}, customer={customer_id}")
 
     try:
-        # בחירת מנוע OCR לפי הגדרות
-        ocr_engine = get_setting('ocr_engine', 'gemini')
+        with app.app_context():
+            # בחירת מנוע OCR לפי הגדרות
+            ocr_engine = get_setting('ocr_engine', 'gemini')
+            price_per_1000 = float(get_setting('price_per_1000_chars_ocr', '0.10'))
+
         log.info(f"OCR engine: {ocr_engine}")
 
         if ocr_engine == 'claude':
@@ -428,11 +431,9 @@ def _ocr_worker(filepath, original_filename, customer_id, customer_email, phone)
         char_count = len(ocr_text)
         log.info(f"OCR completed: {char_count} chars")
 
-        with app.app_context():
-            # חיוב לפי תווים
-            price_per_1000_chars = float(get_setting('price_per_1000_chars_ocr', '0.10'))
-            cost = round((char_count / 1000) * price_per_1000_chars, 2)
+        cost = round((char_count / 1000) * price_per_1000, 2)
 
+        with app.app_context():
             customer = Customer.query.get(customer_id)
             if customer:
                 customer.balance -= cost
