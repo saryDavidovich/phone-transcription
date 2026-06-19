@@ -403,8 +403,17 @@ def _ocr_worker(filepath, original_filename, customer_id, customer_email, phone)
     log.info(f"OCR worker started: {original_filename}, customer={customer_id}")
 
     try:
-        # OCR דרך Gemini
-        ocr_text = _gemini_ocr(filepath, original_filename)
+        # בחירת מנוע OCR לפי הגדרות
+        ocr_engine = get_setting('ocr_engine', 'gemini')
+        log.info(f"OCR engine: {ocr_engine}")
+
+        if ocr_engine == 'claude':
+            ocr_text = _claude_ocr(filepath, original_filename)
+        elif ocr_engine == 'gpt4o':
+            ocr_text = _gpt4o_ocr(filepath, original_filename)
+        else:
+            ocr_text = _gemini_ocr(filepath, original_filename)
+
         if not ocr_text:
             log.error(f"OCR failed for {original_filename}")
             _send_ocr_result_email(
@@ -456,6 +465,144 @@ def _ocr_worker(filepath, original_filename, customer_id, customer_email, phone)
                 log.info(f"OCR temp file deleted: {filepath}")
         except Exception:
             pass
+
+
+OCR_PROMPT_TEXT = """אתה סורק OCR מכני - אתה מזהה צורות גרפיות של אותיות בלבד.
+אין לך שום ידע שפתי. אינך יודע עברית. אינך יודע מה המשמעות של המילים.
+אתה רק מעתיק את מה שאתה רואה, כמו מצלמה שמעתיקה פיקסלים.
+
+כללים ברזל:
+• העתק כל אות, כל מילה, כל סימן - בדיוק כפי שהם מצוירים בתמונה
+• אסור לתקן שגיאות כתיב - אם כתוב "שלבבל" תכתוב "שלבבל"
+• אסור להוסיף מילה שאינה בתמונה
+• אסור להסיר מילה שיש בתמונה
+• אם מילה לא קריאה: כתוב [?]
+• שמור על כל סימני פיסוק, מרכאות, סוגריים, קווים, מספרים
+• שמור על מבנה שורות ופסקאות
+• אל תוסיף כותרות, הסברים, הערות - רק הטקסט עצמו
+
+התחל ישירות:"""
+
+
+def _claude_ocr(filepath, original_filename):
+    """OCR דרך Claude - תמיכה בתמונות ו-PDF עמוד-עמוד."""
+    try:
+        import anthropic
+        import base64
+        import io
+
+        client = anthropic.Anthropic(api_key=os.environ.get('ANTHROPIC_API_KEY'))
+        ext = os.path.splitext(original_filename or filepath)[1].lstrip('.').lower()
+
+        def ocr_image_bytes(img_bytes, mime='image/png'):
+            img_b64 = base64.standard_b64encode(img_bytes).decode('utf-8')
+            for attempt in range(3):
+                try:
+                    response = client.messages.create(
+                        model='claude-opus-4-5',
+                        max_tokens=4096,
+                        messages=[{
+                            'role': 'user',
+                            'content': [
+                                {'type': 'image', 'source': {'type': 'base64', 'media_type': mime, 'data': img_b64}},
+                                {'type': 'text', 'text': OCR_PROMPT_TEXT}
+                            ]
+                        }]
+                    )
+                    return response.content[0].text.strip()
+                except Exception as e:
+                    log.warning(f"Claude OCR attempt {attempt+1} failed: {e}")
+                    if attempt < 2:
+                        import time; time.sleep(8)
+            return None
+
+        if ext == 'pdf':
+            import fitz
+            all_pages = []
+            doc = fitz.open(filepath)
+            num_pages = len(doc)
+            log.info(f"Claude OCR: PDF {num_pages} pages")
+            for i in range(num_pages):
+                pix = doc[i].get_pixmap(matrix=fitz.Matrix(4.0, 4.0))
+                img_bytes = pix.tobytes('png')
+                text = ocr_image_bytes(img_bytes)
+                all_pages.append(f"--- עמוד {i+1} ---\n{text or '[לא קריא]'}")
+            doc.close()
+            result = '\n\n'.join(all_pages)
+        else:
+            mime_map = {'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'png': 'image/png',
+                        'gif': 'image/gif', 'webp': 'image/webp'}
+            mime = mime_map.get(ext, 'image/jpeg')
+            with open(filepath, 'rb') as f:
+                img_bytes = f.read()
+            result = ocr_image_bytes(img_bytes, mime)
+
+        log.info(f"Claude OCR completed: {len(result or '')} chars")
+        return result
+
+    except Exception as e:
+        log.error(f"Claude OCR error: {e}")
+        return None
+
+
+def _gpt4o_ocr(filepath, original_filename):
+    """OCR דרך GPT-4o - תמיכה בתמונות ו-PDF עמוד-עמוד."""
+    try:
+        import base64
+        from openai import OpenAI
+
+        client = OpenAI(api_key=os.environ.get('OPENAI_API_KEY'))
+        ext = os.path.splitext(original_filename or filepath)[1].lstrip('.').lower()
+
+        def ocr_image_bytes(img_bytes, mime='image/png'):
+            img_b64 = base64.b64encode(img_bytes).decode('utf-8')
+            for attempt in range(3):
+                try:
+                    response = client.chat.completions.create(
+                        model='gpt-4o',
+                        max_tokens=4096,
+                        messages=[{
+                            'role': 'user',
+                            'content': [
+                                {'type': 'text', 'text': OCR_PROMPT_TEXT},
+                                {'type': 'image_url', 'image_url': {'url': f'data:{mime};base64,{img_b64}', 'detail': 'high'}}
+                            ]
+                        }]
+                    )
+                    return response.choices[0].message.content.strip()
+                except Exception as e:
+                    log.warning(f"GPT-4o OCR attempt {attempt+1} failed: {e}")
+                    if attempt < 2:
+                        import time; time.sleep(8)
+            return None
+
+        if ext == 'pdf':
+            import fitz
+            all_pages = []
+            doc = fitz.open(filepath)
+            num_pages = len(doc)
+            log.info(f"GPT-4o OCR: PDF {num_pages} pages")
+            for i in range(num_pages):
+                pix = doc[i].get_pixmap(matrix=fitz.Matrix(4.0, 4.0))
+                img_bytes = pix.tobytes('png')
+                text = ocr_image_bytes(img_bytes)
+                all_pages.append(f"--- עמוד {i+1} ---\n{text or '[לא קריא]'}")
+            doc.close()
+            result = '\n\n'.join(all_pages)
+        else:
+            mime_map = {'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'png': 'image/png',
+                        'gif': 'image/gif', 'webp': 'image/webp'}
+            mime = mime_map.get(ext, 'image/jpeg')
+            with open(filepath, 'rb') as f:
+                img_bytes = f.read()
+            result = ocr_image_bytes(img_bytes, mime)
+
+        log.info(f"GPT-4o OCR completed: {len(result or '')} chars")
+        return result
+
+    except Exception as e:
+        log.error(f"GPT-4o OCR error: {e}")
+        return None
 
 
 def _preprocess_image_for_ocr(img_bytes):
