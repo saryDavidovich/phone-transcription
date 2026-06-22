@@ -226,10 +226,60 @@ def finalize_alefbot_recording(call_id, transcript_text):
             log.error(f"AlefBot finalize error for {call_id}: {e}")
 
 
+def _split_wav_chunks(audio_content, mime_type, chunk_seconds=300):
+    """
+    מפצל audio_content לחלקים של chunk_seconds שניות.
+    אם הקובץ הוא WAV - מפצל frame by frame.
+    אם הקובץ הוא וידאו (לא WAV) - מחזיר רשימה עם הקובץ המקורי (אין פיצול).
+    מחזיר רשימת bytes, כל אחד קובץ WAV תקין.
+    """
+    import wave, io
+
+    if mime_type.startswith('video/'):
+        # וידאו - לא ניתן לפצל בקלות, נחזיר כמו שזה
+        log.info("Video file - no chunking, returning as-is")
+        return [audio_content]
+
+    try:
+        with wave.open(io.BytesIO(audio_content)) as wav_in:
+            nchannels = wav_in.getnchannels()
+            sampwidth = wav_in.getsampwidth()
+            framerate = wav_in.getframerate()
+            total_frames = wav_in.getnframes()
+            all_frames = wav_in.readframes(total_frames)
+
+        frames_per_chunk = framerate * chunk_seconds
+        total_duration = total_frames // framerate
+        log.info(f"Splitting {total_duration}s audio into {chunk_seconds}s chunks")
+
+        chunks = []
+        offset = 0  # offset בבייטים
+        bytes_per_frame = nchannels * sampwidth
+
+        while offset < len(all_frames):
+            chunk_frame_bytes = frames_per_chunk * bytes_per_frame
+            chunk_data = all_frames[offset:offset + chunk_frame_bytes]
+            offset += chunk_frame_bytes
+
+            buf = io.BytesIO()
+            with wave.open(buf, 'wb') as wav_out:
+                wav_out.setnchannels(nchannels)
+                wav_out.setsampwidth(sampwidth)
+                wav_out.setframerate(framerate)
+                wav_out.writeframes(chunk_data)
+            chunks.append(buf.getvalue())
+
+        return chunks
+
+    except Exception as e:
+        log.warning(f"Could not split WAV into chunks: {e}, returning as single chunk")
+        return [audio_content]
+
+
 def _gemini_from_url(url, language='he', output_language='he'):
     log.info(f"Gemini: language={language}, output_language={output_language}")
     try:
-        import wave, audioop, io, tempfile
+        import wave, audioop, io
         from google import genai
         from google.genai import types as gtypes
 
@@ -317,87 +367,40 @@ def _gemini_from_url(url, language='he', output_language='he'):
 - שמור על מינוח תורני נכון, ארמית, ראשי תיבות וגרסאות.
 - החזר רק את הטקסט המתומלל ללא הערות נוספות."""
 
-        # Files API לקבצים גדולים מ-18MB (שומרים מרווח ביטחון מ-20MB)
-        USE_FILES_API_THRESHOLD = 18 * 1024 * 1024
-        uploaded_file = None
+        # פיצול לחלקי 5 דקות ותמלול כל חלק בנפרד
+        CHUNK_SECONDS = 300  # 5 דקות
+        chunks = _split_wav_chunks(audio_content, mime_type, CHUNK_SECONDS)
+        log.info(f"Split into {len(chunks)} chunks of up to {CHUNK_SECONDS}s each")
 
-        transcript = None
-        try:
-            if file_size > USE_FILES_API_THRESHOLD:
-                # קובץ גדול - העלאה דרך Files API
-                log.info(f"File size {file_size} bytes > 18MB, using Files API")
-                with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
-                    tmp.write(audio_content)
-                    tmp_path = tmp.name
+        transcript_parts = []
+        for i, chunk_bytes in enumerate(chunks):
+            chunk_num = i + 1
+            log.info(f"Transcribing chunk {chunk_num}/{len(chunks)} ({len(chunk_bytes)} bytes)")
+            chunk_transcript = None
+            for attempt in range(5):
                 try:
-                    uploaded_file = client.files.upload(
-                        file=tmp_path,
-                        config={'mime_type': mime_type}
+                    response = client.models.generate_content(
+                        model='gemini-3.5-flash',
+                        contents=[
+                            prompt,
+                            gtypes.Part.from_bytes(data=chunk_bytes, mime_type='audio/wav'),
+                        ],
                     )
-                    log.info(f"Files API upload complete: {uploaded_file.name}, state: {uploaded_file.state}")
-                finally:
-                    try:
-                        os.remove(tmp_path)
-                    except Exception:
-                        pass
+                    chunk_transcript = response.text.strip()
+                    log.info(f"Chunk {chunk_num} done, {len(chunk_transcript)} chars")
+                    break
+                except Exception as ge:
+                    log.warning(f"Chunk {chunk_num} attempt {attempt+1} failed: {ge}")
+                    if attempt < 4:
+                        time.sleep(15)
+                    else:
+                        log.error(f"Chunk {chunk_num} failed after 5 attempts, skipping")
+            if chunk_transcript:
+                transcript_parts.append(chunk_transcript)
 
-                # המתנה עד שהקובץ במצב ACTIVE (עיבוד Google הסתיים)
-                max_wait = 300  # מקסימום 5 דקות המתנה
-                waited = 0
-                while str(uploaded_file.state) not in ('FileState.ACTIVE', 'ACTIVE') and waited < max_wait:
-                    log.info(f"Waiting for Files API file to be ACTIVE (current: {uploaded_file.state}), waited {waited}s...")
-                    time.sleep(5)
-                    waited += 5
-                    uploaded_file = client.files.get(name=uploaded_file.name)
-
-                if str(uploaded_file.state) not in ('FileState.ACTIVE', 'ACTIVE'):
-                    raise Exception(f"Files API file never became ACTIVE after {max_wait}s, state: {uploaded_file.state}")
-
-                log.info(f"Files API file is ACTIVE after {waited}s, proceeding to transcribe")
-
-                for attempt in range(3):
-                    try:
-                        response = client.models.generate_content(
-                            model='gemini-3.5-flash',
-                            contents=[prompt, uploaded_file],
-                        )
-                        transcript = response.text.strip()
-                        log.info(f"Gemini transcription completed (Files API), {len(transcript)} chars")
-                        break
-                    except Exception as ge:
-                        log.warning(f"Gemini Files API attempt {attempt+1} failed: {ge}")
-                        if attempt < 2:
-                            time.sleep(10)
-                        else:
-                            raise
-            else:
-                # קובץ קטן - inline כמו קודם
-                for attempt in range(5):
-                    try:
-                        response = client.models.generate_content(
-                            model='gemini-3.5-flash',
-                            contents=[
-                                prompt,
-                                gtypes.Part.from_bytes(data=audio_content, mime_type=mime_type),
-                            ],
-                        )
-                        transcript = response.text.strip()
-                        log.info(f"Gemini transcription completed (inline), {len(transcript)} chars")
-                        break
-                    except Exception as ge:
-                        log.warning(f"Gemini inline attempt {attempt+1} failed: {ge}")
-                        if attempt < 4:
-                            time.sleep(15)
-                        else:
-                            raise
-        finally:
-            # מחיקת הקובץ מ-Files API בכל מקרה (הצלחה או כשלון)
-            if uploaded_file:
-                try:
-                    client.files.delete(name=uploaded_file.name)
-                    log.info(f"Files API file deleted: {uploaded_file.name}")
-                except Exception:
-                    pass
+        transcript = '\n\n'.join(transcript_parts) if transcript_parts else None
+        if transcript:
+            log.info(f"All chunks merged, total {len(transcript)} chars")
 
         if language == 'yi' and output_language == 'he':
             log.info("Translating Yiddish to Hebrew...")
