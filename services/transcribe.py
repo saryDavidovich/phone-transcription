@@ -1,14 +1,20 @@
 import os, requests, logging, threading, time, math
+from concurrent.futures import ThreadPoolExecutor
 
 log = logging.getLogger(__name__)
 
+# מקסימום 10 תמלולים במקביל — מגן על rate limits של גמיני
+_executor = ThreadPoolExecutor(max_workers=10)
+
 
 def transcribe_async(call_id, rec_url, customer_id, delivery_method, delivered_to, duration_seconds, transcription_tier='basic', language='he', output_language='he'):
-    t = threading.Thread(
-        target=_process,
-        args=(call_id, rec_url, customer_id, delivery_method, delivered_to, duration_seconds, transcription_tier, language, output_language),
+    waiting = _executor._work_queue.qsize()
+    log.info(f"transcribe_async: call_id={call_id} נכנס לתור (ממתינים בתור: {waiting})")
+    _executor.submit(
+        _process,
+        call_id, rec_url, customer_id, delivery_method, delivered_to,
+        duration_seconds, transcription_tier, language, output_language,
     )
-    t.start()
 
 
 def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, duration_seconds, transcription_tier='basic', language='he', output_language='he'):
