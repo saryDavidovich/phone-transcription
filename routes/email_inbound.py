@@ -230,40 +230,61 @@ def _download_gdrive_file(file_id, dest_dir):
     """
     מוריד קובץ מ-Google Drive לפי file_id לתיקיית dest_dir.
     מניח שהקובץ משותף כ-"כל מי שיש לו קישור יכול לצפות".
-    מחזיר (filepath, original_filename) או (None, None) בכשלון.
+    מחזיר (filepath, original_filename, dest_filename) או (None, None, None) בכשלון.
+    תומך ב-MP4 ווידאו דרך drive.usercontent.google.com
     """
     import urllib.parse
     import requests
 
-    # URL להורדה ישירה ללא אימות (עובד לקבצים ציבוריים / anyone with link)
-    download_url = f"https://drive.google.com/uc?export=download&id={file_id}&confirm=t"
+    HEADERS = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': '*/*',
+    }
+
+    # רשימת URLים לנסות בסדר — ה-usercontent הוא הכי אמין ל-MP4 וקבצים גדולים
+    download_urls = [
+        f"https://drive.usercontent.google.com/download?id={file_id}&export=download&confirm=t",
+        f"https://drive.google.com/uc?export=download&id={file_id}&confirm=t",
+    ]
 
     try:
         session = requests.Session()
-        # קריאה ראשונה - עשויה להחזיר דף אישור לקבצים גדולים
-        r = session.get(download_url, timeout=60, stream=True, allow_redirects=True)
-        r.raise_for_status()
+        session.headers.update(HEADERS)
 
-        content_type = r.headers.get('Content-Type', '')
+        r = None
+        content_type = ''
 
-        # אם קיבלנו HTML - כנראה דף אישור של Drive לקבצים גדולים
-        if 'text/html' in content_type:
-            # נחפש את קישור האישור בתוכן
+        for url in download_urls:
+            r = session.get(url, timeout=300, stream=True, allow_redirects=True)
+            r.raise_for_status()
+            content_type = r.headers.get('Content-Type', '')
+            log.info(f"Drive download attempt url={url[:60]} status={r.status_code} content_type={content_type} size_header={r.headers.get('Content-Length','?')}")
+
+            if 'text/html' not in content_type:
+                break  # קיבלנו קובץ אמיתי
+
+            # עדיין HTML — נסה לחלץ uuid/confirm מתוכן
             html_text = r.text
-            confirm_match = re.search(r'confirm=([0-9A-Za-z_-]+)', html_text)
             uuid_match = re.search(r'uuid=([0-9A-Za-z_-]+)', html_text)
-            if confirm_match or uuid_match:
+            confirm_match = re.search(r'confirm=([0-9A-Za-z_-]+)', html_text)
+            if uuid_match or confirm_match:
                 params = {'export': 'download', 'id': file_id, 'confirm': 't'}
                 if uuid_match:
                     params['uuid'] = uuid_match.group(1)
+                if confirm_match:
+                    params['confirm'] = confirm_match.group(1)
                 r = session.get(
-                    'https://drive.google.com/uc',
+                    'https://drive.usercontent.google.com/download',
                     params=params,
                     timeout=300,
                     stream=True
                 )
                 r.raise_for_status()
                 content_type = r.headers.get('Content-Type', '')
+                if 'text/html' not in content_type:
+                    break
+
+            log.warning(f"Drive URL {url[:60]} returned HTML, trying next...")
 
         # קבע סיומת לפי Content-Type
         ct_to_ext = {
