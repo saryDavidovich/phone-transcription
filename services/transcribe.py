@@ -300,43 +300,72 @@ def _gemini_from_url(url, language='he', output_language='he'):
         audio_content = r.content
         file_size = len(audio_content)
 
-        # זיהוי סוג הקובץ לפי כותרת URL
+        # זיהוי סוג הקובץ — לפי magic bytes ואחר כך לפי URL
+        def _is_mp4(data):
+            # MP4/MOV/M4A מתחילים ב-ftyp box לאחר 4 בייטים של גודל
+            return len(data) > 8 and data[4:8] in (b'ftyp', b'moov', b'mdat', b'free', b'skip')
+
         url_lower = url.lower().split('?')[0]
-        if url_lower.endswith('.mp4') or url_lower.endswith('.mov') or url_lower.endswith('.avi') or url_lower.endswith('.mkv') or url_lower.endswith('.3gp'):
+        is_video_url = any(url_lower.endswith(ext) for ext in ('.mp4', '.mov', '.avi', '.mkv', '.3gp', '.m4v'))
+
+        if _is_mp4(audio_content) or is_video_url:
             mime_type = 'video/mp4'
             ext = '.mp4'
         else:
             mime_type = 'audio/wav'
             ext = '.wav'
 
-        try:
-            with wave.open(io.BytesIO(r.content)) as wav_in:
-                frames = wav_in.readframes(wav_in.getnframes())
-                sampwidth = wav_in.getsampwidth()
-                nchannels = wav_in.getnchannels()
-                framerate = wav_in.getframerate()
-                actual_duration = wav_in.getnframes() // framerate
+        # המרת וידאו/אודיו לא-WAV ל-WAV לצורך פיצול ותמלול
+        if mime_type == 'video/mp4' or (mime_type == 'audio/wav' and not audio_content[:4] == b'RIFF'):
+            try:
+                from pydub import AudioSegment
+                import tempfile, os as _os
+                log.info(f"Converting {mime_type} to WAV for chunking...")
+                with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp_in:
+                    tmp_in.write(audio_content)
+                    tmp_in_path = tmp_in.name
+                try:
+                    seg = AudioSegment.from_file(tmp_in_path)
+                    seg = seg.set_frame_rate(16000).set_channels(1).set_sample_width(2)
+                    buf = io.BytesIO()
+                    seg.export(buf, format='wav')
+                    audio_content = buf.getvalue()
+                    actual_duration = len(seg) // 1000
+                    mime_type = 'audio/wav'
+                    ext = '.wav'
+                    log.info(f"Converted to WAV: {len(audio_content)} bytes, {actual_duration}s")
+                finally:
+                    _os.unlink(tmp_in_path)
+            except Exception as e:
+                log.warning(f"Could not convert to WAV: {e}, sending as-is to Gemini")
 
-            log.info(f"Duration: {actual_duration}s, framerate: {framerate}Hz")
-            mime_type = 'audio/wav'
-            ext = '.wav'
+        if mime_type == 'audio/wav':
+            try:
+                with wave.open(io.BytesIO(audio_content)) as wav_in:
+                    frames = wav_in.readframes(wav_in.getnframes())
+                    sampwidth = wav_in.getsampwidth()
+                    nchannels = wav_in.getnchannels()
+                    framerate = wav_in.getframerate()
+                    actual_duration = wav_in.getnframes() // framerate
 
-            if framerate != 16000:
-                frames, _ = audioop.ratecv(frames, sampwidth, nchannels, framerate, 16000, None)
-                framerate = 16000
-                log.info("Upsampled to 16000Hz for Gemini")
+                log.info(f"Duration: {actual_duration}s, framerate: {framerate}Hz")
 
-                output_buffer = io.BytesIO()
-                with wave.open(output_buffer, 'wb') as wav_out:
-                    wav_out.setnchannels(nchannels)
-                    wav_out.setsampwidth(sampwidth)
-                    wav_out.setframerate(16000)
-                    wav_out.writeframes(frames)
-                audio_content = output_buffer.getvalue()
-                file_size = len(audio_content)
+                if framerate != 16000:
+                    frames, _ = audioop.ratecv(frames, sampwidth, nchannels, framerate, 16000, None)
+                    framerate = 16000
+                    log.info("Upsampled to 16000Hz for Gemini")
 
-        except Exception as e:
-            log.warning(f"Could not process WAV: {e}, using original")
+                    output_buffer = io.BytesIO()
+                    with wave.open(output_buffer, 'wb') as wav_out:
+                        wav_out.setnchannels(nchannels)
+                        wav_out.setsampwidth(sampwidth)
+                        wav_out.setframerate(16000)
+                        wav_out.writeframes(frames)
+                    audio_content = output_buffer.getvalue()
+                    file_size = len(audio_content)
+
+            except Exception as e:
+                log.warning(f"Could not process WAV: {e}, using original")
 
         input_lang_map = {'he': 'עברית', 'yi': 'יידיש', 'en': 'English'}
         input_lang_name = input_lang_map.get(language, 'עברית')
