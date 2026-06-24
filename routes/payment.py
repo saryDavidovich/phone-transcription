@@ -131,6 +131,12 @@ def nedarim_callback():
 
     log.info(f"Payment OK: customer={customer.id}, +{total_credit}, balance={customer.balance}")
 
+    # הפעל הקלטות ממתינות ב-thread נפרד
+    from services.transcribe import process_pending_recordings
+    import threading
+    t = threading.Thread(target=process_pending_recordings, args=(customer.id,), daemon=True)
+    t.start()
+
     # הפקת קבלה ושליחה למייל - ב-thread נפרד כדי לא לעכב את ימות
     if approval and customer.email:
         import threading
