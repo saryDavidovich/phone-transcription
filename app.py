@@ -71,6 +71,11 @@ def _migrate_db():
             conn.execute(db.text("ALTER TABLE recordings ADD COLUMN IF NOT EXISTS fax_status VARCHAR(32)"))
             conn.execute(db.text("ALTER TABLE recordings ADD COLUMN IF NOT EXISTS fax_status_note TEXT"))
             conn.execute(db.text("CREATE INDEX IF NOT EXISTS ix_recordings_fax_campaign_id ON recordings (fax_campaign_id)"))
+            # עמודות pending payment
+            conn.execute(db.text("ALTER TABLE recordings ADD COLUMN IF NOT EXISTS transcription_tier VARCHAR(10)"))
+            conn.execute(db.text("ALTER TABLE recordings ADD COLUMN IF NOT EXISTS language VARCHAR(10)"))
+            conn.execute(db.text("ALTER TABLE recordings ADD COLUMN IF NOT EXISTS output_language VARCHAR(10)"))
+            conn.execute(db.text("ALTER TABLE recordings ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP"))
             # ניקוי - עמודות פקס שנוספו בטעות ל-customers בעבר
             conn.execute(db.text("ALTER TABLE customers DROP COLUMN IF EXISTS fax_campaign_id"))
             conn.execute(db.text("ALTER TABLE customers DROP COLUMN IF EXISTS fax_status"))
