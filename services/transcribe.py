@@ -58,6 +58,31 @@ def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, durat
             else:
                 # gemini או כל ברירת מחדל
                 log.info(f"Using Gemini for customer {customer_id}")
+
+                # בדיקת יתרה לפי אומדן אורך לפני תמלול
+                if duration_seconds and duration_seconds > 0:
+                    price_per_20min_pre = float(_get_setting('price_per_20min_basic', '0.90'))
+                    units_pre = math.ceil(duration_seconds / 1200)
+                    cost_pre = round(units_pre * price_per_20min_pre, 2)
+                    customer_pre = Customer.query.get(customer_id)
+                    if customer_pre and customer_pre.balance < cost_pre:
+                        log.info(f"Insufficient balance for {call_id}: need {cost_pre}, have {customer_pre.balance}")
+                        db.session.remove()
+                        rec = Recording.query.filter_by(call_id=call_id).first()
+                        if rec:
+                            _save_pending_payment(
+                                rec=rec,
+                                customer=customer_pre,
+                                duration_seconds=duration_seconds,
+                                price_per_20min=price_per_20min_pre,
+                                delivery_method=delivery_method,
+                                delivered_to=delivered_to,
+                                transcription_tier=transcription_tier,
+                                language=language,
+                                output_language=output_language,
+                            )
+                        return
+
                 transcript_raw, actual_duration, is_video = _gemini_from_url(rec_url, language, output_language)
                 transcript_fixed = transcript_raw
                 price_key = 'price_per_20min_video' if is_video else 'price_per_20min_basic'
@@ -80,6 +105,25 @@ def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, durat
             units = math.ceil(duration_seconds / 1200)
             cost = round(units * price_per_20min, 2)
 
+            # בדיקה סופית שהיתרה מספיקה (לאחר שיודעים את האורך המדויק)
+            customer = Customer.query.get(customer_id)
+            if customer and customer.balance < cost:
+                log.info(f"Insufficient balance after transcription for {call_id}: need {cost}, have {customer.balance}")
+                rec = Recording.query.filter_by(call_id=call_id).first()
+                if rec:
+                    _save_pending_payment(
+                        rec=rec,
+                        customer=customer,
+                        duration_seconds=duration_seconds,
+                        price_per_20min=price_per_20min,
+                        delivery_method=delivery_method,
+                        delivered_to=delivered_to,
+                        transcription_tier=transcription_tier,
+                        language=language,
+                        output_language=output_language,
+                    )
+                return
+
             if rec:
                 rec.transcript = transcript_fixed
                 rec.summary = ''
@@ -88,7 +132,6 @@ def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, durat
                 rec.duration_seconds = duration_seconds
                 db.session.commit()
 
-            customer = Customer.query.get(customer_id)
             if customer:
                 customer.balance -= cost
                 txn = Transaction(
@@ -113,6 +156,130 @@ def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, durat
 
         except Exception as e:
             log.error(f"Error processing {call_id}: {e}")
+
+
+def _get_pending_recordings(customer_id):
+    """מחזיר הקלטות ממתינות לתשלום שטרם פגה תקופתן"""
+    from models import Recording
+    from datetime import datetime
+    return Recording.query.filter_by(
+        customer_id=customer_id,
+        status='pending_payment'
+    ).filter(
+        Recording.expires_at > datetime.utcnow()
+    ).all()
+
+
+def process_pending_recordings(customer_id):
+    """נקרא אחרי טעינת ארנק - מתמלל הקלטות ממתינות אם יש יתרה מספקת"""
+    from app import app, db
+    from models import Recording, Customer
+    from datetime import datetime
+
+    with app.app_context():
+        customer = Customer.query.get(customer_id)
+        if not customer:
+            return
+
+        pending = _get_pending_recordings(customer_id)
+        if not pending:
+            log.info(f"process_pending_recordings: no pending for customer {customer_id}")
+            return
+
+        for rec in pending:
+            price_per_20min = float(_get_setting('price_per_20min_basic', '0.90'))
+            units = math.ceil((rec.duration_seconds or 0) / 1200)
+            cost = round(units * price_per_20min, 2) if units > 0 else price_per_20min
+
+            db.session.refresh(customer)
+            if customer.balance < cost:
+                log.info(f"process_pending_recordings: not enough balance for rec {rec.id} (need {cost}, have {customer.balance})")
+                continue
+
+            log.info(f"process_pending_recordings: processing rec {rec.id} for customer {customer_id}")
+            rec.status = 'queued'
+            db.session.commit()
+
+            transcribe_async(
+                call_id=rec.call_id,
+                rec_url=rec.rec_url,
+                customer_id=customer_id,
+                delivery_method=rec.delivery_method,
+                delivered_to=rec.delivered_to,
+                duration_seconds=rec.duration_seconds or 0,
+                transcription_tier=rec.transcription_tier or 'gemini',
+                language=rec.language or 'he',
+                output_language=rec.output_language or 'he',
+            )
+
+
+def _save_pending_payment(rec, customer, duration_seconds, price_per_20min,
+                           delivery_method, delivered_to, transcription_tier,
+                           language, output_language):
+    """שומר הקלטה במצב pending_payment ושולח מייל ללקוח"""
+    from datetime import datetime, timedelta
+
+    units = math.ceil(duration_seconds / 1200) if duration_seconds > 0 else 1
+    cost = round(units * price_per_20min, 2)
+
+    rec.status = 'pending_payment'
+    rec.duration_seconds = duration_seconds
+    rec.delivery_method = delivery_method
+    rec.delivered_to = delivered_to
+    rec.transcription_tier = transcription_tier
+    rec.language = language
+    rec.output_language = output_language
+    rec.expires_at = datetime.utcnow() + timedelta(hours=72)
+
+    from app import db
+    db.session.commit()
+
+    log.info(f"Recording {rec.call_id} saved as pending_payment, expires {rec.expires_at}, cost={cost}")
+
+    if customer and customer.email:
+        try:
+            _send_insufficient_balance_email(customer.email, duration_seconds, cost, customer.balance)
+        except Exception as e:
+            log.error(f"Failed to send insufficient balance email: {e}")
+
+
+def _send_insufficient_balance_email(to_email, duration_seconds, cost, balance):
+    """שולח מייל ללקוח שהיתרה אינה מספיקה"""
+    import sendgrid
+    from sendgrid.helpers.mail import Mail
+
+    minutes = duration_seconds // 60
+    balance_str = f"\u20aa{balance:.2f}"
+    cost_str = f"\u20aa{cost:.2f}"
+
+    html = f"""<div dir="rtl" style="font-family:Arial,sans-serif;max-width:640px;margin:auto;color:#111827">
+<h2 style="color:#dc2626">לא ניתן היה להשלים את התמלול</h2>
+<p>שלום,</p>
+<p>התקבל קובץ אודיו/וידאו לתמלול באורך <b>{minutes} דקות</b>.</p>
+<div style="background:#fef2f2;border-right:4px solid #ef4444;padding:14px;margin:14px 0;border-radius:8px">
+<p style="margin:0;font-weight:700;color:#991b1b">היתרה בארנק אינה מספיקה לתמלול זה</p>
+<p style="margin:8px 0 0;color:#111827">
+יתרה נוכחית: <b>{balance_str}</b><br>
+עלות התמלול: <b>{cost_str}</b>
+</p>
+</div>
+<p>הקובץ <b>נשמר במערכת ל-72 שעות</b>.<br>
+אם תטעין את הארנק תוך 72 שעות, התמלול יבוצע אוטומטית ויישלח אליך.</p>
+<p style="text-align:center;margin:24px 0">
+<a href="tel:033131795" style="background:#2563eb;color:#fff;text-decoration:none;padding:12px 28px;border-radius:8px;font-weight:700;font-size:16px;display:inline-block">התקשר לטעינת ארנק</a>
+</p>
+<p style="color:#6b7280;font-size:13px">מערכת תמלולפון 03-3131795</p>
+</div>"""
+
+    sg = sendgrid.SendGridAPIClient(api_key=os.environ.get('SENDGRID_API_KEY'))
+    message = Mail(
+        from_email=os.environ.get('SENDGRID_FROM_EMAIL', os.environ.get('GMAIL_USER', '')),
+        to_emails=to_email,
+        subject='תמלולפון - יתרה אינה מספיקה, הקובץ נשמר',
+        html_content=html,
+    )
+    sg.send(message)
+    log.info(f"Insufficient balance email sent to {to_email}")
 
 
 def _alefbot_submit(rec_url, call_id):
