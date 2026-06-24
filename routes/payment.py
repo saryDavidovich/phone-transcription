@@ -152,6 +152,13 @@ def nedarim_callback():
 
 def _issue_receipt_and_send(approval, customer_email, amount, bonus, total_credit, get_setting):
     """מפיק קבלה מנדרים פלוס ושולח למייל הלקוח."""
+    from app import app
+    with app.app_context():
+        _issue_receipt_and_send_inner(approval, customer_email, amount, bonus, total_credit, get_setting)
+
+
+def _issue_receipt_and_send_inner(approval, customer_email, amount, bonus, total_credit, get_setting):
+    """הלוגיקה הפנימית - רצה בתוך app_context."""
     import requests as req
 
     mosad = get_setting('nedarim_mosad_number', '')
@@ -159,7 +166,15 @@ def _issue_receipt_and_send(approval, customer_email, amount, bonus, total_credi
     tamal_type = get_setting('nedarim_tamal_type', '400')
 
     if not mosad or not api_password:
-        log.warning("Receipt: nedarim_mosad_number or nedarim_api_password not configured")
+        log.warning("Receipt: nedarim_mosad_number or nedarim_api_password not configured, sending email without receipt link")
+        _send_receipt_email(
+            to=customer_email,
+            amount=amount,
+            bonus=bonus,
+            total_credit=total_credit,
+            approval=approval,
+            receipt_url=None,
+        )
         return
 
     # שלב 1: הפקת קבלה
