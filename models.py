@@ -35,6 +35,11 @@ class Recording(db.Model):
     fax_campaign_id = db.Column(db.String(64), nullable=True, index=True)
     fax_status = db.Column(db.String(32), nullable=True)
     fax_status_note = db.Column(db.Text, nullable=True)
+    # הקלטות ממתינות לתשלום
+    transcription_tier = db.Column(db.String(10), nullable=True)
+    language = db.Column(db.String(10), nullable=True)
+    output_language = db.Column(db.String(10), nullable=True)
+    expires_at = db.Column(db.DateTime, nullable=True)  # תפוגה אחרי 72 שעות
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
 class Transaction(db.Model):
