@@ -22,6 +22,45 @@ def get_customer(phone):
         'is_blocked': customer.is_blocked
     })
 
+@api_bp.route('/customer/pending-recordings', methods=['GET'])
+def get_pending_recordings():
+    """
+    נקרא מה-IVR בכניסה לשיחה - בודק אם יש ללקוח הקלטות ממתינות לתשלום.
+    מחזיר את ההקלטה הראשונה שממתינה עם פרטי העלות.
+    """
+    from models import Recording
+    from datetime import datetime
+    import math
+
+    phone = request.args.get('phone', '')
+    customer = Customer.query.filter_by(phone=phone).first()
+    if not customer:
+        return jsonify({'has_pending': False})
+
+    pending = Recording.query.filter_by(
+        customer_id=customer.id,
+        status='pending_payment'
+    ).filter(
+        Recording.expires_at > datetime.utcnow()
+    ).order_by(Recording.created_at.asc()).first()
+
+    if not pending:
+        return jsonify({'has_pending': False})
+
+    price_per_20min = float(_get_setting('price_per_20min_basic', '0.90'))
+    units = math.ceil((pending.duration_seconds or 0) / 1200) or 1
+    cost = round(units * price_per_20min, 2)
+    minutes = (pending.duration_seconds or 0) // 60
+
+    return jsonify({
+        'has_pending': True,
+        'minutes': minutes,
+        'cost': cost,
+        'balance': customer.balance,
+        'enough_balance': customer.balance >= cost,
+    })
+
+
 @api_bp.route('/customer/update', methods=['POST'])
 def update_customer():
     data = request.json
@@ -230,3 +269,20 @@ def get_public_settings():
         settings[f'bonus_threshold_{i}'] = get_setting(f'bonus_threshold_{i}', '')
         settings[f'bonus_amount_{i}'] = get_setting(f'bonus_amount_{i}', '')
     return jsonify(settings)
+
+
+@api_bp.route('/process-pending', methods=['POST'])
+def process_pending():
+    """נקרא מה-IVR כשמזוהה שיש pending ויש יתרה — מפעיל תמלול"""
+    from services.transcribe import process_pending_recordings
+    import threading
+
+    data = request.get_json(silent=True) or {}
+    phone = data.get('phone', '')
+    customer = Customer.query.filter_by(phone=phone).first()
+    if not customer:
+        return jsonify({'status': 'not_found'}), 404
+
+    t = threading.Thread(target=process_pending_recordings, args=(customer.id,), daemon=True)
+    t.start()
+    return jsonify({'status': 'started'})
