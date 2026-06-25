@@ -108,7 +108,12 @@ def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, durat
                 duration_seconds = actual_duration
                 log.info(f"Actual duration from file: {duration_seconds}s")
 
+            # סגור ופתח מחדש את ה-connection — חיוני לתמלולים ארוכים שה-SSL נסגר
             db.session.remove()
+            try:
+                db.engine.dispose()
+            except Exception:
+                pass
             rec = Recording.query.filter_by(call_id=call_id).first()
 
             if not transcript_raw:
