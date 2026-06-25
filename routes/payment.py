@@ -131,10 +131,15 @@ def nedarim_callback():
 
     log.info(f"Payment OK: customer={customer.id}, +{total_credit}, balance={customer.balance}")
 
-    # הפעל הקלטות ממתינות ב-thread נפרד
+    # הפעל הקלטות ממתינות ב-thread נפרד — המתן 3 שניות כדי לוודא שהטעינה נרשמה ב-DB
     from services.transcribe import process_pending_recordings
-    import threading
-    t = threading.Thread(target=process_pending_recordings, args=(customer.id,), daemon=True)
+    import threading, time
+
+    def _delayed_process(customer_id):
+        time.sleep(3)
+        process_pending_recordings(customer_id)
+
+    t = threading.Thread(target=_delayed_process, args=(customer.id,), daemon=True)
     t.start()
 
     # הפקת קבלה ושליחה למייל - ב-thread נפרד כדי לא לעכב את ימות
