@@ -109,12 +109,25 @@ def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, durat
                 log.info(f"Actual duration from file: {duration_seconds}s")
 
             # סגור ופתח מחדש את ה-connection — חיוני לתמלולים ארוכים שה-SSL נסגר
-            db.session.remove()
-            try:
-                db.engine.dispose()
-            except Exception:
-                pass
-            rec = Recording.query.filter_by(call_id=call_id).first()
+            for _attempt in range(5):
+                try:
+                    db.session.remove()
+                    db.engine.dispose()
+                    break
+                except Exception as _e:
+                    log.warning(f"DB dispose attempt {_attempt+1} failed: {_e}")
+                    time.sleep(2)
+
+            rec = None
+            for _attempt in range(5):
+                try:
+                    rec = Recording.query.filter_by(call_id=call_id).first()
+                    break
+                except Exception as _e:
+                    log.warning(f"DB query attempt {_attempt+1} failed: {_e}")
+                    db.session.remove()
+                    db.engine.dispose()
+                    time.sleep(3)
 
             if not transcript_raw:
                 if rec:
