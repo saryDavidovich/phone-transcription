@@ -17,7 +17,9 @@ def create_app():
     app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024
     app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
     'pool_pre_ping': True,
-    'pool_recycle': 300,
+    'pool_recycle': 1800,   # 30 דקות — מספיק לתמלולים ארוכים
+    'pool_timeout': 30,
+    'connect_args': {'connect_timeout': 10},
 }
     
     app.config['PRICE_PER_30MIN'] = float(os.environ.get('PRICE_PER_30MIN', '5.0'))
