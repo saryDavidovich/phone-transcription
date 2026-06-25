@@ -76,6 +76,7 @@ def _migrate_db():
             conn.execute(db.text("ALTER TABLE recordings ADD COLUMN IF NOT EXISTS language VARCHAR(10)"))
             conn.execute(db.text("ALTER TABLE recordings ADD COLUMN IF NOT EXISTS output_language VARCHAR(10)"))
             conn.execute(db.text("ALTER TABLE recordings ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP"))
+            conn.execute(db.text("ALTER TABLE recordings ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()"))
             # ניקוי - עמודות פקס שנוספו בטעות ל-customers בעבר
             conn.execute(db.text("ALTER TABLE customers DROP COLUMN IF EXISTS fax_campaign_id"))
             conn.execute(db.text("ALTER TABLE customers DROP COLUMN IF EXISTS fax_status"))
