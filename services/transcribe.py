@@ -59,6 +59,22 @@ def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, durat
                 # gemini או כל ברירת מחדל
                 log.info(f"Using Gemini for customer {customer_id}")
 
+                # אומדן אורך לפי גודל קובץ אם לא ידוע
+                if not duration_seconds or duration_seconds == 0:
+                    try:
+                        head_r = requests.head(rec_url, timeout=10, allow_redirects=True)
+                        content_length = int(head_r.headers.get('Content-Length', 0))
+                        if content_length > 0:
+                            # WAV 16kHz mono 16bit: ~32KB לשנייה, אודיו דחוס: ~1KB לשנייה
+                            url_lower = rec_url.lower()
+                            if 'wav' in url_lower or content_length > 10_000_000:
+                                duration_seconds = content_length // 32000
+                            else:
+                                duration_seconds = content_length // 1000
+                            log.info(f"Estimated duration from Content-Length {content_length}: {duration_seconds}s")
+                    except Exception as e:
+                        log.warning(f"Could not estimate duration: {e}")
+
                 # בדיקת יתרה לפי אומדן אורך לפני תמלול
                 if duration_seconds and duration_seconds > 0:
                     price_per_20min_pre = float(_get_setting('price_per_20min_basic', '0.90'))
@@ -121,6 +137,7 @@ def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, durat
                         transcription_tier=transcription_tier,
                         language=language,
                         output_language=output_language,
+                        transcript=transcript_fixed,  # שמור טרנסקריפט — לא לתמלל שוב
                     )
                 return
 
@@ -197,6 +214,33 @@ def process_pending_recordings(customer_id):
                 continue
 
             log.info(f"process_pending_recordings: processing rec {rec.id} for customer {customer_id}")
+
+            # אם יש כבר טרנסקריפט שמור — לא לתמלל שוב, רק לחייב ולשלוח
+            if rec.transcript:
+                log.info(f"process_pending_recordings: transcript already exists, charging and sending")
+                customer.balance -= cost
+                from models import Transaction
+                txn = Transaction(
+                    customer_id=customer_id,
+                    amount=-cost,
+                    type='debit',
+                    description=f'תמלול {(rec.duration_seconds or 0)//60} דקות',
+                    recording_id=rec.id
+                )
+                db.session.add(txn)
+                rec.status = 'transcribed'
+                rec.cost = cost
+                db.session.commit()
+
+                # שלח למייל/פקס
+                from services.transcribe import _send_email, _send_fax
+                if rec.delivery_method == 'email' and rec.delivered_to:
+                    _send_email(rec.delivered_to, rec.transcript, customer, rec.rec_url, rec.duration_seconds or 0)
+                elif rec.delivery_method == 'fax' and rec.delivered_to:
+                    _send_fax(rec.delivered_to, rec.transcript, customer, rec.duration_seconds or 0, rec.call_id)
+                continue
+
+            # אין טרנסקריפט — תמלל מחדש
             rec.status = 'queued'
             db.session.commit()
 
@@ -215,7 +259,7 @@ def process_pending_recordings(customer_id):
 
 def _save_pending_payment(rec, customer, duration_seconds, price_per_20min,
                            delivery_method, delivered_to, transcription_tier,
-                           language, output_language):
+                           language, output_language, transcript=None):
     """שומר הקלטה במצב pending_payment ושולח מייל ללקוח"""
     from datetime import datetime, timedelta
 
@@ -230,6 +274,9 @@ def _save_pending_payment(rec, customer, duration_seconds, price_per_20min,
     rec.language = language
     rec.output_language = output_language
     rec.expires_at = datetime.utcnow() + timedelta(hours=72)
+    # שמור טרנסקריפט אם כבר תומלל — כדי לא לתמלל שוב
+    if transcript:
+        rec.transcript = transcript
 
     from app import db
     db.session.commit()
