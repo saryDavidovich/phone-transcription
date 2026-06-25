@@ -37,12 +37,16 @@ def get_pending_recordings():
     if not customer:
         return jsonify({'has_pending': False})
 
-    pending = Recording.query.filter_by(
-        customer_id=customer.id,
-        status='pending_payment'
-    ).filter(
-        Recording.expires_at > datetime.utcnow()
-    ).order_by(Recording.created_at.asc()).first()
+    try:
+        pending = Recording.query.filter_by(
+            customer_id=customer.id,
+            status='pending_payment'
+        ).filter(
+            Recording.expires_at > datetime.utcnow()
+        ).first()
+    except Exception as e:
+        log.warning(f"pending-recordings query error: {e}")
+        return jsonify({'has_pending': False})
 
     if not pending:
         return jsonify({'has_pending': False})
