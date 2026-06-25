@@ -12,6 +12,7 @@ class Customer(db.Model):
     balance = db.Column(db.Float, default=0.0)
     is_blocked = db.Column(db.Boolean, default=False)
     delivery_method = db.Column(db.String(10), default='email')
+    default_settings = db.Column(db.JSON, nullable=True)  # ברירות מחדל: tier, language, output_language
     transcription_tier = db.Column(db.String(10), default='basic')
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     recordings = db.relationship('Recording', backref='customer', lazy=True)
