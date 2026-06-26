@@ -19,7 +19,9 @@ def get_customer(phone):
         'email': customer.email or '',
         'fax': customer.fax or '',
         'delivery_method': customer.delivery_method or 'email',
-        'is_blocked': customer.is_blocked
+        'is_blocked': customer.is_blocked,
+        'default_settings': customer.default_settings or {},
+        'name': customer.name or '',
     })
 
 @api_bp.route('/customer/pending-recordings', methods=['GET'])
@@ -78,6 +80,8 @@ def update_customer():
         customer.fax = data['fax']
     if 'delivery_method' in data:
         customer.delivery_method = data['delivery_method']
+    if 'default_settings' in data:
+        customer.default_settings = data['default_settings']
     db.session.commit()
     return jsonify({'ok': True})
 
