@@ -88,3 +88,20 @@ class ManagerMessage(db.Model):
     admin_note = db.Column(db.Text)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class OcrResult(db.Model):
+    __tablename__ = 'ocr_results'
+
+    id = db.Column(db.Integer, primary_key=True)
+    customer_id = db.Column(db.Integer, db.ForeignKey('customers.id'), nullable=False, index=True)
+    original_filename = db.Column(db.String(255))
+    original_file_path = db.Column(db.String(512))  # נתיב לקובץ המקורי
+    ocr_text = db.Column(db.Text)
+    char_count = db.Column(db.Integer, default=0)
+    cost = db.Column(db.Float, default=0.0)
+    engine = db.Column(db.String(20), default='gemini')
+    status = db.Column(db.String(20), default='completed')  # completed / error
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    customer = db.relationship('Customer', backref=db.backref('ocr_results', lazy=True))
