@@ -34,7 +34,8 @@ def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, durat
 
             if tier == 'premium':
                 log.info(f"Using AlefBot for customer {customer_id}")
-                job_id, actual_duration = _alefbot_submit(rec_url, call_id)
+                alefbot_tier = 'premium_quality' if transcription_tier == 'premium' else 'standard'
+                job_id, actual_duration = _alefbot_submit(rec_url, call_id, model_tier=alefbot_tier)
 
                 if job_id:
                     db.session.remove()
@@ -347,7 +348,7 @@ def _send_insufficient_balance_email(to_email, duration_seconds, cost, balance):
     log.info(f"Insufficient balance email sent to {to_email}")
 
 
-def _alefbot_submit(rec_url, call_id):
+def _alefbot_submit(rec_url, call_id, model_tier='premium_quality'):
     """שולח ל-AlefBot ומחזיר job_id מיד"""
     try:
         import wave, io
@@ -398,6 +399,7 @@ def _alefbot_submit(rec_url, call_id):
                 'upload_id': upload_id,
                 'output_format': 'plain_text',
                 'webhook_url': webhook_url,
+                'model_tier': model_tier,
             },
             timeout=30
         )
