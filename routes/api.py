@@ -128,28 +128,41 @@ def transcribe():
 @api_bp.route('/alefbot-webhook', methods=['POST'])
 def alefbot_webhook():
     from services.transcribe import finalize_alefbot_recording
+    from models import Recording
     import requests as req
     import os
     data = request.json
     if not data:
         return jsonify({'ok': False}), 400
 
-    status = data.get('status', '')
-    call_id = data.get('client_reference', '')
+    log.info(f"AlefBot webhook received: {data}")
+
+    # אלף בוט שולח event_type ו-job_id
+    event_type = data.get('event_type', '')
     job_id = data.get('job_id', '')
 
-    if status == 'completed' and call_id and job_id:
+    if event_type == 'transcription.completed' and job_id:
+        # מצא את ה-call_id לפי job_id בבסיס הנתונים
+        rec = Recording.query.filter_by(alefbot_job_id=job_id).first()
+        if not rec:
+            log.warning(f"AlefBot webhook: no recording found for job_id={job_id}")
+            return jsonify({'ok': True})
+
+        call_id = rec.call_id
         api_key = os.environ.get('ALEFBOT_API_KEY')
         try:
+            # קבל את הטקסט מ-artifact — plain_text
             r = req.get(
-                f'https://alef-bot.top/api/v1/transcriptions/{job_id}/artifact?format=txt',
+                f'https://alef-bot.top/api/v1/transcriptions/{job_id}/artifact.plain_text',
                 headers={'Authorization': f'Bearer {api_key}'},
                 timeout=60
             )
             r.raise_for_status()
             transcript = r.text.strip()
+            log.info(f"AlefBot artifact fetched: {len(transcript)} chars for job {job_id}")
             finalize_alefbot_recording(call_id, transcript)
         except Exception as e:
+            log.error(f"AlefBot webhook error: {e}")
             return jsonify({'ok': False, 'error': str(e)}), 500
 
     return jsonify({'ok': True})
