@@ -402,8 +402,10 @@ def _alefbot_submit(rec_url, call_id):
             },
             timeout=30
         )
+        if not transcribe_res.ok:
+            log.error(f"AlefBot transcription error {transcribe_res.status_code}: {transcribe_res.text}")
         transcribe_res.raise_for_status()
-        job_id = transcribe_res.json().get('job_id')
+        job_id = transcribe_res.json().get('job_id') or transcribe_res.json().get('id')
         log.info(f"AlefBot job created: {job_id} for call {call_id}")
         return job_id, actual_duration
 
