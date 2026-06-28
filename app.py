@@ -80,6 +80,22 @@ def _migrate_db():
             conn.execute(db.text("ALTER TABLE recordings ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP"))
             conn.execute(db.text("ALTER TABLE recordings ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()"))
             conn.execute(db.text("ALTER TABLE customers ADD COLUMN IF NOT EXISTS default_settings JSONB"))
+            # טבלת OCR
+            conn.execute(db.text("""
+                CREATE TABLE IF NOT EXISTS ocr_results (
+                    id SERIAL PRIMARY KEY,
+                    customer_id INTEGER REFERENCES customers(id),
+                    original_filename VARCHAR(255),
+                    original_file_path VARCHAR(512),
+                    ocr_text TEXT,
+                    char_count INTEGER DEFAULT 0,
+                    cost FLOAT DEFAULT 0.0,
+                    engine VARCHAR(20) DEFAULT 'gemini',
+                    status VARCHAR(20) DEFAULT 'completed',
+                    created_at TIMESTAMP DEFAULT NOW()
+                )
+            """))
+            conn.execute(db.text("CREATE INDEX IF NOT EXISTS ix_ocr_results_customer_id ON ocr_results (customer_id)"))
             # ניקוי - עמודות פקס שנוספו בטעות ל-customers בעבר
             conn.execute(db.text("ALTER TABLE customers DROP COLUMN IF EXISTS fax_campaign_id"))
             conn.execute(db.text("ALTER TABLE customers DROP COLUMN IF EXISTS fax_status"))
