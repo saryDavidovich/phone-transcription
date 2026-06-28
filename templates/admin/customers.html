@@ -1,42 +1,39 @@
 {% extends 'admin/base.html' %}
-{% block title %}לקוחות</form>
-<script>
-function selectAll() { document.querySelectorAll('.row-check').forEach(c => c.checked = true); }
-function deselectAll() { document.querySelectorAll('.row-check').forEach(c => c.checked = false); }
-function toggleAll(cb) { document.querySelectorAll('.row-check').forEach(c => c.checked = cb.checked); }
-</script>
-{% endblock %}
+{% block title %}לקוחות{% endblock %}
 {% block page_title %}ניהול לקוחות{% endblock %}
 {% block content %}
+
 <div class="search-bar">
   <form method="GET" style="display:flex;gap:8px;width:100%">
     <input class="form-input" name="q" value="{{ search }}" placeholder="חיפוש לפי טלפון, שם או מייל...">
     <button class="btn btn-primary" type="submit">🔍 חפש</button>
   </form>
 </div>
-<div class="table-card">
-  <!-- סינון לפי פעילות -->
+
+<!-- סינון לפי פעילות -->
 <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
   <a href="/admin/customers" class="btn {% if not active_filter %}btn-primary{% else %}btn-ghost{% endif %}" style="font-size:13px;padding:6px 14px">כל הלקוחות</a>
-  <a href="/admin/customers/filter?filter=inactive_month" class="btn {% if active_filter=='inactive_month' %}btn-primary{% else %}btn-ghost{% endif %}" style="font-size:13px;padding:6px 14px">😴 לא פעילים חודש</a>
-  <a href="/admin/customers/filter?filter=inactive_year" class="btn {% if active_filter=='inactive_year' %}btn-primary{% else %}btn-ghost{% endif %}" style="font-size:13px;padding:6px 14px">💤 לא פעילים שנה</a>
+  <a href="/admin/customers-filter?filter=inactive_month" class="btn {% if active_filter=='inactive_month' %}btn-primary{% else %}btn-ghost{% endif %}" style="font-size:13px;padding:6px 14px">😴 לא פעילים חודש</a>
+  <a href="/admin/customers-filter?filter=inactive_year" class="btn {% if active_filter=='inactive_year' %}btn-primary{% else %}btn-ghost{% endif %}" style="font-size:13px;padding:6px 14px">💤 לא פעילים שנה</a>
 </div>
 
-<!-- פעולות מרובות -->
+<!-- טופס פעולות מרובות -->
 <form method="POST" action="/admin/customers/bulk-action" id="bulkForm">
+
 <div style="display:flex;gap:10px;margin-bottom:14px;align-items:center;flex-wrap:wrap">
-  <button type="button" onclick="selectAll()" class="btn btn-ghost" style="font-size:12px;padding:5px 12px">בחר הכל</button>
-  <button type="button" onclick="deselectAll()" class="btn btn-ghost" style="font-size:12px;padding:5px 12px">בטל הכל</button>
-  <select name="action" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;cursor:pointer">
+  <button type="button" onclick="selectAll()" class="btn btn-ghost" style="font-size:12px;padding:5px 12px">☑ בחר הכל</button>
+  <button type="button" onclick="deselectAll()" class="btn btn-ghost" style="font-size:12px;padding:5px 12px">☐ בטל הכל</button>
+  <select name="action" style="padding:5px 10px;border-radius:6px;border:1px solid #2d3748;background:#1a1f2e;color:#e2e8f0;font-size:13px">
     <option value="add_amount">הוסף סכום קבוע</option>
     <option value="add_percent">הוסף אחוזים מהיתרה</option>
   </select>
   <input type="number" name="amount" placeholder="₪ סכום" step="0.01" min="0" style="width:90px;padding:5px 10px;border-radius:6px;border:1px solid #2d3748;background:#1a1f2e;color:#e2e8f0;font-size:13px">
   <input type="number" name="percent" placeholder="% אחוז" step="0.1" min="0" style="width:80px;padding:5px 10px;border-radius:6px;border:1px solid #2d3748;background:#1a1f2e;color:#e2e8f0;font-size:13px">
-  <button type="submit" class="btn btn-primary" style="font-size:12px;padding:5px 14px">בצע על נבחרים</button>
+  <button type="submit" class="btn btn-primary" style="font-size:12px;padding:5px 14px">▶ בצע על נבחרים</button>
 </div>
 
-<div class="table-header">
+<div class="table-card">
+  <div class="table-header">
     <span class="table-title">👥 לקוחות ({{ customers.total }})</span>
     <div style="display:flex;gap:8px">
       <a href="/admin/customers/add" class="btn btn-primary">➕ הוסף לקוח</a>
@@ -44,29 +41,65 @@ function toggleAll(cb) { document.querySelectorAll('.row-check').forEach(c => c.
     </div>
   </div>
   <table>
-    <thead><tr>
-      <th style="width:30px"><input type="checkbox" onchange="toggleAll(this)"></th><th>טלפון</th><th>שם</th><th>מייל</th><th>יתרה</th><th>הקלטות</th><th>סטטוס</th><th>תאריך הצטרפות</th>
-    </tr></thead>
+    <thead>
+      <tr>
+        <th style="width:36px;text-align:center">
+          <input type="checkbox" id="checkAll" onchange="toggleAll(this)" title="בחר הכל">
+        </th>
+        <th>טלפון</th>
+        <th>שם</th>
+        <th>מייל</th>
+        <th>יתרה</th>
+        <th>הקלטות</th>
+        <th>סטטוס</th>
+        <th>תאריך הצטרפות</th>
+      </tr>
+    </thead>
     <tbody>
       {% for c in customers.items %}
-      <tr onclick="location='/admin/customers/{{c.id}}'" style="cursor:pointer">
-        <td><strong>{{ c.phone }}</strong></td>
-        <td>{{ c.name or '—' }}</td>
-        <td style="color:#8892b0">{{ c.email or '—' }}</td>
-        <td style="color:{% if c.balance < 5 %}#ef4444{% else %}#10b981{% endif %}">₪{{ "%.2f"|format(c.balance) }}</td>
-        <td>{{ c.recordings|length }}</td>
-        <td>{% if c.is_blocked %}<span class="badge badge-red">חסום</span>{% else %}<span class="badge badge-green">פעיל</span>{% endif %}</td>
-        <td style="color:#8892b0">{{ c.created_at.strftime('%d/%m/%Y') }}</td>
+      <tr>
+        <td style="text-align:center" onclick="event.stopPropagation()">
+          <input type="checkbox" name="customer_ids" value="{{ c.id }}" class="row-check">
+        </td>
+        <td onclick="location='/admin/customers/{{c.id}}'" style="cursor:pointer"><strong>{{ c.phone }}</strong></td>
+        <td onclick="location='/admin/customers/{{c.id}}'" style="cursor:pointer">{{ c.name or '—' }}</td>
+        <td onclick="location='/admin/customers/{{c.id}}'" style="cursor:pointer;color:#8892b0">{{ c.email or '—' }}</td>
+        <td onclick="location='/admin/customers/{{c.id}}'" style="cursor:pointer;color:{% if c.balance < 5 %}#ef4444{% else %}#10b981{% endif %}">₪{{ "%.2f"|format(c.balance) }}</td>
+        <td onclick="location='/admin/customers/{{c.id}}'" style="cursor:pointer">{{ c.recordings|length }}</td>
+        <td onclick="location='/admin/customers/{{c.id}}'" style="cursor:pointer">
+          {% if c.is_blocked %}<span class="badge badge-red">חסום</span>
+          {% else %}<span class="badge badge-green">פעיל</span>{% endif %}
+        </td>
+        <td onclick="location='/admin/customers/{{c.id}}'" style="cursor:pointer;color:#8892b0">{{ c.created_at.strftime('%d/%m/%Y') }}</td>
       </tr>
       {% endfor %}
     </tbody>
   </table>
 </div>
+
+</form>
+
 <div class="pagination">
   {% for p in customers.iter_pages() %}
     {% if p %}
-      <a href="?page={{ p }}{% if search %}&q={{ search }}{% endif %}" class="page-btn {% if p == customers.page %}active{% endif %}">{{ p }}</a>
+      <a href="?page={{ p }}{% if search %}&q={{ search }}{% endif %}{% if active_filter %}&filter={{ active_filter }}{% endif %}"
+         class="page-btn {% if p == customers.page %}active{% endif %}">{{ p }}</a>
     {% endif %}
   {% endfor %}
 </div>
+
+<script>
+function selectAll() {
+  document.querySelectorAll('.row-check').forEach(c => c.checked = true);
+  document.getElementById('checkAll').checked = true;
+}
+function deselectAll() {
+  document.querySelectorAll('.row-check').forEach(c => c.checked = false);
+  document.getElementById('checkAll').checked = false;
+}
+function toggleAll(cb) {
+  document.querySelectorAll('.row-check').forEach(c => c.checked = cb.checked);
+}
+</script>
+
 {% endblock %}
