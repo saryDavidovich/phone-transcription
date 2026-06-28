@@ -183,6 +183,9 @@ textarea.form-input { resize:vertical; min-height:80px; }
       <span class="nav-icon">⚙️</span> הגדרות
     </a>
     <div class="nav-section">תקשורת</div>
+    <a href="/admin/ocr" class="nav-item {% if request.endpoint in ['admin.ocr_list','admin.ocr_detail'] %}active{% endif %}">
+      <span class="nav-icon">✍️</span> זיהוי כתב יד
+    </a>
     <a href="/admin/messages" class="nav-item {% if request.endpoint == 'admin.manager_messages' %}active{% endif %}" style="position:relative">
       <span class="nav-icon">📬</span> הודעות למנהל
       {% if new_messages_count > 0 %}
