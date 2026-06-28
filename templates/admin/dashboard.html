@@ -1,72 +1,5 @@
 {% extends 'admin/base.html' %}
-{% block title %}דשבורד
-<!-- חלון חיובי ארנקות היום -->
-<div class="table-card" style="margin-top:20px">
-  <div class="table-header">
-    <span class="table-title">💳 חיובי ארנקות היום</span>
-    <span style="color:#8892b0;font-size:13px">סה"כ: ₪{{ "%.2f"|format(billing_stats.total_cost) }} | {{ billing_stats.count }} הקלטות</span>
-  </div>
-  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;padding:16px">
-
-    <!-- לפי סוג תמלול -->
-    <div style="background:#0d1b2a;border-radius:10px;padding:14px">
-      <div style="font-weight:700;margin-bottom:10px;color:#8892b0">לפי סוג תמלול</div>
-      <div style="display:flex;justify-content:space-between;margin-bottom:6px">
-        <span>רגיל</span>
-        <span>₪{{ "%.2f"|format(billing_stats.basic_cost) }} ({{ billing_stats.basic_count }})</span>
-      </div>
-      <div style="display:flex;justify-content:space-between;margin-bottom:6px">
-        <span>מקצועי</span>
-        <span>₪{{ "%.2f"|format(billing_stats.premium_cost) }} ({{ billing_stats.premium_count }})</span>
-      </div>
-      <div style="display:flex;justify-content:space-between">
-        <span>וידאו</span>
-        <span>₪{{ "%.2f"|format(billing_stats.video_cost) }} ({{ billing_stats.video_count }})</span>
-      </div>
-    </div>
-
-    <!-- לפי ערוץ -->
-    <div style="background:#0d1b2a;border-radius:10px;padding:14px">
-      <div style="font-weight:700;margin-bottom:10px;color:#8892b0">לפי ערוץ קבלה</div>
-      <div style="display:flex;justify-content:space-between;margin-bottom:6px">
-        <span>📞 טלפון</span>
-        <span>₪{{ "%.2f"|format(billing_stats.phone_cost) }} ({{ billing_stats.phone_count }})</span>
-      </div>
-      <div style="display:flex;justify-content:space-between">
-        <span>📧 מייל</span>
-        <span>₪{{ "%.2f"|format(billing_stats.email_cost) }} ({{ billing_stats.email_count }})</span>
-      </div>
-    </div>
-
-    <!-- לפי שיטת שליחה -->
-    <div style="background:#0d1b2a;border-radius:10px;padding:14px">
-      <div style="font-weight:700;margin-bottom:10px;color:#8892b0">לפי שיטת שליחה</div>
-      <div style="display:flex;justify-content:space-between;margin-bottom:6px">
-        <span>📧 נשלח למייל</span>
-        <span>{{ billing_stats.sent_email_count }}</span>
-      </div>
-      <div style="display:flex;justify-content:space-between">
-        <span>📠 נשלח לפקס</span>
-        <span>{{ billing_stats.sent_fax_count }}</span>
-      </div>
-    </div>
-
-  </div>
-</div>
-
-<!-- סטטיסטיקות לקוחות לא פעילים -->
-<div style="display:flex;gap:12px;margin-top:16px">
-  <a href="/admin/customers-filter?filter=inactive_month" style="flex:1;background:#1a1f2e;border-radius:10px;padding:14px;text-decoration:none;display:flex;justify-content:space-between;align-items:center">
-    <span style="color:#8892b0">😴 לא פעילים חודש</span>
-    <span style="font-size:22px;font-weight:700;color:#f59e0b">{{ stats.inactive_month }}</span>
-  </a>
-  <a href="/admin/customers-filter?filter=inactive_year" style="flex:1;background:#1a1f2e;border-radius:10px;padding:14px;text-decoration:none;display:flex;justify-content:space-between;align-items:center">
-    <span style="color:#8892b0">💤 לא פעילים שנה</span>
-    <span style="font-size:22px;font-weight:700;color:#ef4444">{{ stats.inactive_year }}</span>
-  </a>
-</div>
-
-{% endblock %}
+{% block title %}דשבורד{% endblock %}
 {% block page_title %}דשבורד{% endblock %}
 {% block content %}
 
@@ -95,6 +28,65 @@
     <div class="stat-value">₪{{ "%.2f"|format(stats.total_balance) }}</div>
     <div class="stat-change" style="color:#ef4444">{{ stats.blocked_customers }} חסומים</div>
   </div>
+</div>
+
+<!-- חלון חיובי ארנקות היום -->
+<div class="table-card" style="margin-bottom:20px">
+  <div class="table-header">
+    <span class="table-title">💳 חיובי ארנקות היום</span>
+    <span style="color:#8892b0;font-size:13px">סה"כ: ₪{{ "%.2f"|format(billing_stats.total_cost) }} | {{ billing_stats.count }} הקלטות</span>
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;padding:16px">
+    <div style="background:#0d1b2a;border-radius:10px;padding:14px">
+      <div style="font-weight:700;margin-bottom:10px;color:#8892b0">לפי סוג תמלול</div>
+      <div style="display:flex;justify-content:space-between;margin-bottom:6px">
+        <span>רגיל</span>
+        <span>₪{{ "%.2f"|format(billing_stats.basic_cost) }} ({{ billing_stats.basic_count }})</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;margin-bottom:6px">
+        <span>מקצועי</span>
+        <span>₪{{ "%.2f"|format(billing_stats.premium_cost) }} ({{ billing_stats.premium_count }})</span>
+      </div>
+      <div style="display:flex;justify-content:space-between">
+        <span>וידאו</span>
+        <span>₪{{ "%.2f"|format(billing_stats.video_cost) }} ({{ billing_stats.video_count }})</span>
+      </div>
+    </div>
+    <div style="background:#0d1b2a;border-radius:10px;padding:14px">
+      <div style="font-weight:700;margin-bottom:10px;color:#8892b0">לפי ערוץ קבלה</div>
+      <div style="display:flex;justify-content:space-between;margin-bottom:6px">
+        <span>📞 טלפון</span>
+        <span>₪{{ "%.2f"|format(billing_stats.phone_cost) }} ({{ billing_stats.phone_count }})</span>
+      </div>
+      <div style="display:flex;justify-content:space-between">
+        <span>📧 מייל</span>
+        <span>₪{{ "%.2f"|format(billing_stats.email_cost) }} ({{ billing_stats.email_count }})</span>
+      </div>
+    </div>
+    <div style="background:#0d1b2a;border-radius:10px;padding:14px">
+      <div style="font-weight:700;margin-bottom:10px;color:#8892b0">לפי שיטת שליחה</div>
+      <div style="display:flex;justify-content:space-between;margin-bottom:6px">
+        <span>📧 נשלח למייל</span>
+        <span>{{ billing_stats.sent_email_count }}</span>
+      </div>
+      <div style="display:flex;justify-content:space-between">
+        <span>📠 נשלח לפקס</span>
+        <span>{{ billing_stats.sent_fax_count }}</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- לקוחות לא פעילים -->
+<div style="display:flex;gap:12px;margin-bottom:20px">
+  <a href="/admin/customers-filter?filter=inactive_month" style="flex:1;background:#1a1f2e;border-radius:10px;padding:14px;text-decoration:none;display:flex;justify-content:space-between;align-items:center">
+    <span style="color:#8892b0">😴 לא פעילים חודש</span>
+    <span style="font-size:22px;font-weight:700;color:#f59e0b">{{ stats.inactive_month }}</span>
+  </a>
+  <a href="/admin/customers-filter?filter=inactive_year" style="flex:1;background:#1a1f2e;border-radius:10px;padding:14px;text-decoration:none;display:flex;justify-content:space-between;align-items:center">
+    <span style="color:#8892b0">💤 לא פעילים שנה</span>
+    <span style="font-size:22px;font-weight:700;color:#ef4444">{{ stats.inactive_year }}</span>
+  </a>
 </div>
 
 <div class="grid-2" style="gap:20px">
@@ -154,4 +146,5 @@
     </table>
   </div>
 </div>
+
 {% endblock %}
