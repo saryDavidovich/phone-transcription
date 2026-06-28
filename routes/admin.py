@@ -49,16 +49,21 @@ def logout():
 @admin_bp.route('/dashboard')
 @login_required
 def dashboard():
+    from datetime import timedelta
     today = datetime.utcnow().date()
+    today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
     month_start = today.replace(day=1)
+    one_month_ago = datetime.utcnow() - timedelta(days=30)
+    one_year_ago = datetime.utcnow() - timedelta(days=365)
 
+    # סטטיסטיקות כלליות
     stats = {
         'total_customers': Customer.query.count(),
         'active_customers': Customer.query.filter_by(is_blocked=False).count(),
         'blocked_customers': Customer.query.filter_by(is_blocked=True).count(),
         'total_recordings': Recording.query.count(),
         'today_recordings': Recording.query.filter(
-            func.date(Recording.created_at) == today
+            Recording.created_at >= today_start
         ).count(),
         'month_revenue': db.session.query(func.sum(Transaction.amount)).filter(
             Transaction.type == 'charge',
@@ -68,6 +73,48 @@ def dashboard():
             Transaction.type == 'charge'
         ).scalar() or 0,
         'total_balance': db.session.query(func.sum(Customer.balance)).scalar() or 0,
+        # לקוחות לא פעילים
+        'inactive_month': Customer.query.filter(
+            ~Customer.id.in_(
+                db.session.query(Recording.customer_id).filter(
+                    Recording.created_at >= one_month_ago
+                )
+            )
+        ).count(),
+        'inactive_year': Customer.query.filter(
+            ~Customer.id.in_(
+                db.session.query(Recording.customer_id).filter(
+                    Recording.created_at >= one_year_ago
+                )
+            )
+        ).count(),
+    }
+
+    # חיובי ארנקות היום — לפי סוג, ערוץ, ושיטת שליחה
+    today_debits = Recording.query.filter(
+        Recording.created_at >= today_start,
+        Recording.status == 'delivered',
+        Recording.cost > 0
+    ).all()
+
+    billing_stats = {
+        'total_cost': sum(r.cost or 0 for r in today_debits),
+        'count': len(today_debits),
+        # לפי סוג תמלול
+        'basic_cost': sum(r.cost or 0 for r in today_debits if (r.transcription_tier or 'gemini') not in ('premium', 'video')),
+        'premium_cost': sum(r.cost or 0 for r in today_debits if r.transcription_tier == 'premium'),
+        'video_cost': sum(r.cost or 0 for r in today_debits if r.transcription_tier == 'video'),
+        'basic_count': sum(1 for r in today_debits if (r.transcription_tier or 'gemini') not in ('premium', 'video')),
+        'premium_count': sum(1 for r in today_debits if r.transcription_tier == 'premium'),
+        'video_count': sum(1 for r in today_debits if r.transcription_tier == 'video'),
+        # לפי ערוץ
+        'phone_cost': sum(r.cost or 0 for r in today_debits if not (r.call_id or '').startswith('email-')),
+        'email_cost': sum(r.cost or 0 for r in today_debits if (r.call_id or '').startswith('email-')),
+        'phone_count': sum(1 for r in today_debits if not (r.call_id or '').startswith('email-')),
+        'email_count': sum(1 for r in today_debits if (r.call_id or '').startswith('email-')),
+        # לפי שיטת שליחה
+        'sent_email_count': sum(1 for r in today_debits if r.delivery_method == 'email'),
+        'sent_fax_count': sum(1 for r in today_debits if r.delivery_method == 'fax'),
     }
 
     recent_recordings = Recording.query.order_by(Recording.created_at.desc()).limit(10).all()
@@ -75,6 +122,7 @@ def dashboard():
 
     return render_template('admin/dashboard.html',
         stats=stats,
+        billing_stats=billing_stats,
         recent_recordings=recent_recordings,
         recent_transactions=recent_transactions
     )
@@ -699,3 +747,93 @@ def bulk_delete_messages():
             db.session.delete(msg)
     db.session.commit()
     return jsonify({'ok': True})
+
+
+@admin_bp.route('/customers/bulk-action', methods=['POST'])
+@login_required
+def bulk_customer_action():
+    """ניהול לקוחות מרובים — הוספת כסף, אחוזים, סינון"""
+    action = request.form.get('action')
+    customer_ids = request.form.getlist('customer_ids')
+
+    if not customer_ids:
+        flash('לא נבחרו לקוחות')
+        return redirect(url_for('admin.customers'))
+
+    customers = Customer.query.filter(Customer.id.in_(customer_ids)).all()
+
+    if action == 'add_amount':
+        amount = float(request.form.get('amount', 0) or 0)
+        if amount <= 0:
+            flash('סכום לא תקין')
+            return redirect(url_for('admin.customers'))
+        for c in customers:
+            c.balance += amount
+            txn = Transaction(
+                customer_id=c.id,
+                amount=amount,
+                type='credit',
+                description=f'זיכוי ידני מנהל — {amount}₪'
+            )
+            db.session.add(txn)
+        db.session.commit()
+        flash(f'נוסף ₪{amount} ל-{len(customers)} לקוחות')
+
+    elif action == 'add_percent':
+        percent = float(request.form.get('percent', 0) or 0)
+        if percent <= 0:
+            flash('אחוז לא תקין')
+            return redirect(url_for('admin.customers'))
+        for c in customers:
+            bonus = round(c.balance * percent / 100, 2)
+            c.balance += bonus
+            txn = Transaction(
+                customer_id=c.id,
+                amount=bonus,
+                type='credit',
+                description=f'זיכוי {percent}% מנהל — {bonus}₪'
+            )
+            db.session.add(txn)
+        db.session.commit()
+        flash(f'נוסף {percent}% ל-{len(customers)} לקוחות')
+
+    return redirect(url_for('admin.customers'))
+
+
+@admin_bp.route('/customers/filter')
+@login_required
+def customers_filter():
+    """סינון לקוחות לפי פעילות"""
+    from datetime import timedelta
+    filter_type = request.args.get('filter', '')
+    search = request.args.get('q', '')
+    page = request.args.get('page', 1, type=int)
+
+    query = Customer.query
+
+    if filter_type == 'inactive_month':
+        one_month_ago = datetime.utcnow() - timedelta(days=30)
+        active_ids = db.session.query(Recording.customer_id).filter(
+            Recording.created_at >= one_month_ago
+        ).subquery()
+        query = query.filter(~Customer.id.in_(active_ids))
+    elif filter_type == 'inactive_year':
+        one_year_ago = datetime.utcnow() - timedelta(days=365)
+        active_ids = db.session.query(Recording.customer_id).filter(
+            Recording.created_at >= one_year_ago
+        ).subquery()
+        query = query.filter(~Customer.id.in_(active_ids))
+
+    if search:
+        query = query.filter(
+            Customer.phone.contains(search) |
+            Customer.name.contains(search) |
+            Customer.email.contains(search)
+        )
+
+    customers = query.order_by(Customer.created_at.desc()).paginate(page=page, per_page=50)
+    return render_template('admin/customers.html',
+        customers=customers,
+        search=search,
+        active_filter=filter_type
+    )
