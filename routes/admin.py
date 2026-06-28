@@ -9,6 +9,15 @@ import io
 
 admin_bp = Blueprint('admin', __name__)
 
+@admin_bp.context_processor
+def inject_new_messages_count():
+    from models import ManagerMessage
+    try:
+        count = ManagerMessage.query.filter_by(status='new').count()
+    except Exception:
+        count = 0
+    return {'new_messages_count': count}
+
 @login_manager.user_loader
 def load_user(user_id):
     return AdminUser.query.get(int(user_id))
