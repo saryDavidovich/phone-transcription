@@ -106,6 +106,18 @@ def dashboard():
         Recording.cost > 0
     ).all()
 
+    # סטטיסטיקות OCR היום
+    from models import OcrResult
+    today_ocr = OcrResult.query.filter(
+        OcrResult.created_at >= today_start,
+        OcrResult.status == 'completed'
+    ).all()
+    ocr_stats = {
+        'count': len(today_ocr),
+        'total_cost': sum(r.cost or 0 for r in today_ocr),
+        'total_chars': sum(r.char_count or 0 for r in today_ocr),
+    }
+
     billing_stats = {
         'total_cost': sum(r.cost or 0 for r in today_debits),
         'count': len(today_debits),
@@ -132,6 +144,7 @@ def dashboard():
     return render_template('admin/dashboard.html',
         stats=stats,
         billing_stats=billing_stats,
+        ocr_stats=ocr_stats,
         recent_recordings=recent_recordings,
         recent_transactions=recent_transactions
     )
@@ -846,3 +859,40 @@ def customers_filter():
         search=search,
         active_filter=filter_type
     )
+
+
+@admin_bp.route('/ocr')
+@login_required
+def ocr_list():
+    from models import OcrResult
+    page = request.args.get('page', 1, type=int)
+    search = request.args.get('q', '')
+
+    query = OcrResult.query.order_by(OcrResult.created_at.desc())
+    if search:
+        query = query.join(Customer).filter(
+            Customer.phone.contains(search) | OcrResult.original_filename.contains(search)
+        )
+
+    ocr_results = query.paginate(page=page, per_page=20)
+    return render_template('admin/ocr_list.html', ocr_results=ocr_results, search=search)
+
+
+@admin_bp.route('/ocr/<int:ocr_id>')
+@login_required
+def ocr_detail(ocr_id):
+    from models import OcrResult
+    ocr = OcrResult.query.get_or_404(ocr_id)
+    return render_template('admin/ocr_detail.html', ocr=ocr)
+
+
+@admin_bp.route('/ocr/<int:ocr_id>/file')
+@login_required
+def ocr_file(ocr_id):
+    from models import OcrResult
+    import os
+    ocr = OcrResult.query.get_or_404(ocr_id)
+    if not ocr.original_file_path or not os.path.exists(ocr.original_file_path):
+        return "הקובץ אינו זמין", 404
+    return send_file(ocr.original_file_path, as_attachment=False,
+                     download_name=ocr.original_filename)
