@@ -1,0 +1,60 @@
+{% extends 'admin/base.html' %}
+{% block title %}OCR #{{ ocr.id }}{% endblock %}
+{% block page_title %}תוצאת OCR #{{ ocr.id }}{% endblock %}
+{% block content %}
+
+<div style="display:flex;gap:8px;margin-bottom:20px">
+  <a href="/admin/ocr" class="btn btn-ghost">← חזרה לרשימה</a>
+  <a href="/admin/customers/{{ ocr.customer_id }}" class="btn btn-ghost">👤 פרופיל לקוח</a>
+</div>
+
+<div class="grid-2" style="gap:20px;margin-bottom:20px">
+  <div class="card">
+    <div class="card-title">פרטים</div>
+    <table style="width:100%">
+      <tr><td style="color:#8892b0;padding:6px 0">לקוח</td><td><strong>{{ ocr.customer.phone }}</strong></td></tr>
+      <tr><td style="color:#8892b0;padding:6px 0">קובץ מקורי</td><td>{{ ocr.original_filename }}</td></tr>
+      <tr><td style="color:#8892b0;padding:6px 0">מנוע</td><td><span class="badge badge-blue">{{ ocr.engine }}</span></td></tr>
+      <tr><td style="color:#8892b0;padding:6px 0">תווים</td><td>{{ ocr.char_count }}</td></tr>
+      <tr><td style="color:#8892b0;padding:6px 0">עלות</td><td>₪{{ "%.2f"|format(ocr.cost) }}</td></tr>
+      <tr><td style="color:#8892b0;padding:6px 0">סטטוס</td><td>
+        {% if ocr.status == 'completed' %}<span class="badge badge-green">הושלם</span>
+        {% else %}<span class="badge badge-red">שגיאה</span>{% endif %}
+      </td></tr>
+      <tr><td style="color:#8892b0;padding:6px 0">תאריך</td><td>{{ ocr.created_at.strftime('%d/%m/%Y %H:%M') }}</td></tr>
+    </table>
+  </div>
+
+  <div class="card">
+    <div class="card-title">קובץ מקורי</div>
+    {% if ocr.original_file_path %}
+      {% set ext = ocr.original_filename.rsplit('.', 1)[-1].lower() if '.' in ocr.original_filename else '' %}
+      {% if ext in ['jpg', 'jpeg', 'png', 'webp', 'heic'] %}
+        <img src="/admin/ocr/{{ ocr.id }}/file" style="max-width:100%;border-radius:8px;margin-top:8px" alt="קובץ מקורי">
+      {% elif ext == 'pdf' %}
+        <a href="/admin/ocr/{{ ocr.id }}/file" class="btn btn-primary" style="margin-top:12px" target="_blank">📄 פתח PDF</a>
+      {% else %}
+        <a href="/admin/ocr/{{ ocr.id }}/file" class="btn btn-ghost" style="margin-top:12px">⬇ הורד קובץ</a>
+      {% endif %}
+    {% else %}
+      <p style="color:#8892b0;margin-top:8px">הקובץ המקורי אינו זמין</p>
+    {% endif %}
+  </div>
+</div>
+
+<div class="table-card">
+  <div class="table-header">
+    <span class="table-title">📝 טקסט התוצאה</span>
+    <button onclick="copyText()" class="btn btn-ghost" style="font-size:12px;padding:5px 12px">📋 העתק</button>
+  </div>
+  <div id="ocrText" style="padding:20px;white-space:pre-wrap;font-family:inherit;line-height:1.8;direction:rtl;max-height:600px;overflow-y:auto">{{ ocr.ocr_text or 'אין טקסט' }}</div>
+</div>
+
+<script>
+function copyText() {
+  navigator.clipboard.writeText(document.getElementById('ocrText').innerText);
+  alert('הטקסט הועתק');
+}
+</script>
+
+{% endblock %}

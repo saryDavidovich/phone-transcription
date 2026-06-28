@@ -1,0 +1,59 @@
+{% extends 'admin/base.html' %}
+{% block title %}זיהוי כתב יד{% endblock %}
+{% block page_title %}זיהוי כתב יד — OCR{% endblock %}
+{% block content %}
+
+<div class="search-bar">
+  <form method="GET" style="display:flex;gap:8px;width:100%">
+    <input class="form-input" name="q" value="{{ search }}" placeholder="חיפוש לפי טלפון או שם קובץ...">
+    <button class="btn btn-primary" type="submit">🔍 חפש</button>
+  </form>
+</div>
+
+<div class="table-card">
+  <div class="table-header">
+    <span class="table-title">📄 תוצאות OCR ({{ ocr_results.total }})</span>
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th>לקוח</th>
+        <th>קובץ</th>
+        <th>תווים</th>
+        <th>עלות</th>
+        <th>מנוע</th>
+        <th>סטטוס</th>
+        <th>תאריך</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in ocr_results.items %}
+      <tr onclick="location='/admin/ocr/{{r.id}}'" style="cursor:pointer">
+        <td><strong>{{ r.customer.phone }}</strong></td>
+        <td style="color:#8892b0;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.original_filename }}</td>
+        <td>{{ r.char_count }}</td>
+        <td>₪{{ "%.2f"|format(r.cost) }}</td>
+        <td><span class="badge badge-blue">{{ r.engine }}</span></td>
+        <td>
+          {% if r.status == 'completed' %}<span class="badge badge-green">הושלם</span>
+          {% else %}<span class="badge badge-red">שגיאה</span>{% endif %}
+        </td>
+        <td style="color:#8892b0">{{ r.created_at.strftime('%d/%m/%Y %H:%M') }}</td>
+        <td><a href="/admin/ocr/{{r.id}}" class="btn btn-ghost" style="font-size:12px;padding:4px 10px">פרטים</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="pagination">
+  {% for p in ocr_results.iter_pages() %}
+    {% if p %}
+      <a href="?page={{ p }}{% if search %}&q={{ search }}{% endif %}"
+         class="page-btn {% if p == ocr_results.page %}active{% endif %}">{{ p }}</a>
+    {% endif %}
+  {% endfor %}
+</div>
+
+{% endblock %}
