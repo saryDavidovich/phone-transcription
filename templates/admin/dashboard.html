@@ -77,6 +77,28 @@
   </div>
 </div>
 
+<!-- OCR היום -->
+<div class="table-card" style="margin-bottom:20px">
+  <div class="table-header">
+    <span class="table-title">✍️ זיהוי כתב יד היום</span>
+    <a href="/admin/ocr" class="btn btn-ghost" style="font-size:12px;padding:5px 12px">כל הרשומות</a>
+  </div>
+  <div style="display:flex;gap:16px;padding:16px">
+    <div style="flex:1;background:#0d1b2a;border-radius:10px;padding:14px;text-align:center">
+      <div style="color:#8892b0;font-size:13px;margin-bottom:6px">מסמכים</div>
+      <div style="font-size:24px;font-weight:700">{{ ocr_stats.count }}</div>
+    </div>
+    <div style="flex:1;background:#0d1b2a;border-radius:10px;padding:14px;text-align:center">
+      <div style="color:#8892b0;font-size:13px;margin-bottom:6px">תווים שזוהו</div>
+      <div style="font-size:24px;font-weight:700">{{ ocr_stats.total_chars }}</div>
+    </div>
+    <div style="flex:1;background:#0d1b2a;border-radius:10px;padding:14px;text-align:center">
+      <div style="color:#8892b0;font-size:13px;margin-bottom:6px">הכנסות OCR</div>
+      <div style="font-size:24px;font-weight:700">₪{{ "%.2f"|format(ocr_stats.total_cost) }}</div>
+    </div>
+  </div>
+</div>
+
 <!-- לקוחות לא פעילים -->
 <div style="display:flex;gap:12px;margin-bottom:20px">
   <a href="/admin/customers-filter?filter=inactive_month" style="flex:1;background:#1a1f2e;border-radius:10px;padding:14px;text-decoration:none;display:flex;justify-content:space-between;align-items:center">
