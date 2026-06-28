@@ -452,7 +452,9 @@ def _ocr_worker(filepath, original_filename, customer_id, customer_email, phone)
         char_count = len(ocr_text)
         log.info(f"OCR completed: {char_count} chars")
 
-        cost = round((char_count / 1000) * price_per_1000, 2)
+        import math
+        units = math.ceil(char_count / 1000)  # כל 1000 תווים = יחידה אחת (עיגול למעלה)
+        cost = round(units * price_per_1000, 2)
 
         with app.app_context():
             customer = Customer.query.get(customer_id)
