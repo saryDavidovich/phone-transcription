@@ -396,9 +396,8 @@ def _alefbot_submit(rec_url, call_id):
             headers={'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'},
             json={
                 'upload_id': upload_id,
-                'output_format': 'txt',
+                'output_format': 'plain_text',
                 'webhook_url': webhook_url,
-                'client_reference': call_id,
             },
             timeout=30
         )
