@@ -1,5 +1,11 @@
 {% extends 'admin/base.html' %}
-{% block title %}לקוחות{% endblock %}
+{% block title %}לקוחות</form>
+<script>
+function selectAll() { document.querySelectorAll('.row-check').forEach(c => c.checked = true); }
+function deselectAll() { document.querySelectorAll('.row-check').forEach(c => c.checked = false); }
+function toggleAll(cb) { document.querySelectorAll('.row-check').forEach(c => c.checked = cb.checked); }
+</script>
+{% endblock %}
 {% block page_title %}ניהול לקוחות{% endblock %}
 {% block content %}
 <div class="search-bar">
@@ -9,7 +15,28 @@
   </form>
 </div>
 <div class="table-card">
-  <div class="table-header">
+  <!-- סינון לפי פעילות -->
+<div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
+  <a href="/admin/customers" class="btn {% if not active_filter %}btn-primary{% else %}btn-ghost{% endif %}" style="font-size:13px;padding:6px 14px">כל הלקוחות</a>
+  <a href="/admin/customers/filter?filter=inactive_month" class="btn {% if active_filter=='inactive_month' %}btn-primary{% else %}btn-ghost{% endif %}" style="font-size:13px;padding:6px 14px">😴 לא פעילים חודש</a>
+  <a href="/admin/customers/filter?filter=inactive_year" class="btn {% if active_filter=='inactive_year' %}btn-primary{% else %}btn-ghost{% endif %}" style="font-size:13px;padding:6px 14px">💤 לא פעילים שנה</a>
+</div>
+
+<!-- פעולות מרובות -->
+<form method="POST" action="/admin/customers/bulk-action" id="bulkForm">
+<div style="display:flex;gap:10px;margin-bottom:14px;align-items:center;flex-wrap:wrap">
+  <button type="button" onclick="selectAll()" class="btn btn-ghost" style="font-size:12px;padding:5px 12px">בחר הכל</button>
+  <button type="button" onclick="deselectAll()" class="btn btn-ghost" style="font-size:12px;padding:5px 12px">בטל הכל</button>
+  <select name="action" class="btn btn-ghost" style="font-size:12px;padding:5px 12px;cursor:pointer">
+    <option value="add_amount">הוסף סכום קבוע</option>
+    <option value="add_percent">הוסף אחוזים מהיתרה</option>
+  </select>
+  <input type="number" name="amount" placeholder="₪ סכום" step="0.01" min="0" style="width:90px;padding:5px 10px;border-radius:6px;border:1px solid #2d3748;background:#1a1f2e;color:#e2e8f0;font-size:13px">
+  <input type="number" name="percent" placeholder="% אחוז" step="0.1" min="0" style="width:80px;padding:5px 10px;border-radius:6px;border:1px solid #2d3748;background:#1a1f2e;color:#e2e8f0;font-size:13px">
+  <button type="submit" class="btn btn-primary" style="font-size:12px;padding:5px 14px">בצע על נבחרים</button>
+</div>
+
+<div class="table-header">
     <span class="table-title">👥 לקוחות ({{ customers.total }})</span>
     <div style="display:flex;gap:8px">
       <a href="/admin/customers/add" class="btn btn-primary">➕ הוסף לקוח</a>
@@ -18,7 +45,7 @@
   </div>
   <table>
     <thead><tr>
-      <th>טלפון</th><th>שם</th><th>מייל</th><th>יתרה</th><th>הקלטות</th><th>סטטוס</th><th>תאריך הצטרפות</th>
+      <th style="width:30px"><input type="checkbox" onchange="toggleAll(this)"></th><th>טלפון</th><th>שם</th><th>מייל</th><th>יתרה</th><th>הקלטות</th><th>סטטוס</th><th>תאריך הצטרפות</th>
     </tr></thead>
     <tbody>
       {% for c in customers.items %}
