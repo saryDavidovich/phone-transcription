@@ -800,7 +800,7 @@ def bulk_customer_action():
     return redirect(url_for('admin.customers'))
 
 
-@admin_bp.route('/customers/filter')
+@admin_bp.route('/customers-filter')
 @login_required
 def customers_filter():
     """סינון לקוחות לפי פעילות"""
