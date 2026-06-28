@@ -1,1369 +1,898 @@
-"""
-routes/email_inbound.py
-מקבל מיילים נכנסים מ-SendGrid Inbound Parse עם קובץ הקלטה מצורף.
-מתמלל ושולח את התמלול חזרה לאותה כתובת מייל.
+from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify, send_file, make_response
+from flask_login import login_user, logout_user, login_required, current_user
+from werkzeug.security import check_password_hash
+from app import db, login_manager
+from models import Customer, Recording, Transaction, Settings, AdminUser, ManagerMessage
+from datetime import datetime, timedelta
+from sqlalchemy import func
+import io
 
-פורמט שורת הנושא (Subject):
-    <מספר טלפון> [רגיל|מקצועי] [שפת קלט] [שפת פלט]
+admin_bp = Blueprint('admin', __name__)
 
-כל הפרמטרים מעבר למספר הטלפון אופציונליים, בכל סדר.
-שפות אפשריות: עברית / יידיש / אנגלית
-ברירות מחדל: רגיל (Gemini), עברית->עברית
-
-דוגמאות:
-    "0501234567"                              -> רגיל, he->he
-    "0501234567 מקצועי"                       -> מקצועי, he->he
-    "0501234567 רגיל יידיש עברית"             -> רגיל, yi->he
-    "0501234567 יידיש"                        -> רגיל, yi->he (פלט עברית כברירת מחדל)
-
-חיוב: לפי מספר הטלפון שבנושא (לא לפי כתובת המייל - כך אפשר לאותה כתובת
-מייל לשלוח בשם כמה מספרים, וכל אחד מחויב מהארנק שלו).
-
-תנאי לעיבוד:
-    - קיים לקוח רשום עם מספר הטלפון הזה
-    - הלקוח לא חסום
-    - כתובת המייל השולחת == כתובת המייל הרשומה ללקוח זה
-    - יתרת הלקוח > 0
-
-אם תנאי לא מתקיים - נשלח מייל הדרכה לכתובת השולחת (לא מתבצע תמלול).
-"""
-
-import os
-import re
-import time
-import uuid
-import logging
-import threading
-from urllib.parse import quote
-
-from flask import Blueprint, request, jsonify, send_from_directory
-
-from services.transcribe import transcribe_async
-
-log = logging.getLogger(__name__)
-
-
-def _normalize_israeli_phone(raw):
-    """מנקה ומנרמל מספר טלפון ישראלי לפורמט מקומי (05XXXXXXXX / 0XXXXXXXXX).
-    מוגדרת כאן מקומית (במקום import) כדי לא להיות תלויה במבנה הפנימי
-    של services/transcribe_service.py."""
-    phone = (raw or '').strip().replace('-', '').replace(' ', '')
-    if phone.startswith('+972'):
-        phone = '0' + phone[4:]
-    elif phone.startswith('972'):
-        phone = '0' + phone[3:]
-    return phone
-
-email_bp = Blueprint('email_inbound', __name__)
-
-# כתובת המייל הציבורית שאליה לקוחות שולחים הקלטות לתמלול
-TRANSCRIBE_INBOUND_EMAIL = os.environ.get('TRANSCRIBE_INBOUND_EMAIL', '033131795@sheasystem.com')
-
-# תיקייה לשמירת קבצי אודיו שהתקבלו במייל (משם הם מוגשים חזרה כ-rec_url)
-RECORDINGS_EMAIL_DIR = os.environ.get('RECORDINGS_EMAIL_DIR', 'recordings_email')
-os.makedirs(RECORDINGS_EMAIL_DIR, exist_ok=True)
-
-# מחיקה אוטומטית של קבצי הקלטה שהתקבלו במייל - לאחר כמה ימים נחשבים "ישנים"
-RECORDINGS_EMAIL_MAX_AGE_DAYS = float(os.environ.get('RECORDINGS_EMAIL_MAX_AGE_DAYS', '2'))
-# בדיקת ניקוי מתבצעת לכל היותר פעם בכמה שעות (לא בכל בקשה)
-_CLEANUP_INTERVAL_SECONDS = 6 * 60 * 60
-_last_cleanup_time = 0
-_cleanup_lock = threading.Lock()
-
-
-def _cleanup_old_email_recordings():
-    """מוחק קבצים ב-RECORDINGS_EMAIL_DIR שעברו את גיל המקסימום.
-    רץ ברקע (thread נפרד) כדי לא לעכב את תגובת ה-webhook."""
+@admin_bp.context_processor
+def inject_new_messages_count():
+    from models import ManagerMessage
     try:
-        now = time.time()
-        max_age_seconds = RECORDINGS_EMAIL_MAX_AGE_DAYS * 24 * 60 * 60
-        removed = 0
-        for fname in os.listdir(RECORDINGS_EMAIL_DIR):
-            fpath = os.path.join(RECORDINGS_EMAIL_DIR, fname)
-            try:
-                if not os.path.isfile(fpath):
-                    continue
-                if now - os.path.getmtime(fpath) > max_age_seconds:
-                    os.remove(fpath)
-                    removed += 1
-            except OSError as e:
-                log.warning(f"email-inbound cleanup: failed to remove {fpath}: {e}")
-        if removed:
-            log.info(f"email-inbound cleanup: removed {removed} old recording file(s)")
-    except Exception as e:
-        log.warning(f"email-inbound cleanup error: {e}")
+        count = ManagerMessage.query.filter_by(status='new').count()
+    except Exception:
+        count = 0
+    return {'new_messages_count': count}
 
+@login_manager.user_loader
+def load_user(user_id):
+    return AdminUser.query.get(int(user_id))
 
-def _maybe_run_cleanup():
-    """מריץ ניקוי לכל היותר פעם ב-_CLEANUP_INTERVAL_SECONDS, ברקע."""
-    global _last_cleanup_time
-    now = time.time()
-    with _cleanup_lock:
-        if now - _last_cleanup_time < _CLEANUP_INTERVAL_SECONDS:
-            return
-        _last_cleanup_time = now
-    threading.Thread(target=_cleanup_old_email_recordings, daemon=True).start()
+def get_setting(key, default=''):
+    s = Settings.query.filter_by(key=key).first()
+    return s.value if s else default
 
+def set_setting(key, value):
+    s = Settings.query.filter_by(key=key).first()
+    if s:
+        s.value = value
+        s.updated_at = datetime.utcnow()
+    else:
+        s = Settings(key=key, value=value)
+        db.session.add(s)
+    db.session.commit()
 
-TIER_MAP = {
-    'רגיל': 'gemini',
-    'בסיסי': 'gemini',
-    'מקצועי': 'premium',
-    'פרימיום': 'premium',
-}
+@admin_bp.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        username = request.form.get('username')
+        password = request.form.get('password')
+        user = AdminUser.query.filter_by(username=username).first()
+        if user and check_password_hash(user.password_hash, password):
+            login_user(user)
+            return redirect(url_for('admin.dashboard'))
+        flash('שם משתמש או סיסמה שגויים')
+    return render_template('admin/login.html')
 
-LANG_MAP = {
-    'עברית': 'he',
-    'יידיש': 'yi',
-    'אנגלית': 'en',
-}
+@admin_bp.route('/logout')
+@login_required
+def logout():
+    logout_user()
+    return redirect(url_for('admin.login'))
 
-# מיפוי content-type נפוץ -> סיומת קובץ
-AUDIO_EXT_MAP = {
-    'audio/mpeg': 'mp3',
-    'audio/mp3': 'mp3',
-    'audio/wav': 'wav',
-    'audio/x-wav': 'wav',
-    'audio/wave': 'wav',
-    'audio/mp4': 'm4a',
-    'audio/x-m4a': 'm4a',
-    'audio/aac': 'm4a',
-    'audio/ogg': 'ogg',
-    'audio/amr': 'amr',
-}
+@admin_bp.route('/')
+@admin_bp.route('/dashboard')
+@login_required
+def dashboard():
+    from datetime import timedelta
+    today = datetime.utcnow().date()
+    today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    month_start = today.replace(day=1)
+    one_month_ago = datetime.utcnow() - timedelta(days=30)
+    one_year_ago = datetime.utcnow() - timedelta(days=365)
 
-# תווי כיווניות נסתרים שמופיעים לפעמים בכותרות מייל בעברית
-_DIRECTION_MARKS_RE = re.compile(r'[\u200e\u200f\u202a-\u202e]')
-
-
-def _clean_text(s):
-    return _DIRECTION_MARKS_RE.sub('', s or '').strip()
-
-
-def _parse_subject(subject):
-    """מפענח את שורת הנושא לפי הפורמט שמתואר למעלה. מחזיר dict או None אם אין מספר טלפון."""
-    tokens = _clean_text(subject).split()
-    if not tokens:
-        return None
-
-    phone = _normalize_israeli_phone(tokens[0])
-    if not phone or not phone.isdigit():
-        return None
-
-    tier = 'gemini'
-    lang_tokens = []
-
-    for tok in tokens[1:]:
-        tok_clean = tok.strip()
-        if tok_clean in TIER_MAP:
-            tier = TIER_MAP[tok_clean]
-        elif tok_clean in LANG_MAP:
-            lang_tokens.append(LANG_MAP[tok_clean])
-
-    language = lang_tokens[0] if len(lang_tokens) >= 1 else 'he'
-    output_language = lang_tokens[1] if len(lang_tokens) >= 2 else 'he'
-
-    return {
-        'phone': phone,
-        'tier': tier,
-        'language': language,
-        'output_language': output_language,
+    # סטטיסטיקות כלליות
+    stats = {
+        'total_customers': Customer.query.count(),
+        'active_customers': Customer.query.filter_by(is_blocked=False).count(),
+        'blocked_customers': Customer.query.filter_by(is_blocked=True).count(),
+        'total_recordings': Recording.query.count(),
+        'today_recordings': Recording.query.filter(
+            Recording.created_at >= today_start
+        ).count(),
+        'month_revenue': db.session.query(func.sum(Transaction.amount)).filter(
+            Transaction.type == 'charge',
+            Transaction.created_at >= month_start
+        ).scalar() or 0,
+        'total_revenue': db.session.query(func.sum(Transaction.amount)).filter(
+            Transaction.type == 'charge'
+        ).scalar() or 0,
+        'total_balance': db.session.query(func.sum(Customer.balance)).scalar() or 0,
+        # לקוחות לא פעילים
+        'inactive_month': Customer.query.filter(
+            ~Customer.id.in_(
+                db.session.query(Recording.customer_id).filter(
+                    Recording.created_at >= one_month_ago
+                )
+            )
+        ).count(),
+        'inactive_year': Customer.query.filter(
+            ~Customer.id.in_(
+                db.session.query(Recording.customer_id).filter(
+                    Recording.created_at >= one_year_ago
+                )
+            )
+        ).count(),
     }
 
+    # חיובי ארנקות היום — לפי סוג, ערוץ, ושיטת שליחה
+    today_debits = Recording.query.filter(
+        Recording.created_at >= today_start,
+        Recording.status == 'delivered',
+        Recording.cost > 0
+    ).all()
 
-def _extract_sender_email(from_header):
-    """מתוך 'שם <email@domain.com>' או 'email@domain.com' מחזיר את כתובת המייל בלבד, lowercase."""
-    from_header = (from_header or '').strip()
-    m = re.search(r'<(.+?)>', from_header)
-    addr = m.group(1) if m else from_header
-    return addr.strip().lower()
-
-
-_STYLE_SCRIPT_RE = re.compile(r'<(style|script)[^>]*>.*?</\1>', re.IGNORECASE | re.DOTALL)
-_TAG_RE = re.compile(r'<[^>]+>')
-_WHITESPACE_RE = re.compile(r'\s+')
-
-
-def _strip_html(html):
-    """מסיר <style>/<script> ותגי HTML, ומחזיר טקסט נקי - שימושי ללוגים/דיבאג."""
-    if not html:
-        return ''
-    text = _STYLE_SCRIPT_RE.sub(' ', html)
-    text = _TAG_RE.sub(' ', text)
-    text = _WHITESPACE_RE.sub(' ', text)
-    return text.strip()
-
-
-# ביטוי רגולרי לזיהוי קישורי Google Drive - ישירים או עטופים ב-Google redirect
-_GDRIVE_RE = re.compile(
-    r'https://(?:drive|docs)\.google\.com/(?:file/d/|open\?id=|uc\?.*?id=)([\w-]+)',
-    re.IGNORECASE
-)
-# ביטוי לזיהוי Google redirect שמכיל קישור Drive בתוכו
-_GOOGLE_REDIRECT_RE = re.compile(
-    r'https://www\.google\.com/url\?[^\s<>"]*?q=(https://(?:drive|docs)\.google\.com/[^\s<>&"]+)',
-    re.IGNORECASE
-)
-
-
-def _extract_gdrive_file_id(text):
-    """מחפש קישור Google Drive בטקסט ומחזיר את ה-file ID, או None אם לא נמצא."""
-    if not text:
-        return None
-
-    import urllib.parse
-
-    # נסה קודם לחלץ מ-Google redirect (כשGmail עוטף קישורים)
-    redirect_match = _GOOGLE_REDIRECT_RE.search(text)
-    if redirect_match:
-        inner_url = urllib.parse.unquote(redirect_match.group(1))
-        m = _GDRIVE_RE.search(inner_url)
-        if m:
-            return m.group(1)
-
-    # נסה ישירות
-    m = _GDRIVE_RE.search(text)
-    return m.group(1) if m else None
-
-
-def _download_gdrive_file(file_id, dest_dir):
-    """
-    מוריד קובץ מ-Google Drive לפי file_id לתיקיית dest_dir.
-    מניח שהקובץ משותף כ-"כל מי שיש לו קישור יכול לצפות".
-    מחזיר (filepath, original_filename, dest_filename) או (None, None, None) בכשלון.
-    תומך ב-MP4 ווידאו דרך drive.usercontent.google.com
-    """
-    import urllib.parse
-    import requests
-
-    HEADERS = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': '*/*',
+    # סטטיסטיקות OCR היום
+    from models import OcrResult
+    today_ocr = OcrResult.query.filter(
+        OcrResult.created_at >= today_start,
+        OcrResult.status == 'completed'
+    ).all()
+    ocr_stats = {
+        'count': len(today_ocr),
+        'total_cost': sum(r.cost or 0 for r in today_ocr),
+        'total_chars': sum(r.char_count or 0 for r in today_ocr),
     }
 
-    # רשימת URLים לנסות בסדר — ה-usercontent הוא הכי אמין ל-MP4 וקבצים גדולים
-    download_urls = [
-        f"https://drive.usercontent.google.com/download?id={file_id}&export=download&confirm=t",
-        f"https://drive.google.com/uc?export=download&id={file_id}&confirm=t",
-    ]
+    billing_stats = {
+        'total_cost': sum(r.cost or 0 for r in today_debits),
+        'count': len(today_debits),
+        # לפי סוג תמלול
+        'basic_cost': sum(r.cost or 0 for r in today_debits if (r.transcription_tier or 'gemini') not in ('premium', 'video')),
+        'premium_cost': sum(r.cost or 0 for r in today_debits if r.transcription_tier == 'premium'),
+        'video_cost': sum(r.cost or 0 for r in today_debits if r.transcription_tier == 'video'),
+        'basic_count': sum(1 for r in today_debits if (r.transcription_tier or 'gemini') not in ('premium', 'video')),
+        'premium_count': sum(1 for r in today_debits if r.transcription_tier == 'premium'),
+        'video_count': sum(1 for r in today_debits if r.transcription_tier == 'video'),
+        # לפי ערוץ
+        'phone_cost': sum(r.cost or 0 for r in today_debits if not (r.call_id or '').startswith('email-')),
+        'email_cost': sum(r.cost or 0 for r in today_debits if (r.call_id or '').startswith('email-')),
+        'phone_count': sum(1 for r in today_debits if not (r.call_id or '').startswith('email-')),
+        'email_count': sum(1 for r in today_debits if (r.call_id or '').startswith('email-')),
+        # לפי שיטת שליחה
+        'sent_email_count': sum(1 for r in today_debits if r.delivery_method == 'email'),
+        'sent_fax_count': sum(1 for r in today_debits if r.delivery_method == 'fax'),
+    }
 
-    try:
-        session = requests.Session()
-        session.headers.update(HEADERS)
+    recent_recordings = Recording.query.order_by(Recording.created_at.desc()).limit(10).all()
+    recent_transactions = Transaction.query.order_by(Transaction.created_at.desc()).limit(10).all()
 
-        r = None
-        content_type = ''
-
-        for url in download_urls:
-            r = session.get(url, timeout=300, stream=True, allow_redirects=True)
-            r.raise_for_status()
-            content_type = r.headers.get('Content-Type', '')
-            log.info(f"Drive download attempt url={url[:60]} status={r.status_code} content_type={content_type} size_header={r.headers.get('Content-Length','?')}")
-
-            if 'text/html' not in content_type:
-                break  # קיבלנו קובץ אמיתי
-
-            # עדיין HTML — נסה לחלץ uuid/confirm מתוכן
-            html_text = r.text
-            uuid_match = re.search(r'uuid=([0-9A-Za-z_-]+)', html_text)
-            confirm_match = re.search(r'confirm=([0-9A-Za-z_-]+)', html_text)
-            if uuid_match or confirm_match:
-                params = {'export': 'download', 'id': file_id, 'confirm': 't'}
-                if uuid_match:
-                    params['uuid'] = uuid_match.group(1)
-                if confirm_match:
-                    params['confirm'] = confirm_match.group(1)
-                r = session.get(
-                    'https://drive.usercontent.google.com/download',
-                    params=params,
-                    timeout=300,
-                    stream=True
-                )
-                r.raise_for_status()
-                content_type = r.headers.get('Content-Type', '')
-                if 'text/html' not in content_type:
-                    break
-
-            log.warning(f"Drive URL {url[:60]} returned HTML, trying next...")
-
-        # קבע סיומת לפי Content-Type
-        ct_to_ext = {
-            'audio/mpeg': 'mp3', 'audio/mp3': 'mp3',
-            'audio/wav': 'wav', 'audio/x-wav': 'wav',
-            'audio/mp4': 'm4a', 'audio/x-m4a': 'm4a',
-            'audio/ogg': 'ogg', 'audio/flac': 'flac',
-            'audio/aac': 'aac', 'audio/opus': 'opus',
-            'video/mp4': 'mp4', 'video/quicktime': 'mov',
-            'video/x-msvideo': 'avi', 'video/x-matroska': 'mkv',
-            'video/3gpp': '3gp', 'application/octet-stream': 'mp3',
-        }
-        ct_base = content_type.split(';')[0].strip().lower()
-        ext = ct_to_ext.get(ct_base, 'mp3')
-
-        # נסה לחלץ שם קובץ מ-Content-Disposition
-        original_filename = None
-        cd = r.headers.get('Content-Disposition', '')
-        fn_match = re.search(r'filename\*?=["\']?(?:UTF-8\'\')?([^"\';\r\n]+)', cd, re.IGNORECASE)
-        if fn_match:
-            original_filename = urllib.parse.unquote(fn_match.group(1).strip())
-        if not original_filename:
-            original_filename = f"gdrive_{file_id}.{ext}"
-
-        # שמור לקובץ
-        dest_filename = f"{uuid.uuid4().hex}.{ext}"
-        dest_path = os.path.join(dest_dir, dest_filename)
-        with open(dest_path, 'wb') as f:
-            for chunk in r.iter_content(chunk_size=1024 * 1024):
-                if chunk:
-                    f.write(chunk)
-
-        size = os.path.getsize(dest_path)
-        log.info(f"Google Drive download: file_id={file_id}, size={size}, ext={ext}, saved={dest_filename}")
-        return dest_path, original_filename, dest_filename
-
-    except Exception as e:
-        log.error(f"Google Drive download failed for file_id={file_id}: {e}")
-        return None, None, None
-
-
-def _estimate_duration_seconds(filepath):
-    """מנסה לחשב משך אודיו (בשניות) ללא תלות בפורמט, לצורך חיוב התחלתי."""
-    try:
-        from mutagen import File as MutagenFile
-        audio = MutagenFile(filepath)
-        if audio is not None and audio.info and audio.info.length:
-            return int(audio.info.length)
-    except Exception as e:
-        log.warning(f"duration estimate failed for {filepath}: {e}")
-    return 0
-
-
-# סוגי קבצי תמונה/PDF הנתמכים ל-OCR
-IMAGE_MIME_TYPES = {
-    'image/jpeg': 'jpg',
-    'image/jpg': 'jpg',
-    'image/png': 'png',
-    'image/gif': 'gif',
-    'image/webp': 'webp',
-    'image/tiff': 'tiff',
-    'image/bmp': 'bmp',
-    'application/pdf': 'pdf',
-}
-
-IMAGE_EXTENSIONS = {'jpg', 'jpeg', 'png', 'gif', 'webp', 'tiff', 'tif', 'bmp', 'pdf'}
-AUDIO_VIDEO_EXTENSIONS = {'mp3', 'wav', 'm4a', 'ogg', 'flac', 'aac', 'opus', 'webm',
-                           'mp4', 'mov', 'avi', 'mkv', '3gp', 'amr'}
-
-
-def _pick_file():
-    """מאתר בין קבצי ה-attachments את הקובץ הרלוונטי.
-    מחזיר (file_object, file_type) כאשר file_type הוא 'audio' או 'image'.
-    מעדיף אודיו/וידאו על פני תמונה/PDF אם שניהם קיימים."""
-    if not request.files:
-        return None, None
-
-    audio_candidate = None
-    image_candidate = None
-
-    for key in request.files:
-        f = request.files[key]
-        if not f or not f.filename:
-            continue
-
-        mime = (f.mimetype or '').lower()
-        ext = os.path.splitext(f.filename or '')[1].lstrip('.').lower()
-
-        # זיהוי אודיו/וידאו
-        if mime.startswith('audio') or mime.startswith('video'):
-            audio_candidate = f
-            continue
-        if ext in AUDIO_VIDEO_EXTENSIONS and audio_candidate is None:
-            audio_candidate = f
-            continue
-
-        # זיהוי תמונה/PDF
-        if mime in IMAGE_MIME_TYPES or ext in IMAGE_EXTENSIONS:
-            image_candidate = f
-            continue
-
-    # העדפה: אודיו > תמונה
-    if audio_candidate:
-        return audio_candidate, 'audio'
-    if image_candidate:
-        return image_candidate, 'image'
-
-    # fallback - קובץ ראשון שיש
-    for key in request.files:
-        f = request.files[key]
-        if f and f.filename:
-            return f, 'audio'  # ברירת מחדל - תמלול
-
-    return None, None
-
-
-def _process_ocr_email(filepath, original_filename, customer, sender_email, phone, db):
-    """
-    מעבד קובץ תמונה/PDF ב-OCR דרך Gemini ושולח את הטקסט חזרה במייל + Word.
-    רץ ב-thread נפרד כדי לא לעכב את תגובת ה-webhook.
-    """
-    import threading
-    t = threading.Thread(
-        target=_ocr_worker,
-        args=(filepath, original_filename, customer.id, customer.email, phone),
-        daemon=True
+    return render_template('admin/dashboard.html',
+        stats=stats,
+        billing_stats=billing_stats,
+        ocr_stats=ocr_stats,
+        recent_recordings=recent_recordings,
+        recent_transactions=recent_transactions
     )
-    t.start()
 
-
-def _ocr_worker(filepath, original_filename, customer_id, customer_email, phone):
-    """Worker thread שמבצע OCR ושולח תשובה."""
-    from app import app, db
-    from models import Customer, Transaction
-    from routes.admin import get_setting
-
-    log.info(f"OCR worker started: {original_filename}, customer={customer_id}")
-
-    try:
-        with app.app_context():
-            # בחירת מנוע OCR לפי הגדרות
-            ocr_engine = get_setting('ocr_engine', 'gemini')
-            price_per_1000 = float(get_setting('price_per_1000_chars_ocr', '0.10'))
-
-        log.info(f"OCR engine: {ocr_engine}")
-
-        if ocr_engine == 'claude':
-            ocr_text = _claude_ocr(filepath, original_filename)
-        elif ocr_engine == 'gpt4o':
-            ocr_text = _gpt4o_ocr(filepath, original_filename)
-        else:
-            ocr_text = _gemini_ocr(filepath, original_filename)
-
-        if not ocr_text:
-            log.error(f"OCR failed for {original_filename}")
-            _send_ocr_result_email(
-                to=customer_email,
-                original_filename=original_filename,
-                ocr_text=None,
-                char_count=0,
-                cost=0,
-            )
-            return
-
-        char_count = len(ocr_text)
-        log.info(f"OCR completed: {char_count} chars")
-
-        import math
-        units = math.ceil(char_count / 1000)  # כל 1000 תווים = יחידה אחת (עיגול למעלה)
-        cost = round(units * price_per_1000, 2)
-
-        with app.app_context():
-            customer = Customer.query.get(customer_id)
-            if customer:
-                customer.balance -= cost
-                txn = Transaction(
-                    customer_id=customer_id,
-                    amount=-cost,
-                    type='debit',
-                    description=f'OCR כתב יד - {original_filename} ({char_count} תווים)',
-                )
-                db.session.add(txn)
-                db.session.commit()
-                log.info(f"OCR charged {cost} to customer {customer_id}, balance={customer.balance}")
-
-        # שליחת תוצאה במייל
-        _send_ocr_result_email(
-            to=customer_email,
-            original_filename=original_filename,
-            ocr_text=ocr_text,
-            char_count=char_count,
-            cost=cost,
+@admin_bp.route('/customers')
+@login_required
+def customers():
+    search = request.args.get('q', '')
+    page = request.args.get('page', 1, type=int)
+    query = Customer.query
+    if search:
+        query = query.filter(
+            Customer.phone.contains(search) |
+            Customer.name.contains(search) |
+            Customer.email.contains(search)
         )
-
-    except Exception as e:
-        log.error(f"OCR worker error: {e}")
-    finally:
-        # מחיקת הקובץ הזמני
-        try:
-            if os.path.exists(filepath):
-                os.remove(filepath)
-                log.info(f"OCR temp file deleted: {filepath}")
-        except Exception:
-            pass
-
-
-OCR_PROMPT_TEXT = """אתה סורק OCR מכני - אתה מזהה צורות גרפיות של אותיות בלבד.
-אין לך שום ידע שפתי. אינך יודע עברית. אינך יודע מה המשמעות של המילים.
-אתה רק מעתיק את מה שאתה רואה, כמו מצלמה שמעתיקה פיקסלים.
-
-כללים ברזל:
-• העתק כל אות, כל מילה, כל סימן - בדיוק כפי שהם מצוירים בתמונה
-• אסור לתקן שגיאות כתיב - אם כתוב "שלבבל" תכתוב "שלבבל"
-• אסור להוסיף מילה שאינה בתמונה
-• אסור להסיר מילה שיש בתמונה
-• אם מילה לא קריאה: כתוב [?]
-• שמור על כל סימני פיסוק, מרכאות, סוגריים, קווים, מספרים
-• שמור על מבנה שורות ופסקאות
-• אל תוסיף כותרות, הסברים, הערות - רק הטקסט עצמו
-
-התחל ישירות:"""
-
-
-def _claude_ocr(filepath, original_filename):
-    """OCR דרך Claude - תמיכה בתמונות ו-PDF עמוד-עמוד."""
-    try:
-        import anthropic
-        import base64
-        import io
-
-        client = anthropic.Anthropic(api_key=os.environ.get('ANTHROPIC_API_KEY'))
-        ext = os.path.splitext(original_filename or filepath)[1].lstrip('.').lower()
-
-        def ocr_image_bytes(img_bytes, mime='image/png'):
-            img_b64 = base64.standard_b64encode(img_bytes).decode('utf-8')
-            for attempt in range(3):
-                try:
-                    response = client.messages.create(
-                        model='claude-opus-4-5',
-                        max_tokens=4096,
-                        messages=[{
-                            'role': 'user',
-                            'content': [
-                                {'type': 'image', 'source': {'type': 'base64', 'media_type': mime, 'data': img_b64}},
-                                {'type': 'text', 'text': OCR_PROMPT_TEXT}
-                            ]
-                        }]
-                    )
-                    return response.content[0].text.strip()
-                except Exception as e:
-                    log.warning(f"Claude OCR attempt {attempt+1} failed: {e}")
-                    if attempt < 2:
-                        import time; time.sleep(8)
-            return None
-
-        if ext == 'pdf':
-            import fitz
-            all_pages = []
-            doc = fitz.open(filepath)
-            num_pages = len(doc)
-            log.info(f"Claude OCR: PDF {num_pages} pages")
-            for i in range(num_pages):
-                pix = doc[i].get_pixmap(matrix=fitz.Matrix(4.0, 4.0))
-                img_bytes = pix.tobytes('png')
-                text = ocr_image_bytes(img_bytes)
-                all_pages.append(f"--- עמוד {i+1} ---\n{text or '[לא קריא]'}")
-            doc.close()
-            result = '\n\n'.join(all_pages)
-        else:
-            mime_map = {'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'png': 'image/png',
-                        'gif': 'image/gif', 'webp': 'image/webp'}
-            mime = mime_map.get(ext, 'image/jpeg')
-            with open(filepath, 'rb') as f:
-                img_bytes = f.read()
-            result = ocr_image_bytes(img_bytes, mime)
-
-        log.info(f"Claude OCR completed: {len(result or '')} chars")
-        return result
-
-    except Exception as e:
-        log.error(f"Claude OCR error: {e}")
-        return None
-
-
-def _gpt4o_ocr(filepath, original_filename):
-    """OCR דרך GPT-4o - תמיכה בתמונות ו-PDF עמוד-עמוד."""
-    try:
-        import base64
-        from openai import OpenAI
-
-        client = OpenAI(api_key=os.environ.get('OPENAI_API_KEY'))
-        ext = os.path.splitext(original_filename or filepath)[1].lstrip('.').lower()
-
-        def ocr_image_bytes(img_bytes, mime='image/png'):
-            img_b64 = base64.b64encode(img_bytes).decode('utf-8')
-            for attempt in range(3):
-                try:
-                    response = client.chat.completions.create(
-                        model='gpt-4o',
-                        max_tokens=4096,
-                        messages=[{
-                            'role': 'user',
-                            'content': [
-                                {'type': 'text', 'text': OCR_PROMPT_TEXT},
-                                {'type': 'image_url', 'image_url': {'url': f'data:{mime};base64,{img_b64}', 'detail': 'high'}}
-                            ]
-                        }]
-                    )
-                    return response.choices[0].message.content.strip()
-                except Exception as e:
-                    log.warning(f"GPT-4o OCR attempt {attempt+1} failed: {e}")
-                    if attempt < 2:
-                        import time; time.sleep(8)
-            return None
-
-        if ext == 'pdf':
-            import fitz
-            all_pages = []
-            doc = fitz.open(filepath)
-            num_pages = len(doc)
-            log.info(f"GPT-4o OCR: PDF {num_pages} pages")
-            for i in range(num_pages):
-                pix = doc[i].get_pixmap(matrix=fitz.Matrix(4.0, 4.0))
-                img_bytes = pix.tobytes('png')
-                text = ocr_image_bytes(img_bytes)
-                all_pages.append(f"--- עמוד {i+1} ---\n{text or '[לא קריא]'}")
-            doc.close()
-            result = '\n\n'.join(all_pages)
-        else:
-            mime_map = {'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'png': 'image/png',
-                        'gif': 'image/gif', 'webp': 'image/webp'}
-            mime = mime_map.get(ext, 'image/jpeg')
-            with open(filepath, 'rb') as f:
-                img_bytes = f.read()
-            result = ocr_image_bytes(img_bytes, mime)
-
-        log.info(f"GPT-4o OCR completed: {len(result or '')} chars")
-        return result
-
-    except Exception as e:
-        log.error(f"GPT-4o OCR error: {e}")
-        return None
-
-
-def _preprocess_image_for_ocr(img_bytes):
-    """
-    עיבוד תמונה לשיפור OCR:
-    - המרה ל-Grayscale
-    - הגברת ניגודיות (contrast boost)
-    - Binarization (שחור-לבן טהור) להסרת רעש רקע
-    מחזיר bytes של PNG מעובד.
-    """
-    try:
-        import io
-        from PIL import Image, ImageEnhance, ImageOps, ImageFilter
-
-        img = Image.open(io.BytesIO(img_bytes)).convert('RGB')
-
-        # Grayscale
-        img = img.convert('L')
-
-        # Contrast boost x2
-        enhancer = ImageEnhance.Contrast(img)
-        img = enhancer.enhance(2.0)
-
-        # Sharpness boost
-        enhancer = ImageEnhance.Sharpness(img)
-        img = enhancer.enhance(1.5)
-
-        # Binarization - Otsu-like threshold
-        # ניקוי רעש רקע תוך שמירה על אותיות שחורות
-        img = img.point(lambda x: 0 if x < 180 else 255, '1')
-        img = img.convert('L')
-
-        output = io.BytesIO()
-        img.save(output, format='PNG')
-        return output.getvalue()
-
-    except Exception as e:
-        log.warning(f"Image preprocessing failed: {e}, using original")
-        return img_bytes
-
-
-def _gemini_ocr_single_pass(client, img_bytes, page_label, gtypes, prompt):
-    """מבצע OCR אחד על תמונה ומחזיר טקסט."""
-    from google.genai import types as _gtypes
-    response = client.models.generate_content(
-        model='gemini-3.5-flash',
-        contents=[
-            prompt,
-            _gtypes.Part.from_bytes(data=img_bytes, mime_type='image/png'),
-        ],
-    )
-    return response.text.strip()
-
-
-def _gemini_ocr(filepath, original_filename):
-    """
-    OCR לכתב יד עברי עם ארבעה שיפורים:
-    1. זום גבוה (4x) לבהירות מקסימלית
-    2. פרומפט שמכריח העתקה עיוורת ללא שיפוט לשוני
-    3. עיבוד תמונה (Grayscale + Contrast + Binarization)
-    4. זיהוי כפול + מיזוג בידי Gemini
-    """
-    try:
-        from google import genai
-        from google.genai import types as gtypes
-
-        api_key = os.environ.get('GOOGLE_API_KEY')
-        client = genai.Client(api_key=api_key)
-
-        ext = os.path.splitext(original_filename or filepath)[1].lstrip('.').lower()
-
-        # פרומפט ראשי - מדגיש העתקה עיוורת ללא שיפוט לשוני
-        OCR_PROMPT = """אתה סורק OCR מכני - אתה מזהה **צורות גרפיות של אותיות** בלבד.
-אין לך שום ידע שפתי. אינך יודע עברית. אינך יודע מה המשמעות של המילים.
-אתה רק מעתיק את מה שאתה רואה, כמו מצלמה שמעתיקה פיקסלים.
-
-כללים ברזל - הפרתם = כשלון במשימה:
-• העתק כל אות, כל מילה, כל סימן - בדיוק כפי שהם מצוירים בתמונה
-• אסור לך לתקן שגיאות כתיב - אם כתוב "שלבבל" תכתוב "שלבבל"
-• אסור לך להוסיף מילה שאינה בתמונה - אפילו אם המשפט נראה "חסר"
-• אסור לך להסיר מילה שיש בתמונה - אפילו אם נראית "מיותרת"
-• אסור לך לשנות סדר מילים - אפילו אם הסדר נראה "הפוך"
-• אם מילה לא קריאה: כתוב [?]
-• שמור על כל סימני פיסוק, מרכאות, סוגריים, קווים, מספרים
-• שמור על מבנה שורות ופסקאות
-• אל תוסיף כותרות, הסברים, הערות - רק הטקסט עצמו
-
-התחל ישירות:"""
-
-        # פרומפט מיזוג - לשלב שני העתקים
-        MERGE_PROMPT = """לפניך שני עותקים של OCR על אותה תמונה של כתב יד עברי.
-שני הסורקים ביצעו העתקה עיוורת - בלי לשפוט משמעות.
-
-משימתך: לייצר עותק שלישי ומדויק יותר על ידי:
-1. במקומות שהם **זהים** - זה כנראה נכון, השאר כפי שהוא
-2. במקומות שהם **שונים** - בחר את הגרסה שנראית נאמנה יותר לכתב יד (לא "הגיונית" יותר!)
-3. אם שניהם נראים שגויים - כתוב [?]
-4. אל תתקן שגיאות כתיב, אל תוסיף מילים, אל תשנה סדר
-5. החזר רק את הטקסט הממוזג, ללא הערות
-
-עותק א':
-{text_a}
-
-עותק ב':
-{text_b}
-
-טקסט ממוזג:"""
-
-        def process_page_image(page_img_bytes):
-            """מעבד תמונת עמוד: preprocessing + dual OCR + merge."""
-            # עיבוד תמונה
-            processed = _preprocess_image_for_ocr(page_img_bytes)
-
-            # פעימה א' - על התמונה המעובדת
-            text_a = None
-            text_b = None
-            for attempt in range(3):
-                try:
-                    text_a = _gemini_ocr_single_pass(client, processed, 'א', gtypes, OCR_PROMPT)
-                    break
-                except Exception as ge:
-                    log.warning(f"OCR pass A attempt {attempt+1} failed: {ge}")
-                    if attempt < 2:
-                        import time as _t; _t.sleep(8)
-
-            if not text_a:
-                return None
-
-            # פעימה ב' - על התמונה המקורית (לא מעובדת) לקבל נקודת מבט שונה
-            for attempt in range(3):
-                try:
-                    text_b = _gemini_ocr_single_pass(client, page_img_bytes, 'ב', gtypes, OCR_PROMPT)
-                    break
-                except Exception as ge:
-                    log.warning(f"OCR pass B attempt {attempt+1} failed: {ge}")
-                    if attempt < 2:
-                        import time as _t; _t.sleep(8)
-
-            if not text_b:
-                return text_a  # אם פעימה ב' נכשלה, נחזיר פעימה א'
-
-            # מיזוג שני העתקים
-            merge_prompt = MERGE_PROMPT.format(text_a=text_a, text_b=text_b)
-            for attempt in range(3):
-                try:
-                    response = client.models.generate_content(
-                        model='gemini-3.5-flash',
-                        contents=[merge_prompt],
-                    )
-                    merged = response.text.strip()
-                    log.info(f"OCR merge: A={len(text_a)}ch, B={len(text_b)}ch, merged={len(merged)}ch")
-                    return merged
-                except Exception as ge:
-                    log.warning(f"OCR merge attempt {attempt+1} failed: {ge}")
-                    if attempt < 2:
-                        import time as _t; _t.sleep(8)
-
-            return text_a  # fallback לפעימה א'
-
-        # PDF - עיבוד עמוד-עמוד
-        if ext == 'pdf':
-            import fitz
-            all_pages_text = []
-
-            doc = fitz.open(filepath)
-            num_pages = len(doc)
-            log.info(f"Gemini OCR: PDF has {num_pages} pages")
-
-            for page_num in range(num_pages):
-                page = doc[page_num]
-                # זום 4x לבהירות מקסימלית
-                mat = fitz.Matrix(4.0, 4.0)
-                pix = page.get_pixmap(matrix=mat)
-                img_bytes = pix.tobytes("png")
-
-                log.info(f"Gemini OCR: processing page {page_num+1}/{num_pages}, {len(img_bytes)} bytes")
-
-                page_text = process_page_image(img_bytes)
-                if page_text:
-                    all_pages_text.append(f"--- עמוד {page_num+1} ---\n{page_text}")
-                else:
-                    all_pages_text.append(f"--- עמוד {page_num+1} ---\n[לא קריא]")
-
-            doc.close()
-            result = '\n\n'.join(all_pages_text)
-            log.info(f"Gemini OCR completed (PDF, {len(all_pages_text)} pages): {len(result)} chars")
-            return result
-
-        else:
-            # תמונה רגילה
-            mime_map = {
-                'jpg': 'image/jpeg', 'jpeg': 'image/jpeg',
-                'png': 'image/png', 'gif': 'image/gif',
-                'webp': 'image/webp', 'tiff': 'image/tiff',
-                'tif': 'image/tiff', 'bmp': 'image/bmp',
-            }
-
-            with open(filepath, 'rb') as f:
-                file_bytes = f.read()
-
-            log.info(f"Gemini OCR: {original_filename}, {len(file_bytes)} bytes")
-            result = process_page_image(file_bytes)
-            if result:
-                log.info(f"Gemini OCR completed: {len(result)} chars")
-                return result
-            return None
-
-    except Exception as e:
-        log.error(f"Gemini OCR error: {e}")
-        return None
-
-
-def _send_ocr_result_email(to, original_filename, ocr_text, char_count, cost):
-    """שולח את תוצאת ה-OCR במייל עם מסמך Word מצורף."""
-    try:
-        import sendgrid
-        import base64
-        from sendgrid.helpers.mail import Mail, Attachment, FileContent, FileName, FileType, Disposition
-        from services.transcribe import _build_word_doc
-
-        title = f'זיהוי כתב יד - {original_filename}'
-
-        if not ocr_text:
-            html = f'''<div dir="rtl" style="font-family:Arial,sans-serif;max-width:600px;margin:auto">
-<h2 style="color:#dc2626">שגיאה בזיהוי כתב יד</h2>
-<p>לא הצלחנו לזהות את הטקסט מהקובץ <b>{original_filename}</b>.<br>
-אנא ודאו שהתמונה ברורה ונסו שנית.</p>
-</div>'''
-            message = Mail(
-                from_email=os.environ.get('SENDGRID_FROM_EMAIL', ''),
-                to_emails=to,
-                subject=f'שגיאה בזיהוי כתב יד - {original_filename}',
-                html_content=html
-            )
-            sg = sendgrid.SendGridAPIClient(api_key=os.environ.get('SENDGRID_API_KEY'))
-            sg.send(message)
-            return
-
-        # בניית מסמך Word
-        word_bytes = _build_word_doc(
-            name='',
-            duration_str=f'{char_count} תווים',
-            transcript_fixed=ocr_text,
-            title=title,
+    customers = query.order_by(Customer.created_at.desc()).paginate(page=page, per_page=50)
+    return render_template('admin/customers.html', customers=customers, search=search)
+
+@admin_bp.route('/customers/add', methods=['GET', 'POST'])
+@login_required
+def add_customer():
+    if request.method == 'POST':
+        phone = request.form.get('phone', '').strip()
+        name = request.form.get('name', '').strip()
+        email = request.form.get('email', '').strip()
+        fax = request.form.get('fax', '').strip()
+        balance = float(request.form.get('balance', 0) or 0)
+        delivery_method = request.form.get('delivery_method', 'email')
+
+        if not phone:
+            flash('מספר טלפון הוא שדה חובה')
+            return render_template('admin/add_customer.html')
+
+        existing = Customer.query.filter_by(phone=phone).first()
+        if existing:
+            flash('לקוח עם מספר טלפון זה כבר קיים')
+            return render_template('admin/add_customer.html')
+
+        customer = Customer(
+            phone=phone,
+            name=name,
+            email=email,
+            fax=fax,
+            balance=balance,
+            delivery_method=delivery_method
         )
-        word_b64 = base64.b64encode(word_bytes).decode('utf-8')
-
-        html = f'''<div dir="rtl" style="font-family:Arial,sans-serif;max-width:600px;margin:auto">
-<h2 style="color:#1d4ed8">זיהוי כתב יד - {original_filename}</h2>
-<p style="color:#6b7280">תווים שזוהו: <b>{char_count}</b> | עלות: <b>₪{cost}</b></p>
-<div style="background:#f0fdf4;border-right:4px solid #10b981;padding:16px;margin:16px 0;border-radius:8px">
-<h3 style="margin:0 0 12px;color:#065f46">✍️ טקסט מזוהה</h3>
-<div style="line-height:1.8;white-space:pre-wrap;text-align:right;direction:rtl">{ocr_text}</div>
-</div>
-</div>'''
-
-        sg = sendgrid.SendGridAPIClient(api_key=os.environ.get('SENDGRID_API_KEY'))
-        safe_name = os.path.splitext(original_filename)[0][:40] if original_filename else 'ocr'
-        message = Mail(
-            from_email=os.environ.get('SENDGRID_FROM_EMAIL', ''),
-            to_emails=to,
-            subject=f'זיהוי כתב יד - {original_filename}',
-            html_content=html
-        )
-        message.attachment = Attachment(
-            FileContent(word_b64),
-            FileName(f'כתב_יד_{safe_name}.docx'),
-            FileType('application/vnd.openxmlformats-officedocument.wordprocessingml.document'),
-            Disposition('attachment')
-        )
-        sg.send(message)
-        log.info(f"OCR result email sent to {to}")
-
-    except Exception as e:
-        log.error(f"OCR result email error: {e}")
-
-
-@email_bp.route('/email-inbound', methods=['POST'])
-def email_inbound():
-    from app import app, db
-    from models import Customer, Recording
-
-    _maybe_run_cleanup()
-
-    sender_email = _extract_sender_email(request.form.get('from', ''))
-    subject = request.form.get('subject', '')
-
-    parsed = _parse_subject(subject)
-    if not parsed:
-        raw_text = request.form.get('text') or ''
-        raw_html = request.form.get('html') or ''
-        body_text = raw_text.strip() or _strip_html(raw_html)
-        log.warning(f"email-inbound: שורת נושא לא תקינה '{subject}' מאת {sender_email}")
-        if body_text:
-            log.warning(f"email-inbound: תוכן ההודעה: {body_text[:2000]}")
-        # אין למי לענות (אין מספר טלפון תקין) - רק לוג, בלי תגובה
-        return jsonify({'status': 'ignored', 'reason': 'invalid_subject'}), 200
-
-    phone = parsed['phone']
-
-    with app.app_context():
-        customer = Customer.query.filter_by(phone=phone).first()
-
-        if not customer:
-            _send_guidance_email(sender_email, 'not_registered', phone=phone)
-            return jsonify({'status': 'rejected', 'reason': 'customer_not_found'}), 200
-
-        if getattr(customer, 'is_blocked', False):
-            _send_guidance_email(sender_email, 'blocked', phone=phone)
-            return jsonify({'status': 'rejected', 'reason': 'blocked'}), 200
-
-        registered_email = (customer.email or '').strip().lower()
-        if not registered_email or registered_email != sender_email:
-            _send_guidance_email(sender_email, 'email_mismatch', phone=phone)
-            return jsonify({'status': 'rejected', 'reason': 'email_mismatch'}), 200
-
-        if customer.balance <= 0:
-            _send_guidance_email(sender_email, 'low_balance', phone=phone)
-            return jsonify({'status': 'rejected', 'reason': 'low_balance'}), 200
-
-        attached_file, file_type = _pick_file()
-        gdrive_filepath = None  # אם הורדנו מ-Drive - לניקוי בשגיאה
-
-        if attached_file is None:
-            # אין קובץ מצורף - נבדוק אם יש קישור Google Drive בגוף המייל
-            body_text = request.form.get('text', '') or _strip_html(request.form.get('html', ''))
-            file_id = _extract_gdrive_file_id(body_text)
-
-            if not file_id:
-                log.warning(f"email-inbound: לא נמצא קישור Drive בגוף המייל. תחילת גוף: {body_text[:300]}")
-                _send_guidance_email(sender_email, 'no_attachment', phone=phone)
-                return jsonify({'status': 'rejected', 'reason': 'no_attachment'}), 200
-
-            log.info(f"email-inbound: לא נמצא קובץ מצורף, מנסה Google Drive file_id={file_id}")
-            filepath, original_filename, filename = _download_gdrive_file(file_id, RECORDINGS_EMAIL_DIR)
-
-            if not filepath:
-                _send_guidance_email(sender_email, 'gdrive_download_failed', phone=phone)
-                return jsonify({'status': 'rejected', 'reason': 'gdrive_download_failed'}), 200
-
-            gdrive_filepath = filepath
-            # זיהוי סוג מ-Drive לפי סיומת
-            drive_ext = os.path.splitext(original_filename or '')[1].lstrip('.').lower()
-            file_type = 'image' if drive_ext in IMAGE_EXTENSIONS else 'audio'
-            base_url = os.environ.get('APP_BASE_URL', '').rstrip('/')
-            rec_url = f"{base_url}/api/recordings-email/{filename}"
-            duration_seconds = _estimate_duration_seconds(filepath) if file_type == 'audio' else 0
-
-        elif file_type == 'image':
-            # --- שמירת קובץ תמונה/PDF ---
-            mime = (attached_file.mimetype or '').lower()
-            ext = IMAGE_MIME_TYPES.get(mime) or \
-                  os.path.splitext(attached_file.filename or '')[1].lstrip('.').lower() or 'jpg'
-            filename = f"{uuid.uuid4().hex}.{ext}"
-            filepath = os.path.join(RECORDINGS_EMAIL_DIR, filename)
-            attached_file.save(filepath)
-            original_filename = attached_file.filename or filename
-            rec_url = ''
-            duration_seconds = 0
-
-        else:
-            # --- שמירת קובץ האודיו המצורף ---
-            audio_file = attached_file
-            ext = AUDIO_EXT_MAP.get(
-                (audio_file.mimetype or '').lower(),
-                (os.path.splitext(audio_file.filename or '')[1].lstrip('.') or 'mp3').lower()
-            )
-            filename = f"{uuid.uuid4().hex}.{ext}"
-            filepath = os.path.join(RECORDINGS_EMAIL_DIR, filename)
-            audio_file.save(filepath)
-
-            base_url = os.environ.get('APP_BASE_URL', '').rstrip('/')
-            rec_url = f"{base_url}/api/recordings-email/{filename}"
-            duration_seconds = _estimate_duration_seconds(filepath)
-            original_filename = audio_file.filename or filename
-
-        # --- ניתוב: OCR או תמלול ---
-        if file_type == 'image':
-            _process_ocr_email(
-                filepath=filepath,
-                original_filename=original_filename,
-                customer=customer,
-                sender_email=sender_email,
-                phone=phone,
-                db=db,
-            )
-            return jsonify({'status': 'accepted', 'type': 'ocr'}), 200
-
-        call_id = f"email-{uuid.uuid4().hex}"
-        rec = Recording(
-            customer_id=customer.id,
-            call_id=call_id,
-            duration_seconds=duration_seconds,
-            status='recording',
-            delivery_method='email',
-            delivered_to=customer.email,
-            rec_url=rec_url,
-            source_filename=original_filename,
-        )
-        db.session.add(rec)
+        db.session.add(customer)
         db.session.commit()
 
-        log.info(
-            f"email-inbound: call_id={call_id} phone={phone} "
-            f"tier={parsed['tier']} lang={parsed['language']}->{parsed['output_language']} "
-            f"file={filename} duration~{duration_seconds}s"
+        if balance > 0:
+            txn = Transaction(
+                customer_id=customer.id,
+                amount=balance,
+                type='credit',
+                description='יתרה ראשונית'
+            )
+            db.session.add(txn)
+            db.session.commit()
+
+        flash(f'לקוח {phone} נוסף בהצלחה')
+        return redirect(url_for('admin.customer_detail', id=customer.id))
+
+    return render_template('admin/add_customer.html')
+
+@admin_bp.route('/customers/export/excel')
+@login_required
+def export_customers_excel():
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = 'לקוחות'
+
+    headers = ['ID', 'טלפון', 'שם', 'מייל', 'פקס', 'יתרה', 'שיטת משלוח', 'חסום', 'תאריך הצטרפות']
+    ws.append(headers)
+
+    for cell in ws[1]:
+        cell.font = Font(bold=True, color='FFFFFF')
+        cell.fill = PatternFill(start_color='2563EB', end_color='2563EB', fill_type='solid')
+        cell.alignment = Alignment(horizontal='center')
+
+    customers = Customer.query.order_by(Customer.created_at.desc()).all()
+    for c in customers:
+        ws.append([
+            c.id,
+            c.phone,
+            c.name or '',
+            c.email or '',
+            c.fax or '',
+            round(c.balance, 2),
+            c.delivery_method or '',
+            'כן' if c.is_blocked else 'לא',
+            c.created_at.strftime('%d/%m/%Y %H:%M') if c.created_at else ''
+        ])
+
+    for col in ws.columns:
+        max_length = max(len(str(cell.value or '')) for cell in col)
+        ws.column_dimensions[col[0].column_letter].width = max(max_length + 2, 12)
+
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+
+    return send_file(
+        output,
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        as_attachment=True,
+        download_name=f'customers_{datetime.now().strftime("%Y%m%d")}.xlsx'
+    )
+
+@admin_bp.route('/customers/<int:id>')
+@login_required
+def customer_detail(id):
+    customer = Customer.query.get_or_404(id)
+    recordings = Recording.query.filter_by(customer_id=id).order_by(Recording.created_at.desc()).all()
+    transactions = Transaction.query.filter_by(customer_id=id).order_by(Transaction.created_at.desc()).all()
+    return render_template('admin/customer_detail.html',
+        customer=customer, recordings=recordings, transactions=transactions,
+        timedelta=timedelta)
+
+@admin_bp.route('/customers/<int:id>/block', methods=['POST'])
+@login_required
+def block_customer(id):
+    customer = Customer.query.get_or_404(id)
+    customer.is_blocked = not customer.is_blocked
+    db.session.commit()
+    status = 'נחסם' if customer.is_blocked else 'בוטל חסם'
+    flash(f'לקוח {status} בהצלחה')
+    return redirect(url_for('admin.customer_detail', id=id))
+
+@admin_bp.route('/customers/<int:id>/delete', methods=['POST'])
+@login_required
+def delete_customer(id):
+    customer = Customer.query.get_or_404(id)
+    Transaction.query.filter_by(customer_id=id).delete()
+    Recording.query.filter_by(customer_id=id).delete()
+    db.session.delete(customer)
+    db.session.commit()
+    flash(f'לקוח {customer.phone} נמחק בהצלחה')
+    return redirect(url_for('admin.customers'))
+
+@admin_bp.route('/customers/<int:id>/credit', methods=['POST'])
+@login_required
+def credit_customer(id):
+    customer = Customer.query.get_or_404(id)
+    amount = float(request.form.get('amount', 0))
+    reason = request.form.get('reason', 'זיכוי ידני')
+    if amount > 0:
+        customer.balance += amount
+        txn = Transaction(
+            customer_id=id,
+            amount=amount,
+            type='credit',
+            description=reason
         )
+        db.session.add(txn)
+        db.session.commit()
+        flash(f'לקוח זוכה ב-{amount:.2f} ₪')
+    return redirect(url_for('admin.customer_detail', id=id))
 
-        transcribe_async(
-            call_id=call_id,
-            rec_url=rec_url,
-            customer_id=customer.id,
-            delivery_method='email',
-            delivered_to=customer.email,
-            duration_seconds=duration_seconds,
-            transcription_tier=parsed['tier'],
-            language=parsed['language'],
-            output_language=parsed['output_language'],
+@admin_bp.route('/customers/<int:id>/charge', methods=['POST'])
+@login_required
+def charge_customer(id):
+    customer = Customer.query.get_or_404(id)
+    amount = float(request.form.get('amount', 0))
+    reason = request.form.get('reason', 'חיוב ידני')
+    if amount > 0:
+        customer.balance -= amount
+        txn = Transaction(
+            customer_id=id,
+            amount=-amount,
+            type='debit',
+            description=reason
         )
+        db.session.add(txn)
+        db.session.commit()
+        flash(f'לקוח חויב ב-{amount:.2f} ₪')
+    return redirect(url_for('admin.customer_detail', id=id))
 
-    return jsonify({'status': 'processing', 'call_id': call_id}), 200
+@admin_bp.route('/customers/<int:id>/update', methods=['POST'])
+@login_required
+def update_customer(id):
+    customer = Customer.query.get_or_404(id)
+    customer.name = request.form.get('name', customer.name)
+    customer.email = request.form.get('email', customer.email)
+    customer.fax = request.form.get('fax', customer.fax)
+    customer.delivery_method = request.form.get('delivery_method', customer.delivery_method)
+    db.session.commit()
+    flash('פרטי לקוח עודכנו')
+    return redirect(url_for('admin.customer_detail', id=id))
 
+@admin_bp.route('/customers/<int:id>/send-recordings', methods=['POST'])
+@login_required
+def send_recordings(id):
+    import os
+    from services.transcribe import _send_email, _send_fax
+    customer = Customer.query.get_or_404(id)
+    recording_ids = request.form.getlist('recording_ids')
+    send_method = request.form.get('send_method', 'email')
+    send_to = request.form.get('send_to', '').strip()
 
-@email_bp.route('/recordings-email/<filename>')
-def serve_email_recording(filename):
-    return send_from_directory(RECORDINGS_EMAIL_DIR, filename)
+    if not recording_ids:
+        flash('לא נבחרו הקלטות')
+        return redirect(url_for('admin.customer_detail', id=id))
 
+    if not send_to:
+        flash('יש להזין כתובת מייל או מספר פקס')
+        return redirect(url_for('admin.customer_detail', id=id))
 
-_GUIDANCE_MESSAGES = {
-    'not_registered': lambda phone: f'''
-לא נמצא לקוח רשום עם מספר הטלפון <b>{phone}</b> במערכת תמלולפון.<br><br>
-כדי להשתמש בשירות תמלול דרך המייל, יש להירשם תחילה במערכת:<br>
-התקשרו למספר המערכת <b>מהטלפון שאת/ה רוצה לשייך לחיוב</b>, ועקבו אחרי ההנחיות
-הקוליות לעדכון כתובת מייל וטעינת ארנק.<br><br>
-לאחר ההרשמה ועדכון המייל, ניתן לשלוח מייל עם קובץ הקלטה ולקבל את התמלול חזרה
-לאותה כתובת מייל.
-''',
-    'blocked': lambda phone: f'''
-חשבון הלקוח עם מספר הטלפון <b>{phone}</b> חסום במערכת.<br><br>
-לפרטים יש לפנות לשירות הלקוחות.
-''',
-    'email_mismatch': lambda phone: f'''
-כתובת המייל ששלחה את ההקלטה הזו אינה תואמת לכתובת המייל הרשומה למספר
-הטלפון <b>{phone}</b> במערכת.<br><br>
-תמלול דרך מייל מתאפשר רק מכתובת המייל המעודכנת ברישום אותו מספר טלפון.
-אם זו לא כתובת המייל המעודכנת שלך - התקשרו למערכת מהטלפון הרלוונטי ועדכנו
-את כתובת המייל בתפריט "עדכון פרטים".
-''',
-    'low_balance': lambda phone: f'''
-היתרה במערכת תמלולפון למספר הטלפון <b>{phone}</b> אינה מספיקה לביצוע תמלול.<br><br>
-כדי לטעון את הארנק, התקשרו למספר המערכת מהטלפון הזה ועקבו אחרי ההנחיות הקוליות
-לטעינת ארנק.<br><br>
-לאחר הטעינה ניתן לשלוח מחדש מייל עם קובץ ההקלטה.
-''',
-    'no_attachment': lambda phone: f'''
-לא נמצא קובץ הקלטת אודיו מצורף למייל שנשלח עם הנושא <b>{phone}</b>.<br><br>
-יש לצרף את קובץ ההקלטה למייל, או לשלוח קישור Google Drive לקובץ משותף.<br><br>
-אם הקובץ גדול מ-25MB, ניתן להעלות אותו ל-Google Drive, לשתף אותו
-("כל מי שיש לו קישור יכול לצפות"), ולשלוח את הקישור בגוף המייל (ללא קובץ מצורף).
-''',
-    'gdrive_download_failed': lambda phone: f'''
-לא הצלחנו להוריד את הקובץ מהקישור Google Drive שנשלח במייל עם הנושא <b>{phone}</b>.<br><br>
-אנא ודאו שהקובץ ב-Google Drive משותף כ-<b>"כל מי שיש לו קישור יכול לצפות"</b> ונסו שוב.<br><br>
-<b>כיצד לשתף ב-Google Drive:</b><br>
-1. לחצו על הקובץ ב-Drive → שתף → שנה ל"כל אחד עם הקישור"<br>
-2. העתיקו את הקישור ושלחו אותו בגוף המייל<br>
-3. שורת הנושא: <b>{phone}</b> (כרגיל)
-''',
-}
+    sent = 0
+    for rec_id in recording_ids:
+        rec = Recording.query.get(int(rec_id))
+        if not rec or not rec.transcript:
+            continue
+        try:
+            rec_url = f'https://www.call2all.co.il/ym/api/DownloadFile?token={os.environ.get("YEMOT_TOKEN","")}&path=ivr2:/recordings/{rec.call_id}.wav'
+            if send_method == 'email':
+                _send_email(send_to, rec.transcript, customer, rec_url, rec.duration_seconds, source_filename=rec.source_filename)
+            else:
+                _send_fax(send_to, rec.transcript, customer, rec.duration_seconds)
+            sent += 1
+        except Exception as e:
+            flash(f'שגיאה בשליחת הקלטה {rec_id}: {e}')
 
+    flash(f'נשלחו {sent} הקלטות בהצלחה')
+    return redirect(url_for('admin.customer_detail', id=id))
 
-def _send_guidance_email(to_email, reason, phone=''):
-    if not to_email:
-        log.warning(f"_send_guidance_email: אין כתובת מייל לשלוח אליה (reason={reason}, phone={phone})")
-        return
+@admin_bp.route('/recordings')
+@login_required
+def recordings():
+    page = request.args.get('page', 1, type=int)
+    recordings = Recording.query.order_by(Recording.created_at.desc()).paginate(page=page, per_page=50)
+    return render_template('admin/recordings.html', recordings=recordings, timedelta=timedelta)
 
-    body_fn = _GUIDANCE_MESSAGES.get(reason)
-    body_html = body_fn(phone) if body_fn else 'אירעה שגיאה בעיבוד הבקשה.'
+@admin_bp.route('/recordings/<int:id>')
+@login_required
+def recording_detail(id):
+    recording = Recording.query.get_or_404(id)
+    return render_template('admin/recording_detail.html', recording=recording)
 
-    html = f'''<div dir="rtl" style="font-family:Arial,sans-serif;max-width:600px;margin:auto">
-<h2 style="color:#b91c1c">לא ניתן היה לעבד את הבקשה</h2>
-<div style="background:#fef2f2;border-right:4px solid #ef4444;padding:16px;margin:16px 0;border-radius:8px;line-height:1.8">
-{body_html}
-</div>
-<p style="color:#6b7280;font-size:13px">מערכת תמלולפון 03-3131795</p>
-</div>'''
+@admin_bp.route('/recordings/<int:id>/download-audio')
+@login_required
+def download_audio(id):
+    import requests as req
+    recording = Recording.query.get_or_404(id)
+
+    yemot_username = __import__('os').environ.get('YEMOT_USERNAME', '')
+    yemot_password = __import__('os').environ.get('YEMOT_PASSWORD', '')
+
+    call_id = recording.call_id or ''
+    rec_url = f'https://www.call2all.co.il/ym/api/DownloadFile?username={yemot_username}&password={yemot_password}&path=ivr2:/recordings/{call_id}.wav'
 
     try:
-        import sendgrid
-        from sendgrid.helpers.mail import Mail
-
-        sg = sendgrid.SendGridAPIClient(api_key=os.environ.get('SENDGRID_API_KEY'))
-        message = Mail(
-            from_email=os.environ.get('SENDGRID_FROM_EMAIL', os.environ.get('GMAIL_USER', '')),
-            to_emails=to_email,
-            subject='תמלולפון - לא ניתן לעבד את הבקשה',
-            html_content=html,
+        r = req.get(rec_url, timeout=60)
+        r.raise_for_status()
+        return send_file(
+            io.BytesIO(r.content),
+            mimetype='audio/wav',
+            as_attachment=True,
+            download_name=f'recording_{id}.wav'
         )
-        sg.send(message)
-        log.info(f"Guidance email sent to {to_email} (reason: {reason})")
     except Exception as e:
-        log.error(f"Failed to send guidance email to {to_email}: {e}")
+        flash(f'שגיאה בהורדת ההקלטה: {e}')
+        return redirect(url_for('admin.recording_detail', id=id))
 
+@admin_bp.route('/recordings/<int:id>/play-audio')
+@login_required
+def play_audio(id):
+    import requests as req
+    import os
+    recording = Recording.query.get_or_404(id)
 
-@email_bp.route('/send-email-instructions', methods=['POST'])
-def send_email_instructions():
-    """
-    נקרא מה-IVR (שלוחה 5, מקש 1). שולח לכתובת המייל הרשומה של הלקוח
-    הוראות מפורטות ומעוצבות + קישורי mailto מוכנים לשליחת הקלטה לתמלול במייל.
-    """
-    from app import app
-    from models import Customer
+    yemot_username = os.environ.get('YEMOT_USERNAME', '')
+    yemot_password = os.environ.get('YEMOT_PASSWORD', '')
 
-    data = request.get_json(silent=True) or {}
-    phone = _normalize_israeli_phone(data.get('phone', ''))
-
-    if not phone:
-        return jsonify({'status': 'error', 'reason': 'missing_phone'}), 400
-
-    with app.app_context():
-        customer = Customer.query.filter_by(phone=phone).first()
-
-        if not customer or not (customer.email or '').strip():
-            log.info(f"send-email-instructions: אין כתובת מייל רשומה ל-{phone}")
-            return jsonify({'status': 'no_email'}), 200
-
-        _send_instructions_email(customer.email, customer.phone, customer.name)
-        return jsonify({'status': 'sent'}), 200
-
-
-def _mailto_link(phone, extra=''):
-    subject = phone if not extra else f'{phone} {extra}'
-    return f"mailto:{TRANSCRIBE_INBOUND_EMAIL}?subject={quote(subject)}"
-
-
-def _send_instructions_email(to_email, phone, name=''):
-    options = [
-        ('תמלול רגיל, עברית', ''),
-        ('תמלול רגיל, יידיש → עברית', 'רגיל יידיש עברית'),
-        ('תמלול רגיל, יידיש → יידיש', 'רגיל יידיש יידיש'),
-        ('תמלול רגיל, אנגלית → עברית', 'רגיל אנגלית עברית'),
-        ('תמלול מקצועי, עברית', 'מקצועי'),
-    ]
-
-    rows_html = ''
-    for label, extra in options:
-        subject_display = phone if not extra else f'{phone} {extra}'
-        link = _mailto_link(phone, extra)
-        rows_html += f'''
-<tr>
-<td style="padding:10px;border:1px solid #e5e7eb">{label}</td>
-<td style="padding:10px;border:1px solid #e5e7eb;font-family:monospace">{subject_display}</td>
-<td style="padding:10px;border:1px solid #e5e7eb;text-align:center">
-<a href="{link}" style="background:#2563eb;color:#fff;text-decoration:none;padding:8px 16px;border-radius:6px;font-weight:600;display:inline-block">פתח מייל מוכן</a>
-</td>
-</tr>'''
-
-    html = f'''<div dir="rtl" style="font-family:Arial,sans-serif;max-width:640px;margin:auto;color:#111827">
-<h2 style="color:#1d4ed8">שליחת הקלטה לתמלול במייל</h2>
-<p>שלום {name or ''},</p>
-<p style="line-height:1.8">
-ניתן לשלוח הקלטה לתמלול גם באמצעות מייל, בלי להתקשר למערכת.
-פשוט שולחים מייל עם <b>קובץ ההקלטה מצורף</b> לכתובת:
-</p>
-<div style="background:#eff6ff;border-right:4px solid #2563eb;padding:14px;margin:14px 0;border-radius:8px;font-size:18px;font-weight:700;text-align:center;direction:ltr">
-{TRANSCRIBE_INBOUND_EMAIL}
-</div>
-<p style="line-height:1.8">
-ב<b>שורת הנושא</b> (Subject) של המייל כותבים את מספר הטלפון שלך - <b dir="ltr" style="font-family:monospace">{phone}</b>.
-אפשר גם להוסיף אחרי המספר, מופרד ברווחים, את סוג התמלול (רגיל / מקצועי) ואת שפת ההקלטה ושפת הפלט הרצויה (עברית / יידיש / אנגלית).
-</p>
-<p style="line-height:1.8">
-התמלול יישלח בחזרה <b>לאותה כתובת מייל</b> שממנה נשלחה ההקלטה. שימוש זה מתאפשר רק מכתובת המייל הרשומה במערכת
-(<span dir="ltr" style="font-family:monospace">{to_email}</span>), ובתנאי שיש יתרה בארנק - החיוב מתבצע לפי מספר הטלפון שצוין בנושא.
-</p>
-
-<h3 style="color:#1d4ed8;margin-top:24px">דוגמאות מוכנות לשימוש</h3>
-<p style="line-height:1.8">
-הלחצנים הבאים פותחים טיוטת מייל חדשה עם הכתובת ושורת הנושא ממולאות מראש - צריך רק <b>לצרף את קובץ ההקלטה</b> ולשלוח.
-</p>
-<table style="width:100%;border-collapse:collapse;margin:14px 0;font-size:14px">
-<thead>
-<tr style="background:#f3f4f6">
-<th style="padding:10px;border:1px solid #e5e7eb;text-align:right">סוג תמלול</th>
-<th style="padding:10px;border:1px solid #e5e7eb;text-align:right">שורת הנושא</th>
-<th style="padding:10px;border:1px solid #e5e7eb;text-align:center">פתיחת מייל</th>
-</tr>
-</thead>
-<tbody>
-{rows_html}
-</tbody>
-</table>
-
-<p style="color:#6b7280;font-size:13px;line-height:1.8">
-שים לב: לחיצה על "פתח מייל מוכן" תפתח את תוכנת המייל המוגדרת כברירת מחדל במכשיר שלך (Gmail, Outlook וכו'),
-עם הכתובת ושורת הנושא ממולאות. יש לצרף את קובץ ההקלטה באופן רגיל ולשלוח.
-</p>
-
-<div style="background:#f0fdf4;border-right:4px solid #10b981;padding:14px;margin:16px 0;border-radius:8px">
-<p style="margin:0 0 8px;font-weight:700;color:#065f46">סוגי קבצים נתמכים לצירוף:</p>
-<p style="margin:0;line-height:2;color:#111827">
-🎵 <b>אודיו:</b> MP3, WAV, M4A, OGG, FLAC, AAC, OPUS, WEBM<br>
-🎬 <b>וידאו:</b> MP4, MOV, AVI, MKV, 3GP<br>
-</p>
-<p style="margin:8px 0 0;font-size:13px;color:#6b7280">ניתן לצרף קובץ אחד בלבד לכל מייל. גודל מקסימלי מומלץ: 25MB.</p>
-</div>
-
-<div style="background:#eff6ff;border-right:4px solid #3b82f6;padding:14px;margin:16px 0;border-radius:8px">
-<p style="margin:0 0 8px;font-weight:700;color:#1e40af">📁 קובץ גדול מ-25MB? שלחו קישור Google Drive</p>
-<p style="margin:0;line-height:1.8;color:#111827;font-size:14px">
-אם הקובץ גדול מדי לצירוף רגיל, העלו אותו ל-Google Drive ושלחו את הקישור בגוף המייל (ללא קובץ מצורף).<br>
-<b>חשוב:</b> הקובץ ב-Drive חייב להיות משותף כ-"כל מי שיש לו קישור יכול לצפות".<br>
-שורת הנושא נשארת זהה (מספר הטלפון + סוג תמלול כרגיל).
-</p>
-</div>
-
-<p style="color:#6b7280;font-size:13px;margin-top:24px">מערכת תמלולפון 03-3131795</p>
-</div>'''
+    call_id = recording.call_id or ''
+    rec_url = f'https://www.call2all.co.il/ym/api/DownloadFile?username={yemot_username}&password={yemot_password}&path=ivr2:/recordings/{call_id}.wav'
 
     try:
-        import sendgrid
-        from sendgrid.helpers.mail import Mail
-
-        sg = sendgrid.SendGridAPIClient(api_key=os.environ.get('SENDGRID_API_KEY'))
-        message = Mail(
-            from_email=os.environ.get('SENDGRID_FROM_EMAIL', os.environ.get('GMAIL_USER', '')),
-            to_emails=to_email,
-            subject='תמלולפון - הוראות לשליחת הקלטה לתמלול במייל',
-            html_content=html,
-        )
-        sg.send(message)
-        log.info(f"Instructions email sent to {to_email}")
+        r = req.get(rec_url, timeout=60)
+        r.raise_for_status()
+        response = make_response(r.content)
+        response.headers['Content-Type'] = 'audio/wav'
+        response.headers['Content-Disposition'] = 'inline'
+        return response
     except Exception as e:
-        log.error(f"Failed to send instructions email to {to_email}: {e}")
+        return jsonify({'error': str(e)}), 400
+
+@admin_bp.route('/recordings/<int:id>/download-word')
+@login_required
+def download_word(id):
+    from docx import Document
+    from docx.shared import Pt, RGBColor
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+
+    recording = Recording.query.get_or_404(id)
+    customer = Customer.query.get(recording.customer_id)
+
+    doc = Document()
+
+    title = doc.add_heading('תמלול שיחה', 0)
+    title.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+
+    doc.add_paragraph(f'לקוח: {customer.name or customer.phone if customer else ""}').alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    doc.add_paragraph(f'תאריך: {recording.created_at.strftime("%d/%m/%Y %H:%M") if recording.created_at else ""}').alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    doc.add_paragraph(f'משך: {recording.duration_seconds // 60} דקות').alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    doc.add_paragraph('─' * 50)
+
+    if recording.summary:
+        doc.add_heading('סיכום', level=1).alignment = WD_ALIGN_PARAGRAPH.RIGHT
+        p = doc.add_paragraph(recording.summary)
+        p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+
+    doc.add_heading('תמלול מלא', level=1).alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    p = doc.add_paragraph(recording.transcript or 'אין תמלול')
+    p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+
+    output = io.BytesIO()
+    doc.save(output)
+    output.seek(0)
+
+    return send_file(
+        output,
+        mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        as_attachment=True,
+        download_name=f'transcript_{id}.docx'
+    )
+
+@admin_bp.route('/recordings/cleanup', methods=['POST'])
+@login_required
+def cleanup_old_recordings():
+    cutoff = datetime.utcnow() - timedelta(days=30)
+    old = Recording.query.filter(Recording.created_at < cutoff).all()
+    count = 0
+    for rec in old:
+        rec.transcript = None
+        rec.summary = None
+        count += 1
+    db.session.commit()
+    flash(f'נמחקו תמלולים של {count} הקלטות ישנות')
+    return redirect(url_for('admin.recordings'))
+
+@admin_bp.route('/reports')
+@login_required
+def reports():
+    monthly = db.session.query(
+        func.to_char(Transaction.created_at, 'YYYY-MM').label('month'),
+        func.sum(Transaction.amount).label('revenue')
+    ).filter(Transaction.type == 'charge').group_by('month').order_by('month').all()
+    top_customers = db.session.query(
+        Customer,
+        func.sum(Transaction.amount).label('total_spend')
+    ).join(Transaction).filter(
+        Transaction.type == 'debit'
+    ).group_by(Customer.id).order_by(func.sum(Transaction.amount).desc()).limit(10).all()
+
+    return render_template('admin/reports.html',
+        monthly=monthly, top_customers=top_customers)
+
+@admin_bp.route('/settings', methods=['GET', 'POST'])
+@login_required
+def settings():
+    if request.method == 'POST':
+        set_setting('price_per_20min_basic', request.form.get('price_per_20min_basic', '0.90'))
+        set_setting('price_per_20min_premium', request.form.get('price_per_20min_premium', '1.90'))
+        set_setting('price_per_20min_video', request.form.get('price_per_20min_video', '1.50'))
+        set_setting('price_per_1000_chars_ocr', request.form.get('price_per_1000_chars_ocr', '0.10'))
+        set_setting('ocr_engine', request.form.get('ocr_engine', 'gemini'))
+        set_setting('yemot_token', request.form.get('yemot_token', ''))
+        set_setting('yemot_log_path', request.form.get('yemot_log_path', 'ivr2:/199/LogCreditCardOK.ymgr'))
+        set_setting('payment_callback_secret', request.form.get('payment_callback_secret', ''))
+        set_setting('nedarim_mosad_number', request.form.get('nedarim_mosad_number', ''))
+        set_setting('nedarim_api_password', request.form.get('nedarim_api_password', ''))
+        set_setting('nedarim_tamal_type', request.form.get('nedarim_tamal_type', '400'))
+        # הגדרות בונוס - עד 3 רמות
+        for i in range(1, 4):
+            set_setting(f'bonus_threshold_{i}', request.form.get(f'bonus_threshold_{i}', ''))
+            set_setting(f'bonus_amount_{i}', request.form.get(f'bonus_amount_{i}', ''))
+        set_setting('min_balance', request.form.get('min_balance', '5'))
+        set_setting('max_recording_seconds', request.form.get('max_recording_seconds', '1800'))
+        set_setting('welcome_new', request.form.get('welcome_new', ''))
+        set_setting('welcome_returning', request.form.get('welcome_returning', ''))
+        set_setting('system_explanation', request.form.get('system_explanation', ''))
+        flash('הגדרות נשמרו בהצלחה')
+        return redirect(url_for('admin.settings'))
+
+    current_settings = {
+        'price_per_20min_basic': get_setting('price_per_20min_basic', '0.90'),
+        'price_per_20min_premium': get_setting('price_per_20min_premium', '1.90'),
+        'price_per_20min_video': get_setting('price_per_20min_video', '1.50'),
+        'price_per_1000_chars_ocr': get_setting('price_per_1000_chars_ocr', '0.10'),
+        'ocr_engine': get_setting('ocr_engine', 'gemini'),
+        'yemot_token': get_setting('yemot_token', ''),
+        'yemot_log_path': get_setting('yemot_log_path', 'ivr2:/199/LogCreditCardOK.ymgr'),
+        'payment_callback_secret': get_setting('payment_callback_secret', ''),
+        'nedarim_mosad_number': get_setting('nedarim_mosad_number', ''),
+        'nedarim_api_password': get_setting('nedarim_api_password', ''),
+        'nedarim_tamal_type': get_setting('nedarim_tamal_type', '400'),
+        'bonus_thresholds': [
+            {'threshold': get_setting(f'bonus_threshold_{i}', ''), 'amount': get_setting(f'bonus_amount_{i}', '')}
+            for i in range(1, 4)
+        ],
+        'min_balance': get_setting('min_balance', '5'),
+        'max_recording_seconds': get_setting('max_recording_seconds', '1800'),
+        'welcome_new': get_setting('welcome_new', 'שלום וברוכים הבאים למערכת התמלול.'),
+        'welcome_returning': get_setting('welcome_returning', 'שלום וברוכים השבים.'),
+        'system_explanation': get_setting('system_explanation', 'מערכת התמלול מאפשרת לך להקליט הודעות שיתומללו ויישלחו אליך למייל או לפקס.'),
+    }
+    return render_template('admin/settings.html', settings=current_settings)
+
+@admin_bp.route('/api/stats')
+@login_required
+def api_stats():
+    last_30 = []
+    for i in range(29, -1, -1):
+        day = datetime.utcnow().date() - timedelta(days=i)
+        revenue = db.session.query(func.sum(Transaction.amount)).filter(
+            Transaction.type == 'charge',
+            func.date(Transaction.created_at) == day
+        ).scalar() or 0
+        recordings = Recording.query.filter(
+            func.date(Recording.created_at) == day
+        ).count()
+        last_30.append({'date': str(day), 'revenue': float(revenue), 'recordings': recordings})
+    return jsonify(last_30)
+@admin_bp.route('/messages')
+@login_required
+def manager_messages():
+    status_filter = request.args.get('status', '')
+    query = ManagerMessage.query
+    if status_filter:
+        query = query.filter_by(status=status_filter)
+    messages = query.order_by(ManagerMessage.created_at.desc()).all()
+    return render_template('admin/manager_messages.html', messages=messages, status_filter=status_filter, timedelta=timedelta)
 
 
-@email_bp.route('/send-handwriting-instructions', methods=['POST'])
-def send_handwriting_instructions():
-    """
-    נקרא מה-IVR (שלוחה 6, מקש 1). שולח לכתובת המייל הרשומה של הלקוח
-    הוראות לשליחת קבצי כתב יד לזיהוי OCR.
-    """
-    from app import app
-    from models import Customer
-
-    data = request.get_json(silent=True) or {}
-    phone = _normalize_israeli_phone(data.get('phone', ''))
-
-    if not phone:
-        return jsonify({'status': 'error', 'reason': 'missing_phone'}), 400
-
-    with app.app_context():
-        customer = Customer.query.filter_by(phone=phone).first()
-
-        if not customer or not (customer.email or '').strip():
-            log.info(f"send-handwriting-instructions: אין כתובת מייל רשומה ל-{phone}")
-            return jsonify({'status': 'no_email'}), 200
-
-        _send_handwriting_instructions_email(customer.email, customer.phone, customer.name)
-        return jsonify({'status': 'sent'}), 200
-
-
-def _send_handwriting_instructions_email(to_email, phone, name=''):
-    subject_display = phone
-    link = _mailto_link(phone, 'ocr')
-
-    html = f'''<div dir="rtl" style="font-family:Arial,sans-serif;max-width:640px;margin:auto;color:#111827">
-<h2 style="color:#1d4ed8">זיהוי כתב יד במייל <span style="font-size:14px;color:#d97706;font-weight:normal">— גרסה נסיונית</span></h2>
-<p>שלום {name or ''},</p>
-
-<div style="background:#fffbeb;border-right:4px solid #f59e0b;padding:14px;margin:14px 0;border-radius:8px">
-<p style="margin:0;font-weight:700;color:#92400e">⚠️ שימו לב — שירות זה בגרסה נסיונית בלבד</p>
-<p style="margin:8px 0 0;line-height:1.8;color:#111827;font-size:14px">
-ייתכנו שגיאות, מילים משובשות, או קטעים שלא יזוהו כראוי, במיוחד בכתב יד צפוף, לא ברור, או בכתב רש"י.<br>
-אנו ממליצים לבדוק את התוצאה ולא להסתמך עליה באופן מלא.
-</p>
-</div>
-
-<p style="line-height:1.8">
-ניתן לשלוח תמונות או קבצי PDF של כתב יד לזיהוי, בלי להתקשר למערכת.<br>
-פשוט שולחים מייל עם <b>הקובץ מצורף</b> לכתובת:
-</p>
-<div style="background:#eff6ff;border-right:4px solid #2563eb;padding:14px;margin:14px 0;border-radius:8px;font-size:18px;font-weight:700;text-align:center;direction:ltr">
-{TRANSCRIBE_INBOUND_EMAIL}
-</div>
-<p style="line-height:1.8">
-ב<b>שורת הנושא</b> (Subject) של המייל כותבים את מספר הטלפון שלך - <b dir="ltr" style="font-family:monospace">{phone}</b> - ואחריו המילה <b>ocr</b>:<br>
-<span dir="ltr" style="font-family:monospace;background:#f3f4f6;padding:4px 10px;border-radius:4px;display:inline-block;margin-top:6px">{phone} ocr</span>
-</p>
-<p style="line-height:1.8">
-התוצאה תישלח בחזרה <b>לאותה כתובת מייל</b> שממנה נשלח הקובץ.
-שימוש זה מתאפשר רק מכתובת המייל הרשומה במערכת
-(<span dir="ltr" style="font-family:monospace">{to_email}</span>), ובתנאי שיש יתרה בארנק.
-</p>
-
-<h3 style="color:#1d4ed8;margin-top:24px">פתח מייל מוכן לשליחה</h3>
-<p style="line-height:1.8">
-לחיצה על הכפתור תפתח טיוטת מייל עם הכתובת ושורת הנושא ממולאות — צריך רק <b>לצרף את הקובץ</b> ולשלוח:
-</p>
-<p style="text-align:center;margin:20px 0">
-<a href="{link} ocr" style="background:#2563eb;color:#fff;text-decoration:none;padding:12px 28px;border-radius:8px;font-weight:700;font-size:16px;display:inline-block">📄 פתח מייל מוכן לזיהוי כתב יד</a>
-</p>
-
-<div style="background:#f0fdf4;border-right:4px solid #10b981;padding:14px;margin:16px 0;border-radius:8px">
-<p style="margin:0 0 8px;font-weight:700;color:#065f46">סוגי קבצים נתמכים:</p>
-<p style="margin:0;line-height:2;color:#111827">
-🖼️ <b>תמונות:</b> JPG, PNG, WEBP, HEIC<br>
-📄 <b>מסמכים:</b> PDF (כולל רב-עמודי)<br>
-</p>
-<p style="margin:8px 0 0;font-size:13px;color:#6b7280">ניתן לצרף קובץ אחד בלבד לכל מייל. גודל מקסימלי מומלץ: 25MB.</p>
-</div>
-
-<div style="background:#fef2f2;border-right:4px solid #ef4444;padding:14px;margin:16px 0;border-radius:8px">
-<p style="margin:0 0 8px;font-weight:700;color:#991b1b">טיפים לתוצאה טובה יותר:</p>
-<ul style="margin:0;padding-right:20px;line-height:2;color:#111827;font-size:14px">
-<li>צלמו בתאורה טובה, ללא צללים</li>
-<li>הדף צריך להיות ישר ולא מקופל</li>
-<li>ודאו שהכתב נמצא כולו בתוך התמונה</li>
-<li>ככל שהתמונה חדה יותר — התוצאה טובה יותר</li>
-</ul>
-</div>
-
-<p style="color:#6b7280;font-size:13px;margin-top:24px">מערכת תמלולפון 03-3131795</p>
-</div>'''
-
+@admin_bp.route('/messages/<int:id>/play')
+@login_required
+def play_manager_message(id):
+    import requests as req, io
+    msg = ManagerMessage.query.get_or_404(id)
+    if not msg.rec_url:
+        return jsonify({'error': 'אין הקלטה'}), 404
     try:
-        import sendgrid
-        from sendgrid.helpers.mail import Mail
-
-        sg = sendgrid.SendGridAPIClient(api_key=os.environ.get('SENDGRID_API_KEY'))
-        message = Mail(
-            from_email=os.environ.get('SENDGRID_FROM_EMAIL', os.environ.get('GMAIL_USER', '')),
-            to_emails=to_email,
-            subject='תמלולפון - הוראות לשליחת כתב יד לזיהוי',
-            html_content=html,
+        r = req.get(msg.rec_url, timeout=120, stream=False)
+        r.raise_for_status()
+        return send_file(
+            io.BytesIO(r.content),
+            mimetype='application/octet-stream',
+            as_attachment=False,
+            download_name='message.wav'
         )
-        sg.send(message)
-        log.info(f"Handwriting instructions email sent to {to_email}")
     except Exception as e:
-        log.error(f"Failed to send handwriting instructions email to {to_email}: {e}")
+        return jsonify({'error': str(e)}), 400
+ 
+@admin_bp.route('/messages/<int:id>/status', methods=['POST'])
+@login_required
+def update_message_status(id):
+    msg = ManagerMessage.query.get_or_404(id)
+    msg.status     = request.form.get('status', msg.status)
+    msg.admin_note = request.form.get('admin_note', msg.admin_note)
+    db.session.commit()
+    flash('סטטוס עודכן בהצלחה')
+    return redirect(url_for('admin.manager_messages'))
+
+
+@admin_bp.route('/messages/<int:id>/delete', methods=['POST'])
+@login_required
+def delete_manager_message(id):
+    msg = ManagerMessage.query.get_or_404(id)
+    db.session.delete(msg)
+    db.session.commit()
+    flash('הפניה נמחקה')
+    return redirect(url_for('admin.manager_messages'))
+@admin_bp.route('/messages/debug')
+@login_required
+def debug_messages():
+    from models import ManagerMessage
+    msgs = ManagerMessage.query.all()
+    return jsonify([{
+        'id': m.id,
+        'call_id': m.call_id,
+        'rec_url': m.rec_url
+    } for m in msgs])
+
+@admin_bp.route('/test-transcribe', methods=['GET', 'POST'])
+@login_required
+def test_transcribe():
+    if request.method == 'POST':
+        import os, uuid, tempfile
+        from services.transcribe import _gemini_from_url, finalize_alefbot_recording, _send_email, _send_fax
+
+        file = request.files.get('audio_file')
+        tier = request.form.get('tier', 'gemini')
+        language = request.form.get('language', 'he')
+        output_language = request.form.get('output_language', 'he')
+        send_method = request.form.get('send_method', 'email')
+        send_to = request.form.get('send_to', '')
+        customer_id = request.form.get('customer_id', '')
+
+        if not file:
+            flash('יש להעלות קובץ')
+            return redirect(url_for('admin.test_transcribe'))
+
+        # שמור קובץ זמנית
+        tmp = tempfile.NamedTemporaryFile(suffix='.wav', delete=False)
+        file.save(tmp.name)
+        tmp.close()
+
+        # בנה URL זמני מה-static
+        import shutil
+        static_dir = os.path.join(os.path.dirname(__file__), '..', 'static', 'fax_tmp')
+        os.makedirs(static_dir, exist_ok=True)
+        filename = f"test_{uuid.uuid4().hex}.wav"
+        dest_path = os.path.join(static_dir, filename)
+        shutil.copy(tmp.name, dest_path)
+        os.remove(tmp.name)
+
+        base_url = os.environ.get('APP_BASE_URL', '').rstrip('/')
+        rec_url = f"{base_url}/static/fax_tmp/{filename}"
+
+        customer = Customer.query.get(int(customer_id)) if customer_id and customer_id.isdigit() else None
+        if customer and not send_to:
+            send_to = customer.email if send_method == 'email' else customer.fax
+
+        try:
+            transcript_variants = None  # רשימת (כותרת, טקסט) להשוואה בתבנית, לטיירים נסיוניים
+            if tier == 'gemini':
+                transcript, duration, _ = _gemini_from_url(rec_url, language, output_language)
+            elif tier == 'gemini_pro_solo':
+                # נסיוני - פעימה אחת בלבד עם Gemini 3.1 Pro + פרומפט הגייה אשכנזית-חסידית
+                from services.transcribe import _gemini_pro_solo
+                transcript, duration = _gemini_pro_solo(rec_url, language, output_language)
+            elif tier == 'gemini_review':
+                # נסיוני - תמלול מקצועי מבוסס Gemini עם מעבר תיקון שני (במקום אלף בוט)
+                from services.transcribe import _gemini_review_pass
+                transcript, duration, transcript_raw_first_pass = _gemini_review_pass(rec_url, language, output_language)
+                if transcript_raw_first_pass:
+                    transcript_variants = [
+                        ('לפני תיקון (תמלול ראשוני)', transcript_raw_first_pass),
+                        ('אחרי תיקון (גרסה סופית)', transcript),
+                    ]
+            elif tier == 'gemini_dual_flash':
+                # נסיוני - שני תמלולים עצמאיים + מיזוג ע"י Flash (במקום אלף בוט)
+                from services.transcribe import _gemini_dual_transcribe_and_merge
+                transcript, duration, transcript_a, transcript_b = _gemini_dual_transcribe_and_merge(
+                    rec_url, language, output_language, merge_model='gemini-3.5-flash')
+                if transcript_a:
+                    variants = [('תמלול א\' (עצמאי)', transcript_a)]
+                    if transcript_b:
+                        variants.append(('תמלול ב\' (עצמאי)', transcript_b))
+                    variants.append(('אחרי מיזוג - Flash (גרסה סופית)', transcript))
+                    transcript_variants = variants
+            elif tier == 'gemini_dual_pro':
+                # נסיוני - שני תמלולים עצמאיים + מיזוג ע"י Pro (במקום אלף בוט)
+                from services.transcribe import _gemini_dual_transcribe_and_merge
+                transcript, duration, transcript_a, transcript_b = _gemini_dual_transcribe_and_merge(
+                    rec_url, language, output_language, merge_model='gemini-3.1-pro-preview')
+                if transcript_a:
+                    variants = [('תמלול א\' (עצמאי)', transcript_a)]
+                    if transcript_b:
+                        variants.append(('תמלול ב\' (עצמאי)', transcript_b))
+                    variants.append(('אחרי מיזוג - Pro (גרסה סופית)', transcript))
+                    transcript_variants = variants
+            else:
+                # AlefBot — שלח ישירות
+                from services.transcribe import _alefbot_submit
+                job_id, duration = _alefbot_submit(rec_url, f"test_{uuid.uuid4().hex[:8]}")
+                flash(f'אלף בוט קיבל את הקובץ — job_id: {job_id}. התמלול יגיע ב-webhook.')
+                return redirect(url_for('admin.test_transcribe'))
+
+            if not transcript:
+                flash('התמלול נכשל')
+                return redirect(url_for('admin.test_transcribe'))
+
+            if send_to and customer:
+                if send_method == 'email':
+                    _send_email(send_to, transcript, customer, rec_url, duration)
+                    flash(f'תמלול נשלח למייל: {send_to}')
+                else:
+                    _send_fax(send_to, transcript, customer, duration)
+                    flash(f'תמלול נשלח לפקס: {send_to}')
+            else:
+                flash('התמלול הושלם — לא נשלח (לא הוזן לקוח/כתובת)')
+
+            return render_template('admin/test_transcribe.html',
+                transcript=transcript,
+                duration=duration,
+                transcript_variants=transcript_variants,
+                customers=Customer.query.order_by(Customer.name).all()
+            )
+
+        except Exception as e:
+            flash(f'שגיאה: {e}')
+            return redirect(url_for('admin.test_transcribe'))
+
+    customers = Customer.query.order_by(Customer.name).all()
+    return render_template('admin/test_transcribe.html', transcript=None, transcript_variants=None, customers=customers)
+@admin_bp.route('/messages/bulk-status', methods=['POST'])
+@login_required
+def bulk_update_status():
+    data = request.json
+    ids = data.get('ids', [])
+    status = data.get('status', '')
+    for msg_id in ids:
+        msg = ManagerMessage.query.get(int(msg_id))
+        if msg:
+            msg.status = status
+    db.session.commit()
+    return jsonify({'ok': True})
+
+@admin_bp.route('/messages/bulk-delete', methods=['POST'])
+@login_required
+def bulk_delete_messages():
+    data = request.json
+    ids = data.get('ids', [])
+    for msg_id in ids:
+        msg = ManagerMessage.query.get(int(msg_id))
+        if msg:
+            db.session.delete(msg)
+    db.session.commit()
+    return jsonify({'ok': True})
+
+
+@admin_bp.route('/customers/bulk-action', methods=['POST'])
+@login_required
+def bulk_customer_action():
+    """ניהול לקוחות מרובים — הוספת כסף, אחוזים, סינון"""
+    action = request.form.get('action')
+    customer_ids = request.form.getlist('customer_ids')
+
+    if not customer_ids:
+        flash('לא נבחרו לקוחות')
+        return redirect(url_for('admin.customers'))
+
+    customers = Customer.query.filter(Customer.id.in_(customer_ids)).all()
+
+    if action == 'add_amount':
+        amount = float(request.form.get('amount', 0) or 0)
+        if amount <= 0:
+            flash('סכום לא תקין')
+            return redirect(url_for('admin.customers'))
+        for c in customers:
+            c.balance += amount
+            txn = Transaction(
+                customer_id=c.id,
+                amount=amount,
+                type='credit',
+                description=f'זיכוי ידני מנהל — {amount}₪'
+            )
+            db.session.add(txn)
+        db.session.commit()
+        flash(f'נוסף ₪{amount} ל-{len(customers)} לקוחות')
+
+    elif action == 'add_percent':
+        percent = float(request.form.get('percent', 0) or 0)
+        if percent <= 0:
+            flash('אחוז לא תקין')
+            return redirect(url_for('admin.customers'))
+        for c in customers:
+            bonus = round(c.balance * percent / 100, 2)
+            c.balance += bonus
+            txn = Transaction(
+                customer_id=c.id,
+                amount=bonus,
+                type='credit',
+                description=f'זיכוי {percent}% מנהל — {bonus}₪'
+            )
+            db.session.add(txn)
+        db.session.commit()
+        flash(f'נוסף {percent}% ל-{len(customers)} לקוחות')
+
+    return redirect(url_for('admin.customers'))
+
+
+@admin_bp.route('/customers-filter')
+@login_required
+def customers_filter():
+    """סינון לקוחות לפי פעילות"""
+    from datetime import timedelta
+    filter_type = request.args.get('filter', '')
+    search = request.args.get('q', '')
+    page = request.args.get('page', 1, type=int)
+
+    query = Customer.query
+
+    if filter_type == 'inactive_month':
+        one_month_ago = datetime.utcnow() - timedelta(days=30)
+        active_ids = db.session.query(Recording.customer_id).filter(
+            Recording.created_at >= one_month_ago
+        ).subquery()
+        query = query.filter(~Customer.id.in_(active_ids))
+    elif filter_type == 'inactive_year':
+        one_year_ago = datetime.utcnow() - timedelta(days=365)
+        active_ids = db.session.query(Recording.customer_id).filter(
+            Recording.created_at >= one_year_ago
+        ).subquery()
+        query = query.filter(~Customer.id.in_(active_ids))
+
+    if search:
+        query = query.filter(
+            Customer.phone.contains(search) |
+            Customer.name.contains(search) |
+            Customer.email.contains(search)
+        )
+
+    customers = query.order_by(Customer.created_at.desc()).paginate(page=page, per_page=50)
+    return render_template('admin/customers.html',
+        customers=customers,
+        search=search,
+        active_filter=filter_type
+    )
+
+
+@admin_bp.route('/ocr')
+@login_required
+def ocr_list():
+    from models import OcrResult
+    page = request.args.get('page', 1, type=int)
+    search = request.args.get('q', '')
+
+    query = OcrResult.query.order_by(OcrResult.created_at.desc())
+    if search:
+        query = query.join(Customer).filter(
+            Customer.phone.contains(search) | OcrResult.original_filename.contains(search)
+        )
+
+    ocr_results = query.paginate(page=page, per_page=20)
+    return render_template('admin/ocr_list.html', ocr_results=ocr_results, search=search)
+
+
+@admin_bp.route('/ocr/<int:ocr_id>')
+@login_required
+def ocr_detail(ocr_id):
+    from models import OcrResult
+    ocr = OcrResult.query.get_or_404(ocr_id)
+    return render_template('admin/ocr_detail.html', ocr=ocr)
+
+
+@admin_bp.route('/ocr/<int:ocr_id>/file')
+@login_required
+def ocr_file(ocr_id):
+    from models import OcrResult
+    import os
+    ocr = OcrResult.query.get_or_404(ocr_id)
+    if not ocr.original_file_path or not os.path.exists(ocr.original_file_path):
+        return "הקובץ אינו זמין", 404
+    return send_file(ocr.original_file_path, as_attachment=False,
+                     download_name=ocr.original_filename)
