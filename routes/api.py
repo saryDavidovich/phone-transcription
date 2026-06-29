@@ -139,11 +139,11 @@ def alefbot_webhook():
 
     # אלף בוט שולח event_type ו-job_id
     # payload אפשרי: {"event_type": "transcription.completed", "job_id": "...", "status": "completed"}
-    event_type = data.get('event_type', '')
+    # אלף בוט שולח לפעמים 'event_type' ולפעמים 'event'
+    event_type = data.get('event_type', '') or data.get('event', '')
     job_id = data.get('job_id', '') or data.get('id', '')
     status = data.get('status', '')
 
-    # קבל אם event_type הוא completed או status הוא completed
     is_completed = (event_type == 'transcription.completed') or (status == 'completed')
 
     if is_completed and job_id:
