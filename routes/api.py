@@ -1,4 +1,4 @@
-from flask import Blueprint, request, jsonify
+from flask import current_app, Blueprint, request, jsonify
 from app import db
 from models import Customer, Recording, Settings
 from services.transcribe import transcribe_async
@@ -135,7 +135,7 @@ def alefbot_webhook():
     if not data:
         return jsonify({'ok': False}), 400
 
-    app.logger.info(f"AlefBot webhook received: {data}")
+    current_app.logger.info(f"AlefBot webhook received: {data}")
 
     # אלף בוט שולח event_type ו-job_id
     event_type = data.get('event_type', '')
@@ -145,7 +145,7 @@ def alefbot_webhook():
         # מצא את ה-call_id לפי job_id בבסיס הנתונים
         rec = Recording.query.filter_by(alefbot_job_id=job_id).first()
         if not rec:
-            app.logger.warning(f"AlefBot webhook: no recording found for job_id={job_id}")
+            current_app.logger.warning(f"AlefBot webhook: no recording found for job_id={job_id}")
             return jsonify({'ok': True})
 
         call_id = rec.call_id
@@ -159,10 +159,10 @@ def alefbot_webhook():
             )
             r.raise_for_status()
             transcript = r.text.strip()
-            app.logger.info(f"AlefBot artifact fetched: {len(transcript)} chars for job {job_id}")
+            current_app.logger.info(f"AlefBot artifact fetched: {len(transcript)} chars for job {job_id}")
             finalize_alefbot_recording(call_id, transcript)
         except Exception as e:
-            app.logger.error(f"AlefBot webhook error: {e}")
+            current_app.logger.error(f"AlefBot webhook error: {e}")
             return jsonify({'ok': False, 'error': str(e)}), 500
 
     return jsonify({'ok': True})
