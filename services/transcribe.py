@@ -46,7 +46,65 @@ def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, durat
                         if actual_duration:
                             rec.duration_seconds = actual_duration
                         db.session.commit()
-                    log.info(f"AlefBot job submitted: {job_id}, waiting for webhook")
+                    log.info(f"AlefBot job submitted: {job_id}, waiting for webhook + polling backup")
+
+                    # Polling כגיבוי — אם webhook לא הגיע, השרת ישאל בעצמו
+                    import threading
+                    def _poll_alefbot(job_id, call_id, customer_id, delivery_method, delivered_to):
+                        import requests as req_poll, os as _os
+                        api_key = _os.environ.get('ALEFBOT_API_KEY')
+                        base = 'https://alef-bot.top/api/v1'
+                        from app import app, db
+                        with app.app_context():
+                            # בדוק כל 30 שניות עד 30 דקות
+                            for attempt in range(60):
+                                time.sleep(30)
+                                try:
+                                    # בדוק אם כבר טופל ע"י webhook
+                                    from models import Recording
+                                    rec_check = Recording.query.filter_by(call_id=call_id).first()
+                                    if rec_check and rec_check.status not in ('alefbot_pending',):
+                                        log.info(f"AlefBot poll: job {job_id} already handled (status={rec_check.status}), stopping poll")
+                                        return
+
+                                    status_res = req_poll.get(
+                                        f'{base}/transcriptions/{job_id}',
+                                        headers={'Authorization': f'Bearer {api_key}'},
+                                        timeout=15
+                                    )
+                                    job_status = status_res.json().get('status', '')
+                                    log.info(f"AlefBot poll {attempt+1}/60: job={job_id} status={job_status}")
+
+                                    if job_status == 'completed':
+                                        art = req_poll.get(
+                                            f'{base}/transcriptions/{job_id}/artifact?format=txt',
+                                            headers={'Authorization': f'Bearer {api_key}'},
+                                            timeout=30
+                                        )
+                                        art.raise_for_status()
+                                        transcript = art.text.strip()
+                                        log.info(f"AlefBot poll: transcript fetched {len(transcript)} chars")
+                                        finalize_alefbot_recording(call_id, transcript)
+                                        return
+                                    elif job_status in ('failed', 'cancelled'):
+                                        log.error(f"AlefBot poll: job {job_id} failed with status {job_status}")
+                                        from models import Recording
+                                        rec_err = Recording.query.filter_by(call_id=call_id).first()
+                                        if rec_err:
+                                            rec_err.status = 'error'
+                                            db.session.commit()
+                                        return
+                                except Exception as poll_err:
+                                    log.warning(f"AlefBot poll error attempt {attempt+1}: {poll_err}")
+
+                            log.error(f"AlefBot poll: job {job_id} timed out after 30 minutes")
+
+                    t = threading.Thread(
+                        target=_poll_alefbot,
+                        args=(job_id, call_id, customer_id, delivery_method, delivered_to),
+                        daemon=True
+                    )
+                    t.start()
                     return
                 else:
                     db.session.remove()
