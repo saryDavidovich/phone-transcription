@@ -691,74 +691,47 @@ def _gemini_ocr_single_pass(client, img_bytes, page_label, gtypes, prompt):
 
 def _gemini_ocr(filepath, original_filename):
     """
-    OCR לכתב יד עברי עם ארבעה שיפורים:
-    1. זום גבוה (4x) לבהירות מקסימלית
-    2. פרומפט שמכריח העתקה עיוורת ללא שיפוט לשוני
-    3. עיבוד תמונה (Grayscale + Contrast + Binarization)
-    4. זיהוי כפול + מיזוג בידי Gemini
+    OCR לכתב יד עברי — זיהוי שורות + שליחה מקבילה (15 שורות בו זמנית).
+    משתמש במפתח API נפרד לOCR.
     """
     try:
         from google import genai
         from google.genai import types as gtypes
+        from concurrent.futures import ThreadPoolExecutor as _TPE, as_completed
+        import cv2, numpy as np
+        from PIL import Image
+        import io
 
-        api_key = os.environ.get('GOOGLE_API_KEY')
+        api_key = os.environ.get('GOOGLE_API_KEY_OCR') or os.environ.get('GOOGLE_API_KEY')
         client = genai.Client(api_key=api_key)
 
         ext = os.path.splitext(original_filename or filepath)[1].lstrip('.').lower()
 
-        # פרומפט ראשי - מדגיש העתקה עיוורת ללא שיפוט לשוני
-        OCR_PROMPT = """אתה סורק OCR מכני - אתה מזהה **צורות גרפיות של אותיות** בלבד.
+        OCR_PROMPT = """אתה סורק OCR מכני - אתה מזהה צורות גרפיות של אותיות בלבד.
 אין לך שום ידע שפתי. אינך יודע עברית. אינך יודע מה המשמעות של המילים.
 אתה רק מעתיק את מה שאתה רואה, כמו מצלמה שמעתיקה פיקסלים.
 
-כללים ברזל - הפרתם = כשלון במשימה:
+כללים ברזל:
 • העתק כל אות, כל מילה, כל סימן - בדיוק כפי שהם מצוירים בתמונה
-• אסור לך לתקן שגיאות כתיב - אם כתוב "שלבבל" תכתוב "שלבבל"
-• אסור לך להוסיף מילה שאינה בתמונה - אפילו אם המשפט נראה "חסר"
-• אסור לך להסיר מילה שיש בתמונה - אפילו אם נראית "מיותרת"
-• אסור לך לשנות סדר מילים - אפילו אם הסדר נראה "הפוך"
+• אסור לתקן שגיאות כתיב
+• אסור להוסיף מילה שאינה בתמונה
+• אסור להסיר מילה שיש בתמונה
 • אם מילה לא קריאה: כתוב [?]
-• שמור על כל סימני פיסוק, מרכאות, סוגריים, קווים, מספרים
-• שמור על מבנה שורות ופסקאות
+• שמור על סימני פיסוק ומספרים
 • אל תוסיף כותרות, הסברים, הערות - רק הטקסט עצמו
+• שורה זו היא שורה אחת מתוך עמוד — תן רק את הטקסט של שורה זו
 
 התחל ישירות:"""
 
-        # פרומפט מיזוג - לשלב שני העתקים
-        MERGE_PROMPT = """לפניך שני עותקים של OCR על אותה תמונה של כתב יד עברי.
-שני הסורקים ביצעו העתקה עיוורת - בלי לשפוט משמעות.
-
-משימתך: לייצר עותק שלישי ומדויק יותר על ידי:
-1. במקומות שהם **זהים** - זה כנראה נכון, השאר כפי שהוא
-2. במקומות שהם **שונים** - בחר את הגרסה שנראית נאמנה יותר לכתב יד (לא "הגיונית" יותר!)
-3. אם שניהם נראים שגויים - כתוב [?]
-4. אל תתקן שגיאות כתיב, אל תוסיף מילים, אל תשנה סדר
-5. החזר רק את הטקסט הממוזג, ללא הערות
-
-עותק א':
-{text_a}
-
-עותק ב':
-{text_b}
-
-טקסט ממוזג:"""
-
-        def _split_to_row_groups(img_bytes, rows_per_group=5):
-            """
-            מפצל תמונה לקבוצות של rows_per_group שורות.
-            מחזיר רשימת bytes של תמונות.
-            """
-            from PIL import Image
-            import io, numpy as np
-
+        def _detect_lines(img_bytes):
+            """מזהה שורות טקסט בתמונה ומחזיר רשימת (top, bottom) לכל שורה."""
             img = Image.open(io.BytesIO(img_bytes)).convert('L')
             arr = np.array(img)
 
-            # זיהוי שורות — מצא שורות אופקיות לבנות (הפרדה בין שורות טקסט)
+            # סף: שורות בהירות = רווח בין שורות
             row_means = arr.mean(axis=1)
-            threshold = row_means.max() * 0.95  # שורות שכמעט לבנות לגמרי
+            threshold = row_means.max() * 0.92
 
-            # מצא נקודות פיצול (מעבר מטקסט לרווח)
             in_text = False
             line_starts = []
             line_ends = []
@@ -773,152 +746,119 @@ def _gemini_ocr(filepath, original_filename):
                 line_ends.append(len(row_means))
 
             lines = list(zip(line_starts, line_ends))
-            if not lines:
-                return [img_bytes]  # אין פיצול אפשרי
+            # סנן שורות קצרות מדי (רעש)
+            min_height = arr.shape[0] * 0.01
+            lines = [(s, e) for s, e in lines if (e - s) >= min_height]
+            return lines, img
 
-            # קבץ שורות לקבוצות
-            groups = []
-            for i in range(0, len(lines), rows_per_group):
-                group_lines = lines[i:i + rows_per_group]
-                top = max(0, group_lines[0][0] - 10)
-                bottom = min(arr.shape[0], group_lines[-1][1] + 10)
-                cropped = img.crop((0, top, img.width, bottom))
-                buf = io.BytesIO()
-                cropped.save(buf, format='PNG')
-                groups.append(buf.getvalue())
+        def _crop_line(img, top, bottom, padding=8):
+            """חותך שורה אחת מהתמונה."""
+            h = img.height
+            t = max(0, top - padding)
+            b = min(h, bottom + padding)
+            cropped = img.crop((0, t, img.width, b))
+            # הגדל × 2 לבהירות
+            new_w = cropped.width * 2
+            new_h = cropped.height * 2
+            cropped = cropped.resize((new_w, new_h), Image.LANCZOS)
+            buf = io.BytesIO()
+            cropped.save(buf, format='PNG')
+            return buf.getvalue()
 
-            return groups if groups else [img_bytes]
-
-        def process_page_image(page_img_bytes):
-            """מעבד תמונת עמוד: פיצול לשורות + dual OCR + merge."""
-
-            # פיצול לקבוצות של 5 שורות
-            groups = _split_to_row_groups(page_img_bytes, rows_per_group=5)
-            log.info(f"OCR: split page into {len(groups)} groups of ~5 lines")
-
-            if len(groups) == 1:
-                # לא הצלחנו לפצל — נעבד כרגיל
-                pass
-            else:
-                # עבד כל קבוצה בנפרד ואחד
-                group_texts = []
-                for gi, group_bytes in enumerate(groups):
-                    processed_g = _preprocess_image_for_ocr(group_bytes)
-                    text = None
-                    for attempt in range(3):
-                        try:
-                            text = _gemini_ocr_single_pass(client, processed_g, f'קבוצה {gi+1}', gtypes, OCR_PROMPT)
-                            break
-                        except Exception as ge:
-                            log.warning(f"OCR group {gi+1} attempt {attempt+1} failed: {ge}")
-                            if attempt < 2:
-                                import time as _t; _t.sleep(8)
-                    if text:
-                        group_texts.append(text)
-
-                if group_texts:
-                    return '\n'.join(group_texts)
-                # אם נכשל — נמשיך לעיבוד רגיל
-
-            # עיבוד תמונה
-            processed = _preprocess_image_for_ocr(page_img_bytes)
-
-            # פעימה א' - על התמונה המעובדת
-            text_a = None
-            text_b = None
-            for attempt in range(3):
-                try:
-                    text_a = _gemini_ocr_single_pass(client, processed, 'א', gtypes, OCR_PROMPT)
-                    break
-                except Exception as ge:
-                    log.warning(f"OCR pass A attempt {attempt+1} failed: {ge}")
-                    if attempt < 2:
-                        import time as _t; _t.sleep(8)
-
-            if not text_a:
-                return None
-
-            # פעימה ב' - על התמונה המקורית (לא מעובדת) לקבל נקודת מבט שונה
-            for attempt in range(3):
-                try:
-                    text_b = _gemini_ocr_single_pass(client, page_img_bytes, 'ב', gtypes, OCR_PROMPT)
-                    break
-                except Exception as ge:
-                    log.warning(f"OCR pass B attempt {attempt+1} failed: {ge}")
-                    if attempt < 2:
-                        import time as _t; _t.sleep(8)
-
-            if not text_b:
-                return text_a  # אם פעימה ב' נכשלה, נחזיר פעימה א'
-
-            # מיזוג שני העתקים
-            merge_prompt = MERGE_PROMPT.format(text_a=text_a, text_b=text_b)
+        def _ocr_single_line(client, line_bytes, line_idx, gtypes, prompt):
+            """מבצע OCR על שורה אחת."""
+            from google.genai import types as _gt
             for attempt in range(3):
                 try:
                     response = client.models.generate_content(
                         model='gemini-3.5-flash',
-                        contents=[merge_prompt],
+                        contents=[
+                            prompt,
+                            _gt.Part.from_bytes(data=line_bytes, mime_type='image/png'),
+                        ],
                     )
-                    merged = response.text.strip()
-                    log.info(f"OCR merge: A={len(text_a)}ch, B={len(text_b)}ch, merged={len(merged)}ch")
-                    return merged
-                except Exception as ge:
-                    log.warning(f"OCR merge attempt {attempt+1} failed: {ge}")
+                    return line_idx, response.text.strip()
+                except Exception as e:
+                    log.warning(f"OCR line {line_idx} attempt {attempt+1} failed: {e}")
                     if attempt < 2:
-                        import time as _t; _t.sleep(8)
+                        import time as _t; _t.sleep(5)
+            return line_idx, '[?]'
 
-            return text_a  # fallback לפעימה א'
+        def process_page_image(page_img_bytes):
+            """מזהה שורות ושולח 15 במקביל לגמיני."""
+            lines, img = _detect_lines(page_img_bytes)
+            log.info(f"OCR: detected {len(lines)} lines in page")
 
-        # PDF - עיבוד עמוד-עמוד
+            if not lines:
+                # אין שורות — שלח עמוד שלם
+                log.warning("OCR: no lines detected, sending full page")
+                processed = _preprocess_image_for_ocr(page_img_bytes)
+                response = client.models.generate_content(
+                    model='gemini-3.5-flash',
+                    contents=[OCR_PROMPT, gtypes.Part.from_bytes(data=processed, mime_type='image/png')],
+                )
+                return response.text.strip()
+
+            # חתוך כל שורה
+            line_images = []
+            for i, (top, bottom) in enumerate(lines):
+                try:
+                    line_bytes = _crop_line(img, top, bottom)
+                    line_images.append((i, line_bytes))
+                except Exception as e:
+                    log.warning(f"OCR: could not crop line {i}: {e}")
+                    line_images.append((i, None))
+
+            # שלח 15 שורות במקביל
+            results = {}
+            with _TPE(max_workers=15) as pool:
+                futures = {}
+                for idx, lb in line_images:
+                    if lb is None:
+                        results[idx] = '[?]'
+                        continue
+                    f = pool.submit(_ocr_single_line, client, lb, idx, gtypes, OCR_PROMPT)
+                    futures[f] = idx
+
+                for f in as_completed(futures):
+                    try:
+                        line_idx, text = f.result()
+                        results[line_idx] = text
+                    except Exception as e:
+                        results[futures[f]] = '[?]'
+
+            # איחוד לפי סדר
+            full_text = '\n'.join(results.get(i, '[?]') for i in range(len(lines)))
+            return full_text
+
+        # עיבוד לפי סוג קובץ
         if ext == 'pdf':
-            import fitz
-            all_pages_text = []
-
-            doc = fitz.open(filepath)
-            num_pages = len(doc)
-            log.info(f"Gemini OCR: PDF has {num_pages} pages")
-
-            for page_num in range(num_pages):
-                page = doc[page_num]
-                # זום 4x לבהירות מקסימלית
-                mat = fitz.Matrix(4.0, 4.0)
-                pix = page.get_pixmap(matrix=mat)
-                img_bytes = pix.tobytes("png")
-
-                log.info(f"Gemini OCR: processing page {page_num+1}/{num_pages}, {len(img_bytes)} bytes")
-
-                page_text = process_page_image(img_bytes)
-                if page_text:
-                    all_pages_text.append(f"--- עמוד {page_num+1} ---\n{page_text}")
-                else:
-                    all_pages_text.append(f"--- עמוד {page_num+1} ---\n[לא קריא]")
-
-            doc.close()
-            result = '\n\n'.join(all_pages_text)
-            log.info(f"Gemini OCR completed (PDF, {len(all_pages_text)} pages): {len(result)} chars")
-            return result
-
+            try:
+                import fitz
+                doc = fitz.open(filepath)
+                page_texts = []
+                for page_num in range(len(doc)):
+                    page = doc[page_num]
+                    mat = fitz.Matrix(3, 3)
+                    pix = page.get_pixmap(matrix=mat, colorspace=fitz.csGRAY)
+                    img_bytes = pix.tobytes('png')
+                    log.info(f"OCR PDF page {page_num + 1}/{len(doc)}")
+                    text = process_page_image(img_bytes)
+                    if text:
+                        page_texts.append(f"--- עמוד {page_num + 1} ---\n{text}")
+                doc.close()
+                return '\n\n'.join(page_texts) if page_texts else None
+            except Exception as e:
+                log.error(f"OCR PDF error: {e}")
+                return None
         else:
-            # תמונה רגילה
-            mime_map = {
-                'jpg': 'image/jpeg', 'jpeg': 'image/jpeg',
-                'png': 'image/png', 'gif': 'image/gif',
-                'webp': 'image/webp', 'tiff': 'image/tiff',
-                'tif': 'image/tiff', 'bmp': 'image/bmp',
-            }
-
             with open(filepath, 'rb') as f:
-                file_bytes = f.read()
-
-            log.info(f"Gemini OCR: {original_filename}, {len(file_bytes)} bytes")
-            result = process_page_image(file_bytes)
-            if result:
-                log.info(f"Gemini OCR completed: {len(result)} chars")
-                return result
-            return None
+                img_bytes = f.read()
+            return process_page_image(img_bytes)
 
     except Exception as e:
-        log.error(f"Gemini OCR error: {e}")
+        log.error(f"OCR error: {e}")
+        import traceback; log.error(traceback.format_exc())
         return None
 
 
