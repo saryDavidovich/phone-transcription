@@ -730,7 +730,7 @@ def _gemini_ocr(filepath, original_filename):
 
             # סף: שורות בהירות = רווח בין שורות
             row_means = arr.mean(axis=1)
-            threshold = row_means.max() * 0.92
+            threshold = row_means.max() * 0.85  # threshold מתון יותר לזיהוי שורות
 
             in_text = False
             line_starts = []
@@ -747,7 +747,7 @@ def _gemini_ocr(filepath, original_filename):
 
             lines = list(zip(line_starts, line_ends))
             # סנן שורות קצרות מדי (רעש)
-            min_height = arr.shape[0] * 0.01
+            min_height = arr.shape[0] * 0.005  # שורות קצרות מינימום
             lines = [(s, e) for s, e in lines if (e - s) >= min_height]
             return lines, img
 
