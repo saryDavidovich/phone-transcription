@@ -698,7 +698,7 @@ def _gemini_ocr(filepath, original_filename):
         from google import genai
         from google.genai import types as gtypes
         from concurrent.futures import ThreadPoolExecutor as _TPE, as_completed
-        import cv2, numpy as np
+        import numpy as np
         from PIL import Image
         import io
 
