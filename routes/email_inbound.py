@@ -404,15 +404,10 @@ def _pick_file():
 def _process_ocr_email(filepath, original_filename, customer, sender_email, phone, db):
     """
     מעבד קובץ תמונה/PDF ב-OCR דרך Gemini ושולח את הטקסט חזרה במייל + Word.
-    רץ ב-thread נפרד כדי לא לעכב את תגובת ה-webhook.
+    נכנס לתור המשותף עם תמלולים (מקסימום 12 במקביל).
     """
-    import threading
-    t = threading.Thread(
-        target=_ocr_worker,
-        args=(filepath, original_filename, customer.id, customer.email, phone),
-        daemon=True
-    )
-    t.start()
+    from services.transcribe import ocr_async
+    ocr_async(_ocr_worker, filepath, original_filename, customer.id, customer.email, phone)
 
 
 def _ocr_worker(filepath, original_filename, customer_id, customer_email, phone):
@@ -748,8 +743,83 @@ def _gemini_ocr(filepath, original_filename):
 
 טקסט ממוזג:"""
 
+        def _split_to_row_groups(img_bytes, rows_per_group=5):
+            """
+            מפצל תמונה לקבוצות של rows_per_group שורות.
+            מחזיר רשימת bytes של תמונות.
+            """
+            from PIL import Image
+            import io, numpy as np
+
+            img = Image.open(io.BytesIO(img_bytes)).convert('L')
+            arr = np.array(img)
+
+            # זיהוי שורות — מצא שורות אופקיות לבנות (הפרדה בין שורות טקסט)
+            row_means = arr.mean(axis=1)
+            threshold = row_means.max() * 0.95  # שורות שכמעט לבנות לגמרי
+
+            # מצא נקודות פיצול (מעבר מטקסט לרווח)
+            in_text = False
+            line_starts = []
+            line_ends = []
+            for i, mean in enumerate(row_means):
+                if mean < threshold and not in_text:
+                    in_text = True
+                    line_starts.append(i)
+                elif mean >= threshold and in_text:
+                    in_text = False
+                    line_ends.append(i)
+            if in_text:
+                line_ends.append(len(row_means))
+
+            lines = list(zip(line_starts, line_ends))
+            if not lines:
+                return [img_bytes]  # אין פיצול אפשרי
+
+            # קבץ שורות לקבוצות
+            groups = []
+            for i in range(0, len(lines), rows_per_group):
+                group_lines = lines[i:i + rows_per_group]
+                top = max(0, group_lines[0][0] - 10)
+                bottom = min(arr.shape[0], group_lines[-1][1] + 10)
+                cropped = img.crop((0, top, img.width, bottom))
+                buf = io.BytesIO()
+                cropped.save(buf, format='PNG')
+                groups.append(buf.getvalue())
+
+            return groups if groups else [img_bytes]
+
         def process_page_image(page_img_bytes):
-            """מעבד תמונת עמוד: preprocessing + dual OCR + merge."""
+            """מעבד תמונת עמוד: פיצול לשורות + dual OCR + merge."""
+
+            # פיצול לקבוצות של 5 שורות
+            groups = _split_to_row_groups(page_img_bytes, rows_per_group=5)
+            log.info(f"OCR: split page into {len(groups)} groups of ~5 lines")
+
+            if len(groups) == 1:
+                # לא הצלחנו לפצל — נעבד כרגיל
+                pass
+            else:
+                # עבד כל קבוצה בנפרד ואחד
+                group_texts = []
+                for gi, group_bytes in enumerate(groups):
+                    processed_g = _preprocess_image_for_ocr(group_bytes)
+                    text = None
+                    for attempt in range(3):
+                        try:
+                            text = _gemini_ocr_single_pass(client, processed_g, f'קבוצה {gi+1}', gtypes, OCR_PROMPT)
+                            break
+                        except Exception as ge:
+                            log.warning(f"OCR group {gi+1} attempt {attempt+1} failed: {ge}")
+                            if attempt < 2:
+                                import time as _t; _t.sleep(8)
+                    if text:
+                        group_texts.append(text)
+
+                if group_texts:
+                    return '\n'.join(group_texts)
+                # אם נכשל — נמשיך לעיבוד רגיל
+
             # עיבוד תמונה
             processed = _preprocess_image_for_ocr(page_img_bytes)
 
