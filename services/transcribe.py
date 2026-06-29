@@ -4,8 +4,14 @@ from concurrent.futures import ThreadPoolExecutor
 log = logging.getLogger(__name__)
 
 # מקסימום 10 תמלולים במקביל — מגן על rate limits של גמיני
-_executor = ThreadPoolExecutor(max_workers=10)
+_executor = ThreadPoolExecutor(max_workers=12)
 
+
+
+def ocr_async(func, *args, **kwargs):
+    waiting = _executor._work_queue.qsize()
+    log.info(f"ocr_async: נכנס לתור (ממתינים בתור: {waiting})")
+    return _executor.submit(func, *args, **kwargs)
 
 def transcribe_async(call_id, rec_url, customer_id, delivery_method, delivered_to, duration_seconds, transcription_tier='basic', language='he', output_language='he'):
     waiting = _executor._work_queue.qsize()
