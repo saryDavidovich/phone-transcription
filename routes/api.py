@@ -138,10 +138,15 @@ def alefbot_webhook():
     current_app.logger.info(f"AlefBot webhook received: {data}")
 
     # אלף בוט שולח event_type ו-job_id
+    # payload אפשרי: {"event_type": "transcription.completed", "job_id": "...", "status": "completed"}
     event_type = data.get('event_type', '')
-    job_id = data.get('job_id', '')
+    job_id = data.get('job_id', '') or data.get('id', '')
+    status = data.get('status', '')
 
-    if event_type == 'transcription.completed' and job_id:
+    # קבל אם event_type הוא completed או status הוא completed
+    is_completed = (event_type == 'transcription.completed') or (status == 'completed')
+
+    if is_completed and job_id:
         # מצא את ה-call_id לפי job_id בבסיס הנתונים
         rec = Recording.query.filter_by(alefbot_job_id=job_id).first()
         if not rec:
@@ -153,7 +158,7 @@ def alefbot_webhook():
         try:
             # קבל את הטקסט מ-artifact — plain_text
             r = req.get(
-                f'https://alef-bot.top/api/v1/transcriptions/{job_id}/artifact.plain_text',
+                f'https://alef-bot.top/api/v1/transcriptions/{job_id}/artifact?format=txt',
                 headers={'Authorization': f'Bearer {api_key}'},
                 timeout=60
             )
