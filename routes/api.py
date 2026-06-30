@@ -15,7 +15,7 @@ def get_customer(phone):
         db.session.commit()
     return jsonify({
         'phone': customer.phone,
-        'balance': customer.balance,
+        'balance': round(max(customer.balance, 0), 2),
         'email': customer.email or '',
         'fax': customer.fax or '',
         'delivery_method': customer.delivery_method or 'email',
