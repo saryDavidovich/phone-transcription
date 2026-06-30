@@ -740,7 +740,7 @@ def _gemini_ocr(filepath, original_filename):
             return buf.getvalue()
 
         def process_page_image(page_img_bytes):
-            """מגדיל את כל העמוד ב-450% ושולח כקריאה אחת לגמיני."""
+            """מגדיל את כל העמוד ב-450% ושולח כקריאה אחת לגמיני, ללא thinking (חוסך עלות מיותרת)."""
             zoomed_bytes = _zoom_image(page_img_bytes, scale=4.5)
             processed = _preprocess_image_for_ocr(zoomed_bytes)
 
@@ -749,7 +749,15 @@ def _gemini_ocr(filepath, original_filename):
                     response = client.models.generate_content(
                         model='gemini-3.5-flash',
                         contents=[OCR_PROMPT, gtypes.Part.from_bytes(data=processed, mime_type='image/png')],
+                        config=gtypes.GenerateContentConfig(
+                            thinking_config=gtypes.ThinkingConfig(thinking_budget=0)
+                        ),
                     )
+                    try:
+                        thoughts = response.usage_metadata.thoughts_token_count or 0
+                        log.info(f"OCR call usage: thoughts={thoughts}, total={response.usage_metadata.total_token_count}")
+                    except Exception:
+                        pass
                     return (response.text or '').strip()
                 except Exception as e:
                     log.warning(f"OCR full page attempt {attempt+1} failed: {e}")
