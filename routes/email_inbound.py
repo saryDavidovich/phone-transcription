@@ -156,16 +156,22 @@ def _parse_subject(subject):
 
     tier = 'gemini'
     lang_tokens = []
+    output_is_original = False
 
     for tok in tokens[1:]:
         tok_clean = tok.strip()
         if tok_clean in TIER_MAP:
             tier = TIER_MAP[tok_clean]
+        elif tok_clean == 'מקור':
+            output_is_original = True
         elif tok_clean in LANG_MAP:
             lang_tokens.append(LANG_MAP[tok_clean])
 
     language = lang_tokens[0] if len(lang_tokens) >= 1 else 'he'
-    output_language = lang_tokens[1] if len(lang_tokens) >= 2 else 'he'
+    if output_is_original:
+        output_language = 'original'
+    else:
+        output_language = lang_tokens[1] if len(lang_tokens) >= 2 else 'he'
 
     return {
         'phone': phone,
