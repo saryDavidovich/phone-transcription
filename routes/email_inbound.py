@@ -723,8 +723,8 @@ def _gemini_ocr(filepath, original_filename):
 
 התחל ישירות:"""
 
-        def _zoom_image(img_bytes, scale=2.5):
-            """מגדיל את כל התמונה לפני כל עיבוד נוסף — כדי שחיתוך מילים יהיה מדויק וברור."""
+        def _zoom_image(img_bytes, scale=4.5):
+            """מגדיל את כל התמונה לפני חיתוך לשורות — זום 450%."""
             img = Image.open(io.BytesIO(img_bytes)).convert('L')
             new_w = int(img.width * scale)
             new_h = int(img.height * scale)
@@ -770,74 +770,18 @@ def _gemini_ocr(filepath, original_filename):
             log.info(f"OCR line detection: spread={spread:.1f}, threshold={threshold:.1f}, found {len(lines)} lines")
             return lines, img
 
-        def _detect_words_in_line(img, top, bottom, padding=8):
-            """
-            חותך שורה מהתמונה (שכבר מוגדלת) ומזהה בתוכה מילים בודדות
-            לפי רווחים אנכיים (עמודות לבנות = רווח בין מילים).
-            מחזיר רשימת bytes של תמונות מילים, מסודרות מימין לשמאל (RTL).
-            """
+        def _crop_line(img, top, bottom, padding=15):
+            """חותך שורה אחת מהתמונה המוגדלת ב-450%, ללא כיווץ נוסף."""
             h = img.height
             t = max(0, top - padding)
             b = min(h, bottom + padding)
-            line_img = img.crop((0, t, img.width, b))
-            arr = np.array(line_img)
+            cropped = img.crop((0, t, img.width, b))
+            buf = io.BytesIO()
+            cropped.save(buf, format='PNG')
+            return buf.getvalue()
 
-            if arr.shape[1] < 10:
-                return [line_img]
-
-            col_means = arr.mean(axis=0)
-            max_val = col_means.max()
-            min_val = col_means.min()
-            spread = max_val - min_val
-            factor = 0.30 if spread < 60 else 0.5
-            threshold = max_val - spread * factor
-
-            in_word = False
-            word_starts = []
-            word_ends = []
-            for i, mean in enumerate(col_means):
-                if mean < threshold and not in_word:
-                    in_word = True
-                    word_starts.append(i)
-                elif mean >= threshold and in_word:
-                    in_word = False
-                    word_ends.append(i)
-            if in_word:
-                word_ends.append(len(col_means))
-
-            words = list(zip(word_starts, word_ends))
-            # סנן רעש קטן מדי (כתמים, פיסוק בודד שנדבק לאות)
-            min_width = arr.shape[1] * 0.008
-            words = [(s, e) for s, e in words if (e - s) >= min_width]
-
-            if not words:
-                return [line_img]
-
-            # מיזוג מילים קרובות מדי (כנראה אותיות מאותה מילה שהתפצלו)
-            merged = [words[0]]
-            gap_threshold = arr.shape[1] * 0.012
-            for s, e in words[1:]:
-                prev_s, prev_e = merged[-1]
-                if s - prev_e < gap_threshold:
-                    merged[-1] = (prev_s, e)
-                else:
-                    merged.append((s, e))
-            words = merged
-
-            word_imgs = []
-            for ws, we in words:
-                wpad = 6
-                wl = max(0, ws - wpad)
-                wr = min(line_img.width, we + wpad)
-                word_crop = line_img.crop((wl, 0, wr, line_img.height))
-                word_imgs.append(word_crop)
-
-            # עברית נכתבת מימין לשמאל — המילה הימנית ביותר (x גדול) היא הראשונה
-            word_imgs.reverse()
-            return word_imgs if word_imgs else [line_img]
-
-        def _ocr_single_word(client, word_bytes, word_key, gtypes, prompt):
-            """מבצע OCR על מילה אחת."""
+        def _ocr_single_line(client, line_bytes, line_idx, gtypes, prompt):
+            """מבצע OCR על שורה אחת."""
             from google.genai import types as _gt
             for attempt in range(3):
                 try:
@@ -845,34 +789,21 @@ def _gemini_ocr(filepath, original_filename):
                         model='gemini-3.5-flash',
                         contents=[
                             prompt,
-                            _gt.Part.from_bytes(data=word_bytes, mime_type='image/png'),
+                            _gt.Part.from_bytes(data=line_bytes, mime_type='image/png'),
                         ],
                     )
-                    return word_key, response.text.strip()
+                    return line_idx, response.text.strip()
                 except Exception as e:
-                    log.warning(f"OCR word {word_key} attempt {attempt+1} failed: {e}")
+                    log.warning(f"OCR line {line_idx} attempt {attempt+1} failed: {e}")
                     if attempt < 2:
                         import time as _t; _t.sleep(5)
-            return word_key, '[?]'
-
-        WORD_PROMPT = """אתה סורק OCR מכני - אתה מזהה צורת גרפית של מילה אחת בכתב יד בלבד.
-אין לך שום ידע שפתי. אינך יודע עברית. אינך יודע מה המשמעות של המילה.
-אתה רק מעתיק את מה שאתה רואה, כמו מצלמה שמעתיקה פיקסלים.
-
-כללים ברזל:
-• זוהי מילה בודדת אחת - העתק אותה בדיוק כפי שהיא מצוירת
-• אסור לתקן שגיאות כתיב
-• אסור להמיר למילה "הגיונית" אחרת
-• אם המילה לא קריאה כלל: כתוב [?]
-• החזר רק את המילה עצמה, ללא רווחים מיותרים, ללא הסברים
-
-התחל ישירות:"""
+            return line_idx, '[?]'
 
         def process_page_image(page_img_bytes):
-            """מגדיל את כל העמוד, מזהה שורות, מזהה מילים בכל שורה, ושולח הכל במקביל."""
+            """מגדיל את כל העמוד ב-450%, מזהה שורות, ושולח כל שורה בנפרד (15 במקביל)."""
 
-            # שלב 1: זום על כל העמוד לפני כל חיתוך
-            zoomed_bytes = _zoom_image(page_img_bytes, scale=2.5)
+            # שלב 1: זום 450% על כל העמוד לפני חיתוך
+            zoomed_bytes = _zoom_image(page_img_bytes, scale=4.5)
 
             # שלב 2: זיהוי שורות על התמונה המוגדלת
             lines, img = _detect_lines(zoomed_bytes)
@@ -887,55 +818,36 @@ def _gemini_ocr(filepath, original_filename):
                 )
                 return response.text.strip()
 
-            # שלב 3: זיהוי מילים בכל שורה (על התמונה המוגדלת)
-            all_word_tasks = []  # [(line_idx, word_idx_in_line, word_bytes), ...]
-            for li, (top, bottom) in enumerate(lines):
+            # שלב 3: חתוך כל שורה מהתמונה המוגדלת
+            line_images = []
+            for i, (top, bottom) in enumerate(lines):
                 try:
-                    word_imgs = _detect_words_in_line(img, top, bottom)
-                    for wi, word_img in enumerate(word_imgs):
-                        buf = io.BytesIO()
-                        word_img.save(buf, format='PNG')
-                        all_word_tasks.append((li, wi, buf.getvalue()))
+                    line_bytes = _crop_line(img, top, bottom)
+                    line_images.append((i, line_bytes))
                 except Exception as e:
-                    log.warning(f"OCR: could not split words in line {li}: {e}")
+                    log.warning(f"OCR: could not crop line {i}: {e}")
+                    line_images.append((i, None))
 
-            log.info(f"OCR: split into {len(all_word_tasks)} words total across {len(lines)} lines")
-
-            if not all_word_tasks:
-                log.warning("OCR: no words detected, falling back to full page")
-                processed = _preprocess_image_for_ocr(page_img_bytes)
-                response = client.models.generate_content(
-                    model='gemini-3.5-flash',
-                    contents=[OCR_PROMPT, gtypes.Part.from_bytes(data=processed, mime_type='image/png')],
-                )
-                return response.text.strip()
-
-            # שלב 4: שלח את כל המילים במקביל (15 בו זמנית)
+            # שלב 4: שלח כל שורה בנפרד — 15 במקביל
             results = {}
             with _TPE(max_workers=15) as pool:
                 futures = {}
-                for li, wi, wb in all_word_tasks:
-                    key = (li, wi)
-                    f = pool.submit(_ocr_single_word, client, wb, key, gtypes, WORD_PROMPT)
-                    futures[f] = key
+                for idx, lb in line_images:
+                    if lb is None:
+                        results[idx] = '[?]'
+                        continue
+                    f = pool.submit(_ocr_single_line, client, lb, idx, gtypes, OCR_PROMPT)
+                    futures[f] = idx
 
                 for f in as_completed(futures):
                     try:
-                        key, text = f.result()
-                        results[key] = text
+                        line_idx, text = f.result()
+                        results[line_idx] = text
                     except Exception:
                         results[futures[f]] = '[?]'
 
-            # שלב 5: איחוד — לפי שורה, ובתוך כל שורה לפי סדר המילים (כבר מסודר RTL)
-            line_texts = []
-            for li in range(len(lines)):
-                words_in_line = [results.get((li, wi), '') for wi in range(
-                    max((w + 1 for (l, w) in results if l == li), default=0)
-                )]
-                words_in_line = [w for w in words_in_line if w]
-                line_texts.append(' '.join(words_in_line))
-
-            full_text = '\n'.join(line_texts)
+            # שלב 5: איחוד לפי סדר השורות
+            full_text = '\n'.join(results.get(i, '[?]') for i in range(len(lines)))
             return full_text
 
         # עיבוד לפי סוג קובץ
