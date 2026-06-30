@@ -32,6 +32,7 @@ def get_pending_recordings():
     """
     from models import Recording
     from datetime import datetime
+    from routes.admin import get_setting
     import math
 
     phone = request.args.get('phone', '')
@@ -47,13 +48,13 @@ def get_pending_recordings():
             Recording.expires_at > datetime.utcnow()
         ).first()
     except Exception as e:
-        log.warning(f"pending-recordings query error: {e}")
+        current_app.logger.warning(f"pending-recordings query error: {e}")
         return jsonify({'has_pending': False})
 
     if not pending:
         return jsonify({'has_pending': False})
 
-    price_per_20min = float(_get_setting('price_per_20min_basic', '0.90'))
+    price_per_20min = float(get_setting('price_per_20min_basic', '0.90'))
     units = math.ceil((pending.duration_seconds or 0) / 1200) or 1
     cost = round(units * price_per_20min, 2)
     minutes = (pending.duration_seconds or 0) // 60
