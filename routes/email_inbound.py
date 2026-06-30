@@ -34,6 +34,10 @@ import time
 import uuid
 import logging
 import threading
+
+# הגדל מגבלת PIL — עמודים בזום 450% חורגים מהמגבלה הדיפולטית
+from PIL import Image as _PILImage
+_PILImage.MAX_IMAGE_PIXELS = 300_000_000
 from urllib.parse import quote
 
 from flask import Blueprint, request, jsonify, send_from_directory
@@ -770,18 +774,36 @@ def _gemini_ocr(filepath, original_filename):
             log.info(f"OCR line detection: spread={spread:.1f}, threshold={threshold:.1f}, found {len(lines)} lines")
             return lines, img
 
-        def _crop_line(img, top, bottom, padding=15):
-            """חותך שורה אחת מהתמונה המוגדלת ב-450%, ללא כיווץ נוסף."""
+        def _crop_line_halves(img, top, bottom, padding=15, overlap_pct=0.05):
+            """
+            חותך שורה אחת מהתמונה המוגדלת, ואז מחלק אותה לשני חצאים: ימני ושמאלי.
+            עברית נכתבת מימין לשמאל — חצי ימני = תחילת השורה, חצי שמאלי = סוף השורה.
+            יש חפיפה קטנה בין החצאים כדי לא לחתוך אות/מילה בדיוק באמצע.
+            מחזיר [(0, bytes_ימני), (1, bytes_שמאלי)] — לפי סדר קריאה (ימין קודם).
+            """
             h = img.height
             t = max(0, top - padding)
             b = min(h, bottom + padding)
             cropped = img.crop((0, t, img.width, b))
-            buf = io.BytesIO()
-            cropped.save(buf, format='PNG')
-            return buf.getvalue()
 
-        def _ocr_single_line(client, line_bytes, line_idx, gtypes, prompt):
-            """מבצע OCR על שורה אחת."""
+            w = cropped.width
+            overlap = int(w * overlap_pct)
+            mid = w // 2
+
+            # חצי ימני (תחילת השורה בעברית) - מ-mid עד הקצה הימני (+חפיפה שמאלה)
+            right_half = cropped.crop((mid - overlap, 0, w, cropped.height))
+            # חצי שמאלי (סוף השורה) - מההתחלה עד mid (+חפיפה ימינה)
+            left_half = cropped.crop((0, 0, mid + overlap, cropped.height))
+
+            def _to_bytes(im):
+                buf = io.BytesIO()
+                im.save(buf, format='PNG')
+                return buf.getvalue()
+
+            return [(0, _to_bytes(right_half)), (1, _to_bytes(left_half))]
+
+        def _ocr_single_line(client, line_bytes, line_key, gtypes, prompt):
+            """מבצע OCR על חצי שורה."""
             from google.genai import types as _gt
             for attempt in range(3):
                 try:
@@ -792,15 +814,15 @@ def _gemini_ocr(filepath, original_filename):
                             _gt.Part.from_bytes(data=line_bytes, mime_type='image/png'),
                         ],
                     )
-                    return line_idx, response.text.strip()
+                    return line_key, (response.text or '').strip()
                 except Exception as e:
-                    log.warning(f"OCR line {line_idx} attempt {attempt+1} failed: {e}")
+                    log.warning(f"OCR part {line_key} attempt {attempt+1} failed: {e}")
                     if attempt < 2:
                         import time as _t; _t.sleep(5)
-            return line_idx, '[?]'
+            return line_key, '[?]'
 
         def process_page_image(page_img_bytes):
-            """מגדיל את כל העמוד ב-450%, מזהה שורות, ושולח כל שורה בנפרד (15 במקביל)."""
+            """מגדיל את כל העמוד ב-450%, מזהה שורות, מחלק כל שורה לימין/שמאל, ושולח במקביל."""
 
             # שלב 1: זום 450% על כל העמוד לפני חיתוך
             zoomed_bytes = _zoom_image(page_img_bytes, scale=4.5)
@@ -818,36 +840,45 @@ def _gemini_ocr(filepath, original_filename):
                 )
                 return response.text.strip()
 
-            # שלב 3: חתוך כל שורה מהתמונה המוגדלת
-            line_images = []
-            for i, (top, bottom) in enumerate(lines):
+            # שלב 3: חתוך כל שורה לשני חצאים — ימני ושמאלי
+            # key = (line_idx, half_idx) — half_idx: 0=ימין (תחילת שורה), 1=שמאל (סוף שורה)
+            tasks = []
+            for li, (top, bottom) in enumerate(lines):
                 try:
-                    line_bytes = _crop_line(img, top, bottom)
-                    line_images.append((i, line_bytes))
+                    halves = _crop_line_halves(img, top, bottom)
+                    for half_idx, half_bytes in halves:
+                        tasks.append((li, half_idx, half_bytes))
                 except Exception as e:
-                    log.warning(f"OCR: could not crop line {i}: {e}")
-                    line_images.append((i, None))
+                    log.warning(f"OCR: could not split line {li} into halves: {e}")
 
-            # שלב 4: שלח כל שורה בנפרד — 15 במקביל
+            log.info(f"OCR: split into {len(tasks)} half-line images across {len(lines)} lines")
+
+            # שלב 4: שלח את כל החצאים במקביל — 15 בו זמנית
             results = {}
             with _TPE(max_workers=15) as pool:
                 futures = {}
-                for idx, lb in line_images:
-                    if lb is None:
-                        results[idx] = '[?]'
-                        continue
-                    f = pool.submit(_ocr_single_line, client, lb, idx, gtypes, OCR_PROMPT)
-                    futures[f] = idx
+                for li, half_idx, hb in tasks:
+                    key = (li, half_idx)
+                    f = pool.submit(_ocr_single_line, client, hb, key, gtypes, OCR_PROMPT)
+                    futures[f] = key
 
                 for f in as_completed(futures):
                     try:
-                        line_idx, text = f.result()
-                        results[line_idx] = text
+                        key, text = f.result()
+                        results[key] = text
                     except Exception:
                         results[futures[f]] = '[?]'
 
-            # שלב 5: איחוד לפי סדר השורות
-            full_text = '\n'.join(results.get(i, '[?]') for i in range(len(lines)))
+            # שלב 5: איחוד — לכל שורה: חצי ימני (0) ואז חצי שמאלי (1), ואז שורות לפי סדר
+            line_texts = []
+            for li in range(len(lines)):
+                right_part = results.get((li, 0), '')
+                left_part = results.get((li, 1), '')
+                # עברית RTL: הימני נקרא ראשון, אחריו השמאלי
+                combined = f"{right_part} {left_part}".strip()
+                line_texts.append(combined if combined else '[?]')
+
+            full_text = '\n'.join(line_texts)
             return full_text
 
         # עיבוד לפי סוג קובץ
