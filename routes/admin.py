@@ -295,7 +295,7 @@ def credit_customer(id):
     amount = float(request.form.get('amount', 0))
     reason = request.form.get('reason', 'זיכוי ידני')
     if amount > 0:
-        customer.balance += amount
+        customer.balance = round(customer.balance + amount, 2)
         txn = Transaction(
             customer_id=id,
             amount=amount,
@@ -314,7 +314,7 @@ def charge_customer(id):
     amount = float(request.form.get('amount', 0))
     reason = request.form.get('reason', 'חיוב ידני')
     if amount > 0:
-        customer.balance -= amount
+        customer.balance = round(customer.balance - amount, 2)
         txn = Transaction(
             customer_id=id,
             amount=-amount,
@@ -790,7 +790,7 @@ def bulk_customer_action():
             flash('סכום לא תקין')
             return redirect(url_for('admin.customers'))
         for c in customers:
-            c.balance += amount
+            c.balance = round(c.balance + amount, 2)
             txn = Transaction(
                 customer_id=c.id,
                 amount=amount,
@@ -808,7 +808,7 @@ def bulk_customer_action():
             return redirect(url_for('admin.customers'))
         for c in customers:
             bonus = round(c.balance * percent / 100, 2)
-            c.balance += bonus
+            c.balance = round(c.balance + bonus, 2)
             txn = Transaction(
                 customer_id=c.id,
                 amount=bonus,
