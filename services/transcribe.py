@@ -1097,11 +1097,12 @@ def _build_word_doc(name, duration_str, transcript_fixed, transcript_raw=None, t
     from docx import Document
     from docx.enum.text import WD_ALIGN_PARAGRAPH
     from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
     from docx.shared import Pt, RGBColor
     import io
 
-    def set_rtl(paragraph):
-        paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    def set_rtl(paragraph, justify=False):
+        paragraph.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY if justify else WD_ALIGN_PARAGRAPH.RIGHT
         pPr = paragraph._p.get_or_add_pPr()
         bidi = OxmlElement('w:bidi')
         pPr.append(bidi)
@@ -1144,8 +1145,20 @@ def _build_word_doc(name, duration_str, transcript_fixed, transcript_raw=None, t
     add_bottom_border(p_info)
     h1 = doc.add_heading('תמלול', level=1)
     set_rtl(h1)
-    p = doc.add_paragraph(transcript_fixed or '')
-    set_rtl(p)
+    p = doc.add_paragraph()
+    set_rtl(p, justify=True)
+    run_body = p.add_run(transcript_fixed or '')
+    run_body.font.size = Pt(13)
+    run_body.font.name = 'David'
+    # הגדרת פונט מפורשת ל-complex script (עברית) — חיוני לחדות ברינדור PDF/LibreOffice
+    rPr = run_body._r.get_or_add_rPr()
+    rFonts = rPr.find(qn('w:rFonts'))
+    if rFonts is None:
+        rFonts = OxmlElement('w:rFonts')
+        rPr.append(rFonts)
+    rFonts.set(qn('w:cs'), 'David')
+    rFonts.set(qn('w:ascii'), 'David')
+    rFonts.set(qn('w:hAnsi'), 'David')
 
     buf = io.BytesIO()
     doc.save(buf)
@@ -1179,7 +1192,11 @@ def _build_pdf_for_fax(name, duration_str, transcript_fixed):
                 f.write(docx_bytes)
 
             result = subprocess.run(
-                ['soffice', '--headless', '--convert-to', 'pdf', '--outdir', tmpdir, docx_path],
+                [
+                    'soffice', '--headless', '--convert-to',
+                    'pdf:writer_pdf_Export:{"Quality":{"type":"long","value":100},"ReduceImageResolution":{"type":"boolean","value":false},"SelectPdfVersion":{"type":"long","value":1}}',
+                    '--outdir', tmpdir, docx_path
+                ],
                 capture_output=True, text=True, timeout=120
             )
             if result.returncode != 0:
