@@ -1120,12 +1120,18 @@ def _mailto_link(phone, extra=''):
 
 
 def _send_instructions_email(to_email, phone, name=''):
+    from routes.admin import get_setting
+    price_audio = get_setting('price_per_20min_basic', '0.90')
+    price_premium = get_setting('price_per_20min_premium', '1.90')
+    price_video = get_setting('price_per_20min_video', '1.50')
+
     options = [
         ('תמלול רגיל, עברית', ''),
-        ('תמלול רגיל, יידיש → עברית', 'רגיל יידיש עברית'),
-        ('תמלול רגיל, יידיש → יידיש', 'רגיל יידיש יידיש'),
-        ('תמלול רגיל, אנגלית → עברית', 'רגיל אנגלית עברית'),
-        ('תמלול מקצועי, עברית', 'מקצועי'),
+        ('תמלול רגיל, יידיש ← עברית', 'רגיל יידיש עברית'),
+        ('תמלול רגיל, יידיש ← יידיש', 'רגיל יידיש יידיש'),
+        ('תמלול רגיל, אנגלית ← עברית', 'רגיל אנגלית עברית'),
+        ('תמלול מקצועי, פלט בעברית', 'מקצועי עברית'),
+        ('תמלול מקצועי, פלט בשפת ההקלטה', 'מקצועי מקור'),
     ]
 
     rows_html = ''
@@ -1152,7 +1158,7 @@ def _send_instructions_email(to_email, phone, name=''):
 {TRANSCRIBE_INBOUND_EMAIL}
 </div>
 <p style="line-height:1.8">
-ב<b>שורת הנושא</b> (Subject) של המייל כותבים את מספר הטלפון שלך - <b dir="ltr" style="font-family:monospace">{phone}</b>.
+ב<b>שורת הנושא</b> של המייל כותבים את מספר הטלפון שלך - <b dir="ltr" style="font-family:monospace">{phone}</b>.
 אפשר גם להוסיף אחרי המספר, מופרד ברווחים, את סוג התמלול (רגיל / מקצועי) ואת שפת ההקלטה ושפת הפלט הרצויה (עברית / יידיש / אנגלית).
 </p>
 <p style="line-height:1.8">
@@ -1189,6 +1195,15 @@ def _send_instructions_email(to_email, phone, name=''):
 🎬 <b>וידאו:</b> MP4, MOV, AVI, MKV, 3GP<br>
 </p>
 <p style="margin:8px 0 0;font-size:13px;color:#6b7280">ניתן לצרף קובץ אחד בלבד לכל מייל. גודל מקסימלי מומלץ: 25MB.</p>
+</div>
+
+<div style="background:#fffbeb;border-right:4px solid #f59e0b;padding:14px;margin:16px 0;border-radius:8px">
+<p style="margin:0 0 8px;font-weight:700;color:#92400e">💰 מחירון (לכל 20 דקות, או חלק מהן):</p>
+<p style="margin:0;line-height:2;color:#111827">
+🎵 <b>תמלול רגיל (אודיו):</b> ₪{price_audio}<br>
+⭐ <b>תמלול מקצועי:</b> ₪{price_premium}<br>
+🎬 <b>וידאו:</b> ₪{price_video}<br>
+</p>
 </div>
 
 <div style="background:#eff6ff;border-right:4px solid #3b82f6;padding:14px;margin:16px 0;border-radius:8px">
