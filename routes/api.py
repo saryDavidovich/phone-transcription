@@ -63,7 +63,7 @@ def get_pending_recordings():
         'has_pending': True,
         'minutes': minutes,
         'cost': cost,
-        'balance': customer.balance,
+        'balance': round(max(customer.balance, 0), 2),
         'enough_balance': customer.balance >= cost,
     })
 
