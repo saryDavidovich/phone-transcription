@@ -400,8 +400,8 @@ def _send_insufficient_balance_email(to_email, duration_seconds, cost, balance):
 </div>
 <p>הקובץ <b>נשמר במערכת ל-72 שעות</b>.<br>
 אם תטעין את הארנק תוך 72 שעות, התמלול יבוצע אוטומטית ויישלח אליך.</p>
-<p style="text-align:center;margin:24px 0">
-<a href="tel:033131795" style="background:#2563eb;color:#fff;text-decoration:none;padding:12px 28px;border-radius:8px;font-weight:700;font-size:16px;display:inline-block">התקשר לטעינת ארנק</a>
+<p style="text-align:center;margin:24px 0;font-size:16px;font-weight:700;color:#1d4ed8">
+לטעינת ארנק יש להתקשר למערכת ולבחור בתפריט הראשי בטעינת ארנק
 </p>
 <p style="color:#6b7280;font-size:13px">מערכת תמלולפון 03-3131795</p>
 </div>"""
