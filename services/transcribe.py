@@ -45,7 +45,8 @@ def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, durat
             if tier == 'premium':
                 log.info(f"Using AlefBot for customer {customer_id}")
                 alefbot_tier = 'premium_quality'  # תמיד מקצועי
-                translate_heb = (output_language == 'he' and language != 'he') or output_language == 'he'
+                # שפת פלט: 'he' = תרגם לעברית, 'original' (או כל ערך אחר) = השאר בשפת ההקלטה
+                translate_heb = (output_language == 'he')
                 job_id, actual_duration = _alefbot_submit(rec_url, call_id, model_tier=alefbot_tier, translate_to_hebrew=translate_heb)
 
                 if job_id:
