@@ -734,13 +734,21 @@ def _gemini_ocr(filepath, original_filename):
             return buf.getvalue()
 
         def _detect_lines(img_bytes):
-            """מזהה שורות טקסט בתמונה ומחזיר רשימת (top, bottom) לכל שורה."""
+            """מזהה שורות טקסט בתמונה ומחזיר רשימת (top, bottom) לכל שורה.
+            משתמש בסף אדפטיבי לפי טווח הבהירות בפועל בתמונה — מתאים גם לדפים
+            בהירים מאוד עם הבדל קטן בין טקסט לרקע (כמו דפי מחברת עם קווים)."""
             img = Image.open(io.BytesIO(img_bytes)).convert('L')
             arr = np.array(img)
 
-            # סף: שורות בהירות = רווח בין שורות
             row_means = arr.mean(axis=1)
-            threshold = row_means.max() * 0.85  # threshold מתון יותר לזיהוי שורות
+            max_val = row_means.max()
+            min_val = row_means.min()
+            spread = max_val - min_val
+
+            # סף אדפטיבי תמיד לפי spread בפועל — עובד טוב גם בדפים בהירים מאוד
+            # (קווי מחברת) וגם בדפים עם ניגודיות גבוהה
+            factor = 0.30 if spread < 60 else 0.5
+            threshold = max_val - spread * factor
 
             in_text = False
             line_starts = []
@@ -757,8 +765,9 @@ def _gemini_ocr(filepath, original_filename):
 
             lines = list(zip(line_starts, line_ends))
             # סנן שורות קצרות מדי (רעש)
-            min_height = arr.shape[0] * 0.005  # שורות קצרות מינימום
+            min_height = arr.shape[0] * 0.005
             lines = [(s, e) for s, e in lines if (e - s) >= min_height]
+            log.info(f"OCR line detection: spread={spread:.1f}, threshold={threshold:.1f}, found {len(lines)} lines")
             return lines, img
 
         def _detect_words_in_line(img, top, bottom, padding=8):
@@ -777,7 +786,11 @@ def _gemini_ocr(filepath, original_filename):
                 return [line_img]
 
             col_means = arr.mean(axis=0)
-            threshold = col_means.max() * 0.90
+            max_val = col_means.max()
+            min_val = col_means.min()
+            spread = max_val - min_val
+            factor = 0.30 if spread < 60 else 0.5
+            threshold = max_val - spread * factor
 
             in_word = False
             word_starts = []
