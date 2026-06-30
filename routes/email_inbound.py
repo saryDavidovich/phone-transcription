@@ -1263,7 +1263,7 @@ def send_handwriting_instructions():
 
 def _send_handwriting_instructions_email(to_email, phone, name=''):
     subject_display = phone
-    link = _mailto_link(phone, 'ocr')
+    link = _mailto_link(phone, '')
 
     html = f'''<div dir="rtl" style="font-family:Arial,sans-serif;max-width:640px;margin:auto;color:#111827">
 <h2 style="color:#1d4ed8">זיהוי כתב יד במייל <span style="font-size:14px;color:#d97706;font-weight:normal">— גרסה נסיונית</span></h2>
@@ -1272,8 +1272,7 @@ def _send_handwriting_instructions_email(to_email, phone, name=''):
 <div style="background:#fffbeb;border-right:4px solid #f59e0b;padding:14px;margin:14px 0;border-radius:8px">
 <p style="margin:0;font-weight:700;color:#92400e">⚠️ שימו לב — שירות זה בגרסה נסיונית בלבד</p>
 <p style="margin:8px 0 0;line-height:1.8;color:#111827;font-size:14px">
-ייתכנו שגיאות, מילים משובשות, או קטעים שלא יזוהו כראוי, במיוחד בכתב יד צפוף, לא ברור, או בכתב רש"י.<br>
-אנו ממליצים לבדוק את התוצאה ולא להסתמך עליה באופן מלא.
+ייתכנו שגיאות, מילים משובשות, או קטעים שלא יזוהו כראוי, במיוחד בכתב יד צפוף, לא ברור, או בכתב רש"י.
 </p>
 </div>
 
@@ -1285,8 +1284,8 @@ def _send_handwriting_instructions_email(to_email, phone, name=''):
 {TRANSCRIBE_INBOUND_EMAIL}
 </div>
 <p style="line-height:1.8">
-ב<b>שורת הנושא</b> (Subject) של המייל כותבים את מספר הטלפון שלך - <b dir="ltr" style="font-family:monospace">{phone}</b> - ואחריו המילה <b>ocr</b>:<br>
-<span dir="ltr" style="font-family:monospace;background:#f3f4f6;padding:4px 10px;border-radius:4px;display:inline-block;margin-top:6px">{phone} ocr</span>
+ב<b>שורת הנושא</b> של המייל כותבים את מספר הטלפון שלך:<br>
+<span dir="ltr" style="font-family:monospace;background:#f3f4f6;padding:4px 10px;border-radius:4px;display:inline-block;margin-top:6px">{phone}</span>
 </p>
 <p style="line-height:1.8">
 התוצאה תישלח בחזרה <b>לאותה כתובת מייל</b> שממנה נשלח הקובץ.
@@ -1299,7 +1298,7 @@ def _send_handwriting_instructions_email(to_email, phone, name=''):
 לחיצה על הכפתור תפתח טיוטת מייל עם הכתובת ושורת הנושא ממולאות — צריך רק <b>לצרף את הקובץ</b> ולשלוח:
 </p>
 <p style="text-align:center;margin:20px 0">
-<a href="{link} ocr" style="background:#2563eb;color:#fff;text-decoration:none;padding:12px 28px;border-radius:8px;font-weight:700;font-size:16px;display:inline-block">📄 פתח מייל מוכן לזיהוי כתב יד</a>
+<a href="{link}" style="background:#2563eb;color:#fff;text-decoration:none;padding:12px 28px;border-radius:8px;font-weight:700;font-size:16px;display:inline-block">📄 פתח מייל מוכן לזיהוי כתב יד</a>
 </p>
 
 <div style="background:#f0fdf4;border-right:4px solid #10b981;padding:14px;margin:16px 0;border-radius:8px">
@@ -1309,16 +1308,6 @@ def _send_handwriting_instructions_email(to_email, phone, name=''):
 📄 <b>מסמכים:</b> PDF (כולל רב-עמודי)<br>
 </p>
 <p style="margin:8px 0 0;font-size:13px;color:#6b7280">ניתן לצרף קובץ אחד בלבד לכל מייל. גודל מקסימלי מומלץ: 25MB.</p>
-</div>
-
-<div style="background:#fef2f2;border-right:4px solid #ef4444;padding:14px;margin:16px 0;border-radius:8px">
-<p style="margin:0 0 8px;font-weight:700;color:#991b1b">טיפים לתוצאה טובה יותר:</p>
-<ul style="margin:0;padding-right:20px;line-height:2;color:#111827;font-size:14px">
-<li>צלמו בתאורה טובה, ללא צללים</li>
-<li>הדף צריך להיות ישר ולא מקופל</li>
-<li>ודאו שהכתב נמצא כולו בתוך התמונה</li>
-<li>ככל שהתמונה חדה יותר — התוצאה טובה יותר</li>
-</ul>
 </div>
 
 <p style="color:#6b7280;font-size:13px;margin-top:24px">מערכת תמלולפון 03-3131795</p>
