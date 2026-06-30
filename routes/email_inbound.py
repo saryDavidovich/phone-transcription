@@ -1262,6 +1262,9 @@ def send_handwriting_instructions():
 
 
 def _send_handwriting_instructions_email(to_email, phone, name=''):
+    from routes.admin import get_setting
+    price_ocr = get_setting('price_per_1000_chars_ocr', '0.10')
+
     subject_display = phone
     link = _mailto_link(phone, '')
 
@@ -1308,6 +1311,13 @@ def _send_handwriting_instructions_email(to_email, phone, name=''):
 📄 <b>מסמכים:</b> PDF (כולל רב-עמודי)<br>
 </p>
 <p style="margin:8px 0 0;font-size:13px;color:#6b7280">ניתן לצרף קובץ אחד בלבד לכל מייל. גודל מקסימלי מומלץ: 25MB.</p>
+</div>
+
+<div style="background:#fffbeb;border-right:4px solid #f59e0b;padding:14px;margin:16px 0;border-radius:8px">
+<p style="margin:0 0 8px;font-weight:700;color:#92400e">💰 מחירון:</p>
+<p style="margin:0;line-height:2;color:#111827">
+✍️ <b>זיהוי כתב יד:</b> ₪{price_ocr} לכל 1,000 תווים (או חלק מהם)
+</p>
 </div>
 
 <p style="color:#6b7280;font-size:13px;margin-top:24px">מערכת תמלולפון 03-3131795</p>
