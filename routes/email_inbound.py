@@ -725,12 +725,12 @@ def _gemini_ocr(filepath, original_filename):
 • אם מילה לא קריאה לחלוטין: כתוב [?] במקומה ועבור הלאה, אל תנחש
 • שמור על סימני פיסוק ומספרים בדיוק כפי שהם
 • אל תוסיף כותרות, הסברים, הערות, או מילות קישור - רק את הטקסט הגולמי שרשום בתמונה
-• זוהי תמונה של קטע משורה אחת מתוך עמוד - תן רק את הטקסט הנמצא בתמונה הזו, פעם אחת בלבד
+• זוהי תמונה של עמוד שלם - תן את כל הטקסט הנמצא בעמוד, שורה אחר שורה, מלמעלה למטה
 
 התחל ישירות, ללא הקדמות:"""
 
         def _zoom_image(img_bytes, scale=4.5):
-            """מגדיל את כל התמונה לפני חיתוך לשורות — זום 450%."""
+            """מגדיל את כל התמונה ב-450% לפני שליחה לגמיני."""
             img = Image.open(io.BytesIO(img_bytes)).convert('L')
             new_w = int(img.width * scale)
             new_h = int(img.height * scale)
@@ -739,149 +739,23 @@ def _gemini_ocr(filepath, original_filename):
             img.save(buf, format='PNG')
             return buf.getvalue()
 
-        def _detect_lines(img_bytes):
-            """מזהה שורות טקסט בתמונה ומחזיר רשימת (top, bottom) לכל שורה.
-            משתמש בסף אדפטיבי לפי טווח הבהירות בפועל בתמונה — מתאים גם לדפים
-            בהירים מאוד עם הבדל קטן בין טקסט לרקע (כמו דפי מחברת עם קווים)."""
-            img = Image.open(io.BytesIO(img_bytes)).convert('L')
-            arr = np.array(img)
+        def process_page_image(page_img_bytes):
+            """מגדיל את כל העמוד ב-450% ושולח כקריאה אחת לגמיני."""
+            zoomed_bytes = _zoom_image(page_img_bytes, scale=4.5)
+            processed = _preprocess_image_for_ocr(zoomed_bytes)
 
-            row_means = arr.mean(axis=1)
-            max_val = row_means.max()
-            min_val = row_means.min()
-            spread = max_val - min_val
-
-            # סף אדפטיבי תמיד לפי spread בפועל — עובד טוב גם בדפים בהירים מאוד
-            # (קווי מחברת) וגם בדפים עם ניגודיות גבוהה
-            factor = 0.30 if spread < 60 else 0.5
-            threshold = max_val - spread * factor
-
-            in_text = False
-            line_starts = []
-            line_ends = []
-            for i, mean in enumerate(row_means):
-                if mean < threshold and not in_text:
-                    in_text = True
-                    line_starts.append(i)
-                elif mean >= threshold and in_text:
-                    in_text = False
-                    line_ends.append(i)
-            if in_text:
-                line_ends.append(len(row_means))
-
-            lines = list(zip(line_starts, line_ends))
-            # סנן שורות קצרות מדי (רעש)
-            min_height = arr.shape[0] * 0.005
-            lines = [(s, e) for s, e in lines if (e - s) >= min_height]
-            log.info(f"OCR line detection: spread={spread:.1f}, threshold={threshold:.1f}, found {len(lines)} lines")
-            return lines, img
-
-        def _crop_line_halves(img, top, bottom, padding=15, overlap_pct=0.01):
-            """
-            חותך שורה אחת מהתמונה המוגדלת, ואז מחלק אותה לשני חצאים: ימני ושמאלי.
-            עברית נכתבת מימין לשמאל — חצי ימני = תחילת השורה, חצי שמאלי = סוף השורה.
-            יש חפיפה קטנה בין החצאים כדי לא לחתוך אות/מילה בדיוק באמצע.
-            מחזיר [(0, bytes_ימני), (1, bytes_שמאלי)] — לפי סדר קריאה (ימין קודם).
-            """
-            h = img.height
-            t = max(0, top - padding)
-            b = min(h, bottom + padding)
-            cropped = img.crop((0, t, img.width, b))
-
-            w = cropped.width
-            overlap = int(w * overlap_pct)
-            mid = w // 2
-
-            # חצי ימני (תחילת השורה בעברית) - מ-mid עד הקצה הימני (+חפיפה שמאלה)
-            right_half = cropped.crop((mid - overlap, 0, w, cropped.height))
-            # חצי שמאלי (סוף השורה) - מההתחלה עד mid (+חפיפה ימינה)
-            left_half = cropped.crop((0, 0, mid + overlap, cropped.height))
-
-            def _to_bytes(im):
-                buf = io.BytesIO()
-                im.save(buf, format='PNG')
-                return buf.getvalue()
-
-            return [(0, _to_bytes(right_half)), (1, _to_bytes(left_half))]
-
-        def _ocr_single_line(client, line_bytes, line_key, gtypes, prompt):
-            """מבצע OCR על חצי שורה."""
-            from google.genai import types as _gt
             for attempt in range(3):
                 try:
                     response = client.models.generate_content(
                         model='gemini-3.5-flash',
-                        contents=[
-                            prompt,
-                            _gt.Part.from_bytes(data=line_bytes, mime_type='image/png'),
-                        ],
+                        contents=[OCR_PROMPT, gtypes.Part.from_bytes(data=processed, mime_type='image/png')],
                     )
-                    return line_key, (response.text or '').strip()
+                    return (response.text or '').strip()
                 except Exception as e:
-                    log.warning(f"OCR part {line_key} attempt {attempt+1} failed: {e}")
+                    log.warning(f"OCR full page attempt {attempt+1} failed: {e}")
                     if attempt < 2:
                         import time as _t; _t.sleep(5)
-            return line_key, '[?]'
-
-        def process_page_image(page_img_bytes):
-            """מגדיל את כל העמוד ב-450%, מזהה שורות, מחלק כל שורה לימין/שמאל, ושולח במקביל."""
-
-            # שלב 1: זום 450% על כל העמוד לפני חיתוך
-            zoomed_bytes = _zoom_image(page_img_bytes, scale=4.5)
-
-            # שלב 2: זיהוי שורות על התמונה המוגדלת
-            lines, img = _detect_lines(zoomed_bytes)
-            log.info(f"OCR: detected {len(lines)} lines in zoomed page")
-
-            if not lines:
-                log.warning("OCR: no lines detected, sending full page")
-                processed = _preprocess_image_for_ocr(page_img_bytes)
-                response = client.models.generate_content(
-                    model='gemini-3.5-flash',
-                    contents=[OCR_PROMPT, gtypes.Part.from_bytes(data=processed, mime_type='image/png')],
-                )
-                return response.text.strip()
-
-            # שלב 3: חתוך כל שורה לשני חצאים — ימני ושמאלי
-            # key = (line_idx, half_idx) — half_idx: 0=ימין (תחילת שורה), 1=שמאל (סוף שורה)
-            tasks = []
-            for li, (top, bottom) in enumerate(lines):
-                try:
-                    halves = _crop_line_halves(img, top, bottom)
-                    for half_idx, half_bytes in halves:
-                        tasks.append((li, half_idx, half_bytes))
-                except Exception as e:
-                    log.warning(f"OCR: could not split line {li} into halves: {e}")
-
-            log.info(f"OCR: split into {len(tasks)} half-line images across {len(lines)} lines")
-
-            # שלב 4: שלח את כל החצאים במקביל — 15 בו זמנית
-            results = {}
-            with _TPE(max_workers=15) as pool:
-                futures = {}
-                for li, half_idx, hb in tasks:
-                    key = (li, half_idx)
-                    f = pool.submit(_ocr_single_line, client, hb, key, gtypes, OCR_PROMPT)
-                    futures[f] = key
-
-                for f in as_completed(futures):
-                    try:
-                        key, text = f.result()
-                        results[key] = text
-                    except Exception:
-                        results[futures[f]] = '[?]'
-
-            # שלב 5: איחוד — לכל שורה: חצי ימני (0) ואז חצי שמאלי (1), ואז שורות לפי סדר
-            line_texts = []
-            for li in range(len(lines)):
-                right_part = results.get((li, 0), '')
-                left_part = results.get((li, 1), '')
-                # עברית RTL: הימני נקרא ראשון, אחריו השמאלי
-                combined = f"{right_part} {left_part}".strip()
-                line_texts.append(combined if combined else '[?]')
-
-            full_text = '\n'.join(line_texts)
-            return full_text
+            return None
 
         # עיבוד לפי סוג קובץ
         if ext == 'pdf':
