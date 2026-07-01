@@ -807,7 +807,7 @@ def _send_ocr_result_email(to, original_filename, ocr_text, char_count, cost):
     try:
         import sendgrid
         import base64
-        from sendgrid.helpers.mail import Mail, Attachment, FileContent, FileName, FileType, Disposition
+        from sendgrid.helpers.mail import Mail, Attachment, FileContent, FileName, FileType, Disposition, Email
         from services.transcribe import _build_word_doc
 
         title = f'זיהוי כתב יד - {original_filename}'
@@ -819,7 +819,7 @@ def _send_ocr_result_email(to, original_filename, ocr_text, char_count, cost):
 אנא ודאו שהתמונה ברורה ונסו שנית.</p>
 </div>'''
             message = Mail(
-                from_email=os.environ.get('SENDGRID_FROM_EMAIL', ''),
+                from_email=Email(os.environ.get('SENDGRID_FROM_EMAIL', ''), 'תמלולפון'),
                 to_emails=to,
                 subject=f'שגיאה בזיהוי כתב יד - {original_filename}',
                 html_content=html
@@ -849,7 +849,7 @@ def _send_ocr_result_email(to, original_filename, ocr_text, char_count, cost):
         sg = sendgrid.SendGridAPIClient(api_key=os.environ.get('SENDGRID_API_KEY'))
         safe_name = os.path.splitext(original_filename)[0][:40] if original_filename else 'ocr'
         message = Mail(
-            from_email=os.environ.get('SENDGRID_FROM_EMAIL', ''),
+            from_email=Email(os.environ.get('SENDGRID_FROM_EMAIL', ''), 'תמלולפון'),
             to_emails=to,
             subject=f'זיהוי כתב יד - {original_filename}',
             html_content=html
@@ -1079,11 +1079,11 @@ def _send_guidance_email(to_email, reason, phone=''):
 
     try:
         import sendgrid
-        from sendgrid.helpers.mail import Mail
+        from sendgrid.helpers.mail import Mail, Email
 
         sg = sendgrid.SendGridAPIClient(api_key=os.environ.get('SENDGRID_API_KEY'))
         message = Mail(
-            from_email=os.environ.get('SENDGRID_FROM_EMAIL', os.environ.get('GMAIL_USER', '')),
+            from_email=Email(os.environ.get('SENDGRID_FROM_EMAIL', os.environ.get('GMAIL_USER', '')), 'תמלולפון'),
             to_emails=to_email,
             subject='תמלולפון - לא ניתן לעבד את הבקשה',
             html_content=html,
@@ -1226,11 +1226,11 @@ def _send_instructions_email(to_email, phone, name=''):
 
     try:
         import sendgrid
-        from sendgrid.helpers.mail import Mail
+        from sendgrid.helpers.mail import Mail, Email
 
         sg = sendgrid.SendGridAPIClient(api_key=os.environ.get('SENDGRID_API_KEY'))
         message = Mail(
-            from_email=os.environ.get('SENDGRID_FROM_EMAIL', os.environ.get('GMAIL_USER', '')),
+            from_email=Email(os.environ.get('SENDGRID_FROM_EMAIL', os.environ.get('GMAIL_USER', '')), 'תמלולפון'),
             to_emails=to_email,
             subject='תמלולפון - הוראות לשליחת הקלטה לתמלול במייל',
             html_content=html,
@@ -1331,11 +1331,11 @@ def _send_handwriting_instructions_email(to_email, phone, name=''):
 
     try:
         import sendgrid
-        from sendgrid.helpers.mail import Mail
+        from sendgrid.helpers.mail import Mail, Email
 
         sg = sendgrid.SendGridAPIClient(api_key=os.environ.get('SENDGRID_API_KEY'))
         message = Mail(
-            from_email=os.environ.get('SENDGRID_FROM_EMAIL', os.environ.get('GMAIL_USER', '')),
+            from_email=Email(os.environ.get('SENDGRID_FROM_EMAIL', os.environ.get('GMAIL_USER', '')), 'תמלולפון'),
             to_emails=to_email,
             subject='תמלולפון - הוראות לשליחת כתב יד לזיהוי',
             html_content=html,
