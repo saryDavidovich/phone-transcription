@@ -105,3 +105,12 @@ class OcrResult(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     customer = db.relationship('Customer', backref=db.backref('ocr_results', lazy=True))
+
+
+class ProcessedWebhook(db.Model):
+    """מונע עיבוד כפול כאשר SendGrid שולח את אותו webhook יותר מפעם אחת (retry)"""
+    __tablename__ = 'processed_webhooks'
+
+    id = db.Column(db.Integer, primary_key=True)
+    message_id = db.Column(db.String(255), unique=True, nullable=False, index=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
