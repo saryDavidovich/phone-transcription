@@ -1,6 +1,14 @@
 import os, requests, logging, threading, time, math
 from concurrent.futures import ThreadPoolExecutor
 
+_TRANSCRIBE_INBOUND_EMAIL = os.environ.get('TRANSCRIBE_INBOUND_EMAIL', '033131795@sheasystem.com')
+
+
+def _is_system_inbound_address(email):
+    """מונע לולאת מייל עצמית: שליחה לכתובת הקבלה של המערכת עצמה תיקלט חזרה כ-webhook נכנס."""
+    return (email or '').strip().lower() == _TRANSCRIBE_INBOUND_EMAIL.strip().lower()
+
+
 log = logging.getLogger(__name__)
 
 # מקסימום 10 תמלולים במקביל — מגן על rate limits של גמיני
@@ -324,7 +332,7 @@ def process_pending_recordings(customer_id):
                 # שלח למייל/פקס
                 from services.transcribe import _send_email, _send_fax
                 if rec.delivery_method == 'email' and rec.delivered_to:
-                    _send_email(rec.delivered_to, rec.transcript, customer, rec.rec_url, rec.duration_seconds or 0)
+                    _send_email(rec.delivered_to, rec.transcript, customer, rec.rec_url, rec.duration_seconds or 0, is_premium=(rec.transcription_tier == 'premium'))
                 elif rec.delivery_method == 'fax' and rec.delivered_to:
                     _send_fax(rec.delivered_to, rec.transcript, customer, rec.duration_seconds or 0, rec.call_id)
                 continue
@@ -381,6 +389,10 @@ def _save_pending_payment(rec, customer, duration_seconds, price_per_20min,
 
 def _send_insufficient_balance_email(to_email, duration_seconds, cost, balance):
     """שולח מייל ללקוח שהיתרה אינה מספיקה"""
+    if _is_system_inbound_address(to_email):
+        log.error(f"חסימת שליחת מייל יתרה לכתובת המערכת עצמה ({to_email}) - מניעת לולאה")
+        return
+
     import sendgrid
     from sendgrid.helpers.mail import Mail, Email
 
@@ -404,14 +416,14 @@ def _send_insufficient_balance_email(to_email, duration_seconds, cost, balance):
 <p style="text-align:center;margin:24px 0;font-size:16px;font-weight:700;color:#1d4ed8">
 לטעינת ארנק יש להתקשר למערכת ולבחור בתפריט הראשי בטעינת ארנק
 </p>
-<p style="color:#6b7280;font-size:13px">מערכת תמלולפון 03-3131795</p>
+<p style="color:#6b7280;font-size:13px">מערכת תמלול פון 03-3131795</p>
 </div>"""
 
     sg = sendgrid.SendGridAPIClient(api_key=os.environ.get('SENDGRID_API_KEY'))
     message = Mail(
-        from_email=Email(os.environ.get('SENDGRID_FROM_EMAIL', os.environ.get('GMAIL_USER', '')), 'תמלולפון'),
+        from_email=Email(os.environ.get('SENDGRID_FROM_EMAIL', os.environ.get('GMAIL_USER', '')), 'תמלול פון'),
         to_emails=to_email,
-        subject='תמלולפון - יתרה אינה מספיקה, הקובץ נשמר',
+        subject='תמלול פון - יתרה אינה מספיקה, הקובץ נשמר',
         html_content=html,
     )
     sg.send(message)
@@ -526,7 +538,7 @@ def finalize_alefbot_recording(call_id, transcript_text):
 
             rec_url = rec.rec_url or ''
             if rec.delivery_method == 'email':
-                _send_email(rec.delivered_to, transcript_text, customer, rec_url, duration_seconds, source_filename=rec.source_filename)
+                _send_email(rec.delivered_to, transcript_text, customer, rec_url, duration_seconds, source_filename=rec.source_filename, is_premium=True)
             elif rec.delivery_method == 'fax':
                 _send_fax(rec.delivered_to, transcript_text, customer, duration_seconds, call_id)
 
@@ -1128,7 +1140,7 @@ def _build_word_doc(name, duration_str, transcript_fixed, transcript_raw=None, t
         pPr = footer_para._p.get_or_add_pPr()
         bidi = OxmlElement('w:bidi')
         pPr.append(bidi)
-        run = footer_para.add_run('הופק באמצעות מערכת תמלולפון 03-3131795')
+        run = footer_para.add_run('הופק באמצעות מערכת תמלול פון 03-3131795')
         run.font.size = Pt(11)
         run.font.color.rgb = RGBColor(0x80, 0x80, 0x80)
 
@@ -1372,7 +1384,10 @@ def handle_fax_delivery_webhook(data):
             log.error(f"handle_fax_delivery_webhook error: {e}")
 
 
-def _send_email(to, transcript, customer, rec_url, duration_seconds, source_filename=None):
+def _send_email(to, transcript, customer, rec_url, duration_seconds, source_filename=None, is_premium=False):
+    if _is_system_inbound_address(to):
+        log.error(f"חסימת שליחת מייל תמלול לכתובת המערכת עצמה ({to}) - מניעת לולאה")
+        return
     try:
         import sendgrid, base64
         from sendgrid.helpers.mail import Mail, Attachment, FileContent, FileName, FileType, Disposition, Email
@@ -1385,6 +1400,15 @@ def _send_email(to, transcript, customer, rec_url, duration_seconds, source_file
         # אם ההקלטה התקבלה במייל - הכותרת היא שם הקובץ שנשלח, ולא נכלל קישור להורדת ההקלטה
         title = source_filename if source_filename else 'תמלול שיחה'
 
+        if is_premium:
+            badge = '''<div style="display:inline-block;background:linear-gradient(135deg,#7c3aed,#a855f7);color:#fff;padding:6px 16px;border-radius:20px;font-size:13px;font-weight:700;margin-bottom:10px">
+💎 תמלול מקצועי
+</div><br>'''
+        else:
+            badge = '''<div style="display:inline-block;background:#f3f4f6;color:#4b5563;padding:6px 16px;border-radius:20px;font-size:13px;font-weight:700;margin-bottom:10px">
+📝 תמלול רגיל
+</div><br>'''
+
         word_bytes = _build_word_doc(name, duration_str, transcript, title=title)
         word_b64 = base64.b64encode(word_bytes).decode('utf-8')
 
@@ -1395,7 +1419,8 @@ def _send_email(to, transcript, customer, rec_url, duration_seconds, source_file
 </div>'''
 
         html = f'''<div dir="rtl" style="font-family:Arial,sans-serif;max-width:600px;margin:auto">
-<h2 style="color:#1d4ed8">{title}</h2>
+{badge}
+<h2 style="color:#1d4ed8;margin-top:4px">{title}</h2>
 <p style="color:#6b7280">לקוח: <b>{name}</b> | משך: <b>{duration_str}</b></p>
 <div style="background:#f0fdf4;border-right:4px solid #10b981;padding:16px;margin:16px 0;border-radius:8px">
 <h3 style="margin:0 0 12px;color:#065f46">✨ תמלול</h3>
@@ -1406,7 +1431,7 @@ def _send_email(to, transcript, customer, rec_url, duration_seconds, source_file
 
         sg = sendgrid.SendGridAPIClient(api_key=os.environ.get('SENDGRID_API_KEY'))
         message = Mail(
-            from_email=Email(os.environ.get('SENDGRID_FROM_EMAIL', os.environ.get('GMAIL_USER', '')), 'תמלולפון'),
+            from_email=Email(os.environ.get('SENDGRID_FROM_EMAIL', os.environ.get('GMAIL_USER', '')), 'תמלול פון'),
             to_emails=to,
             subject=f'תמלול שיחה - {title}' if source_filename else f'תמלול שיחה - {name}',
             html_content=html
