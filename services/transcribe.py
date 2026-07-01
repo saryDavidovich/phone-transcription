@@ -382,7 +382,7 @@ def _save_pending_payment(rec, customer, duration_seconds, price_per_20min,
 def _send_insufficient_balance_email(to_email, duration_seconds, cost, balance):
     """שולח מייל ללקוח שהיתרה אינה מספיקה"""
     import sendgrid
-    from sendgrid.helpers.mail import Mail
+    from sendgrid.helpers.mail import Mail, Email
 
     minutes = duration_seconds // 60
     balance_str = f"\u20aa{balance:.2f}"
@@ -409,7 +409,7 @@ def _send_insufficient_balance_email(to_email, duration_seconds, cost, balance):
 
     sg = sendgrid.SendGridAPIClient(api_key=os.environ.get('SENDGRID_API_KEY'))
     message = Mail(
-        from_email=os.environ.get('SENDGRID_FROM_EMAIL', os.environ.get('GMAIL_USER', '')),
+        from_email=Email(os.environ.get('SENDGRID_FROM_EMAIL', os.environ.get('GMAIL_USER', '')), 'תמלולפון'),
         to_emails=to_email,
         subject='תמלולפון - יתרה אינה מספיקה, הקובץ נשמר',
         html_content=html,
@@ -1375,7 +1375,7 @@ def handle_fax_delivery_webhook(data):
 def _send_email(to, transcript, customer, rec_url, duration_seconds, source_filename=None):
     try:
         import sendgrid, base64
-        from sendgrid.helpers.mail import Mail, Attachment, FileContent, FileName, FileType, Disposition
+        from sendgrid.helpers.mail import Mail, Attachment, FileContent, FileName, FileType, Disposition, Email
 
         name = customer.name if hasattr(customer, 'name') and customer.name else customer.phone if customer else ''
         minutes = duration_seconds // 60
@@ -1406,7 +1406,7 @@ def _send_email(to, transcript, customer, rec_url, duration_seconds, source_file
 
         sg = sendgrid.SendGridAPIClient(api_key=os.environ.get('SENDGRID_API_KEY'))
         message = Mail(
-            from_email=os.environ.get('SENDGRID_FROM_EMAIL', os.environ.get('GMAIL_USER', '')),
+            from_email=Email(os.environ.get('SENDGRID_FROM_EMAIL', os.environ.get('GMAIL_USER', '')), 'תמלולפון'),
             to_emails=to,
             subject=f'תמלול שיחה - {title}' if source_filename else f'תמלול שיחה - {name}',
             html_content=html
