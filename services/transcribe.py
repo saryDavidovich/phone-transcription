@@ -44,7 +44,7 @@ def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, durat
 
             if tier == 'premium':
                 log.info(f"Using AlefBot for customer {customer_id}")
-                alefbot_tier = 'premium_quality'  # תמיד מקצועי
+                alefbot_tier = 'standard'  # תמיד standard (היה premium_quality - פי 2 מחיר)
                 # שפת פלט: 'he' = תרגם לעברית, 'original' (או כל ערך אחר) = השאר בשפת ההקלטה
                 translate_heb = (output_language == 'he')
                 job_id, actual_duration = _alefbot_submit(rec_url, call_id, model_tier=alefbot_tier, translate_to_hebrew=translate_heb)
@@ -418,7 +418,7 @@ def _send_insufficient_balance_email(to_email, duration_seconds, cost, balance):
     log.info(f"Insufficient balance email sent to {to_email}")
 
 
-def _alefbot_submit(rec_url, call_id, model_tier='premium_quality', translate_to_hebrew=False):
+def _alefbot_submit(rec_url, call_id, model_tier='standard', translate_to_hebrew=False):
     """שולח ל-AlefBot ומחזיר job_id מיד"""
     try:
         import wave, io
