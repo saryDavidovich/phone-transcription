@@ -63,6 +63,15 @@ email_bp = Blueprint('email_inbound', __name__)
 # כתובת המייל הציבורית שאליה לקוחות שולחים הקלטות לתמלול
 TRANSCRIBE_INBOUND_EMAIL = os.environ.get('TRANSCRIBE_INBOUND_EMAIL', '033131795@sheasystem.com')
 
+
+def _is_system_inbound_address(email):
+    """
+    מונע לולאת מייל עצמית: אם כתובת ה'to' זהה לכתובת הקבלה של המערכת עצמה
+    (TRANSCRIBE_INBOUND_EMAIL), שליחה אליה תיקלט חזרה כ-webhook נכנס.
+    קורה בפועל כשלקוח רשום בטעות עם כתובת המייל של המערכת.
+    """
+    return (email or '').strip().lower() == TRANSCRIBE_INBOUND_EMAIL.strip().lower()
+
 # תיקייה לשמירת קבצי אודיו שהתקבלו במייל (משם הם מוגשים חזרה כ-rec_url)
 RECORDINGS_EMAIL_DIR = os.environ.get('RECORDINGS_EMAIL_DIR', 'recordings_email')
 os.makedirs(RECORDINGS_EMAIL_DIR, exist_ok=True)
@@ -804,6 +813,9 @@ def _gemini_ocr(filepath, original_filename):
 
 def _send_ocr_result_email(to, original_filename, ocr_text, char_count, cost):
     """שולח את תוצאת ה-OCR במייל עם מסמך Word מצורף."""
+    if _is_system_inbound_address(to):
+        log.error(f"email-inbound: חסימת שליחת מייל לכתובת המערכת עצמה ({to}) - כנראה לקוח רשום עם מייל שגוי")
+        return
     try:
         import sendgrid
         import base64
@@ -819,7 +831,7 @@ def _send_ocr_result_email(to, original_filename, ocr_text, char_count, cost):
 אנא ודאו שהתמונה ברורה ונסו שנית.</p>
 </div>'''
             message = Mail(
-                from_email=Email(os.environ.get('SENDGRID_FROM_EMAIL', ''), 'תמלולפון'),
+                from_email=Email(os.environ.get('SENDGRID_FROM_EMAIL', ''), 'תמלול פון'),
                 to_emails=to,
                 subject=f'שגיאה בזיהוי כתב יד - {original_filename}',
                 html_content=html
@@ -849,7 +861,7 @@ def _send_ocr_result_email(to, original_filename, ocr_text, char_count, cost):
         sg = sendgrid.SendGridAPIClient(api_key=os.environ.get('SENDGRID_API_KEY'))
         safe_name = os.path.splitext(original_filename)[0][:40] if original_filename else 'ocr'
         message = Mail(
-            from_email=Email(os.environ.get('SENDGRID_FROM_EMAIL', ''), 'תמלולפון'),
+            from_email=Email(os.environ.get('SENDGRID_FROM_EMAIL', ''), 'תמלול פון'),
             to_emails=to,
             subject=f'זיהוי כתב יד - {original_filename}',
             html_content=html
@@ -870,9 +882,26 @@ def _send_ocr_result_email(to, original_filename, ocr_text, char_count, cost):
 @email_bp.route('/email-inbound', methods=['POST'])
 def email_inbound():
     from app import app, db
-    from models import Customer, Recording
+    from models import Customer, Recording, ProcessedWebhook
 
     _maybe_run_cleanup()
+
+    # --- הגנה מפני עיבוד כפול (SendGrid לפעמים שולח את אותו webhook פעמיים - retry) ---
+    raw_headers = request.form.get('headers', '') or ''
+    message_id_match = re.search(r'Message-ID:\s*(<[^>\s]+>)', raw_headers, re.IGNORECASE)
+    message_id = message_id_match.group(1) if message_id_match else None
+
+    if message_id:
+        with app.app_context():
+            try:
+                db.session.add(ProcessedWebhook(message_id=message_id))
+                db.session.commit()
+            except Exception:
+                db.session.rollback()
+                log.info(f"email-inbound: webhook כפול התקבל ודולג (message_id={message_id})")
+                return jsonify({'status': 'ignored', 'reason': 'duplicate_webhook'}), 200
+    else:
+        log.warning("email-inbound: לא נמצא Message-ID בכותרות - לא ניתן להגן מפני כפילות עבור בקשה זו")
 
     sender_email = _extract_sender_email(request.form.get('from', ''))
     subject = request.form.get('subject', '')
@@ -1020,7 +1049,7 @@ def serve_email_recording(filename):
 
 _GUIDANCE_MESSAGES = {
     'not_registered': lambda phone: f'''
-לא נמצא לקוח רשום עם מספר הטלפון <b>{phone}</b> במערכת תמלולפון.<br><br>
+לא נמצא לקוח רשום עם מספר הטלפון <b>{phone}</b> במערכת תמלול פון.<br><br>
 כדי להשתמש בשירות תמלול דרך המייל, יש להירשם תחילה במערכת:<br>
 התקשרו למספר המערכת <b>מהטלפון שאת/ה רוצה לשייך לחיוב</b>, ועקבו אחרי ההנחיות
 הקוליות לעדכון כתובת מייל וטעינת ארנק.<br><br>
@@ -1039,7 +1068,7 @@ _GUIDANCE_MESSAGES = {
 את כתובת המייל בתפריט "עדכון פרטים".
 ''',
     'low_balance': lambda phone: f'''
-היתרה במערכת תמלולפון למספר הטלפון <b>{phone}</b> אינה מספיקה לביצוע תמלול.<br><br>
+היתרה במערכת תמלול פון למספר הטלפון <b>{phone}</b> אינה מספיקה לביצוע תמלול.<br><br>
 כדי לטעון את הארנק, התקשרו למספר המערכת מהטלפון הזה ועקבו אחרי ההנחיות הקוליות
 לטעינת ארנק.<br><br>
 לאחר הטעינה ניתן לשלוח מחדש מייל עם קובץ ההקלטה.
@@ -1066,6 +1095,10 @@ def _send_guidance_email(to_email, reason, phone=''):
         log.warning(f"_send_guidance_email: אין כתובת מייל לשלוח אליה (reason={reason}, phone={phone})")
         return
 
+    if _is_system_inbound_address(to_email):
+        log.error(f"email-inbound: חסימת שליחת מייל הכוונה לכתובת המערכת עצמה ({to_email}, reason={reason}) - מניעת לולאה")
+        return
+
     body_fn = _GUIDANCE_MESSAGES.get(reason)
     body_html = body_fn(phone) if body_fn else 'אירעה שגיאה בעיבוד הבקשה.'
 
@@ -1074,7 +1107,7 @@ def _send_guidance_email(to_email, reason, phone=''):
 <div style="background:#fef2f2;border-right:4px solid #ef4444;padding:16px;margin:16px 0;border-radius:8px;line-height:1.8">
 {body_html}
 </div>
-<p style="color:#6b7280;font-size:13px">מערכת תמלולפון 03-3131795</p>
+<p style="color:#6b7280;font-size:13px">מערכת תמלול פון 03-3131795</p>
 </div>'''
 
     try:
@@ -1083,9 +1116,9 @@ def _send_guidance_email(to_email, reason, phone=''):
 
         sg = sendgrid.SendGridAPIClient(api_key=os.environ.get('SENDGRID_API_KEY'))
         message = Mail(
-            from_email=Email(os.environ.get('SENDGRID_FROM_EMAIL', os.environ.get('GMAIL_USER', '')), 'תמלולפון'),
+            from_email=Email(os.environ.get('SENDGRID_FROM_EMAIL', os.environ.get('GMAIL_USER', '')), 'תמלול פון'),
             to_emails=to_email,
-            subject='תמלולפון - לא ניתן לעבד את הבקשה',
+            subject='תמלול פון - לא ניתן לעבד את הבקשה',
             html_content=html,
         )
         sg.send(message)
@@ -1126,6 +1159,10 @@ def _mailto_link(phone, extra=''):
 
 
 def _send_instructions_email(to_email, phone, name=''):
+    if _is_system_inbound_address(to_email):
+        log.error(f"email-inbound: חסימת שליחת מייל הוראות לכתובת המערכת עצמה ({to_email}, phone={phone}) - מניעת לולאה")
+        return
+
     from routes.admin import get_setting
     price_audio = get_setting('price_per_20min_basic', '0.90')
     price_premium = get_setting('price_per_20min_premium', '1.90')
@@ -1221,7 +1258,7 @@ def _send_instructions_email(to_email, phone, name=''):
 </p>
 </div>
 
-<p style="color:#6b7280;font-size:13px;margin-top:24px">מערכת תמלולפון 03-3131795</p>
+<p style="color:#6b7280;font-size:13px;margin-top:24px">מערכת תמלול פון 03-3131795</p>
 </div>'''
 
     try:
@@ -1230,9 +1267,9 @@ def _send_instructions_email(to_email, phone, name=''):
 
         sg = sendgrid.SendGridAPIClient(api_key=os.environ.get('SENDGRID_API_KEY'))
         message = Mail(
-            from_email=Email(os.environ.get('SENDGRID_FROM_EMAIL', os.environ.get('GMAIL_USER', '')), 'תמלולפון'),
+            from_email=Email(os.environ.get('SENDGRID_FROM_EMAIL', os.environ.get('GMAIL_USER', '')), 'תמלול פון'),
             to_emails=to_email,
-            subject='תמלולפון - הוראות לשליחת הקלטה לתמלול במייל',
+            subject='תמלול פון - הוראות לשליחת הקלטה לתמלול במייל',
             html_content=html,
         )
         sg.send(message)
@@ -1268,6 +1305,10 @@ def send_handwriting_instructions():
 
 
 def _send_handwriting_instructions_email(to_email, phone, name=''):
+    if _is_system_inbound_address(to_email):
+        log.error(f"email-inbound: חסימת שליחת מייל הוראות כתב יד לכתובת המערכת עצמה ({to_email}, phone={phone}) - מניעת לולאה")
+        return
+
     from routes.admin import get_setting
     price_ocr = get_setting('price_per_1000_chars_ocr', '0.10')
 
@@ -1326,7 +1367,7 @@ def _send_handwriting_instructions_email(to_email, phone, name=''):
 </p>
 </div>
 
-<p style="color:#6b7280;font-size:13px;margin-top:24px">מערכת תמלולפון 03-3131795</p>
+<p style="color:#6b7280;font-size:13px;margin-top:24px">מערכת תמלול פון 03-3131795</p>
 </div>'''
 
     try:
@@ -1335,9 +1376,9 @@ def _send_handwriting_instructions_email(to_email, phone, name=''):
 
         sg = sendgrid.SendGridAPIClient(api_key=os.environ.get('SENDGRID_API_KEY'))
         message = Mail(
-            from_email=Email(os.environ.get('SENDGRID_FROM_EMAIL', os.environ.get('GMAIL_USER', '')), 'תמלולפון'),
+            from_email=Email(os.environ.get('SENDGRID_FROM_EMAIL', os.environ.get('GMAIL_USER', '')), 'תמלול פון'),
             to_emails=to_email,
-            subject='תמלולפון - הוראות לשליחת כתב יד לזיהוי',
+            subject='תמלול פון - הוראות לשליחת כתב יד לזיהוי',
             html_content=html,
         )
         sg.send(message)
