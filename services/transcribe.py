@@ -15,8 +15,13 @@ log = logging.getLogger(__name__)
 _executor = ThreadPoolExecutor(max_workers=10)
 # תור תמלול — מקסימום 10 במקביל
 
-# תור OCR נפרד — מקסימום 6 לקוחות במקביל
-_ocr_executor = ThreadPoolExecutor(max_workers=6)
+# תור OCR נפרד — מקסימום 3 לקוחות במקביל (הופחת מ-6: כל תמונה בזום 450% יכולה לצרוך מאות MB-1GB+ בזיכרון)
+_ocr_executor = ThreadPoolExecutor(max_workers=3)
+
+# LibreOffice headless צורך הרבה זיכרון (RAM) לכל המרה - מגביל בנפרד מתור התמלול
+# (אחרת עד 10 המרות PDF/פקס יכולות לרוץ בו-זמנית בתוך worker אחד ולהתפוצץ בזיכרון)
+import threading as _threading
+_fax_pdf_semaphore = _threading.Semaphore(2)
 
 
 
@@ -1204,14 +1209,20 @@ def _build_pdf_for_fax(name, duration_str, transcript_fixed):
             with open(docx_path, 'wb') as f:
                 f.write(docx_bytes)
 
-            result = subprocess.run(
-                [
-                    'soffice', '--headless', '--convert-to',
-                    'pdf:writer_pdf_Export:{"Quality":{"type":"long","value":100},"ReduceImageResolution":{"type":"boolean","value":false},"SelectPdfVersion":{"type":"long","value":1}}',
-                    '--outdir', tmpdir, docx_path
-                ],
-                capture_output=True, text=True, timeout=120
-            )
+            profile_dir = os.path.join(tmpdir, 'lo_profile')
+
+            with _fax_pdf_semaphore:
+                log.info("PDF fax: ממתין/מריץ המרת LibreOffice (מוגבל ל-2 בו-זמנית)")
+                result = subprocess.run(
+                    [
+                        'soffice', '--headless',
+                        f'-env:UserInstallation=file://{profile_dir}',
+                        '--convert-to',
+                        'pdf:writer_pdf_Export:{"Quality":{"type":"long","value":100},"ReduceImageResolution":{"type":"boolean","value":false},"SelectPdfVersion":{"type":"long","value":1}}',
+                        '--outdir', tmpdir, docx_path
+                    ],
+                    capture_output=True, text=True, timeout=120
+                )
             if result.returncode != 0:
                 log.error(f"LibreOffice convert error: {result.stderr}")
                 return None
