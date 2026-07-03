@@ -668,9 +668,9 @@ def _preprocess_image_for_ocr(img_bytes):
         import io
         from PIL import Image, ImageEnhance, ImageOps, ImageFilter
 
-        img = Image.open(io.BytesIO(img_bytes)).convert('RGB')
+        img = Image.open(io.BytesIO(img_bytes))
 
-        # Grayscale
+        # Grayscale (התמונה כבר מגיעה כ-grayscale מ-_zoom_image, אין צורך לעבור דרך RGB - חוסך פי 3 בזיכרון)
         img = img.convert('L')
 
         # Contrast boost x2
