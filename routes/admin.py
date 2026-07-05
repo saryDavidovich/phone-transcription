@@ -170,7 +170,18 @@ def customers():
             Customer.email.contains(search)
         )
     customers = query.order_by(Customer.created_at.desc()).paginate(page=page, per_page=50)
-    return render_template('admin/customers.html', customers=customers, search=search)
+
+    # ספירת הקלטות לכל לקוח בשאילתה אחת (במקום לטעון את כל ההקלטות של כל לקוח בנפרד - N+1)
+    customer_ids = [c.id for c in customers.items]
+    counts = dict(
+        db.session.query(Recording.customer_id, func.count(Recording.id))
+        .filter(Recording.customer_id.in_(customer_ids))
+        .group_by(Recording.customer_id)
+        .all()
+    ) if customer_ids else {}
+    recording_counts = {cid: counts.get(cid, 0) for cid in customer_ids}
+
+    return render_template('admin/customers.html', customers=customers, search=search, recording_counts=recording_counts)
 
 @admin_bp.route('/customers/add', methods=['GET', 'POST'])
 @login_required
@@ -917,10 +928,21 @@ def customers_filter():
         )
 
     customers = query.order_by(Customer.created_at.desc()).paginate(page=page, per_page=50)
+
+    customer_ids = [c.id for c in customers.items]
+    counts = dict(
+        db.session.query(Recording.customer_id, func.count(Recording.id))
+        .filter(Recording.customer_id.in_(customer_ids))
+        .group_by(Recording.customer_id)
+        .all()
+    ) if customer_ids else {}
+    recording_counts = {cid: counts.get(cid, 0) for cid in customer_ids}
+
     return render_template('admin/customers.html',
         customers=customers,
         search=search,
-        active_filter=filter_type
+        active_filter=filter_type,
+        recording_counts=recording_counts
     )
 
 
