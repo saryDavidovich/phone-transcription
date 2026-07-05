@@ -96,6 +96,9 @@ def _migrate_db():
                 )
             """))
             conn.execute(db.text("CREATE INDEX IF NOT EXISTS ix_ocr_results_customer_id ON ocr_results (customer_id)"))
+            # עמודות pending payment עבור OCR
+            conn.execute(db.text("ALTER TABLE ocr_results ADD COLUMN IF NOT EXISTS delivered_to VARCHAR(255)"))
+            conn.execute(db.text("ALTER TABLE ocr_results ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP"))
             # ניקוי - עמודות פקס שנוספו בטעות ל-customers בעבר
             conn.execute(db.text("ALTER TABLE customers DROP COLUMN IF EXISTS fax_campaign_id"))
             conn.execute(db.text("ALTER TABLE customers DROP COLUMN IF EXISTS fax_status"))
