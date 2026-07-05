@@ -302,6 +302,7 @@ def get_public_settings():
 def process_pending():
     """נקרא מה-IVR כשמזוהה שיש pending ויש יתרה — מפעיל תמלול"""
     from services.transcribe import process_pending_recordings
+    from routes.email_inbound import process_pending_ocr
     import threading
 
     data = request.get_json(silent=True) or {}
@@ -310,6 +311,10 @@ def process_pending():
     if not customer:
         return jsonify({'status': 'not_found'}), 404
 
-    t = threading.Thread(target=process_pending_recordings, args=(customer.id,), daemon=True)
+    def _run_both(customer_id):
+        process_pending_recordings(customer_id)
+        process_pending_ocr(customer_id)
+
+    t = threading.Thread(target=_run_both, args=(customer.id,), daemon=True)
     t.start()
     return jsonify({'status': 'started'})
