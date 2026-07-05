@@ -4,6 +4,12 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>{% block title %}מערכת תמלול{% endblock %} | ניהול</title>
+<script>
+(function() {
+  const saved = localStorage.getItem('admin-theme') || 'dark';
+  if (saved === 'light') document.documentElement.setAttribute('data-theme', 'light');
+})();
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
@@ -20,6 +26,20 @@
   --text: #e8eaf6;
   --text2: #8892b0;
   --text3: #4a5568;
+}
+html[data-theme="light"] {
+  --bg: #f4f5fa;
+  --surface: #ffffff;
+  --surface2: #f0f1f7;
+  --border: #e0e2ec;
+  --accent: #4f6ef7;
+  --accent2: #7c3aed;
+  --green: #0d9668;
+  --red: #dc2626;
+  --amber: #d97706;
+  --text: #1a1d27;
+  --text2: #5a6178;
+  --text3: #8892b0;
 }
 * { margin:0; padding:0; box-sizing:border-box; }
 body { font-family:'Heebo',sans-serif; background:var(--bg); color:var(--text); min-height:100vh; display:flex; }
@@ -204,6 +224,7 @@ textarea.form-input { resize:vertical; min-height:80px; }
   <div class="topbar">
     <h1 class="page-title">{% block page_title %}{% endblock %}</h1>
     <div class="topbar-right">
+      <button onclick="toggleTheme()" class="btn btn-ghost" id="themeToggleBtn" style="font-size:16px;padding:6px 10px" title="החלף מצב בהיר/כהה">🌙</button>
       <span class="admin-badge">👤 מנהל</span>
     </div>
   </div>
@@ -216,6 +237,26 @@ textarea.form-input { resize:vertical; min-height:80px; }
     {% block content %}{% endblock %}
   </div>
 </main>
+
+<script>
+function toggleTheme() {
+  const html = document.documentElement;
+  const isLight = html.getAttribute('data-theme') === 'light';
+  if (isLight) {
+    html.removeAttribute('data-theme');
+    localStorage.setItem('admin-theme', 'dark');
+  } else {
+    html.setAttribute('data-theme', 'light');
+    localStorage.setItem('admin-theme', 'light');
+  }
+  updateThemeIcon();
+}
+function updateThemeIcon() {
+  const isLight = document.documentElement.getAttribute('data-theme') === 'light';
+  document.getElementById('themeToggleBtn').textContent = isLight ? '☀️' : '🌙';
+}
+updateThemeIcon();
+</script>
 
 </body>
 </html>
