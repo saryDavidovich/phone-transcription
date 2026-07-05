@@ -6,6 +6,7 @@ from models import Customer, Recording, Transaction, Settings, AdminUser, Manage
 from datetime import datetime, timedelta
 from sqlalchemy import func
 import io
+import os
 
 admin_bp = Blueprint('admin', __name__)
 
@@ -141,10 +142,17 @@ def dashboard():
     recent_recordings = Recording.query.order_by(Recording.created_at.desc()).limit(10).all()
     recent_transactions = Transaction.query.order_by(Transaction.created_at.desc()).limit(10).all()
 
+    pending_stats = {
+        'recordings': Recording.query.filter_by(status='pending_payment').count(),
+        'ocr': OcrResult.query.filter_by(status='pending_payment').count(),
+    }
+    pending_stats['total'] = pending_stats['recordings'] + pending_stats['ocr']
+
     return render_template('admin/dashboard.html',
         stats=stats,
         billing_stats=billing_stats,
         ocr_stats=ocr_stats,
+        pending_stats=pending_stats,
         recent_recordings=recent_recordings,
         recent_transactions=recent_transactions
     )
@@ -260,12 +268,14 @@ def export_customers_excel():
 @admin_bp.route('/customers/<int:id>')
 @login_required
 def customer_detail(id):
+    from models import OcrResult
     customer = Customer.query.get_or_404(id)
     recordings = Recording.query.filter_by(customer_id=id).order_by(Recording.created_at.desc()).all()
     transactions = Transaction.query.filter_by(customer_id=id).order_by(Transaction.created_at.desc()).all()
+    ocr_results = OcrResult.query.filter_by(customer_id=id).order_by(OcrResult.created_at.desc()).all()
     return render_template('admin/customer_detail.html',
         customer=customer, recordings=recordings, transactions=transactions,
-        timedelta=timedelta)
+        ocr_results=ocr_results, timedelta=timedelta)
 
 @admin_bp.route('/customers/<int:id>/block', methods=['POST'])
 @login_required
@@ -280,9 +290,11 @@ def block_customer(id):
 @admin_bp.route('/customers/<int:id>/delete', methods=['POST'])
 @login_required
 def delete_customer(id):
+    from models import OcrResult
     customer = Customer.query.get_or_404(id)
     Transaction.query.filter_by(customer_id=id).delete()
     Recording.query.filter_by(customer_id=id).delete()
+    OcrResult.query.filter_by(customer_id=id).delete()
     db.session.delete(customer)
     db.session.commit()
     flash(f'לקוח {customer.phone} נמחק בהצלחה')
@@ -380,6 +392,19 @@ def recordings():
     page = request.args.get('page', 1, type=int)
     recordings = Recording.query.order_by(Recording.created_at.desc()).paginate(page=page, per_page=50)
     return render_template('admin/recordings.html', recordings=recordings, timedelta=timedelta)
+
+@admin_bp.route('/recordings/bulk-delete', methods=['POST'])
+@login_required
+def bulk_delete_recordings():
+    recording_ids = request.form.getlist('recording_ids')
+    if not recording_ids:
+        flash('לא נבחרו הקלטות')
+    else:
+        count = Recording.query.filter(Recording.id.in_(recording_ids)).delete(synchronize_session=False)
+        db.session.commit()
+        flash(f'{count} הקלטות נמחקו בהצלחה')
+    next_url = request.form.get('next') or url_for('admin.recordings')
+    return redirect(next_url)
 
 @admin_bp.route('/recordings/<int:id>')
 @login_required
@@ -846,6 +871,17 @@ def bulk_customer_action():
         db.session.commit()
         flash(f'נוסף {percent}% ל-{len(customers)} לקוחות')
 
+    elif action == 'delete':
+        from models import OcrResult
+        count = len(customers)
+        for c in customers:
+            Transaction.query.filter_by(customer_id=c.id).delete()
+            Recording.query.filter_by(customer_id=c.id).delete()
+            OcrResult.query.filter_by(customer_id=c.id).delete()
+            db.session.delete(c)
+        db.session.commit()
+        flash(f'{count} לקוחות נמחקו בהצלחה')
+
     return redirect(url_for('admin.customers'))
 
 
@@ -903,6 +939,29 @@ def ocr_list():
 
     ocr_results = query.paginate(page=page, per_page=20)
     return render_template('admin/ocr_list.html', ocr_results=ocr_results, search=search)
+
+
+@admin_bp.route('/ocr/bulk-delete', methods=['POST'])
+@login_required
+def bulk_delete_ocr():
+    from models import OcrResult
+    ocr_ids = request.form.getlist('ocr_ids')
+    if not ocr_ids:
+        flash('לא נבחרו תוצאות OCR')
+    else:
+        items = OcrResult.query.filter(OcrResult.id.in_(ocr_ids)).all()
+        count = len(items)
+        for item in items:
+            try:
+                if item.original_file_path and os.path.exists(item.original_file_path):
+                    os.remove(item.original_file_path)
+            except Exception:
+                pass
+            db.session.delete(item)
+        db.session.commit()
+        flash(f'{count} תוצאות OCR נמחקו בהצלחה')
+    next_url = request.form.get('next') or url_for('admin.ocr_list')
+    return redirect(next_url)
 
 
 @admin_bp.route('/ocr/<int:ocr_id>')
