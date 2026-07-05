@@ -432,16 +432,41 @@ def _process_ocr_email(filepath, original_filename, customer, sender_email, phon
 def _ocr_worker(filepath, original_filename, customer_id, customer_email, phone):
     """Worker thread שמבצע OCR ושולח תשובה."""
     from app import app, db
-    from models import Customer, Transaction
+    from models import Customer, Transaction, OcrResult
     from routes.admin import get_setting
+    from datetime import datetime, timedelta
 
     log.info(f"OCR worker started: {original_filename}, customer={customer_id}")
+    keep_file = False
 
     try:
         with app.app_context():
             # בחירת מנוע OCR לפי הגדרות
             ocr_engine = get_setting('ocr_engine', 'gemini')
             price_per_1000 = float(get_setting('price_per_1000_chars_ocr', '0.10'))
+
+            # --- בדיקה מקדימה: אם אין אפילו יתרה ליחידה אחת (1000 תווים) - לא שולחים לגמיני בכלל ---
+            customer_pre = Customer.query.get(customer_id)
+            if customer_pre and customer_pre.balance < price_per_1000:
+                log.info(f"OCR: יתרה לא מספיקה לפני עיבוד עבור customer {customer_id} (צריך לפחות {price_per_1000}, יש {customer_pre.balance})")
+                keep_file = True  # נשמר לעיבוד בפועל כשתטען יתרה
+                ocr_rec = OcrResult(
+                    customer_id=customer_id,
+                    original_filename=original_filename,
+                    original_file_path=filepath,
+                    ocr_text=None,
+                    char_count=0,
+                    cost=0.0,
+                    engine=ocr_engine,
+                    status='pending_payment',
+                    delivered_to=customer_email,
+                    expires_at=datetime.utcnow() + timedelta(hours=72),
+                )
+                db.session.add(ocr_rec)
+                db.session.commit()
+                if customer_email:
+                    _send_ocr_insufficient_balance_email(customer_email, price_per_1000, customer_pre.balance)
+                return
 
         log.info(f"OCR engine: {ocr_engine}")
 
@@ -471,8 +496,29 @@ def _ocr_worker(filepath, original_filename, customer_id, customer_email, phone)
         cost = round(units * price_per_1000, 2)
 
         with app.app_context():
-            from models import OcrResult
             customer = Customer.query.get(customer_id)
+
+            # --- בדיקה סופית: אחרי שיודעים את העלות האמיתית, האם היתרה מספיקה? ---
+            if customer and customer.balance < cost:
+                log.info(f"OCR: יתרה לא מספיקה אחרי עיבוד עבור customer {customer_id} (צריך {cost}, יש {customer.balance})")
+                ocr_rec = OcrResult(
+                    customer_id=customer_id,
+                    original_filename=original_filename,
+                    original_file_path=filepath,
+                    ocr_text=ocr_text,
+                    char_count=char_count,
+                    cost=cost,
+                    engine=ocr_engine,
+                    status='pending_payment',
+                    delivered_to=customer_email,
+                    expires_at=datetime.utcnow() + timedelta(hours=72),
+                )
+                db.session.add(ocr_rec)
+                db.session.commit()
+                if customer_email:
+                    _send_ocr_insufficient_balance_email(customer_email, cost, customer.balance)
+                return
+
             if customer:
                 customer.balance -= cost
                 txn = Transaction(
@@ -509,9 +555,9 @@ def _ocr_worker(filepath, original_filename, customer_id, customer_email, phone)
     except Exception as e:
         log.error(f"OCR worker error: {e}")
     finally:
-        # מחיקת הקובץ הזמני
+        # מחיקת הקובץ הזמני - חוץ ממקרה pending_payment לפני עיבוד, שם הקובץ נחוץ לעיבוד מאוחר יותר
         try:
-            if os.path.exists(filepath):
+            if not keep_file and os.path.exists(filepath):
                 os.remove(filepath)
                 log.info(f"OCR temp file deleted: {filepath}")
         except Exception:
@@ -877,6 +923,144 @@ def _send_ocr_result_email(to, original_filename, ocr_text, char_count, cost):
 
     except Exception as e:
         log.error(f"OCR result email error: {e}")
+
+
+def _send_ocr_insufficient_balance_email(to_email, cost, balance):
+    """שולח מייל ללקוח שהיתרה אינה מספיקה לזיהוי כתב היד - התוצאה נשמרת 72 שעות"""
+    if _is_system_inbound_address(to_email):
+        log.error(f"חסימת שליחת מייל יתרה OCR לכתובת המערכת עצמה ({to_email}) - מניעת לולאה")
+        return
+
+    try:
+        import sendgrid
+        from sendgrid.helpers.mail import Mail, Email
+
+        balance_str = f"\u20aa{balance:.2f}"
+        cost_str = f"\u20aa{cost:.2f}"
+
+        html = f'''<div dir="rtl" style="font-family:Arial,sans-serif;max-width:640px;margin:auto;color:#111827">
+<h2 style="color:#dc2626">לא ניתן היה להשלים את זיהוי כתב היד</h2>
+<p>שלום,</p>
+<p>התקבל קובץ לזיהוי כתב יד.</p>
+<div style="background:#fef2f2;border-right:4px solid #ef4444;padding:14px;margin:14px 0;border-radius:8px">
+<p style="margin:0;font-weight:700;color:#991b1b">היתרה בארנק אינה מספיקה לזיהוי זה</p>
+<p style="margin:8px 0 0;color:#111827">
+יתרה נוכחית: <b>{balance_str}</b><br>
+עלות הזיהוי: <b>{cost_str}</b>
+</p>
+</div>
+<p>הקובץ <b>נשמר במערכת ל-72 שעות</b>.<br>
+אם תטעין את הארנק תוך 72 שעות, זיהוי כתב היד יבוצע/יישלח אליך אוטומטית.</p>
+<p style="color:#6b7280;font-size:14px">מערכת תמלול פון 03-3131795</p>
+</div>'''
+
+        sg = sendgrid.SendGridAPIClient(api_key=os.environ.get('SENDGRID_API_KEY'))
+        message = Mail(
+            from_email=Email(os.environ.get('SENDGRID_FROM_EMAIL', ''), 'תמלול פון'),
+            to_emails=to_email,
+            subject='תמלול פון - יתרה אינה מספיקה לזיהוי כתב היד',
+            html_content=html
+        )
+        sg.send(message)
+        log.info(f"OCR insufficient balance email sent to {to_email}")
+
+    except Exception as e:
+        log.error(f"OCR insufficient balance email error: {e}")
+
+
+def process_pending_ocr(customer_id):
+    """
+    בודק אם יש תוצאות OCR ב-pending_payment עבור לקוח, ומנסה לחייב/לשלוח
+    אחרי שהיתרה התעדכנה (למשל אחרי טעינת ארנק). קורא לזה מ-payment.py ומ-api.py.
+    """
+    from app import app, db
+    from models import Customer, OcrResult, Transaction
+    from routes.admin import get_setting
+    from datetime import datetime
+    import math
+
+    with app.app_context():
+        customer = Customer.query.get(customer_id)
+        if not customer:
+            return
+
+        pending = OcrResult.query.filter_by(customer_id=customer_id, status='pending_payment').all()
+        if not pending:
+            return
+
+        price_per_1000 = float(get_setting('price_per_1000_chars_ocr', '0.10'))
+
+        for ocr_rec in pending:
+            # פג תוקף - מוחקים בשקט (הקובץ המקורי ינוקה על ידי job הניקוי הרגיל)
+            if ocr_rec.expires_at and ocr_rec.expires_at < datetime.utcnow():
+                ocr_rec.status = 'expired'
+                db.session.commit()
+                continue
+
+            # מקרה 1: ה-OCR עוד לא רץ בכלל (נחסם לפני שליחה לגמיני) - צריך להריץ עכשיו
+            if not ocr_rec.ocr_text:
+                if customer.balance < price_per_1000:
+                    log.info(f"process_pending_ocr: עדיין אין מספיק יתרה ל-1 יחידה עבור ocr_rec {ocr_rec.id}")
+                    continue
+                if not ocr_rec.original_file_path or not os.path.exists(ocr_rec.original_file_path):
+                    log.error(f"process_pending_ocr: קובץ מקורי חסר עבור ocr_rec {ocr_rec.id}, לא ניתן לעבד")
+                    ocr_rec.status = 'error'
+                    db.session.commit()
+                    continue
+
+                ocr_engine = ocr_rec.engine or 'gemini'
+                if ocr_engine == 'claude':
+                    ocr_text = _claude_ocr(ocr_rec.original_file_path, ocr_rec.original_filename)
+                elif ocr_engine == 'gpt4o':
+                    ocr_text = _gpt4o_ocr(ocr_rec.original_file_path, ocr_rec.original_filename)
+                else:
+                    ocr_text = _gemini_ocr(ocr_rec.original_file_path, ocr_rec.original_filename)
+
+                if not ocr_text:
+                    log.error(f"process_pending_ocr: OCR נכשל עבור ocr_rec {ocr_rec.id}")
+                    continue
+
+                char_count = len(ocr_text)
+                units = math.ceil(char_count / 1000)
+                cost = round(units * price_per_1000, 2)
+
+                ocr_rec.ocr_text = ocr_text
+                ocr_rec.char_count = char_count
+                ocr_rec.cost = cost
+                db.session.commit()
+            else:
+                cost = ocr_rec.cost
+
+            # מקרה 2: יש כבר טקסט (או שרק סיימנו לחשב אותו למעלה) - בודקים יתרה סופית
+            if customer.balance < cost:
+                log.info(f"process_pending_ocr: עדיין אין מספיק יתרה עבור ocr_rec {ocr_rec.id} (צריך {cost}, יש {customer.balance})")
+                continue
+
+            customer.balance -= cost
+            txn = Transaction(
+                customer_id=customer_id,
+                amount=-cost,
+                type='debit',
+                description=f'OCR כתב יד - {ocr_rec.original_filename} ({ocr_rec.char_count} תווים)',
+            )
+            db.session.add(txn)
+            ocr_rec.status = 'completed'
+            db.session.commit()
+            log.info(f"process_pending_ocr: חויב {cost} ללקוח {customer_id}, יתרה={customer.balance}")
+
+            try:
+                if ocr_rec.original_file_path and os.path.exists(ocr_rec.original_file_path):
+                    os.remove(ocr_rec.original_file_path)
+            except Exception:
+                pass
+
+            _send_ocr_result_email(
+                to=ocr_rec.delivered_to,
+                original_filename=ocr_rec.original_filename,
+                ocr_text=ocr_rec.ocr_text,
+                char_count=ocr_rec.char_count,
+                cost=ocr_rec.cost,
+            )
 
 
 @email_bp.route('/email-inbound', methods=['POST'])
