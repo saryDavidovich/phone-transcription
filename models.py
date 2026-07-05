@@ -101,7 +101,9 @@ class OcrResult(db.Model):
     char_count = db.Column(db.Integer, default=0)
     cost = db.Column(db.Float, default=0.0)
     engine = db.Column(db.String(20), default='gemini')
-    status = db.Column(db.String(20), default='completed')  # completed / error
+    status = db.Column(db.String(20), default='completed')  # completed / error / pending_payment
+    delivered_to = db.Column(db.String(255), nullable=True)  # כתובת מייל לשליחה כשתשלים תשלום
+    expires_at = db.Column(db.DateTime, nullable=True)  # לתוצאות pending_payment - 72 שעות
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     customer = db.relationship('Customer', backref=db.backref('ocr_results', lazy=True))
