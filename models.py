@@ -21,7 +21,7 @@ class Customer(db.Model):
 class Recording(db.Model):
     __tablename__ = 'recordings'
     id = db.Column(db.Integer, primary_key=True)
-    customer_id = db.Column(db.Integer, db.ForeignKey('customers.id'), nullable=False)
+    customer_id = db.Column(db.Integer, db.ForeignKey('customers.id'), nullable=False, index=True)
     call_id = db.Column(db.String(100), unique=True)
     duration_seconds = db.Column(db.Integer, default=0)
     cost = db.Column(db.Float, default=0.0)
@@ -46,7 +46,7 @@ class Recording(db.Model):
 class Transaction(db.Model):
     __tablename__ = 'transactions'
     id = db.Column(db.Integer, primary_key=True)
-    customer_id = db.Column(db.Integer, db.ForeignKey('customers.id'), nullable=False)
+    customer_id = db.Column(db.Integer, db.ForeignKey('customers.id'), nullable=False, index=True)
     amount = db.Column(db.Float, nullable=False)
     type = db.Column(db.String(20))
     description = db.Column(db.String(200))
