@@ -126,6 +126,25 @@
 </form>
 
 <div class="card" style="margin-top:24px">
+  <div style="font-size:16px;font-weight:700;margin-bottom:20px">🔒 שינוי סיסמת מנהל</div>
+  <form method="POST" action="{{ url_for('admin.change_password') }}">
+    <div class="form-group">
+      <label class="form-label">סיסמה נוכחית</label>
+      <input class="form-input" name="current_password" type="password" required>
+    </div>
+    <div class="form-group">
+      <label class="form-label">סיסמה חדשה (לפחות 8 תווים)</label>
+      <input class="form-input" name="new_password" type="password" minlength="8" required>
+    </div>
+    <div class="form-group">
+      <label class="form-label">אימות סיסמה חדשה</label>
+      <input class="form-input" name="confirm_password" type="password" minlength="8" required>
+    </div>
+    <button class="btn btn-primary" type="submit">🔒 שנה סיסמה</button>
+  </form>
+</div>
+
+<div class="card" style="margin-top:24px">
   <div style="font-size:16px;font-weight:700;margin-bottom:20px">🧪 בדיקת תמלול — העלאת קובץ</div>
   <a href="{{ url_for('admin.test_transcribe') }}" class="btn btn-primary">פתח עמוד בדיקת תמלול</a>
 </div>
