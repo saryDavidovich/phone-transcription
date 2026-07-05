@@ -28,6 +28,12 @@
     <div class="stat-value">₪{{ "%.2f"|format(stats.total_balance) }}</div>
     <div class="stat-change" style="color:#ef4444">{{ stats.blocked_customers }} חסומים</div>
   </div>
+  <div class="stat-card">
+    <div class="stat-icon" style="background:rgba(245,158,11,0.15)">⏳</div>
+    <div class="stat-label">ממתינים לתשלום</div>
+    <div class="stat-value" style="{{ 'color:#f59e0b' if pending_stats.total > 0 else '' }}">{{ pending_stats.total }}</div>
+    <div class="stat-change" style="color:#8892b0">{{ pending_stats.recordings }} הקלטות, {{ pending_stats.ocr }} OCR</div>
+  </div>
 </div>
 
 <!-- חלון חיובי ארנקות היום -->
@@ -101,11 +107,11 @@
 
 <!-- לקוחות לא פעילים -->
 <div style="display:flex;gap:12px;margin-bottom:20px">
-  <a href="/admin/customers-filter?filter=inactive_month" style="flex:1;background:#1a1f2e;border-radius:10px;padding:14px;text-decoration:none;display:flex;justify-content:space-between;align-items:center">
+  <a href="/admin/customers-filter?filter=inactive_month" style="flex:1;background:var(--surface2);border-radius:10px;padding:14px;text-decoration:none;display:flex;justify-content:space-between;align-items:center">
     <span style="color:#8892b0">😴 לא פעילים חודש</span>
     <span style="font-size:22px;font-weight:700;color:#f59e0b">{{ stats.inactive_month }}</span>
   </a>
-  <a href="/admin/customers-filter?filter=inactive_year" style="flex:1;background:#1a1f2e;border-radius:10px;padding:14px;text-decoration:none;display:flex;justify-content:space-between;align-items:center">
+  <a href="/admin/customers-filter?filter=inactive_year" style="flex:1;background:var(--surface2);border-radius:10px;padding:14px;text-decoration:none;display:flex;justify-content:space-between;align-items:center">
     <span style="color:#8892b0">💤 לא פעילים שנה</span>
     <span style="font-size:22px;font-weight:700;color:#ef4444">{{ stats.inactive_year }}</span>
   </a>
@@ -130,6 +136,7 @@
           <td>
             {% if rec.status == 'delivered' %}<span class="badge badge-green">נשלח</span>
             {% elif rec.status == 'transcribing' %}<span class="badge badge-amber">מתמלל</span>
+            {% elif rec.status == 'pending_payment' %}<span class="badge badge-amber">ממתין לתשלום</span>
             {% elif rec.status == 'error' %}<span class="badge badge-red">שגיאה</span>
             {% else %}<span class="badge badge-gray">{{ rec.status }}</span>{% endif %}
           </td>
@@ -161,7 +168,7 @@
             {% elif txn.type == 'credit' %}<span class="badge badge-blue">זיכוי</span>
             {% else %}<span class="badge badge-gray">{{ txn.type }}</span>{% endif %}
           </td>
-          <td style="color:#8892b0">{{ txn.created_at.strftime('%d/%m %H:%M') }}</td>
+          <td style="color:#8892b0">{{ txn.created_at | il_time('%d/%m %H:%M') }}</td>
         </tr>
         {% endfor %}
       </tbody>
