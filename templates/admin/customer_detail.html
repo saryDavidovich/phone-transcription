@@ -7,7 +7,7 @@
     <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:20px">
       <div>
         <div style="font-size:22px;font-weight:800">{{ customer.phone }}</div>
-        <div style="color:#8892b0;font-size:13px">מצטרף מ-{{ customer.created_at.strftime('%d/%m/%Y') }}</div>
+        <div style="color:#8892b0;font-size:13px">מצטרף מ-{{ customer.created_at | il_time('%d/%m/%Y') }}</div>
       </div>
       <div style="display:flex;gap:8px">
         <form method="POST" action="/admin/customers/{{ customer.id }}/block">
@@ -83,22 +83,23 @@
 
 <div style="margin-top:20px" class="table-card">
   <div class="table-header"><span class="table-title">🎧 הקלטות</span></div>
-  <form method="POST" action="/admin/customers/{{ customer.id }}/send-recordings">
   <table>
     <thead><tr>
-      <th><input type="checkbox" id="selectAll" onclick="toggleAll(this)"></th>
-      <th>תאריך</th><th>משך</th><th>עלות</th><th>יעד</th><th>סטטוס</th>
+      <th><input type="checkbox" id="selectAllRec" onclick="toggleAllRec(this)"></th>
+      <th>תאריך</th><th>מספר הקלטה (ימות)</th><th>משך</th><th>עלות</th><th>יעד</th><th>סטטוס</th>
     </tr></thead>
     <tbody>
       {% for rec in recordings %}
       <tr>
-        <td><input type="checkbox" name="recording_ids" value="{{ rec.id }}"></td>
-        <td onclick="location='/admin/recordings/{{rec.id}}'" style="cursor:pointer">{{ (rec.created_at + timedelta(hours=3)).strftime('%d/%m/%Y %H:%M') }}</td>
+        <td><input type="checkbox" name="recording_ids" value="{{ rec.id }}" form="sendRecForm" class="rec-check"></td>
+        <td onclick="location='/admin/recordings/{{rec.id}}'" style="cursor:pointer">{{ rec.created_at | il_time }}</td>
+        <td onclick="location='/admin/recordings/{{rec.id}}'" style="cursor:pointer;color:#8892b0;font-family:monospace">{{ rec.call_id or '—' }}</td>
         <td onclick="location='/admin/recordings/{{rec.id}}'" style="cursor:pointer">{{ rec.duration_seconds // 60 }}:{{ '%02d'%(rec.duration_seconds % 60) }}</td>
         <td onclick="location='/admin/recordings/{{rec.id}}'" style="cursor:pointer">₪{{ "%.2f"|format(rec.cost) }}</td>
         <td onclick="location='/admin/recordings/{{rec.id}}'" style="cursor:pointer">{{ rec.delivered_to or '—' }}</td>
         <td onclick="location='/admin/recordings/{{rec.id}}'" style="cursor:pointer">
           {% if rec.status == 'delivered' %}<span class="badge badge-green">נשלח</span>
+          {% elif rec.status == 'pending_payment' %}<span class="badge badge-amber">ממתין לתשלום</span>
           {% elif rec.status == 'error' %}<span class="badge badge-red">שגיאה</span>
           {% else %}<span class="badge badge-gray">{{ rec.status }}</span>{% endif %}
         </td>
@@ -106,20 +107,103 @@
       {% endfor %}
     </tbody>
   </table>
-  <div style="padding:16px;display:flex;gap:12px;align-items:center;border-top:1px solid #2d3561">
-    <select name="send_method" class="form-input" style="width:150px">
-      <option value="email">📧 מייל</option>
-      <option value="fax">📠 פקס</option>
-    </select>
-    <input class="form-input" name="send_to" placeholder="כתובת מייל / מספר פקס" style="width:250px" value="{{ customer.email or customer.fax or '' }}">
-    <button class="btn btn-primary" type="submit">📤 שלח נבחרים</button>
+  <div style="padding:16px;display:flex;gap:12px;align-items:center;border-top:1px solid #2d3561;flex-wrap:wrap">
+    <form method="POST" action="/admin/customers/{{ customer.id }}/send-recordings" id="sendRecForm" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+      <select name="send_method" class="form-input" style="width:150px">
+        <option value="email">📧 מייל</option>
+        <option value="fax">📠 פקס</option>
+      </select>
+      <input class="form-input" name="send_to" placeholder="כתובת מייל / מספר פקס" style="width:250px" value="{{ customer.email or customer.fax or '' }}">
+      <button class="btn btn-primary" type="submit">📤 שלח נבחרים</button>
+    </form>
+    <form method="POST" action="/admin/recordings/bulk-delete" onsubmit="return confirmRecDelete()">
+      <input type="hidden" name="next" value="/admin/customers/{{ customer.id }}">
+      <div id="recDeleteCheckboxes"></div>
+      <button class="btn btn-danger" type="submit" onclick="return copyRecChecks(this)">🗑️ מחק נבחרים</button>
+    </form>
   </div>
-  </form>
 </div>
 
 <script>
-function toggleAll(cb) {
-  document.querySelectorAll('input[name="recording_ids"]').forEach(c => c.checked = cb.checked);
+function toggleAllRec(cb) {
+  document.querySelectorAll('.rec-check').forEach(c => c.checked = cb.checked);
+}
+function copyRecChecks(btn) {
+  const container = document.getElementById('recDeleteCheckboxes');
+  container.innerHTML = '';
+  const checked = document.querySelectorAll('.rec-check:checked');
+  checked.forEach(c => {
+    const hidden = document.createElement('input');
+    hidden.type = 'hidden';
+    hidden.name = 'recording_ids';
+    hidden.value = c.value;
+    container.appendChild(hidden);
+  });
+  return true;
+}
+function confirmRecDelete() {
+  const checked = document.querySelectorAll('.rec-check:checked').length;
+  if (checked === 0) { alert('לא נבחרו הקלטות'); return false; }
+  return confirm('למחוק ' + checked + ' הקלטות נבחרות? פעולה זו אינה הפיכה!');
+}
+</script>
+
+<div style="margin-top:20px" class="table-card">
+  <div class="table-header"><span class="table-title">📄 זיהוי כתב יד (OCR)</span></div>
+  <table>
+    <thead><tr>
+      <th><input type="checkbox" id="selectAllOcr" onclick="toggleAllOcr(this)"></th>
+      <th>תאריך</th><th>קובץ</th><th>תווים</th><th>עלות</th><th>סטטוס</th><th></th>
+    </tr></thead>
+    <tbody>
+      {% for r in ocr_results %}
+      <tr>
+        <td><input type="checkbox" name="ocr_ids" value="{{ r.id }}" class="ocr-check"></td>
+        <td onclick="location='/admin/ocr/{{r.id}}'" style="cursor:pointer">{{ r.created_at | il_time }}</td>
+        <td onclick="location='/admin/ocr/{{r.id}}'" style="cursor:pointer;color:#8892b0;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.original_filename }}</td>
+        <td onclick="location='/admin/ocr/{{r.id}}'" style="cursor:pointer">{{ r.char_count }}</td>
+        <td onclick="location='/admin/ocr/{{r.id}}'" style="cursor:pointer">₪{{ "%.2f"|format(r.cost) }}</td>
+        <td onclick="location='/admin/ocr/{{r.id}}'" style="cursor:pointer">
+          {% if r.status == 'completed' %}<span class="badge badge-green">הושלם</span>
+          {% elif r.status == 'pending_payment' %}<span class="badge badge-amber">ממתין לתשלום</span>
+          {% elif r.status == 'expired' %}<span class="badge badge-gray">פג תוקף</span>
+          {% else %}<span class="badge badge-red">שגיאה</span>{% endif %}
+        </td>
+        <td><a href="/admin/ocr/{{r.id}}" class="btn btn-ghost" style="font-size:12px;padding:4px 10px">פרטים</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <div style="padding:16px;border-top:1px solid #2d3561">
+    <form method="POST" action="/admin/ocr/bulk-delete" onsubmit="return confirmOcrDelete()">
+      <input type="hidden" name="next" value="/admin/customers/{{ customer.id }}">
+      <div id="ocrDeleteCheckboxes"></div>
+      <button class="btn btn-danger" type="submit" onclick="return copyOcrChecks(this)">🗑️ מחק נבחרים</button>
+    </form>
+  </div>
+</div>
+
+<script>
+function toggleAllOcr(cb) {
+  document.querySelectorAll('.ocr-check').forEach(c => c.checked = cb.checked);
+}
+function copyOcrChecks(btn) {
+  const container = document.getElementById('ocrDeleteCheckboxes');
+  container.innerHTML = '';
+  const checked = document.querySelectorAll('.ocr-check:checked');
+  checked.forEach(c => {
+    const hidden = document.createElement('input');
+    hidden.type = 'hidden';
+    hidden.name = 'ocr_ids';
+    hidden.value = c.value;
+    container.appendChild(hidden);
+  });
+  return true;
+}
+function confirmOcrDelete() {
+  const checked = document.querySelectorAll('.ocr-check:checked').length;
+  if (checked === 0) { alert('לא נבחרו תוצאות'); return false; }
+  return confirm('למחוק ' + checked + ' תוצאות OCR נבחרות? פעולה זו אינה הפיכה!');
 }
 </script>
 
@@ -130,7 +214,7 @@ function toggleAll(cb) {
     <tbody>
       {% for txn in transactions %}
       <tr>
-        <td>{{ (txn.created_at + timedelta(hours=3)).strftime('%d/%m/%Y %H:%M') }}</td>
+        <td>{{ txn.created_at | il_time }}</td>
         <td style="color:{% if txn.amount > 0 %}#10b981{% else %}#ef4444{% endif %}">
           {% if txn.amount > 0 %}+{% endif %}₪{{ "%.2f"|format(txn.amount) }}
         </td>
