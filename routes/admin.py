@@ -506,6 +506,33 @@ def reports():
     return render_template('admin/reports.html',
         monthly=monthly, top_customers=top_customers)
 
+@admin_bp.route('/change-password', methods=['POST'])
+@login_required
+def change_password():
+    from werkzeug.security import check_password_hash, generate_password_hash
+
+    current_password = request.form.get('current_password', '')
+    new_password = request.form.get('new_password', '')
+    confirm_password = request.form.get('confirm_password', '')
+
+    if not check_password_hash(current_user.password_hash, current_password):
+        flash('הסיסמה הנוכחית שגויה')
+        return redirect(url_for('admin.settings'))
+
+    if len(new_password) < 8:
+        flash('הסיסמה החדשה חייבת להכיל לפחות 8 תווים')
+        return redirect(url_for('admin.settings'))
+
+    if new_password != confirm_password:
+        flash('הסיסמאות החדשות אינן תואמות')
+        return redirect(url_for('admin.settings'))
+
+    current_user.password_hash = generate_password_hash(new_password)
+    db.session.commit()
+    flash('הסיסמה שונתה בהצלחה')
+    return redirect(url_for('admin.settings'))
+
+
 @admin_bp.route('/settings', methods=['GET', 'POST'])
 @login_required
 def settings():
