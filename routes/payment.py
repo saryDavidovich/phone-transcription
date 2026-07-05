@@ -133,11 +133,13 @@ def nedarim_callback():
 
     # הפעל הקלטות ממתינות ב-thread נפרד — המתן 3 שניות כדי לוודא שהטעינה נרשמה ב-DB
     from services.transcribe import process_pending_recordings
+    from routes.email_inbound import process_pending_ocr
     import threading, time
 
     def _delayed_process(customer_id):
         time.sleep(3)
         process_pending_recordings(customer_id)
+        process_pending_ocr(customer_id)
 
     t = threading.Thread(target=_delayed_process, args=(customer.id,), daemon=True)
     t.start()
@@ -242,7 +244,7 @@ def _send_receipt_email(to, amount, bonus, total_credit, approval, receipt_url):
     try:
         import os
         import sendgrid
-        from sendgrid.helpers.mail import Mail
+        from sendgrid.helpers.mail import Mail, Email
 
         bonus_row = ''
         if bonus > 0:
@@ -268,14 +270,14 @@ def _send_receipt_email(to, amount, bonus, total_credit, approval, receipt_url):
   <div style="font-size:12px;color:#9ca3af;margin-bottom:16px">מספר אישור: {approval}</div>
   {receipt_btn}
 </div>
-<div style="text-align:center;font-size:11px;color:#9ca3af;margin-top:12px">תמלולפון 03-3131795</div>
+<div style="text-align:center;font-size:11px;color:#9ca3af;margin-top:12px">תמלול פון 03-3131795</div>
 </div>'''
 
         sg = sendgrid.SendGridAPIClient(api_key=os.environ.get('SENDGRID_API_KEY'))
         message = Mail(
-            from_email=os.environ.get('SENDGRID_FROM_EMAIL', ''),
+            from_email=Email(os.environ.get('SENDGRID_FROM_EMAIL', ''), 'תמלול פון'),
             to_emails=to,
-            subject=f'הארנק נטען - ₪{total_credit:.2f} | תמלולפון',
+            subject=f'הארנק נטען - ₪{total_credit:.2f} | תמלול פון',
             html_content=html
         )
         sg.send(message)
