@@ -18,18 +18,19 @@
 </div>
 
 <!-- טופס פעולות מרובות -->
-<form method="POST" action="/admin/customers/bulk-action" id="bulkForm">
+<form method="POST" action="/admin/customers/bulk-action" id="bulkForm" onsubmit="return confirmBulkAction()">
 
 <div style="display:flex;gap:10px;margin-bottom:14px;align-items:center;flex-wrap:wrap">
   <button type="button" onclick="selectAll()" class="btn btn-ghost" style="font-size:12px;padding:5px 12px">☑ בחר הכל</button>
   <button type="button" onclick="deselectAll()" class="btn btn-ghost" style="font-size:12px;padding:5px 12px">☐ בטל הכל</button>
-  <select name="action" style="padding:5px 10px;border-radius:6px;border:1px solid #2d3748;background:#1a1f2e;color:#e2e8f0;font-size:13px">
+  <select name="action" id="bulkActionSelect" onchange="onActionChange()" style="padding:5px 10px;border-radius:6px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:13px">
     <option value="add_amount">הוסף סכום קבוע</option>
     <option value="add_percent">הוסף אחוזים מהיתרה</option>
+    <option value="delete">🗑️ מחק לקוחות נבחרים</option>
   </select>
-  <input type="number" name="amount" placeholder="₪ סכום" step="0.01" min="0" style="width:90px;padding:5px 10px;border-radius:6px;border:1px solid #2d3748;background:#1a1f2e;color:#e2e8f0;font-size:13px">
-  <input type="number" name="percent" placeholder="% אחוז" step="0.1" min="0" style="width:80px;padding:5px 10px;border-radius:6px;border:1px solid #2d3748;background:#1a1f2e;color:#e2e8f0;font-size:13px">
-  <button type="submit" class="btn btn-primary" style="font-size:12px;padding:5px 14px">▶ בצע על נבחרים</button>
+  <input type="number" id="amountInput" name="amount" placeholder="₪ סכום" step="0.01" min="0" style="width:90px;padding:5px 10px;border-radius:6px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:13px">
+  <input type="number" id="percentInput" name="percent" placeholder="% אחוז" step="0.1" min="0" style="width:80px;padding:5px 10px;border-radius:6px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:13px">
+  <button type="submit" id="bulkSubmitBtn" class="btn btn-primary" style="font-size:12px;padding:5px 14px">▶ בצע על נבחרים</button>
 </div>
 
 <div class="table-card">
@@ -70,7 +71,7 @@
           {% if c.is_blocked %}<span class="badge badge-red">חסום</span>
           {% else %}<span class="badge badge-green">פעיל</span>{% endif %}
         </td>
-        <td onclick="location='/admin/customers/{{c.id}}'" style="cursor:pointer;color:#8892b0">{{ c.created_at.strftime('%d/%m/%Y') }}</td>
+        <td onclick="location='/admin/customers/{{c.id}}'" style="cursor:pointer;color:#8892b0">{{ c.created_at | il_time('%d/%m/%Y') }}</td>
       </tr>
       {% endfor %}
     </tbody>
@@ -99,6 +100,26 @@ function deselectAll() {
 }
 function toggleAll(cb) {
   document.querySelectorAll('.row-check').forEach(c => c.checked = cb.checked);
+}
+function onActionChange() {
+  const action = document.getElementById('bulkActionSelect').value;
+  const btn = document.getElementById('bulkSubmitBtn');
+  if (action === 'delete') {
+    btn.textContent = '🗑️ מחק נבחרים';
+    btn.className = 'btn btn-danger';
+  } else {
+    btn.textContent = '▶ בצע על נבחרים';
+    btn.className = 'btn btn-primary';
+  }
+}
+function confirmBulkAction() {
+  const checked = document.querySelectorAll('.row-check:checked').length;
+  if (checked === 0) { alert('לא נבחרו לקוחות'); return false; }
+  const action = document.getElementById('bulkActionSelect').value;
+  if (action === 'delete') {
+    return confirm('למחוק ' + checked + ' לקוחות נבחרים, כולל כל ההקלטות/OCR/עסקאות שלהם? פעולה זו אינה הפיכה!');
+  }
+  return true;
 }
 </script>
 
