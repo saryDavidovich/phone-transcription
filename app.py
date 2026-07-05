@@ -58,6 +58,20 @@ def create_app():
         _migrate_db()
         _create_default_admin()
 
+    # פילטר להצגת זמן לפי אזור זמן ישראל - מטפל אוטומטית בשעון קיץ/חורף
+    # (לא כמו hours=3 קבוע שהיה שגוי בחורף, כשישראל היא UTC+2 ולא UTC+3)
+    from zoneinfo import ZoneInfo
+    from datetime import timezone as _timezone
+
+    def il_time(dt, fmt='%d/%m/%Y %H:%M'):
+        if dt is None:
+            return ''
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=_timezone.utc)
+        return dt.astimezone(ZoneInfo('Asia/Jerusalem')).strftime(fmt)
+
+    app.jinja_env.filters['il_time'] = il_time
+
     logging.basicConfig(level=logging.INFO)
     return app
 
