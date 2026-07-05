@@ -64,7 +64,7 @@
       <td><strong>{{ msg.id }}</strong></td>
 
       <!-- תאריך -->
-      <td style="font-size:11px">{{ (msg.created_at + timedelta(hours=3)).strftime('%d/%m %H:%M') }}</td>
+      <td style="font-size:11px">{{ msg.created_at | il_time('%d/%m %H:%M') }}</td>
 
       <!-- טלפון -->
       <td><strong>{{ msg.phone }}</strong></td>
