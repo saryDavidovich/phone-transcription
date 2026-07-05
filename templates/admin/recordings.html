@@ -2,30 +2,68 @@
 {% block title %}הקלטות{% endblock %}
 {% block page_title %}ניהול הקלטות{% endblock %}
 {% block content %}
+
+<form method="POST" action="/admin/recordings/bulk-delete" id="bulkForm" onsubmit="return confirmBulkDelete()">
+<input type="hidden" name="next" value="{{ request.full_path }}">
+
+<div style="display:flex;gap:10px;margin-bottom:14px;align-items:center;flex-wrap:wrap">
+  <button type="button" onclick="selectAll()" class="btn btn-ghost" style="font-size:12px;padding:5px 12px">☑ בחר הכל</button>
+  <button type="button" onclick="deselectAll()" class="btn btn-ghost" style="font-size:12px;padding:5px 12px">☐ בטל הכל</button>
+  <button type="submit" class="btn btn-danger" style="font-size:12px;padding:5px 14px">🗑️ מחק נבחרים</button>
+</div>
+
 <div class="table-card">
   <div class="table-header"><span class="table-title">🎧 הקלטות ({{ recordings.total }})</span></div>
   <table>
-    <thead><tr><th>תאריך</th><th>לקוח</th><th>משך</th><th>עלות</th><th>שיטת שליחה</th><th>סטטוס</th></tr></thead>
+    <thead><tr>
+      <th style="width:36px;text-align:center"><input type="checkbox" id="checkAll" onchange="toggleAll(this)"></th>
+      <th>תאריך</th><th>לקוח</th><th>מספר הקלטה (ימות)</th><th>משך</th><th>עלות</th><th>שיטת שליחה</th><th>סטטוס</th>
+    </tr></thead>
     <tbody>
       {% for rec in recordings.items %}
-      <tr onclick="location='/admin/recordings/{{rec.id}}'" style="cursor:pointer">
-        <td>{{ rec.created_at.strftime('%d/%m/%Y %H:%M') }}</td>
-        <td><a href="/admin/customers/{{ rec.customer_id }}" onclick="event.stopPropagation()">{{ rec.customer.phone }}</a></td>
-        <td>{{ rec.duration_seconds // 60 }}:{{ '%02d'%(rec.duration_seconds % 60) }}</td>
-        <td>₪{{ "%.2f"|format(rec.cost) }}</td>
-        <td>{{ '📧 מייל' if rec.delivery_method == 'email' else '📠 פקס' }}</td>
-        <td>{% if rec.status == 'delivered' %}<span class="badge badge-green">נשלח</span>
-            {% elif rec.status == 'transcribing' %}<span class="badge badge-amber">מתמלל</span>
-            {% elif rec.status == 'error' %}<span class="badge badge-red">שגיאה</span>
-            {% else %}<span class="badge badge-gray">{{ rec.status }}</span>{% endif %}</td>
+      <tr>
+        <td style="text-align:center" onclick="event.stopPropagation()"><input type="checkbox" name="recording_ids" value="{{ rec.id }}" class="row-check"></td>
+        <td onclick="location='/admin/recordings/{{rec.id}}'" style="cursor:pointer">{{ rec.created_at | il_time }}</td>
+        <td onclick="location='/admin/recordings/{{rec.id}}'" style="cursor:pointer"><a href="/admin/customers/{{ rec.customer_id }}" onclick="event.stopPropagation()">{{ rec.customer.phone }}</a></td>
+        <td onclick="location='/admin/recordings/{{rec.id}}'" style="cursor:pointer;color:#8892b0;font-family:monospace">{{ rec.call_id or '—' }}</td>
+        <td onclick="location='/admin/recordings/{{rec.id}}'" style="cursor:pointer">{{ rec.duration_seconds // 60 }}:{{ '%02d'%(rec.duration_seconds % 60) }}</td>
+        <td onclick="location='/admin/recordings/{{rec.id}}'" style="cursor:pointer">₪{{ "%.2f"|format(rec.cost) }}</td>
+        <td onclick="location='/admin/recordings/{{rec.id}}'" style="cursor:pointer">{{ '📧 מייל' if rec.delivery_method == 'email' else '📠 פקס' }}</td>
+        <td onclick="location='/admin/recordings/{{rec.id}}'" style="cursor:pointer">
+          {% if rec.status == 'delivered' %}<span class="badge badge-green">נשלח</span>
+              {% elif rec.status == 'transcribing' %}<span class="badge badge-amber">מתמלל</span>
+              {% elif rec.status == 'pending_payment' %}<span class="badge badge-amber">ממתין לתשלום</span>
+              {% elif rec.status == 'error' %}<span class="badge badge-red">שגיאה</span>
+              {% else %}<span class="badge badge-gray">{{ rec.status }}</span>{% endif %}</td>
       </tr>
       {% endfor %}
     </tbody>
   </table>
 </div>
+</form>
+
 <div class="pagination">
   {% for p in recordings.iter_pages() %}
     {% if p %}<a href="?page={{ p }}" class="page-btn {% if p == recordings.page %}active{% endif %}">{{ p }}</a>{% endif %}
   {% endfor %}
 </div>
+
+<script>
+function selectAll() {
+  document.querySelectorAll('.row-check').forEach(c => c.checked = true);
+  document.getElementById('checkAll').checked = true;
+}
+function deselectAll() {
+  document.querySelectorAll('.row-check').forEach(c => c.checked = false);
+  document.getElementById('checkAll').checked = false;
+}
+function toggleAll(cb) {
+  document.querySelectorAll('.row-check').forEach(c => c.checked = cb.checked);
+}
+function confirmBulkDelete() {
+  const checked = document.querySelectorAll('.row-check:checked').length;
+  if (checked === 0) { alert('לא נבחרו הקלטות'); return false; }
+  return confirm('למחוק ' + checked + ' הקלטות נבחרות? פעולה זו אינה הפיכה!');
+}
+</script>
 {% endblock %}
