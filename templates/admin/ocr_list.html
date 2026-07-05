@@ -10,6 +10,15 @@
   </form>
 </div>
 
+<form method="POST" action="/admin/ocr/bulk-delete" id="bulkForm" onsubmit="return confirmBulkDelete()">
+<input type="hidden" name="next" value="{{ request.full_path }}">
+
+<div style="display:flex;gap:10px;margin-bottom:14px;align-items:center;flex-wrap:wrap">
+  <button type="button" onclick="selectAll()" class="btn btn-ghost" style="font-size:12px;padding:5px 12px">☑ בחר הכל</button>
+  <button type="button" onclick="deselectAll()" class="btn btn-ghost" style="font-size:12px;padding:5px 12px">☐ בטל הכל</button>
+  <button type="submit" class="btn btn-danger" style="font-size:12px;padding:5px 14px">🗑️ מחק נבחרים</button>
+</div>
+
 <div class="table-card">
   <div class="table-header">
     <span class="table-title">📄 תוצאות OCR ({{ ocr_results.total }})</span>
@@ -17,6 +26,7 @@
   <table>
     <thead>
       <tr>
+        <th style="width:36px;text-align:center"><input type="checkbox" id="checkAll" onchange="toggleAll(this)"></th>
         <th>לקוח</th>
         <th>קובץ</th>
         <th>תווים</th>
@@ -29,23 +39,27 @@
     </thead>
     <tbody>
       {% for r in ocr_results.items %}
-      <tr onclick="location='/admin/ocr/{{r.id}}'" style="cursor:pointer">
-        <td><strong>{{ r.customer.phone }}</strong></td>
-        <td style="color:#8892b0;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.original_filename }}</td>
-        <td>{{ r.char_count }}</td>
-        <td>₪{{ "%.2f"|format(r.cost) }}</td>
-        <td><span class="badge badge-blue">{{ r.engine }}</span></td>
-        <td>
+      <tr>
+        <td style="text-align:center" onclick="event.stopPropagation()"><input type="checkbox" name="ocr_ids" value="{{ r.id }}" class="row-check"></td>
+        <td onclick="location='/admin/ocr/{{r.id}}'" style="cursor:pointer"><strong>{{ r.customer.phone }}</strong></td>
+        <td onclick="location='/admin/ocr/{{r.id}}'" style="cursor:pointer;color:#8892b0;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.original_filename }}</td>
+        <td onclick="location='/admin/ocr/{{r.id}}'" style="cursor:pointer">{{ r.char_count }}</td>
+        <td onclick="location='/admin/ocr/{{r.id}}'" style="cursor:pointer">₪{{ "%.2f"|format(r.cost) }}</td>
+        <td onclick="location='/admin/ocr/{{r.id}}'" style="cursor:pointer"><span class="badge badge-blue">{{ r.engine }}</span></td>
+        <td onclick="location='/admin/ocr/{{r.id}}'" style="cursor:pointer">
           {% if r.status == 'completed' %}<span class="badge badge-green">הושלם</span>
+          {% elif r.status == 'pending_payment' %}<span class="badge badge-amber">ממתין לתשלום</span>
+          {% elif r.status == 'expired' %}<span class="badge badge-gray">פג תוקף</span>
           {% else %}<span class="badge badge-red">שגיאה</span>{% endif %}
         </td>
-        <td style="color:#8892b0">{{ r.created_at.strftime('%d/%m/%Y %H:%M') }}</td>
+        <td onclick="location='/admin/ocr/{{r.id}}'" style="cursor:pointer;color:#8892b0">{{ r.created_at | il_time }}</td>
         <td><a href="/admin/ocr/{{r.id}}" class="btn btn-ghost" style="font-size:12px;padding:4px 10px">פרטים</a></td>
       </tr>
       {% endfor %}
     </tbody>
   </table>
 </div>
+</form>
 
 <div class="pagination">
   {% for p in ocr_results.iter_pages() %}
@@ -55,5 +69,24 @@
     {% endif %}
   {% endfor %}
 </div>
+
+<script>
+function selectAll() {
+  document.querySelectorAll('.row-check').forEach(c => c.checked = true);
+  document.getElementById('checkAll').checked = true;
+}
+function deselectAll() {
+  document.querySelectorAll('.row-check').forEach(c => c.checked = false);
+  document.getElementById('checkAll').checked = false;
+}
+function toggleAll(cb) {
+  document.querySelectorAll('.row-check').forEach(c => c.checked = cb.checked);
+}
+function confirmBulkDelete() {
+  const checked = document.querySelectorAll('.row-check:checked').length;
+  if (checked === 0) { alert('לא נבחרו תוצאות'); return false; }
+  return confirm('למחוק ' + checked + ' תוצאות OCR נבחרות? פעולה זו אינה הפיכה!');
+}
+</script>
 
 {% endblock %}
