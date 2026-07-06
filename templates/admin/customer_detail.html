@@ -93,7 +93,7 @@
       <tr>
         <td><input type="checkbox" name="recording_ids" value="{{ rec.id }}" form="sendRecForm" class="rec-check"></td>
         <td onclick="location='/admin/recordings/{{rec.id}}'" style="cursor:pointer">{{ rec.created_at | il_time }}</td>
-        <td onclick="location='/admin/recordings/{{rec.id}}'" style="cursor:pointer;color:#8892b0;font-family:monospace">{{ rec.call_id or '—' }}</td>
+        <td onclick="location='/admin/recordings/{{rec.id}}'" style="cursor:pointer;color:#8892b0;font-family:monospace">{{ rec.rec_url | yemot_rec_number or '—' }}</td>
         <td onclick="location='/admin/recordings/{{rec.id}}'" style="cursor:pointer">{{ rec.duration_seconds // 60 }}:{{ '%02d'%(rec.duration_seconds % 60) }}</td>
         <td onclick="location='/admin/recordings/{{rec.id}}'" style="cursor:pointer">₪{{ "%.2f"|format(rec.cost) }}</td>
         <td onclick="location='/admin/recordings/{{rec.id}}'" style="cursor:pointer">{{ rec.delivered_to or '—' }}</td>
