@@ -72,6 +72,19 @@ def create_app():
 
     app.jinja_env.filters['il_time'] = il_time
 
+    # פילטר לחילוץ מספר ההקלטה האמיתי בימות מתוך rec_url
+    # (rec_url לדוגמה: https://www.call2all.co.il/ym/api/DownloadFile?...&path=ivr2:/recordings/160.wav
+    #  צריך להציג רק "160" - זה מה שמופיע בפועל בממשק ניהול הקבצים של ימות)
+    import re as _re
+
+    def yemot_rec_number(rec_url):
+        if not rec_url:
+            return None
+        match = _re.search(r'recordings/(\d+)\.wav', rec_url)
+        return match.group(1) if match else None
+
+    app.jinja_env.filters['yemot_rec_number'] = yemot_rec_number
+
     logging.basicConfig(level=logging.INFO)
     return app
 
