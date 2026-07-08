@@ -521,6 +521,18 @@ def finalize_alefbot_recording(call_id, transcript_text):
             units = math.ceil(duration_seconds / 1200) if duration_seconds > 0 else 1
             cost = round(units * price_per_20min, 2)
 
+            customer = Customer.query.get(rec.customer_id)
+
+            # --- בדיקת יתרה שהייתה חסרה לגמרי במסלול הזה - היה מחייב למינוס בלי בדיקה ---
+            if customer and customer.balance < cost:
+                log.info(f"AlefBot finalize: יתרה לא מספיקה עבור customer {rec.customer_id} (צריך {cost}, יש {customer.balance})")
+                _save_pending_payment(
+                    rec, customer, duration_seconds, price_per_20min,
+                    rec.delivery_method, rec.delivered_to, rec.transcription_tier,
+                    rec.language, rec.output_language, transcript=transcript_text
+                )
+                return
+
             rec.transcript = transcript_text
             rec.summary = ''
             rec.status = 'transcribed'
@@ -528,7 +540,6 @@ def finalize_alefbot_recording(call_id, transcript_text):
             rec.alefbot_job_id = None
             db.session.commit()
 
-            customer = Customer.query.get(rec.customer_id)
             if customer:
                 customer.balance -= cost
                 txn = Transaction(
