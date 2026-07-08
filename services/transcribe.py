@@ -57,6 +57,31 @@ def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, durat
 
             if tier == 'premium':
                 log.info(f"Using AlefBot for customer {customer_id}")
+
+                # --- בדיקת יתרה מקדימה - לפני שליחה לאלף בוט (שעולה כסף!) ---
+                price_per_20min_premium_pre = float(_get_setting('price_per_20min_premium', '1.90'))
+                if duration_seconds and duration_seconds > 0:
+                    units_pre = math.ceil(duration_seconds / 1200)
+                    cost_pre = round(units_pre * price_per_20min_premium_pre, 2)
+                    customer_pre = Customer.query.get(customer_id)
+                    if customer_pre and customer_pre.balance < cost_pre:
+                        log.info(f"AlefBot pre-check: יתרה לא מספיקה עבור customer {customer_id} (צריך {cost_pre}, יש {customer_pre.balance})")
+                        db.session.remove()
+                        rec = Recording.query.filter_by(call_id=call_id).first()
+                        if rec:
+                            _save_pending_payment(
+                                rec=rec,
+                                customer=customer_pre,
+                                duration_seconds=duration_seconds,
+                                price_per_20min=price_per_20min_premium_pre,
+                                delivery_method=delivery_method,
+                                delivered_to=delivered_to,
+                                transcription_tier=transcription_tier,
+                                language=language,
+                                output_language=output_language,
+                            )
+                        return
+
                 alefbot_tier = 'standard'  # תמיד standard (היה premium_quality - פי 2 מחיר)
                 # שפת פלט: 'he' = תרגם לעברית, 'original' (או כל ערך אחר) = השאר בשפת ההקלטה
                 translate_heb = (output_language == 'he')
