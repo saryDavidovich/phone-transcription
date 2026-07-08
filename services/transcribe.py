@@ -551,6 +551,7 @@ def finalize_alefbot_recording(call_id, transcript_text):
             # --- בדיקת יתרה שהייתה חסרה לגמרי במסלול הזה - היה מחייב למינוס בלי בדיקה ---
             if customer and customer.balance < cost:
                 log.info(f"AlefBot finalize: יתרה לא מספיקה עבור customer {rec.customer_id} (צריך {cost}, יש {customer.balance})")
+                rec.alefbot_job_id = None  # מנקה כדי שלא יתפוס webhook חוזר מאלף בוט וישלח שוב את אותה הודעה
                 _save_pending_payment(
                     rec, customer, duration_seconds, price_per_20min,
                     rec.delivery_method, rec.delivered_to, rec.transcription_tier,
