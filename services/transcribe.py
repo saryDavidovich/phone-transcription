@@ -541,6 +541,19 @@ def finalize_alefbot_recording(call_id, transcript_text):
                 log.error(f"AlefBot webhook: recording not found for call {call_id}")
                 return
 
+            # --- נעילה אטומית: מונעת מה-webhook וה-polling לסיים את אותה הקלטה פעמיים ---
+            # UPDATE עם WHERE על הסטטוס הנוכחי הוא פעולה אטומית ברמת בסיס הנתונים -
+            # רק אחד מהשניים (webhook/polling) "יזכה" ויקבל rowcount=1, השני יקבל 0 ויעצור כאן.
+            # זה חסין ל-race condition, בניגוד לבדיקת SELECT-ואז-UPDATE שהייתה קיימת קודם ב-polling בלבד.
+            claim = db.session.execute(
+                db.text("UPDATE recordings SET status = 'alefbot_finalizing' WHERE call_id = :call_id AND status = 'alefbot_pending'"),
+                {'call_id': call_id}
+            )
+            db.session.commit()
+            if claim.rowcount == 0:
+                log.info(f"AlefBot finalize: {call_id} כבר טופל (webhook/polling) - מדלג כדי למנוע חיוב/מייל כפול")
+                return
+
             duration_seconds = rec.duration_seconds or 0
             price_per_20min = float(_get_setting('price_per_20min_premium', '1.90'))
             units = math.ceil(duration_seconds / 1200) if duration_seconds > 0 else 1
