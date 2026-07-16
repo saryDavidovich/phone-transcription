@@ -213,9 +213,19 @@ def extract_email_local():
                 'המשתמש הקליט את שם המייל שלו (החלק לפני ה-@). החזר רק את שם המייל באנגלית קטנה, ללא רווחים, ללא @ ללא סיומת דומיין. לדוגמה אם אמר "יוסי כהן" החזר "yossycohen". החזר רק את הטקסט עצמו ללא שום הסבר.',
                 gtypes.Part.from_bytes(data=r.content, mime_type='audio/wav'),
             ],
+            config=gtypes.GenerateContentConfig(
+                thinking_config=gtypes.ThinkingConfig(thinking_budget=0)
+            ),
         )
         local_part = response.text.strip().lower()
         local_part = ''.join(c for c in local_part if c.isalnum() or c in '._-')
+        try:
+            current_app.logger.info(
+                f"extract-email-local usage: thoughts={response.usage_metadata.thoughts_token_count or 0}, "
+                f"total={response.usage_metadata.total_token_count}"
+            )
+        except Exception:
+            pass
         return jsonify({'local_part': local_part})
 
     except Exception as e:
@@ -247,9 +257,19 @@ Examples: "gmail.com", "yahoo.com", "walla.co.il"
 Return ONLY the domain, nothing else.''',
                 gtypes.Part.from_bytes(data=r.content, mime_type='audio/wav'),
             ],
+            config=gtypes.GenerateContentConfig(
+                thinking_config=gtypes.ThinkingConfig(thinking_budget=0)
+            ),
         )
         domain = response.text.strip().lower()
         domain = ''.join(c for c in domain if c.isalnum() or c in '.-')
+        try:
+            current_app.logger.info(
+                f"extract-email-domain usage: thoughts={response.usage_metadata.thoughts_token_count or 0}, "
+                f"total={response.usage_metadata.total_token_count}"
+            )
+        except Exception:
+            pass
         return jsonify({'local_part': domain})
 
     except Exception as e:
