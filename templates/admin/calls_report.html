@@ -1,0 +1,33 @@
+{% extends 'admin/base.html' %}
+{% block title %}דוח שיחות{% endblock %}
+{% block page_title %}דוח שיחות - פילוח לפי תאריכים{% endblock %}
+{% block content %}
+<div class="table-card" style="margin-bottom:20px">
+  <div class="table-header"><span class="table-title">📞 ייצוא דוח שיחות (שעון ישראל)</span></div>
+  <form method="get" action="{{ url_for('admin.calls_report_export') }}"
+        style="display:flex; align-items:flex-end; gap:16px; padding:20px; flex-wrap:wrap">
+    <div>
+      <label style="display:block; font-size:13px; color:var(--text3); margin-bottom:6px">מתאריך</label>
+      <input type="date" name="start" value="{{ default_start }}" required
+             style="padding:8px 12px; border-radius:8px; border:1px solid var(--border); background:var(--surface2); color:var(--text)">
+    </div>
+    <div>
+      <label style="display:block; font-size:13px; color:var(--text3); margin-bottom:6px">עד תאריך</label>
+      <input type="date" name="end" value="{{ default_end }}" required
+             style="padding:8px 12px; border-radius:8px; border:1px solid var(--border); background:var(--surface2); color:var(--text)">
+    </div>
+    <button type="submit" class="btn btn-primary" style="padding:10px 20px">
+      ⬇️ הורד אקסל
+    </button>
+  </form>
+  <div style="padding:0 20px 20px; font-size:13px; color:var(--text3); line-height:1.6">
+    הדוח כולל, לכל מספר טלפון בטווח שנבחר: מספר השיחות וסך זמן השיחה (בפורמט שעות:דקות:שניות).
+    התאריכים מתפרשים לפי שעון ישראל (כולל התאמה אוטומטית לשעון קיץ/חורף) — היום מתחיל ומסתיים
+    ב-00:00 שעון ישראל, לא UTC.
+    <br>
+    שים לב: הנתונים מתבססים על טבלת <code>call_logs</code>, שמתמלאת רק משיחות שהתבצעו
+    <b>אחרי</b> שחיבור ה-IVR ל-<code>/api/call/start</code> ו-<code>/api/call/end</code> הופעל.
+    שיחות מלפני כן לא ייכללו.
+  </div>
+</div>
+{% endblock %}
