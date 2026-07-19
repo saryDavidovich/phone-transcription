@@ -1,10 +1,46 @@
 from flask import current_app, Blueprint, request, jsonify
 from app import db
-from models import Customer, Recording, Settings
+from models import Customer, Recording, Settings, CallLog
 from services.transcribe import transcribe_async
+from datetime import datetime
 import uuid
 
 api_bp = Blueprint('api', __name__)
+
+@api_bp.route('/call/start', methods=['POST'])
+def call_start():
+    """נקרא מה-IVR ברגע שנכנסת שיחה חדשה. אידמפוטנטי - קריאה חוזרת עם אותו
+    call_id (למשל אם ה-IVR קורא לזה כמה פעמים באותה שיחה) לא יוצרת רשומה כפולה."""
+    data = request.get_json(force=True, silent=True) or {}
+    call_id = (data.get('call_id') or '').strip()
+    phone = (data.get('phone') or '').strip()
+    if not call_id:
+        return jsonify({'error': 'call_id required'}), 400
+    existing = CallLog.query.filter_by(call_id=call_id).first()
+    if existing:
+        return jsonify({'status': 'exists'})
+    log = CallLog(call_id=call_id, phone=phone, started_at=datetime.utcnow())
+    db.session.add(log)
+    db.session.commit()
+    return jsonify({'status': 'ok'})
+
+@api_bp.route('/call/end', methods=['POST'])
+def call_end():
+    """נקרא מה-IVR כשהשיחה מסתיימת (ניתוק ע"י המתקשר, יציאה, וכו')."""
+    data = request.get_json(force=True, silent=True) or {}
+    call_id = (data.get('call_id') or '').strip()
+    if not call_id:
+        return jsonify({'error': 'call_id required'}), 400
+    log = CallLog.query.filter_by(call_id=call_id).first()
+    if not log:
+        # לא נרשמה התחלה (לדוגמה אם ה-IVR עלה מחדש) - עדיין נשמור מה שיש
+        log = CallLog(call_id=call_id, phone=data.get('phone', ''), started_at=datetime.utcnow())
+        db.session.add(log)
+    if not log.ended_at:
+        log.ended_at = datetime.utcnow()
+        log.duration_seconds = max(0, int((log.ended_at - log.started_at).total_seconds()))
+    db.session.commit()
+    return jsonify({'status': 'ok'})
 
 @api_bp.route('/customer/<phone>', methods=['GET'])
 def get_customer(phone):
