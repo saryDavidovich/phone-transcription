@@ -1004,3 +1004,103 @@ def ocr_file(ocr_id):
         return "הקובץ אינו זמין", 404
     return send_file(ocr.original_file_path, as_attachment=False,
                      download_name=ocr.original_filename)
+
+
+def _il_day_range_to_utc(start_str, end_str):
+    """ממיר טווח תאריכים (YYYY-MM-DD, לפי שעון ישראל) לטווח UTC [start, end)
+    להשוואה מול started_at שנשמר ב-UTC. מטפל אוטומטית בשעון קיץ/חורף."""
+    from zoneinfo import ZoneInfo
+    from datetime import timezone as _timezone
+    il_tz = ZoneInfo('Asia/Jerusalem')
+    start_local = datetime.strptime(start_str, '%Y-%m-%d').replace(tzinfo=il_tz)
+    end_local = (datetime.strptime(end_str, '%Y-%m-%d') + timedelta(days=1)).replace(tzinfo=il_tz)
+    start_utc = start_local.astimezone(_timezone.utc).replace(tzinfo=None)
+    end_utc = end_local.astimezone(_timezone.utc).replace(tzinfo=None)
+    return start_utc, end_utc
+
+
+@admin_bp.route('/calls-report')
+@login_required
+def calls_report():
+    from zoneinfo import ZoneInfo
+    today_il = datetime.now(ZoneInfo('Asia/Jerusalem')).strftime('%Y-%m-%d')
+    default_start = request.args.get('start', today_il)
+    default_end = request.args.get('end', today_il)
+    return render_template('admin/calls_report.html',
+        default_start=default_start, default_end=default_end)
+
+
+@admin_bp.route('/calls-report/export')
+@login_required
+def calls_report_export():
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment
+    from models import CallLog
+    from collections import defaultdict
+
+    start_str = request.args.get('start', '')
+    end_str = request.args.get('end', '')
+    if not start_str or not end_str:
+        flash('יש לבחור טווח תאריכים', 'error')
+        return redirect(url_for('admin.calls_report'))
+
+    start_utc, end_utc = _il_day_range_to_utc(start_str, end_str)
+
+    calls = CallLog.query.filter(
+        CallLog.started_at >= start_utc,
+        CallLog.started_at < end_utc
+    ).all()
+
+    agg = defaultdict(lambda: {'count': 0, 'total_seconds': 0, 'incomplete': 0})
+    for c in calls:
+        a = agg[c.phone]
+        a['count'] += 1
+        if c.duration_seconds is not None:
+            a['total_seconds'] += c.duration_seconds
+        else:
+            a['incomplete'] += 1  # שיחה שעדיין לא נרשם לה סיום (ננטשה/תקלה)
+
+    def fmt_dur(seconds):
+        seconds = int(seconds)
+        h, rem = divmod(seconds, 3600)
+        m, s = divmod(rem, 60)
+        return f"{h:02d}:{m:02d}:{s:02d}" if h else f"{m:02d}:{s:02d}"
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = 'פילוח שיחות'
+    ws.sheet_view.rightToLeft = True
+
+    headers = ['מספר טלפון', 'מספר שיחות', 'זמן שיחה כולל', 'זמן שיחה כולל (שניות)', 'שיחות ללא סיום רשום']
+    ws.append(headers)
+    for cell in ws[1]:
+        cell.font = Font(bold=True, color='FFFFFF')
+        cell.fill = PatternFill(start_color='2563EB', end_color='2563EB', fill_type='solid')
+        cell.alignment = Alignment(horizontal='center')
+
+    rows = sorted(agg.items(), key=lambda kv: -kv[1]['total_seconds'])
+    for phone, a in rows:
+        ws.append([phone, a['count'], fmt_dur(a['total_seconds']), a['total_seconds'], a['incomplete']])
+
+    total_calls = sum(a['count'] for a in agg.values())
+    total_seconds = sum(a['total_seconds'] for a in agg.values())
+    ws.append([])
+    ws.append(['סה"כ', total_calls, fmt_dur(total_seconds), total_seconds, ''])
+    for cell in ws[ws.max_row]:
+        cell.font = Font(bold=True)
+
+    for col in ws.columns:
+        max_length = max(len(str(cell.value or '')) for cell in col)
+        ws.column_dimensions[col[0].column_letter].width = max(max_length + 2, 12)
+
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+
+    return send_file(
+        output,
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        as_attachment=True,
+        download_name=f'calls_report_{start_str}_to_{end_str}.xlsx'
+    )
+
