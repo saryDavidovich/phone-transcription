@@ -4,8 +4,16 @@
 {% block content %}
 
 <div class="search-bar">
-  <form method="GET" style="display:flex;gap:8px;width:100%">
-    <input class="form-input" name="q" value="{{ search }}" placeholder="חיפוש לפי טלפון, שם או מייל...">
+  <form method="GET" style="display:flex;gap:8px;width:100%;flex-wrap:wrap;align-items:center">
+    <input class="form-input" name="q" value="{{ search }}" placeholder="חיפוש לפי טלפון, שם או מייל..." style="flex:1;min-width:200px">
+    <select name="sort" onchange="this.form.submit()" style="padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);color:var(--text)">
+      <option value="" {% if not current_sort %}selected{% endif %}>מיון: ברירת מחדל (הצטרפות)</option>
+      <option value="contact" {% if current_sort=='contact' %}selected{% endif %}>מעודכן מייל/פקס</option>
+      <option value="ever_loaded" {% if current_sort=='ever_loaded' %}selected{% endif %}>מי שהטעין בעבר</option>
+      <option value="balance" {% if current_sort=='balance' %}selected{% endif %}>מי שיש לו כעת יתרה טעונה</option>
+      <option value="most_used" {% if current_sort=='most_used' %}selected{% endif %}>המשתמשים ביותר (הקלטות)</option>
+      <option value="load_count" {% if current_sort=='load_count' %}selected{% endif %}>לפי כמות טעינות</option>
+    </select>
     <button class="btn btn-primary" type="submit">🔍 חפש</button>
   </form>
 </div>
@@ -50,14 +58,17 @@
         <th>טלפון</th>
         <th>שם</th>
         <th>מייל</th>
+        <th>פקס</th>
         <th>יתרה</th>
         <th>הקלטות</th>
+        <th>מס' טעינות</th>
+        <th>סה"כ טעינות</th>
         <th>סטטוס</th>
         <th>תאריך הצטרפות</th>
       </tr>
     </thead>
     <tbody>
-      {% for c in customers.items %}
+      {% for c in customers_list %}
       <tr>
         <td style="text-align:center" onclick="event.stopPropagation()">
           <input type="checkbox" name="customer_ids" value="{{ c.id }}" class="row-check">
@@ -65,8 +76,11 @@
         <td onclick="location='/admin/customers/{{c.id}}'" style="cursor:pointer"><strong>{{ c.phone }}</strong></td>
         <td onclick="location='/admin/customers/{{c.id}}'" style="cursor:pointer">{{ c.name or '—' }}</td>
         <td onclick="location='/admin/customers/{{c.id}}'" style="cursor:pointer;color:#8892b0">{{ c.email or '—' }}</td>
+        <td onclick="location='/admin/customers/{{c.id}}'" style="cursor:pointer;color:#8892b0">{{ c.fax or '—' }}</td>
         <td onclick="location='/admin/customers/{{c.id}}'" style="cursor:pointer;color:{% if c.balance < 5 %}#ef4444{% else %}#10b981{% endif %}">₪{{ "%.2f"|format(c.balance) }}</td>
         <td onclick="location='/admin/customers/{{c.id}}'" style="cursor:pointer">{{ recording_counts.get(c.id, 0) }}</td>
+        <td onclick="location='/admin/customers/{{c.id}}'" style="cursor:pointer">{{ load_counts.get(c.id, 0) }}</td>
+        <td onclick="location='/admin/customers/{{c.id}}'" style="cursor:pointer;color:#10b981">₪{{ "%.2f"|format(load_totals.get(c.id, 0)) }}</td>
         <td onclick="location='/admin/customers/{{c.id}}'" style="cursor:pointer">
           {% if c.is_blocked %}<span class="badge badge-red">חסום</span>
           {% else %}<span class="badge badge-green">פעיל</span>{% endif %}
@@ -83,7 +97,7 @@
 <div class="pagination">
   {% for p in customers.iter_pages() %}
     {% if p %}
-      <a href="?page={{ p }}{% if search %}&q={{ search }}{% endif %}{% if active_filter %}&filter={{ active_filter }}{% endif %}"
+      <a href="?page={{ p }}{% if search %}&q={{ search }}{% endif %}{% if active_filter %}&filter={{ active_filter }}{% endif %}{% if current_sort %}&sort={{ current_sort }}{% endif %}"
          class="page-btn {% if p == customers.page %}active{% endif %}">{{ p }}</a>
     {% endif %}
   {% endfor %}
