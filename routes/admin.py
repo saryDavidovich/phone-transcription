@@ -160,67 +160,28 @@ def dashboard():
 @admin_bp.route('/customers')
 @login_required
 def customers():
-    from sqlalchemy import case, or_
-
     search = request.args.get('q', '')
     page = request.args.get('page', 1, type=int)
-    sort = request.args.get('sort', '')
-
-    # תתי-שאילתות מצטברות (לא N+1) - מספר/סכום טעינות (charge) ומספר הקלטות, לכל לקוח
-    load_sq = db.session.query(
-        Transaction.customer_id.label('cid'),
-        func.count(Transaction.id).label('load_count'),
-        func.sum(Transaction.amount).label('load_total')
-    ).filter(Transaction.type == 'charge').group_by(Transaction.customer_id).subquery()
-
-    rec_sq = db.session.query(
-        Recording.customer_id.label('cid'),
-        func.count(Recording.id).label('rec_count')
-    ).group_by(Recording.customer_id).subquery()
-
-    load_count_col = func.coalesce(load_sq.c.load_count, 0)
-    load_total_col = func.coalesce(load_sq.c.load_total, 0)
-    rec_count_col = func.coalesce(rec_sq.c.rec_count, 0)
-    has_contact_col = case(
-        (or_(
-            (Customer.email.isnot(None)) & (Customer.email != ''),
-            (Customer.fax.isnot(None)) & (Customer.fax != '')
-        ), 1),
-        else_=0
-    )
-
-    query = Customer.query \
-        .outerjoin(load_sq, Customer.id == load_sq.c.cid) \
-        .outerjoin(rec_sq, Customer.id == rec_sq.c.cid) \
-        .add_columns(load_count_col, load_total_col, rec_count_col)
-
+    query = Customer.query
     if search:
         query = query.filter(
             Customer.phone.contains(search) |
             Customer.name.contains(search) |
             Customer.email.contains(search)
         )
+    customers = query.order_by(Customer.created_at.desc()).paginate(page=page, per_page=50)
 
-    sort_map = {
-        'contact': [has_contact_col.desc(), Customer.created_at.desc()],
-        'ever_loaded': [(load_count_col > 0).desc(), load_total_col.desc()],
-        'balance': [Customer.balance.desc()],
-        'most_used': [rec_count_col.desc()],
-        'load_count': [load_count_col.desc()],
-    }
-    query = query.order_by(*sort_map.get(sort, [Customer.created_at.desc()]))
+    # ספירת הקלטות לכל לקוח בשאילתה אחת (במקום לטעון את כל ההקלטות של כל לקוח בנפרד - N+1)
+    customer_ids = [c.id for c in customers.items]
+    counts = dict(
+        db.session.query(Recording.customer_id, func.count(Recording.id))
+        .filter(Recording.customer_id.in_(customer_ids))
+        .group_by(Recording.customer_id)
+        .all()
+    ) if customer_ids else {}
+    recording_counts = {cid: counts.get(cid, 0) for cid in customer_ids}
 
-    paginated = query.paginate(page=page, per_page=50)
-
-    customers_list = [row[0] for row in paginated.items]
-    recording_counts = {row[0].id: row[3] for row in paginated.items}
-    load_counts = {row[0].id: row[1] for row in paginated.items}
-    load_totals = {row[0].id: float(row[2]) for row in paginated.items}
-
-    return render_template('admin/customers.html',
-        customers=paginated, customers_list=customers_list, search=search,
-        recording_counts=recording_counts, load_counts=load_counts, load_totals=load_totals,
-        current_sort=sort)
+    return render_template('admin/customers.html', customers=customers, search=search, recording_counts=recording_counts)
 
 @admin_bp.route('/customers/add', methods=['GET', 'POST'])
 @login_required
@@ -712,7 +673,9 @@ def update_message_status(id):
     msg.admin_note = request.form.get('admin_note', msg.admin_note)
     db.session.commit()
     flash('סטטוס עודכן בהצלחה')
-    return redirect(url_for('admin.manager_messages'))
+    return_filter = request.form.get('return_filter', '')
+    return redirect(url_for('admin.manager_messages', status=return_filter) if return_filter
+                     else url_for('admin.manager_messages'))
 
 
 @admin_bp.route('/messages/<int:id>/delete', methods=['POST'])
@@ -722,7 +685,9 @@ def delete_manager_message(id):
     db.session.delete(msg)
     db.session.commit()
     flash('הפניה נמחקה')
-    return redirect(url_for('admin.manager_messages'))
+    return_filter = request.form.get('return_filter', '')
+    return redirect(url_for('admin.manager_messages', status=return_filter) if return_filter
+                     else url_for('admin.manager_messages'))
 @admin_bp.route('/messages/debug')
 @login_required
 def debug_messages():
