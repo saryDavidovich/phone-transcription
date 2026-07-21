@@ -1,4 +1,4 @@
-import os, requests, logging, threading, time, math, re
+import os, requests, logging, threading, time, math
 from concurrent.futures import ThreadPoolExecutor
 
 _TRANSCRIBE_INBOUND_EMAIL = os.environ.get('TRANSCRIBE_INBOUND_EMAIL', '033131795@sheasystem.com')
@@ -7,51 +7,6 @@ _TRANSCRIBE_INBOUND_EMAIL = os.environ.get('TRANSCRIBE_INBOUND_EMAIL', '03313179
 def _is_system_inbound_address(email):
     """מונע לולאת מייל עצמית: שליחה לכתובת הקבלה של המערכת עצמה תיקלט חזרה כ-webhook נכנס."""
     return (email or '').strip().lower() == _TRANSCRIBE_INBOUND_EMAIL.strip().lower()
-
-
-def _remove_single_letter_stutters(text):
-    """מוחק 'מילים' שהן אות עברית בודדת ומבודדת (עם או בלי נקודה/פסיק/שלוש-נקודות
-    אחריה) - כמעט תמיד שארית של גמגום/התחלה כפולה (למשל 'אומר ב בתחילת' ->
-    'אומר בתחילת'). לא נוגע באות בודדת שאחריה גרש/אפוסטרוף (' או ׳) - כי אז
-    האורך אחרי הסרת פיסוק הוא 2 תווים, לא 1, וזה מגן אוטומטית על 'ה' (שם ה')
-    ועל מספור באותיות ('א', 'ב', 'ג' וכו') שנפוצים מאוד בתוכן הלכתי.
-    נבדק ואומת ב-19.7.2026 מול תמלולים אמיתיים לפני שנכנס לשימוש בייצור."""
-    if not text:
-        return text
-    HEBREW_LETTERS = set('אבגדהוזחטיכלמנסעפצקרשתךםןףץ')
-    tokens = text.split(' ')
-    cleaned = []
-    for tok in tokens:
-        core = tok
-        if core.endswith('...'):
-            core = core[:-3]
-        core = core.rstrip('.,')
-        if len(core) == 1 and core in HEBREW_LETTERS:
-            continue  # אות בודדת בלי גרש - גמגום, מוחקים את כל האסימון
-        cleaned.append(tok)
-    return re.sub(r' {2,}', ' ', ' '.join(cleaned)).strip()
-
-
-def _add_line_breaks(text, min_chars=80):
-    """מפצל לשורות קריאות: מצרף משפטים רצופים (שמסתיימים ב. ! ?) לשורה אחת
-    עד שמגיעים למינימום תווים (min_chars), ואז יורד שורה - כדי למנוע שורות
-    קצרות מדי בודדות (כמו "נכון." או "כן?" בשורה נפרדת משלהן) שמרגישות
-    מקוטעות. דטרמיניסטי לגמרי (regex + לולאה בקוד שלנו) - לא מסתמך על "חשיבה"
-    של גמיני, כי thinking_budget=0 (ראו למטה) מבטל את זה לגמרי בכל מקרה."""
-    if not text:
-        return text
-    marked = re.sub(r'([.!?]["\'”]?)\s+', r'\1\n', text.strip())
-    sentences = [s.strip() for s in marked.split('\n') if s.strip()]
-    lines = []
-    current = ''
-    for s in sentences:
-        current = f'{current} {s}'.strip() if current else s
-        if len(current) >= min_chars:
-            lines.append(current)
-            current = ''
-    if current:
-        lines.append(current)
-    return '\n'.join(lines)
 
 
 log = logging.getLogger(__name__)
@@ -83,6 +38,30 @@ def transcribe_async(call_id, rec_url, customer_id, delivery_method, delivered_t
         call_id, rec_url, customer_id, delivery_method, delivered_to,
         duration_seconds, transcription_tier, language, output_language,
     )
+
+
+def transcribe_manager_message_async(msg_id, rec_url):
+    """מתמלל ברקע הודעה שהושארה למנהל דרך שלוחה 9 - thinking_budget=0 (כמו בכל
+    מקום אחר במערכת), כדי שהמנהל יראה תקציר טקסטואלי בלי לפתוח/להשמיע כל הודעה."""
+    if not rec_url:
+        return
+    _executor.submit(_transcribe_manager_message, msg_id, rec_url)
+
+
+def _transcribe_manager_message(msg_id, rec_url):
+    from app import app, db
+    with app.app_context():
+        from models import ManagerMessage
+        msg = ManagerMessage.query.get(msg_id)
+        if not msg:
+            return
+        try:
+            text, _duration, _is_video = _gemini_from_url(rec_url, language='he', output_language='he')
+        except Exception as e:
+            log.error(f"transcribe manager message {msg_id} failed: {e}")
+            return
+        msg.transcript = text or '(לא זוהה טקסט בהקלטה)'
+        db.session.commit()
 
 
 def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, duration_seconds, transcription_tier='basic', language='he', output_language='he'):
@@ -838,14 +817,6 @@ def _gemini_from_url(url, language='he', output_language='he'):
                             prompt,
                             gtypes.Part.from_bytes(data=chunk_bytes, mime_type='audio/wav'),
                         ],
-                        # thinking_budget=0: בבדיקות (19.7.2026) חשיבה לא שיפרה דיוק תוכן -
-                        # שמות/מונחים לא ברורים "קפצו" בין גרסאות בין אם עם חשיבה ובין בלעדיה.
-                        # ירידות שורה/פיסוק שהחשיבה הייתה "נותנת" מוחלפות עכשיו בעיבוד קוד
-                        # דטרמיניסטי בהמשך (_remove_single_letter_stutters + _add_line_breaks) -
-                        # לכן אין טעם לשלם על טוקני חשיבה שהולכים לאיבוד.
-                        config=gtypes.GenerateContentConfig(
-                            thinking_config=gtypes.ThinkingConfig(thinking_budget=0)
-                        ),
                     )
                     chunk_transcript = response.text.strip()
                     log.info(f"Chunk {chunk_num} done, {len(chunk_transcript)} chars")
@@ -885,12 +856,6 @@ def _gemini_from_url(url, language='he', output_language='he'):
                         time.sleep(10)
                     else:
                         log.error("Translation failed after 5 attempts, using original")
-
-        # ניקוי דטרמיניסטי בקוד (לא "חשיבה" של גמיני) - גמגומי אות בודדת + ירידות
-        # שורה קריאות. מוגן אוטומטית מפני מחיקת "ה'" ומספור הלכתי (א', ב', ג'...).
-        if transcript:
-            transcript = _remove_single_letter_stutters(transcript)
-            transcript = _add_line_breaks(transcript)
 
         return transcript, actual_duration, mime_type.startswith('video/')
 
