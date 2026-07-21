@@ -84,6 +84,7 @@ class ManagerMessage(db.Model):
     delivery_method = db.Column(db.String(10))
     call_id = db.Column(db.String(100))
     rec_url = db.Column(db.String(500))
+    transcript = db.Column(db.Text)  # תמלול אוטומטי (בלי חשיבה) של ההודעה, מתמלא ברקע אחרי השמירה
     status = db.Column(db.String(30), default='new')
     admin_note = db.Column(db.Text)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -116,17 +117,3 @@ class ProcessedWebhook(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     message_id = db.Column(db.String(255), unique=True, nullable=False, index=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
-
-
-class CallLog(db.Model):
-    """רישום כל שיחה נכנסת (התחלה/סיום) - לצורך דוחות פילוח שיחות לפי תאריך.
-    נכתב ע"י שירות ה-IVR (yemot-router2) דרך /api/call/start ו-/api/call/end.
-    started_at/ended_at נשמרים ב-UTC; ההמרה לשעון ישראל נעשית בזמן קריאה בלבד."""
-    __tablename__ = 'call_logs'
-
-    id = db.Column(db.Integer, primary_key=True)
-    call_id = db.Column(db.String(100), unique=True, nullable=False, index=True)
-    phone = db.Column(db.String(20), nullable=False, index=True)
-    started_at = db.Column(db.DateTime, nullable=False, index=True)
-    ended_at = db.Column(db.DateTime, nullable=True)
-    duration_seconds = db.Column(db.Integer, nullable=True)
