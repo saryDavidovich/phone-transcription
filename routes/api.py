@@ -1,46 +1,10 @@
 from flask import current_app, Blueprint, request, jsonify
 from app import db
-from models import Customer, Recording, Settings, CallLog
+from models import Customer, Recording, Settings
 from services.transcribe import transcribe_async
-from datetime import datetime
 import uuid
 
 api_bp = Blueprint('api', __name__)
-
-@api_bp.route('/call/start', methods=['POST'])
-def call_start():
-    """נקרא מה-IVR ברגע שנכנסת שיחה חדשה. אידמפוטנטי - קריאה חוזרת עם אותו
-    call_id (למשל אם ה-IVR קורא לזה כמה פעמים באותה שיחה) לא יוצרת רשומה כפולה."""
-    data = request.get_json(force=True, silent=True) or {}
-    call_id = (data.get('call_id') or '').strip()
-    phone = (data.get('phone') or '').strip()
-    if not call_id:
-        return jsonify({'error': 'call_id required'}), 400
-    existing = CallLog.query.filter_by(call_id=call_id).first()
-    if existing:
-        return jsonify({'status': 'exists'})
-    log = CallLog(call_id=call_id, phone=phone, started_at=datetime.utcnow())
-    db.session.add(log)
-    db.session.commit()
-    return jsonify({'status': 'ok'})
-
-@api_bp.route('/call/end', methods=['POST'])
-def call_end():
-    """נקרא מה-IVR כשהשיחה מסתיימת (ניתוק ע"י המתקשר, יציאה, וכו')."""
-    data = request.get_json(force=True, silent=True) or {}
-    call_id = (data.get('call_id') or '').strip()
-    if not call_id:
-        return jsonify({'error': 'call_id required'}), 400
-    log = CallLog.query.filter_by(call_id=call_id).first()
-    if not log:
-        # לא נרשמה התחלה (לדוגמה אם ה-IVR עלה מחדש) - עדיין נשמור מה שיש
-        log = CallLog(call_id=call_id, phone=data.get('phone', ''), started_at=datetime.utcnow())
-        db.session.add(log)
-    if not log.ended_at:
-        log.ended_at = datetime.utcnow()
-        log.duration_seconds = max(0, int((log.ended_at - log.started_at).total_seconds()))
-    db.session.commit()
-    return jsonify({'status': 'ok'})
 
 @api_bp.route('/customer/<phone>', methods=['GET'])
 def get_customer(phone):
@@ -212,6 +176,7 @@ def alefbot_webhook():
 @api_bp.route('/manager-message', methods=['POST'])
 def receive_manager_message():
     from models import ManagerMessage
+    from services.transcribe import transcribe_manager_message_async
     data = request.json
     call_id = data.get('call_id', '')
     msg = ManagerMessage.query.filter_by(call_id=call_id).first()
@@ -225,6 +190,8 @@ def receive_manager_message():
     msg.delivery_method = data.get('delivery_method', '')
     msg.rec_url = data.get('rec_url', '')
     db.session.commit()
+    if msg.rec_url:
+        transcribe_manager_message_async(msg.id, msg.rec_url)
     return jsonify({'ok': True, 'id': msg.id})
 
 @api_bp.route('/extract-email-local', methods=['POST'])
