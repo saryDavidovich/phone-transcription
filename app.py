@@ -132,6 +132,8 @@ def _migrate_db():
             conn.execute(db.text("ALTER TABLE customers DROP COLUMN IF EXISTS fax_campaign_id"))
             conn.execute(db.text("ALTER TABLE customers DROP COLUMN IF EXISTS fax_status"))
             conn.execute(db.text("ALTER TABLE customers DROP COLUMN IF EXISTS fax_status_note"))
+            # עמודת תמלול הודעות למנהל (שלוחה 9) - נוספה למודל ManagerMessage
+            conn.execute(db.text("ALTER TABLE manager_messages ADD COLUMN IF NOT EXISTS transcript TEXT"))
             conn.commit()
         logging.getLogger(__name__).info("Migration: all columns ready")
     except Exception as e:
