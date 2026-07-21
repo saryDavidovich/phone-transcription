@@ -49,6 +49,7 @@
         <th style="width:120px">תאריך</th>
         <th style="width:110px">טלפון</th>
         <th>שם / מייל</th>
+        <th style="width:260px">תמלול</th>
         <th style="width:160px">סטטוס + הערה</th>
         <th style="width:60px">פעולה</th>
       </tr>
@@ -75,9 +76,17 @@
         {% if msg.email %}<span class="text-muted">{{ msg.email }}</span>{% endif %}
       </td>
 
+      <!-- תמלול (בלי חשיבה) - מתמלא ברקע אחרי השארת ההודעה -->
+      <td style="font-size:11px; max-width:260px; white-space:pre-wrap">
+        {% if msg.transcript %}{{ msg.transcript }}
+        {% elif msg.rec_url %}<span class="text-muted">⏳ מתמלל...</span>
+        {% else %}<span class="text-muted">—</span>{% endif %}
+      </td>
+
       <!-- סטטוס + הערה inline -->
       <td style="min-width:300px">
         <form method="POST" action="{{ url_for('admin.update_message_status', id=msg.id) }}">
+          <input type="hidden" name="return_filter" value="{{ status_filter }}">
           <div class="d-flex gap-1 align-items-center">
             <select name="status" class="form-select form-select-sm" onchange="this.form.submit()" style="font-size:11px;width:85px;flex-shrink:0">
               <option value="new"         {{ 'selected' if msg.status == 'new' }}>חדש</option>
@@ -97,6 +106,7 @@
       <td>
         <form method="POST" action="{{ url_for('admin.delete_manager_message', id=msg.id) }}"
               onsubmit="return confirm('למחוק?')">
+          <input type="hidden" name="return_filter" value="{{ status_filter }}">
           <button type="submit" class="btn btn-sm btn-outline-danger px-1">🗑</button>
         </form>
       </td>
