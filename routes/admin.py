@@ -2,7 +2,7 @@ from flask import Blueprint, render_template, request, redirect, url_for, flash,
 from flask_login import login_user, logout_user, login_required, current_user
 from werkzeug.security import check_password_hash
 from app import db, login_manager
-from models import Customer, Recording, Transaction, Settings, AdminUser, ManagerMessage
+from models import Customer, Recording, Transaction, Settings, AdminUser, ManagerMessage, CustomerMessage
 from datetime import datetime, timedelta
 from sqlalchemy import func
 import io
@@ -323,9 +323,16 @@ def customer_detail(id):
     recordings = Recording.query.filter_by(customer_id=id).order_by(Recording.created_at.desc()).all()
     transactions = Transaction.query.filter_by(customer_id=id).order_by(Transaction.created_at.desc()).all()
     ocr_results = OcrResult.query.filter_by(customer_id=id).order_by(OcrResult.created_at.desc()).all()
+    messages = CustomerMessage.query.filter_by(customer_id=id).order_by(CustomerMessage.created_at.asc()).all()
+    # צפייה בעמוד מסמנת הודעות נכנסות כ"נקראו" - כדי שהתראה בעמוד הודעות למנהל תיעלם
+    unread = [m for m in messages if m.direction == 'in' and not m.is_read]
+    if unread:
+        for m in unread:
+            m.is_read = True
+        db.session.commit()
     return render_template('admin/customer_detail.html',
         customer=customer, recordings=recordings, transactions=transactions,
-        ocr_results=ocr_results, timedelta=timedelta)
+        ocr_results=ocr_results, messages=messages, timedelta=timedelta)
 
 @admin_bp.route('/customers/<int:id>/block', methods=['POST'])
 @login_required
@@ -434,6 +441,98 @@ def send_recordings(id):
             flash(f'שגיאה בשליחת הקלטה {rec_id}: {e}')
 
     flash(f'נשלחו {sent} הקלטות בהצלחה')
+    return redirect(url_for('admin.customer_detail', id=id))
+
+@admin_bp.route('/customers/<int:id>/send-message', methods=['POST'])
+@login_required
+def send_customer_message(id):
+    """שליחת הודעה חדשה ללקוח במייל, מתוך חשבונו בממשק הניהול - פותחת/ממשיכה
+    שרשור התכתבות. תגובת הלקוח (Reply) תחזור אוטומטית לאותה שרשור, כי הנושא
+    כולל את מספר הטלפון + מילת המפתח 'שיחה' שנשמרת גם ב-Re: של רוב תוכנות המייל."""
+    from models import CustomerMessage
+    customer = Customer.query.get_or_404(id)
+    body = (request.form.get('body') or '').strip()
+
+    if not body:
+        flash('יש להזין תוכן להודעה')
+        return redirect(url_for('admin.customer_detail', id=id))
+
+    if not (customer.email or '').strip():
+        flash('ללקוח אין כתובת מייל רשומה')
+        return redirect(url_for('admin.customer_detail', id=id))
+
+    ok = _send_customer_conversation_email(customer, body)
+    if not ok:
+        flash('שליחת המייל נכשלה - בדוק לוגים')
+        return redirect(url_for('admin.customer_detail', id=id))
+
+    msg = CustomerMessage(customer_id=id, direction='out', body=body, is_read=True)
+    db.session.add(msg)
+    db.session.commit()
+    flash('ההודעה נשלחה')
+    return redirect(url_for('admin.customer_detail', id=id))
+
+
+def _send_customer_conversation_email(customer, body):
+    """שולח מייל שיחה ללקוח (מהמנהל). Reply-To מוגדר לכתובת הקליטה הכללית של
+    המערכת, עם נושא שכולל את הטלפון + מילת המפתח 'שיחה' - כדי שתגובת הלקוח
+    תזוהה אוטומטית כתגובת שיחה (ראו _is_conversation_reply ב-email_inbound.py)
+    ולא תיכנס בטעות לצינור התמלול/OCR."""
+    from routes.email_inbound import TRANSCRIBE_INBOUND_EMAIL, CONVERSATION_MARKER
+    try:
+        import sendgrid
+        from sendgrid.helpers.mail import Mail, Email, ReplyTo
+
+        html = f'''<div dir="rtl" style="font-family:Arial,sans-serif;max-width:600px;margin:auto">
+<h2 style="color:#1e3a8a">הודעה מתמלול פון</h2>
+<div style="background:#eff6ff;border-right:4px solid #3b82f6;padding:16px;margin:16px 0;border-radius:8px;line-height:1.8;white-space:pre-wrap">
+{body}
+</div>
+<p style="color:#6b7280;font-size:13px">להשיב - פשוט השב למייל הזה (Reply). תמלול פון 03-3131795</p>
+</div>'''
+
+        sg = sendgrid.SendGridAPIClient(api_key=os.environ.get('SENDGRID_API_KEY'))
+        message = Mail(
+            from_email=Email(os.environ.get('SENDGRID_FROM_EMAIL', os.environ.get('GMAIL_USER', '')), 'תמלול פון'),
+            to_emails=customer.email,
+            subject=f'{customer.phone} {CONVERSATION_MARKER}',
+            html_content=html,
+        )
+        message.reply_to = ReplyTo(TRANSCRIBE_INBOUND_EMAIL, 'תמלול פון')
+        sg.send(message)
+        return True
+    except Exception as e:
+        flash(f'שגיאה בשליחת מייל: {e}')
+        return False
+
+
+@admin_bp.route('/customers/<int:id>/send-instructions', methods=['POST'])
+@login_required
+def admin_send_instructions(id):
+    """כפתור ידני בממשק הניהול - שולח ללקוח את אותו מייל הוראות ששלוחה 5-1
+    בטלפון שולחת (הוראות לשליחת קבצים לתמלול במייל)."""
+    from routes.email_inbound import _send_instructions_email
+    customer = Customer.query.get_or_404(id)
+    if not (customer.email or '').strip():
+        flash('ללקוח אין כתובת מייל רשומה')
+        return redirect(url_for('admin.customer_detail', id=id))
+    _send_instructions_email(customer.email, customer.phone, customer.name)
+    flash('נשלחו הוראות לשליחת קבצים במייל')
+    return redirect(url_for('admin.customer_detail', id=id))
+
+
+@admin_bp.route('/customers/<int:id>/send-handwriting-instructions', methods=['POST'])
+@login_required
+def admin_send_handwriting_instructions(id):
+    """כפתור ידני בממשק הניהול - שולח ללקוח את אותו מייל הוראות ששלוחה 6-1
+    בטלפון שולחת (הוראות לשליחת כתב יד לזיהוי OCR)."""
+    from routes.email_inbound import _send_handwriting_instructions_email
+    customer = Customer.query.get_or_404(id)
+    if not (customer.email or '').strip():
+        flash('ללקוח אין כתובת מייל רשומה')
+        return redirect(url_for('admin.customer_detail', id=id))
+    _send_handwriting_instructions_email(customer.email, customer.phone, customer.name)
+    flash('נשלחו הוראות לשליחת כתב יד במייל')
     return redirect(url_for('admin.customer_detail', id=id))
 
 @admin_bp.route('/recordings')
@@ -682,7 +781,10 @@ def manager_messages():
     if status_filter:
         query = query.filter_by(status=status_filter)
     messages = query.order_by(ManagerMessage.created_at.desc()).all()
-    return render_template('admin/manager_messages.html', messages=messages, status_filter=status_filter, timedelta=timedelta)
+    unread_replies = CustomerMessage.query.filter_by(direction='in', is_read=False) \
+        .order_by(CustomerMessage.created_at.desc()).all()
+    return render_template('admin/manager_messages.html', messages=messages,
+        status_filter=status_filter, timedelta=timedelta, unread_replies=unread_replies)
 
 
 @admin_bp.route('/messages/<int:id>/play')
