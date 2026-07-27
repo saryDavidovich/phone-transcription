@@ -27,6 +27,22 @@
     </div>
   </div>
 
+  {% if unread_replies %}
+  <div class="alert alert-primary" style="border-right:4px solid #3b82f6">
+    <div style="font-weight:600;margin-bottom:8px">💬 {{ unread_replies|length }} תגובות חדשות מלקוחות בהתכתבות</div>
+    {% for r in unread_replies %}
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0">
+      <span style="font-size:13px">
+        <strong>{{ r.customer.phone }}</strong>{% if r.customer.name %} ({{ r.customer.name }}){% endif %}
+        · {{ r.body[:80] }}{% if r.body|length > 80 %}...{% endif %}
+        · {{ r.created_at | il_time }}
+      </span>
+      <a href="{{ url_for('admin.customer_detail', id=r.customer_id) }}" class="btn btn-sm btn-primary">פתח שיחה</a>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
   {% with messages = get_flashed_messages() %}
     {% if messages %}
       {% for msg in messages %}
