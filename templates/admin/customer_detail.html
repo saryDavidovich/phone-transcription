@@ -237,9 +237,9 @@ function confirmOcrDelete() {
     {% endif %}
     {% for m in messages %}
     <div style="display:flex;{% if m.direction == 'out' %}justify-content:flex-start{% else %}justify-content:flex-end{% endif %}">
-      <div style="max-width:70%;padding:10px 14px;border-radius:10px;white-space:pre-wrap;font-size:13px;line-height:1.6;
+      <div style="max-width:70%;width:fit-content;padding:8px 12px;border-radius:10px;white-space:pre-wrap;font-size:13px;line-height:1.5;
                   {% if m.direction == 'out' %}background:#1e3a8a;color:#fff{% else %}background:#2d3561;color:#e2e8f0{% endif %}">
-        <div style="font-size:11px;opacity:0.7;margin-bottom:4px">
+        <div style="font-size:11px;opacity:0.7;margin-bottom:3px">
           {% if m.direction == 'out' %}מנהל{% else %}לקוח{% endif %} · {{ m.created_at | il_time }}
         </div>
         {{ m.body }}
