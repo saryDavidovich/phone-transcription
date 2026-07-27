@@ -12,9 +12,10 @@ admin_bp = Blueprint('admin', __name__)
 
 @admin_bp.context_processor
 def inject_new_messages_count():
-    from models import ManagerMessage
+    from models import ManagerMessage, CustomerMessage
     try:
         count = ManagerMessage.query.filter_by(status='new').count()
+        count += CustomerMessage.query.filter_by(direction='in', is_read=False).count()
     except Exception:
         count = 0
     return {'new_messages_count': count}
@@ -448,7 +449,10 @@ def send_recordings(id):
 def send_customer_message(id):
     """שליחת הודעה חדשה ללקוח במייל, מתוך חשבונו בממשק הניהול - פותחת/ממשיכה
     שרשור התכתבות. תגובת הלקוח (Reply) תחזור אוטומטית לאותה שרשור, כי הנושא
-    כולל את מספר הטלפון + מילת המפתח 'שיחה' שנשמרת גם ב-Re: של רוב תוכנות המייל."""
+    כולל את מספר הטלפון + מילת המפתח 'שיחה' שנשמרת גם ב-Re: של רוב תוכנות המייל.
+    השמירה ב-DB מיידית (מהירה); שליחת המייל בפועל רצה ברקע כדי שהעמוד יתרענן
+    מיד ולא יחכה לתגובת SendGrid."""
+    import threading, uuid as _uuid
     from models import CustomerMessage
     customer = Customer.query.get_or_404(id)
     body = (request.form.get('body') or '').strip()
@@ -461,27 +465,42 @@ def send_customer_message(id):
         flash('ללקוח אין כתובת מייל רשומה')
         return redirect(url_for('admin.customer_detail', id=id))
 
-    ok = _send_customer_conversation_email(customer, body)
-    if not ok:
-        flash('שליחת המייל נכשלה - בדוק לוגים')
-        return redirect(url_for('admin.customer_detail', id=id))
+    # שרשור אמיתי: מוצאים את ה-Message-ID של ההודעה היוצאת האחרונה שלנו ללקוח
+    # הזה (אם יש), כדי לצרף In-Reply-To/References ושהתגובה תיראה אצל הלקוח
+    # כהמשך שרשור, לא כמייל חדש.
+    prev_out = CustomerMessage.query.filter_by(customer_id=id, direction='out') \
+        .filter(CustomerMessage.message_id.isnot(None)) \
+        .order_by(CustomerMessage.created_at.desc()).first()
+    domain = (os.environ.get('SENDGRID_FROM_EMAIL', 'noreply@tamlulphone.co.il')).split('@')[-1]
+    new_message_id = f"<conv-{id}-{_uuid.uuid4().hex}@{domain}>"
 
-    msg = CustomerMessage(customer_id=id, direction='out', body=body, is_read=True)
+    msg = CustomerMessage(customer_id=id, direction='out', body=body,
+                           is_read=True, message_id=new_message_id)
     db.session.add(msg)
     db.session.commit()
-    flash('ההודעה נשלחה')
+
+    in_reply_to = prev_out.message_id if prev_out else None
+    threading.Thread(
+        target=_send_customer_conversation_email,
+        args=(customer.email, customer.phone, body, new_message_id, in_reply_to),
+        daemon=True,
+    ).start()
+
+    flash('ההודעה נשלחת...')
     return redirect(url_for('admin.customer_detail', id=id))
 
 
-def _send_customer_conversation_email(customer, body):
-    """שולח מייל שיחה ללקוח (מהמנהל). Reply-To מוגדר לכתובת הקליטה הכללית של
-    המערכת, עם נושא שכולל את הטלפון + מילת המפתח 'שיחה' - כדי שתגובת הלקוח
-    תזוהה אוטומטית כתגובת שיחה (ראו _is_conversation_reply ב-email_inbound.py)
-    ולא תיכנס בטעות לצינור התמלול/OCR."""
+def _send_customer_conversation_email(to_email, phone, body, message_id, in_reply_to=None):
+    """שולח מייל שיחה ללקוח (מהמנהל). רץ ברקע (thread נפרד) כדי לא לעכב את
+    התגובה למנהל. Reply-To מוגדר לכתובת הקליטה הכללית של המערכת, עם נושא
+    שכולל את הטלפון + מילת המפתח 'שיחה' - כדי שתגובת הלקוח תזוהה אוטומטית
+    כתגובת שיחה (ראו _is_conversation_reply ב-email_inbound.py). Message-ID
+    עצמאי + In-Reply-To/References - כדי שתוכנות מייל ישרשרו את זה נכון,
+    במקום להציג כל הודעה כמייל נפרד."""
     from routes.email_inbound import TRANSCRIBE_INBOUND_EMAIL, CONVERSATION_MARKER
     try:
         import sendgrid
-        from sendgrid.helpers.mail import Mail, Email, ReplyTo
+        from sendgrid.helpers.mail import Mail, Email, ReplyTo, Header
 
         html = f'''<div dir="rtl" style="font-family:Arial,sans-serif;max-width:600px;margin:auto">
 <h2 style="color:#1e3a8a">הודעה מתמלול פון</h2>
@@ -494,16 +513,18 @@ def _send_customer_conversation_email(customer, body):
         sg = sendgrid.SendGridAPIClient(api_key=os.environ.get('SENDGRID_API_KEY'))
         message = Mail(
             from_email=Email(os.environ.get('SENDGRID_FROM_EMAIL', os.environ.get('GMAIL_USER', '')), 'תמלול פון'),
-            to_emails=customer.email,
-            subject=f'{customer.phone} {CONVERSATION_MARKER}',
+            to_emails=to_email,
+            subject=f'{phone} {CONVERSATION_MARKER}',
             html_content=html,
         )
         message.reply_to = ReplyTo(TRANSCRIBE_INBOUND_EMAIL, 'תמלול פון')
+        message.header = Header('Message-ID', message_id)
+        if in_reply_to:
+            message.header = Header('In-Reply-To', in_reply_to)
+            message.header = Header('References', in_reply_to)
         sg.send(message)
-        return True
     except Exception as e:
-        flash(f'שגיאה בשליחת מייל: {e}')
-        return False
+        log.error(f"send_customer_conversation_email failed (to={to_email}): {e}")
 
 
 @admin_bp.route('/customers/<int:id>/send-instructions', methods=['POST'])
