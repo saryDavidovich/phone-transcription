@@ -153,9 +153,33 @@ def _clean_text(s):
     return _DIRECTION_MARKS_RE.sub('', s or '').strip()
 
 
+CONVERSATION_MARKER = 'שיחה'  # מוטבע בנושא המייל שהמנהל שולח מתוך חשבון הלקוח,
+# ונשמר אוטומטית ע"י רוב תוכנות המייל גם כשהלקוח לוחץ "השב" (Re: ...)
+
+_REPLY_PREFIX_RE = re.compile(r'^\s*(re|fw|fwd|תגובה|הועבר)\s*:\s*', re.IGNORECASE)
+
+
+def _strip_reply_prefixes(subject):
+    """מסיר קידומות 'Re:'/'Fwd:'/'תגובה:' וכו' שתוכנות מייל מוסיפות אוטומטית
+    כשעונים/מעבירים הודעה - כדי שנוכל עדיין לחלץ מספר טלפון מהנושא המקורי
+    שנשמר אחרי הקידומת. תומך בכמה קידומות מקוננות (Re: Fwd: Re: ...)."""
+    s = subject or ''
+    while True:
+        new_s = _REPLY_PREFIX_RE.sub('', s)
+        if new_s == s:
+            return s
+        s = new_s
+
+
+def _is_conversation_reply(subject):
+    """בודק אם המייל הזה הוא תגובה להתכתבות עם המנהל (לא קובץ לתמלול/OCR)."""
+    tokens = _clean_text(_strip_reply_prefixes(subject)).split()
+    return CONVERSATION_MARKER in tokens
+
+
 def _parse_subject(subject):
     """מפענח את שורת הנושא לפי הפורמט שמתואר למעלה. מחזיר dict או None אם אין מספר טלפון."""
-    tokens = _clean_text(subject).split()
+    tokens = _clean_text(_strip_reply_prefixes(subject)).split()
     if not tokens:
         return None
 
@@ -1096,6 +1120,22 @@ def email_inbound():
         if not registered_email or registered_email != sender_email:
             _send_guidance_email(sender_email, 'email_mismatch', phone=phone)
             return jsonify({'status': 'rejected', 'reason': 'email_mismatch'}), 200
+
+        # תגובת לקוח בהתכתבות עם המנהל - לא תלויה ביתרה, לא דורשת קובץ מצורף,
+        # ולא עוברת בתמלול/OCR בכלל. נבדק לפני בדיקת יתרה בכוונה.
+        if _is_conversation_reply(subject):
+            raw_text = request.form.get('text') or ''
+            raw_html = request.form.get('html') or ''
+            body_text = _clean_text(raw_text.strip() or _strip_html(raw_html))
+            if not body_text:
+                body_text = '(הודעה ריקה)'
+            from models import CustomerMessage
+            msg = CustomerMessage(customer_id=customer.id, direction='in',
+                                   body=body_text, is_read=False)
+            db.session.add(msg)
+            db.session.commit()
+            log.info(f"email-inbound: תגובת שיחה חדשה מלקוח {phone} (customer_id={customer.id})")
+            return jsonify({'status': 'ok', 'reason': 'conversation_reply_saved'}), 200
 
         if customer.balance <= 0:
             _send_guidance_email(sender_email, 'low_balance', phone=phone)
