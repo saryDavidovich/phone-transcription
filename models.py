@@ -130,6 +130,7 @@ class CustomerMessage(db.Model):
     direction = db.Column(db.String(10), nullable=False)  # 'out' | 'in'
     body = db.Column(db.Text, nullable=False)
     is_read = db.Column(db.Boolean, default=True)
+    message_id = db.Column(db.String(255))  # Message-ID שקבענו לעצמנו, לשרשור אמיתי (In-Reply-To/References)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
 
     customer = db.relationship('Customer', backref='messages')
