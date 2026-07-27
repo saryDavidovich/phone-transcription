@@ -119,6 +119,22 @@ class ProcessedWebhook(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
 
+class CustomerMessage(db.Model):
+    """שרשור התכתבות מייל בין המנהל ללקוח, בתוך חשבון הלקוח. direction='out' -
+    המנהל שלח, direction='in' - תגובת הלקוח שהתקבלה במייל. is_read מסמן
+    הודעות נכנסות שהמנהל עוד לא צפה בהן (לצורך התראה בעמוד הודעות למנהל)."""
+    __tablename__ = 'customer_messages'
+
+    id = db.Column(db.Integer, primary_key=True)
+    customer_id = db.Column(db.Integer, db.ForeignKey('customers.id'), nullable=False, index=True)
+    direction = db.Column(db.String(10), nullable=False)  # 'out' | 'in'
+    body = db.Column(db.Text, nullable=False)
+    is_read = db.Column(db.Boolean, default=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
+    customer = db.relationship('Customer', backref='messages')
+
+
 class CallLog(db.Model):
     """רישום כל שיחה נכנסת (התחלה/סיום) - לצורך דוחות פילוח שיחות לפי תאריך.
     נכתב ע"י שירות ה-IVR (yemot-router2) דרך /api/call/start ו-/api/call/end.
