@@ -177,6 +177,24 @@ def _is_conversation_reply(subject):
     return CONVERSATION_MARKER in tokens
 
 
+_QUOTE_MARKERS_RE = re.compile(
+    r'(^On .{0,100}\bwrote:|^בתאריך .{0,100}כתב|^-{2,}\s*Original Message\s*-{2,}|^_{5,}|^>)',
+    re.IGNORECASE | re.MULTILINE
+)
+
+
+def _strip_quoted_reply(text):
+    """חותך את הטקסט המצוטט מהודעה קודמת שרוב תוכנות המייל מוסיפות אוטומטית
+    כשעונים ("On ... wrote:" / "בתאריך ... כתב:" / קווי ">" וכו') - כדי
+    שבממשק הניהול יוצג רק מה שהלקוח באמת כתב, לא כל השרשור המצוטט."""
+    if not text:
+        return text
+    m = _QUOTE_MARKERS_RE.search(text)
+    if m:
+        text = text[:m.start()]
+    return text.strip()
+
+
 def _parse_subject(subject):
     """מפענח את שורת הנושא לפי הפורמט שמתואר למעלה. מחזיר dict או None אם אין מספר טלפון."""
     tokens = _clean_text(_strip_reply_prefixes(subject)).split()
@@ -1127,6 +1145,7 @@ def email_inbound():
             raw_text = request.form.get('text') or ''
             raw_html = request.form.get('html') or ''
             body_text = _clean_text(raw_text.strip() or _strip_html(raw_html))
+            body_text = _strip_quoted_reply(body_text)
             if not body_text:
                 body_text = '(הודעה ריקה)'
             from models import CustomerMessage
