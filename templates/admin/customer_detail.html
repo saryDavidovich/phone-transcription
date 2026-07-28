@@ -260,7 +260,7 @@ function confirmOcrDelete() {
 {% endif %}
 
 {% for t in threads %}
-<div style="margin-top:20px" class="table-card">
+<div id="thread-{{ t.id }}" style="margin-top:20px;scroll-margin-top:20px" class="table-card">
   <div class="table-header" style="display:flex;justify-content:space-between;align-items:center">
     <span class="table-title">💬 שיחה מ-{{ t.created_at | il_time }}</span>
     <form method="POST" action="/admin/customers/{{ customer.id }}/threads/{{ t.id }}/delete"
