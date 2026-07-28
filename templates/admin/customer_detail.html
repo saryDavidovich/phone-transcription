@@ -230,31 +230,16 @@ function confirmOcrDelete() {
 </div>
 
 <div style="margin-top:20px" class="table-card">
-  <div class="table-header"><span class="table-title">💬 התכתבות עם הלקוח</span></div>
-  <div style="padding:16px;display:flex;flex-direction:column;gap:10px;max-height:420px;overflow-y:auto">
-    {% if not messages %}
-      <div style="color:#8892b0;font-size:13px">אין עדיין התכתבות עם הלקוח הזה.</div>
-    {% endif %}
-    {% for m in messages %}
-    <div style="display:flex;{% if m.direction == 'out' %}justify-content:flex-start{% else %}justify-content:flex-end{% endif %}">
-      <div style="max-width:70%;width:fit-content;padding:8px 12px;border-radius:10px;white-space:pre-wrap;font-size:13px;line-height:1.5;
-                  {% if m.direction == 'out' %}background:#1e3a8a;color:#fff{% else %}background:#2d3561;color:#e2e8f0{% endif %}">
-        <div style="font-size:11px;opacity:0.7;margin-bottom:3px">
-          {% if m.direction == 'out' %}מנהל{% else %}לקוח{% endif %} · {{ m.created_at | il_time }}
-        </div>
-        {{ m.body }}
-      </div>
-    </div>
-    {% endfor %}
-  </div>
+  <div class="table-header"><span class="table-title">💬 שיחה חדשה עם הלקוח</span></div>
   <form method="POST" action="/admin/customers/{{ customer.id }}/send-message"
-        style="padding:16px;border-top:1px solid #2d3561;display:flex;gap:10px;align-items:flex-end">
+        style="padding:16px;display:flex;gap:10px;align-items:flex-end">
+    <input type="hidden" name="thread_id" value="new">
     <div style="flex:1">
-      <label class="form-label">הודעה חדשה ללקוח (יישלח למייל, והלקוח יכול להשיב)</label>
+      <label class="form-label">פתיחת שיחה חדשה ונפרדת (יישלח למייל, והלקוח יכול להשיב)</label>
       <textarea class="form-input" name="body" rows="3" required
                 placeholder="{% if not customer.email %}ללקוח אין כתובת מייל רשומה - הוסף כתובת למעלה כדי לשלוח{% else %}כתוב כאן...{% endif %}"></textarea>
     </div>
-    <button class="btn btn-primary" type="submit" {% if not customer.email %}disabled{% endif %}>📤 שלח</button>
+    <button class="btn btn-primary" type="submit" {% if not customer.email %}disabled{% endif %}>📤 פתח שיחה חדשה</button>
   </form>
   <div style="padding:0 16px 16px;display:flex;gap:10px;flex-wrap:wrap">
     <form method="POST" action="/admin/customers/{{ customer.id }}/send-instructions">
@@ -269,4 +254,41 @@ function confirmOcrDelete() {
     </form>
   </div>
 </div>
+
+{% if not threads %}
+<div style="margin-top:20px;color:#8892b0;font-size:13px">אין עדיין שיחות עם הלקוח הזה.</div>
+{% endif %}
+
+{% for t in threads %}
+<div style="margin-top:20px" class="table-card">
+  <div class="table-header" style="display:flex;justify-content:space-between;align-items:center">
+    <span class="table-title">💬 שיחה מ-{{ t.created_at | il_time }}</span>
+    <form method="POST" action="/admin/customers/{{ customer.id }}/threads/{{ t.id }}/delete"
+          onsubmit="return confirm('למחוק את השיחה הזו לצמיתות?')">
+      <button class="btn btn-sm btn-outline-danger" type="submit">🗑 מחק שיחה</button>
+    </form>
+  </div>
+  <div style="padding:16px;display:flex;flex-direction:column;gap:10px;max-height:360px;overflow-y:auto">
+    {% for m in t.messages %}
+    <div style="display:flex;{% if m.direction == 'out' %}justify-content:flex-start{% else %}justify-content:flex-end{% endif %}">
+      <div style="max-width:70%;width:fit-content;padding:8px 12px;border-radius:10px;white-space:pre-wrap;font-size:13px;line-height:1.5;
+                  {% if m.direction == 'out' %}background:#1e3a8a;color:#fff{% else %}background:#2d3561;color:#e2e8f0{% endif %}">
+        <div style="font-size:11px;opacity:0.7;margin-bottom:3px">
+          {% if m.direction == 'out' %}מנהל{% else %}לקוח{% endif %} · {{ m.created_at | il_time }}
+        </div>
+        {{ m.body }}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  <form method="POST" action="/admin/customers/{{ customer.id }}/send-message"
+        style="padding:16px;border-top:1px solid #2d3561;display:flex;gap:10px;align-items:flex-end">
+    <input type="hidden" name="thread_id" value="{{ t.id }}">
+    <div style="flex:1">
+      <textarea class="form-input" name="body" rows="2" required placeholder="השב בשיחה הזו..."></textarea>
+    </div>
+    <button class="btn btn-primary" type="submit" {% if not customer.email %}disabled{% endif %}>📤 השב</button>
+  </form>
+</div>
+{% endfor %}
 {% endblock %}
