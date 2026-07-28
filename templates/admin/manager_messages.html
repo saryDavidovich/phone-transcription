@@ -37,7 +37,7 @@
         · {{ r.body[:80] }}{% if r.body|length > 80 %}...{% endif %}
         · {{ r.created_at | il_time }}
       </span>
-      <a href="{{ url_for('admin.customer_detail', id=r.customer_id) }}" class="btn btn-sm btn-primary">פתח שיחה</a>
+      <a href="{{ url_for('admin.customer_detail', id=r.customer_id) }}#thread-{{ r.thread_id }}" class="btn btn-sm btn-primary">פתח שיחה</a>
     </div>
     {% endfor %}
   </div>
