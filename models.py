@@ -119,13 +119,26 @@ class ProcessedWebhook(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
 
+class ConversationThread(db.Model):
+    """שיחה בודדת (thread) בהתכתבות מייל עם לקוח. ללקוח יכולות להיות כמה שיחות
+    נפרדות במקביל - כל אחת מוצגת בנפרד בממשק, לא מעורבבת יחד."""
+    __tablename__ = 'conversation_threads'
+
+    id = db.Column(db.Integer, primary_key=True)
+    customer_id = db.Column(db.Integer, db.ForeignKey('customers.id'), nullable=False, index=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
+    customer = db.relationship('Customer', backref='threads')
+
+
 class CustomerMessage(db.Model):
-    """שרשור התכתבות מייל בין המנהל ללקוח, בתוך חשבון הלקוח. direction='out' -
-    המנהל שלח, direction='in' - תגובת הלקוח שהתקבלה במייל. is_read מסמן
-    הודעות נכנסות שהמנהל עוד לא צפה בהן (לצורך התראה בעמוד הודעות למנהל)."""
+    """הודעה בודדת בתוך שיחה (ConversationThread). direction='out' - המנהל
+    שלח, direction='in' - תגובת הלקוח שהתקבלה במייל. is_read מסמן הודעות
+    נכנסות שהמנהל עוד לא צפה בהן (לצורך התראה בעמוד הודעות למנהל)."""
     __tablename__ = 'customer_messages'
 
     id = db.Column(db.Integer, primary_key=True)
+    thread_id = db.Column(db.Integer, db.ForeignKey('conversation_threads.id'), nullable=False, index=True)
     customer_id = db.Column(db.Integer, db.ForeignKey('customers.id'), nullable=False, index=True)
     direction = db.Column(db.String(10), nullable=False)  # 'out' | 'in'
     body = db.Column(db.Text, nullable=False)
@@ -134,6 +147,7 @@ class CustomerMessage(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
 
     customer = db.relationship('Customer', backref='messages')
+    thread = db.relationship('ConversationThread', backref=db.backref('messages', order_by='CustomerMessage.created_at'))
 
 
 class CallLog(db.Model):
