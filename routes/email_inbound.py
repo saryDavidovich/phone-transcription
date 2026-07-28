@@ -153,8 +153,8 @@ def _clean_text(s):
     return _DIRECTION_MARKS_RE.sub('', s or '').strip()
 
 
-CONVERSATION_MARKER = 'שיחה'  # מוטבע בנושא המייל שהמנהל שולח מתוך חשבון הלקוח,
-# ונשמר אוטומטית ע"י רוב תוכנות המייל גם כשהלקוח לוחץ "השב" (Re: ...)
+CONVERSATION_MARKER = 'שירות לקוחות'  # תחילת נושא המייל שהמנהל שולח מתוך חשבון
+# הלקוח (פורמט: "שירות לקוחות 0501234567"), נשמר גם ב-Re: של רוב תוכנות המייל
 
 _REPLY_PREFIX_RE = re.compile(r'^\s*(re|fw|fwd|תגובה|הועבר)\s*:\s*', re.IGNORECASE)
 
@@ -172,9 +172,27 @@ def _strip_reply_prefixes(subject):
 
 
 def _is_conversation_reply(subject):
-    """בודק אם המייל הזה הוא תגובה להתכתבות עם המנהל (לא קובץ לתמלול/OCR)."""
-    tokens = _clean_text(_strip_reply_prefixes(subject)).split()
-    return CONVERSATION_MARKER in tokens
+    """בודק אם המייל הזה הוא תגובה להתכתבות עם המנהל (לא קובץ לתמלול/OCR) -
+    נושא מהצורה 'שירות לקוחות {טלפון}' (גם עם קידומת Re:/Fwd: לפניו)."""
+    cleaned = _clean_text(_strip_reply_prefixes(subject))
+    return cleaned.startswith(CONVERSATION_MARKER)
+
+
+def _parse_conversation_subject(subject):
+    """מחלץ את מספר הטלפון מנושא מהצורה 'שירות לקוחות {טלפון}'. מחזיר None אם
+    הפורמט לא תקין - ייקרא רק אחרי ש-_is_conversation_reply כבר אישר שהתחילית קיימת."""
+    cleaned = _clean_text(_strip_reply_prefixes(subject))
+    remainder = cleaned[len(CONVERSATION_MARKER):].strip()
+    if not remainder:
+        return None
+    return _normalize_israeli_phone(remainder.split()[0])
+
+
+def _extract_header(raw_headers, header_name):
+    """מחלץ ערך כותרת בודדת (למשל In-Reply-To) מתוך טקסט הכותרות הגולמי
+    שסנדגריד שולח. מחזיר None אם לא נמצא."""
+    m = re.search(rf'{header_name}:\s*(<[^>\s]+>)', raw_headers or '', re.IGNORECASE)
+    return m.group(1) if m else None
 
 
 _QUOTE_MARKERS_RE = re.compile(
@@ -1110,6 +1128,55 @@ def email_inbound():
     sender_email = _extract_sender_email(request.form.get('from', ''))
     subject = request.form.get('subject', '')
 
+    # תגובת לקוח בהתכתבות עם המנהל - נושא שונה לגמרי ("שירות לקוחות {טלפון}"),
+    # לא תלויה ביתרה, לא דורשת קובץ מצורף, ולא עוברת בתמלול/OCR בכלל.
+    # נבדק לפני _parse_subject הרגיל כי הפורמט שונה (הטלפון לא באסימון הראשון).
+    if _is_conversation_reply(subject):
+        phone = _parse_conversation_subject(subject)
+        if not phone or not phone.isdigit():
+            log.warning(f"email-inbound: תגובת שיחה עם נושא לא תקין '{subject}' מאת {sender_email}")
+            return jsonify({'status': 'ignored', 'reason': 'invalid_conversation_subject'}), 200
+
+        with app.app_context():
+            from models import CustomerMessage, ConversationThread
+            customer = Customer.query.filter_by(phone=phone).first()
+            if not customer:
+                return jsonify({'status': 'rejected', 'reason': 'customer_not_found'}), 200
+            registered_email = (customer.email or '').strip().lower()
+            if not registered_email or registered_email != sender_email:
+                return jsonify({'status': 'rejected', 'reason': 'email_mismatch'}), 200
+
+            raw_text = request.form.get('text') or ''
+            raw_html = request.form.get('html') or ''
+            body_text = _clean_text(raw_text.strip() or _strip_html(raw_html))
+            body_text = _strip_quoted_reply(body_text)
+            if not body_text:
+                body_text = '(הודעה ריקה)'
+
+            # מזהים לאיזו שיחה ספציפית זו תגובה, לפי In-Reply-To מול ה-Message-ID
+            # ששמרנו על ההודעה היוצאת שלנו. אם לא נמצא (למשל הלקוח פתח מייל חדש
+            # במקום להשיב) - נופלים בחזרה לשיחה הפתוחה/אחרונה של הלקוח הזה.
+            in_reply_to = _extract_header(raw_headers, 'In-Reply-To')
+            thread = None
+            if in_reply_to:
+                prev_msg = CustomerMessage.query.filter_by(message_id=in_reply_to).first()
+                if prev_msg:
+                    thread = prev_msg.thread
+            if not thread:
+                thread = ConversationThread.query.filter_by(customer_id=customer.id) \
+                    .order_by(ConversationThread.created_at.desc()).first()
+            if not thread:
+                thread = ConversationThread(customer_id=customer.id)
+                db.session.add(thread)
+                db.session.flush()
+
+            msg = CustomerMessage(thread_id=thread.id, customer_id=customer.id,
+                                   direction='in', body=body_text, is_read=False)
+            db.session.add(msg)
+            db.session.commit()
+            log.info(f"email-inbound: תגובת שיחה חדשה מלקוח {phone} (thread_id={thread.id})")
+            return jsonify({'status': 'ok', 'reason': 'conversation_reply_saved'}), 200
+
     parsed = _parse_subject(subject)
     if not parsed:
         raw_text = request.form.get('text') or ''
@@ -1138,23 +1205,6 @@ def email_inbound():
         if not registered_email or registered_email != sender_email:
             _send_guidance_email(sender_email, 'email_mismatch', phone=phone)
             return jsonify({'status': 'rejected', 'reason': 'email_mismatch'}), 200
-
-        # תגובת לקוח בהתכתבות עם המנהל - לא תלויה ביתרה, לא דורשת קובץ מצורף,
-        # ולא עוברת בתמלול/OCR בכלל. נבדק לפני בדיקת יתרה בכוונה.
-        if _is_conversation_reply(subject):
-            raw_text = request.form.get('text') or ''
-            raw_html = request.form.get('html') or ''
-            body_text = _clean_text(raw_text.strip() or _strip_html(raw_html))
-            body_text = _strip_quoted_reply(body_text)
-            if not body_text:
-                body_text = '(הודעה ריקה)'
-            from models import CustomerMessage
-            msg = CustomerMessage(customer_id=customer.id, direction='in',
-                                   body=body_text, is_read=False)
-            db.session.add(msg)
-            db.session.commit()
-            log.info(f"email-inbound: תגובת שיחה חדשה מלקוח {phone} (customer_id={customer.id})")
-            return jsonify({'status': 'ok', 'reason': 'conversation_reply_saved'}), 200
 
         if customer.balance <= 0:
             _send_guidance_email(sender_email, 'low_balance', phone=phone)
