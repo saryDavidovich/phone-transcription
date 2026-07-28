@@ -133,6 +133,8 @@ def _migrate_db():
         "ALTER TABLE manager_messages ADD COLUMN IF NOT EXISTS transcript TEXT",
         # עמודת שרשור (In-Reply-To) בהתכתבות לקוחות - נוספה למודל CustomerMessage
         "ALTER TABLE customer_messages ADD COLUMN IF NOT EXISTS message_id VARCHAR(255)",
+        # שיוך הודעה לשיחה (ConversationThread) - נוסף כשעברנו מ"שרשור שטוח" ל"שיחות נפרדות"
+        "ALTER TABLE customer_messages ADD COLUMN IF NOT EXISTS thread_id INTEGER REFERENCES conversation_threads(id)",
     ]
     logger = logging.getLogger(__name__)
     ok, failed = 0, 0
