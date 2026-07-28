@@ -7,6 +7,9 @@ from datetime import datetime, timedelta
 from sqlalchemy import func
 import io
 import os
+import logging
+
+log = logging.getLogger(__name__)
 
 admin_bp = Blueprint('admin', __name__)
 
@@ -319,21 +322,21 @@ def export_customers_excel():
 @admin_bp.route('/customers/<int:id>')
 @login_required
 def customer_detail(id):
-    from models import OcrResult
+    from models import OcrResult, ConversationThread
     customer = Customer.query.get_or_404(id)
     recordings = Recording.query.filter_by(customer_id=id).order_by(Recording.created_at.desc()).all()
     transactions = Transaction.query.filter_by(customer_id=id).order_by(Transaction.created_at.desc()).all()
     ocr_results = OcrResult.query.filter_by(customer_id=id).order_by(OcrResult.created_at.desc()).all()
-    messages = CustomerMessage.query.filter_by(customer_id=id).order_by(CustomerMessage.created_at.asc()).all()
-    # צפייה בעמוד מסמנת הודעות נכנסות כ"נקראו" - כדי שהתראה בעמוד הודעות למנהל תיעלם
-    unread = [m for m in messages if m.direction == 'in' and not m.is_read]
+    threads = ConversationThread.query.filter_by(customer_id=id).order_by(ConversationThread.created_at.desc()).all()
+    # צפייה בעמוד מסמנת הודעות נכנסות כ"נקראו" בכל השיחות - כדי שהתראה בעמוד הודעות למנהל תיעלם
+    unread = [m for t in threads for m in t.messages if m.direction == 'in' and not m.is_read]
     if unread:
         for m in unread:
             m.is_read = True
         db.session.commit()
     return render_template('admin/customer_detail.html',
         customer=customer, recordings=recordings, transactions=transactions,
-        ocr_results=ocr_results, messages=messages, timedelta=timedelta)
+        ocr_results=ocr_results, threads=threads, timedelta=timedelta)
 
 @admin_bp.route('/customers/<int:id>/block', methods=['POST'])
 @login_required
@@ -447,15 +450,15 @@ def send_recordings(id):
 @admin_bp.route('/customers/<int:id>/send-message', methods=['POST'])
 @login_required
 def send_customer_message(id):
-    """שליחת הודעה חדשה ללקוח במייל, מתוך חשבונו בממשק הניהול - פותחת/ממשיכה
-    שרשור התכתבות. תגובת הלקוח (Reply) תחזור אוטומטית לאותה שרשור, כי הנושא
-    כולל את מספר הטלפון + מילת המפתח 'שיחה' שנשמרת גם ב-Re: של רוב תוכנות המייל.
-    השמירה ב-DB מיידית (מהירה); שליחת המייל בפועל רצה ברקע כדי שהעמוד יתרענן
-    מיד ולא יחכה לתגובת SendGrid."""
+    """שליחת הודעה ללקוח במייל, מתוך חשבונו בממשק הניהול. אם נשלח thread_id -
+    ממשיכים שיחה קיימת (שרשור אמיתי, In-Reply-To/References). אם לא (או
+    thread_id='new') - נפתחת שיחה חדשה ונפרדת, שתוצג בממשק בנפרד מהשיחות
+    האחרות. השמירה ב-DB מיידית (מהירה); שליחת המייל בפועל רצה ברקע."""
     import threading, uuid as _uuid
-    from models import CustomerMessage
+    from models import CustomerMessage, ConversationThread
     customer = Customer.query.get_or_404(id)
     body = (request.form.get('body') or '').strip()
+    thread_id = request.form.get('thread_id') or ''
 
     if not body:
         flash('יש להזין תוכן להודעה')
@@ -465,16 +468,25 @@ def send_customer_message(id):
         flash('ללקוח אין כתובת מייל רשומה')
         return redirect(url_for('admin.customer_detail', id=id))
 
-    # שרשור אמיתי: מוצאים את ה-Message-ID של ההודעה היוצאת האחרונה שלנו ללקוח
-    # הזה (אם יש), כדי לצרף In-Reply-To/References ושהתגובה תיראה אצל הלקוח
-    # כהמשך שרשור, לא כמייל חדש.
-    prev_out = CustomerMessage.query.filter_by(customer_id=id, direction='out') \
+    if thread_id and thread_id != 'new':
+        thread = ConversationThread.query.filter_by(id=int(thread_id), customer_id=id).first()
+        if not thread:
+            flash('השיחה לא נמצאה')
+            return redirect(url_for('admin.customer_detail', id=id))
+    else:
+        thread = ConversationThread(customer_id=id)
+        db.session.add(thread)
+        db.session.flush()  # כדי לקבל thread.id לפני commit
+
+    # שרשור אמיתי בתוך אותה שיחה: מוצאים את ה-Message-ID של ההודעה היוצאת
+    # האחרונה בשיחה הזו (אם יש), כדי לצרף In-Reply-To/References.
+    prev_out = CustomerMessage.query.filter_by(thread_id=thread.id, direction='out') \
         .filter(CustomerMessage.message_id.isnot(None)) \
         .order_by(CustomerMessage.created_at.desc()).first()
     domain = (os.environ.get('SENDGRID_FROM_EMAIL', 'noreply@tamlulphone.co.il')).split('@')[-1]
-    new_message_id = f"<conv-{id}-{_uuid.uuid4().hex}@{domain}>"
+    new_message_id = f"<conv-{thread.id}-{_uuid.uuid4().hex}@{domain}>"
 
-    msg = CustomerMessage(customer_id=id, direction='out', body=body,
+    msg = CustomerMessage(thread_id=thread.id, customer_id=id, direction='out', body=body,
                            is_read=True, message_id=new_message_id)
     db.session.add(msg)
     db.session.commit()
@@ -490,13 +502,23 @@ def send_customer_message(id):
     return redirect(url_for('admin.customer_detail', id=id))
 
 
+@admin_bp.route('/customers/<int:id>/threads/<int:thread_id>/delete', methods=['POST'])
+@login_required
+def delete_conversation_thread(id, thread_id):
+    from models import ConversationThread, CustomerMessage
+    thread = ConversationThread.query.filter_by(id=thread_id, customer_id=id).first_or_404()
+    CustomerMessage.query.filter_by(thread_id=thread.id).delete()
+    db.session.delete(thread)
+    db.session.commit()
+    flash('השיחה נמחקה')
+    return redirect(url_for('admin.customer_detail', id=id))
+
+
 def _send_customer_conversation_email(to_email, phone, body, message_id, in_reply_to=None):
     """שולח מייל שיחה ללקוח (מהמנהל). רץ ברקע (thread נפרד) כדי לא לעכב את
-    התגובה למנהל. Reply-To מוגדר לכתובת הקליטה הכללית של המערכת, עם נושא
-    שכולל את הטלפון + מילת המפתח 'שיחה' - כדי שתגובת הלקוח תזוהה אוטומטית
-    כתגובת שיחה (ראו _is_conversation_reply ב-email_inbound.py). Message-ID
-    עצמאי + In-Reply-To/References - כדי שתוכנות מייל ישרשרו את זה נכון,
-    במקום להציג כל הודעה כמייל נפרד."""
+    התגובה למנהל. Reply-To מוגדר לכתובת הקליטה הכללית של המערכת. Message-ID
+    עצמאי + In-Reply-To/References - כדי שתוכנות מייל ישרשרו נכון בתוך אותה
+    שיחה, במקום להציג כל הודעה כמייל נפרד."""
     from routes.email_inbound import TRANSCRIBE_INBOUND_EMAIL, CONVERSATION_MARKER
     try:
         import sendgrid
@@ -507,14 +529,19 @@ def _send_customer_conversation_email(to_email, phone, body, message_id, in_repl
 <div style="background:#eff6ff;border-right:4px solid #3b82f6;padding:16px;margin:16px 0;border-radius:8px;line-height:1.8;white-space:pre-wrap">
 {body}
 </div>
-<p style="color:#6b7280;font-size:13px">להשיב - פשוט השב למייל הזה (Reply). תמלול פון 03-3131795</p>
+<p style="color:#6b7280;font-size:13px;line-height:1.6">
+ניתן להשיב למייל זה<br>
+לשירותכם<br>
+צוות תמלול פון<br>
+03-3131795
+</p>
 </div>'''
 
         sg = sendgrid.SendGridAPIClient(api_key=os.environ.get('SENDGRID_API_KEY'))
         message = Mail(
             from_email=Email(os.environ.get('SENDGRID_FROM_EMAIL', os.environ.get('GMAIL_USER', '')), 'תמלול פון'),
             to_emails=to_email,
-            subject=f'{phone} {CONVERSATION_MARKER}',
+            subject=f'{CONVERSATION_MARKER} {phone}',
             html_content=html,
         )
         message.reply_to = ReplyTo(TRANSCRIBE_INBOUND_EMAIL, 'תמלול פון')
