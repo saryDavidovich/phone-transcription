@@ -89,55 +89,68 @@ def create_app():
     return app
 
 def _migrate_db():
-    try:
-        with db.engine.connect() as conn:
-            conn.execute(db.text("ALTER TABLE customers ADD COLUMN IF NOT EXISTS transcription_tier VARCHAR(10) DEFAULT 'basic'"))
-            conn.execute(db.text("ALTER TABLE recordings ADD COLUMN IF NOT EXISTS alefbot_job_id VARCHAR(100)"))
-            conn.execute(db.text("ALTER TABLE recordings ADD COLUMN IF NOT EXISTS rec_url VARCHAR(500)"))
-            conn.execute(db.text("ALTER TABLE recordings ADD COLUMN IF NOT EXISTS source_filename VARCHAR(255)"))
-            # שדות סטטוס פקס (ימות המשיח) - שייכים ל-recordings, לא ל-customers
-            conn.execute(db.text("ALTER TABLE recordings ADD COLUMN IF NOT EXISTS fax_campaign_id VARCHAR(64)"))
-            conn.execute(db.text("ALTER TABLE recordings ADD COLUMN IF NOT EXISTS fax_status VARCHAR(32)"))
-            conn.execute(db.text("ALTER TABLE recordings ADD COLUMN IF NOT EXISTS fax_status_note TEXT"))
-            conn.execute(db.text("CREATE INDEX IF NOT EXISTS ix_recordings_fax_campaign_id ON recordings (fax_campaign_id)"))
-            conn.execute(db.text("CREATE INDEX IF NOT EXISTS ix_recordings_customer_id ON recordings (customer_id)"))
-            conn.execute(db.text("CREATE INDEX IF NOT EXISTS ix_transactions_customer_id ON transactions (customer_id)"))
-            # עמודות pending payment
-            conn.execute(db.text("ALTER TABLE recordings ADD COLUMN IF NOT EXISTS transcription_tier VARCHAR(10)"))
-            conn.execute(db.text("ALTER TABLE recordings ADD COLUMN IF NOT EXISTS language VARCHAR(10)"))
-            conn.execute(db.text("ALTER TABLE recordings ADD COLUMN IF NOT EXISTS output_language VARCHAR(10)"))
-            conn.execute(db.text("ALTER TABLE recordings ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP"))
-            conn.execute(db.text("ALTER TABLE recordings ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()"))
-            conn.execute(db.text("ALTER TABLE customers ADD COLUMN IF NOT EXISTS default_settings JSONB"))
-            # טבלת OCR
-            conn.execute(db.text("""
-                CREATE TABLE IF NOT EXISTS ocr_results (
-                    id SERIAL PRIMARY KEY,
-                    customer_id INTEGER REFERENCES customers(id),
-                    original_filename VARCHAR(255),
-                    original_file_path VARCHAR(512),
-                    ocr_text TEXT,
-                    char_count INTEGER DEFAULT 0,
-                    cost FLOAT DEFAULT 0.0,
-                    engine VARCHAR(20) DEFAULT 'gemini',
-                    status VARCHAR(20) DEFAULT 'completed',
-                    created_at TIMESTAMP DEFAULT NOW()
-                )
-            """))
-            conn.execute(db.text("CREATE INDEX IF NOT EXISTS ix_ocr_results_customer_id ON ocr_results (customer_id)"))
-            # עמודות pending payment עבור OCR
-            conn.execute(db.text("ALTER TABLE ocr_results ADD COLUMN IF NOT EXISTS delivered_to VARCHAR(255)"))
-            conn.execute(db.text("ALTER TABLE ocr_results ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP"))
-            # ניקוי - עמודות פקס שנוספו בטעות ל-customers בעבר
-            conn.execute(db.text("ALTER TABLE customers DROP COLUMN IF EXISTS fax_campaign_id"))
-            conn.execute(db.text("ALTER TABLE customers DROP COLUMN IF EXISTS fax_status"))
-            conn.execute(db.text("ALTER TABLE customers DROP COLUMN IF EXISTS fax_status_note"))
-            # עמודת תמלול הודעות למנהל (שלוחה 9) - נוספה למודל ManagerMessage
-            conn.execute(db.text("ALTER TABLE manager_messages ADD COLUMN IF NOT EXISTS transcript TEXT"))
-            conn.commit()
-        logging.getLogger(__name__).info("Migration: all columns ready")
-    except Exception as e:
-        logging.getLogger(__name__).warning(f"Migration skipped: {e}")
+    statements = [
+        "ALTER TABLE customers ADD COLUMN IF NOT EXISTS transcription_tier VARCHAR(10) DEFAULT 'basic'",
+        "ALTER TABLE recordings ADD COLUMN IF NOT EXISTS alefbot_job_id VARCHAR(100)",
+        "ALTER TABLE recordings ADD COLUMN IF NOT EXISTS rec_url VARCHAR(500)",
+        "ALTER TABLE recordings ADD COLUMN IF NOT EXISTS source_filename VARCHAR(255)",
+        # שדות סטטוס פקס (ימות המשיח) - שייכים ל-recordings, לא ל-customers
+        "ALTER TABLE recordings ADD COLUMN IF NOT EXISTS fax_campaign_id VARCHAR(64)",
+        "ALTER TABLE recordings ADD COLUMN IF NOT EXISTS fax_status VARCHAR(32)",
+        "ALTER TABLE recordings ADD COLUMN IF NOT EXISTS fax_status_note TEXT",
+        "CREATE INDEX IF NOT EXISTS ix_recordings_fax_campaign_id ON recordings (fax_campaign_id)",
+        "CREATE INDEX IF NOT EXISTS ix_recordings_customer_id ON recordings (customer_id)",
+        "CREATE INDEX IF NOT EXISTS ix_transactions_customer_id ON transactions (customer_id)",
+        # עמודות pending payment
+        "ALTER TABLE recordings ADD COLUMN IF NOT EXISTS transcription_tier VARCHAR(10)",
+        "ALTER TABLE recordings ADD COLUMN IF NOT EXISTS language VARCHAR(10)",
+        "ALTER TABLE recordings ADD COLUMN IF NOT EXISTS output_language VARCHAR(10)",
+        "ALTER TABLE recordings ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP",
+        "ALTER TABLE recordings ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()",
+        "ALTER TABLE customers ADD COLUMN IF NOT EXISTS default_settings JSONB",
+        # טבלת OCR
+        """CREATE TABLE IF NOT EXISTS ocr_results (
+                id SERIAL PRIMARY KEY,
+                customer_id INTEGER REFERENCES customers(id),
+                original_filename VARCHAR(255),
+                original_file_path VARCHAR(512),
+                ocr_text TEXT,
+                char_count INTEGER DEFAULT 0,
+                cost FLOAT DEFAULT 0.0,
+                engine VARCHAR(20) DEFAULT 'gemini',
+                status VARCHAR(20) DEFAULT 'completed',
+                created_at TIMESTAMP DEFAULT NOW()
+            )""",
+        "CREATE INDEX IF NOT EXISTS ix_ocr_results_customer_id ON ocr_results (customer_id)",
+        # עמודות pending payment עבור OCR
+        "ALTER TABLE ocr_results ADD COLUMN IF NOT EXISTS delivered_to VARCHAR(255)",
+        "ALTER TABLE ocr_results ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP",
+        # ניקוי - עמודות פקס שנוספו בטעות ל-customers בעבר
+        "ALTER TABLE customers DROP COLUMN IF EXISTS fax_campaign_id",
+        "ALTER TABLE customers DROP COLUMN IF EXISTS fax_status",
+        "ALTER TABLE customers DROP COLUMN IF EXISTS fax_status_note",
+        # עמודת תמלול הודעות למנהל (שלוחה 9) - נוספה למודל ManagerMessage
+        "ALTER TABLE manager_messages ADD COLUMN IF NOT EXISTS transcript TEXT",
+        # עמודת שרשור (In-Reply-To) בהתכתבות לקוחות - נוספה למודל CustomerMessage
+        "ALTER TABLE customer_messages ADD COLUMN IF NOT EXISTS message_id VARCHAR(255)",
+    ]
+    logger = logging.getLogger(__name__)
+    ok, failed = 0, 0
+    # כל שורה בעסקה (transaction) ונפרדת משלה - כדי שכישלון בשורה אחת (למשל
+    # עמודה שכבר קיימת בפורמט אחר, או טבלה שעדיין לא נוצרה) לא יעצור את כל
+    # שאר המיגרציות שאחריה. זו הייתה תקלה אמיתית שקרתה בעבר: כל המיגרציה
+    # הייתה בלוק try אחד עם commit יחיד, ושורה ראשונה שנכשלה חסמה את כל השאר.
+    for stmt in statements:
+        try:
+            with db.engine.connect() as conn:
+                conn.execute(db.text(stmt))
+                conn.commit()
+            ok += 1
+        except Exception as e:
+            failed += 1
+            logger.warning(f"Migration statement skipped ({stmt[:60]}...): {e}")
+    logger.info(f"Migration: {ok} statements applied, {failed} skipped")
+
 
 def _create_default_admin():
     try:
