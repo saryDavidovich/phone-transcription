@@ -17,7 +17,10 @@ admin_bp = Blueprint('admin', __name__)
 def inject_new_messages_count():
     from models import ManagerMessage, CustomerMessage
     try:
-        count = ManagerMessage.query.filter_by(status='new').count()
+        count = ManagerMessage.query.filter(
+            ManagerMessage.status == 'new',
+            ManagerMessage.rec_url.isnot(None), ManagerMessage.rec_url != ''
+        ).count()
         count += CustomerMessage.query.filter_by(direction='in', is_read=False).count()
     except Exception:
         count = 0
@@ -825,7 +828,11 @@ def api_stats():
 @login_required
 def manager_messages():
     status_filter = request.args.get('status', '')
-    query = ManagerMessage.query
+    # מסננים החוצה הודעות "משוריינות" שמעולם לא הוקלטו בפועל (הלקוח ניתק לפני
+    # שהקליט, או הקיש סולמית בלי להשאיר תוכן) - ל-Yemot עדיין דרוש שריון ID
+    # מראש כדי שמספר ההודעה בשלוחה יתאים למספר בממשק, אבל אין סיבה להציג
+    # רשומות בלי rec_url בפועל כאילו הן הודעות אמיתיות.
+    query = ManagerMessage.query.filter(ManagerMessage.rec_url.isnot(None), ManagerMessage.rec_url != '')
     if status_filter:
         query = query.filter_by(status=status_filter)
     messages = query.order_by(ManagerMessage.created_at.desc()).all()
