@@ -43,6 +43,13 @@
   </div>
   {% endif %}
 
+  {% if unread_inbox_count %}
+  <div class="alert alert-warning" style="border-right:4px solid #f59e0b;display:flex;justify-content:space-between;align-items:center">
+    <span style="font-weight:600">📥 {{ unread_inbox_count }} הודעות חדשות בתיבה הכללית (מיילים ללא זיהוי לקוח)</span>
+    <a href="{{ url_for('admin.general_inbox') }}" class="btn btn-sm btn-primary">פתח את התיבה הכללית</a>
+  </div>
+  {% endif %}
+
   {% with messages = get_flashed_messages() %}
     {% if messages %}
       {% for msg in messages %}
