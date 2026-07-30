@@ -162,3 +162,18 @@ class CallLog(db.Model):
     started_at = db.Column(db.DateTime, nullable=False, index=True)
     ended_at = db.Column(db.DateTime, nullable=True)
     duration_seconds = db.Column(db.Integer, nullable=True)
+
+
+class GeneralInboxMessage(db.Model):
+    """מייל נכנס לכתובת הראשית ששירות הלקוחות (routes/email_inbound.py) לא הצליח
+    לשייך לאף לקוח - לא תגובה לשיחה קיימת, ולא נמצא מספר טלפון בנושא שתואם
+    ללקוח רשום עם אותה כתובת מייל. ממתין למיון ידני של המנהל: שיוך ללקוח
+    (הופך להודעה בתוך conversation_threads שלו) או מחיקה."""
+    __tablename__ = 'general_inbox_messages'
+
+    id = db.Column(db.Integer, primary_key=True)
+    from_email = db.Column(db.String(255), nullable=False)
+    subject = db.Column(db.String(500))
+    body = db.Column(db.Text)
+    is_read = db.Column(db.Boolean, default=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
