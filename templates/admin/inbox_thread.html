@@ -1,0 +1,56 @@
+{% extends 'admin/base.html' %}
+{% block title %}שרשור - תיבה כללית{% endblock %}
+{% block page_title %}📥 שרשור עם {{ thread.from_email }}{% endblock %}
+
+{% block content %}
+<div style="margin-bottom:16px">
+  <a href="{{ url_for('admin.general_inbox') }}" class="btn btn-ghost" style="font-size:13px">&rarr; חזרה לתיבה הכללית</a>
+</div>
+
+{% with flashed = get_flashed_messages() %}
+  {% if flashed %}
+    {% for m in flashed %}
+      <div class="flash flash-success">{{ m }}</div>
+    {% endfor %}
+  {% endif %}
+{% endwith %}
+
+<div class="table-card" style="margin-bottom:20px">
+  <div class="table-header">
+    <span class="table-title">💬 {{ thread.subject or '(ללא נושא)' }}</span>
+  </div>
+  <div style="padding:16px;display:flex;flex-direction:column;gap:10px;max-height:480px;overflow-y:auto">
+    {% for m in thread.messages %}
+    <div style="display:flex;{% if m.direction == 'out' %}justify-content:flex-start{% else %}justify-content:flex-end{% endif %}">
+      <div style="max-width:70%;width:fit-content;padding:8px 12px;border-radius:10px;white-space:pre-wrap;font-size:13px;line-height:1.5;
+                  {% if m.direction == 'out' %}background:#1e3a8a;color:#fff{% else %}background:#2d3561;color:#e2e8f0{% endif %}">
+        <div style="font-size:11px;opacity:0.7;margin-bottom:3px">
+          {% if m.direction == 'out' %}מנהל{% else %}{{ thread.from_email }}{% endif %} · {{ m.created_at | il_time }}
+        </div>
+        {{ m.body }}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  <form method="POST" action="{{ url_for('admin.reply_inbox_thread', id=thread.id) }}"
+        style="padding:16px;border-top:1px solid var(--border);display:flex;gap:10px;align-items:flex-end">
+    <div style="flex:1">
+      <textarea class="form-input" name="body" rows="3" required placeholder="השב לשרשור הזה..."></textarea>
+    </div>
+    <button class="btn btn-primary" type="submit">📤 השב</button>
+  </form>
+</div>
+
+<div class="card" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
+  <form method="POST" action="{{ url_for('admin.assign_inbox_message', id=thread.id) }}"
+        style="display:flex;gap:8px;align-items:center;flex:1;min-width:280px">
+    <label class="form-label" style="margin:0;white-space:nowrap">שיוך ללקוח לפי טלפון:</label>
+    <input class="form-input" type="text" name="phone" placeholder="050XXXXXXX" required style="max-width:180px">
+    <button type="submit" class="btn btn-primary" style="font-size:13px">שייך ופתח בחשבון הלקוח</button>
+  </form>
+  <form method="POST" action="{{ url_for('admin.delete_inbox_message', id=thread.id) }}"
+        onsubmit="return confirm('למחוק את השרשור הזה לצמיתות?')">
+    <button type="submit" class="btn btn-danger" style="font-size:13px">🗑 מחק שרשור</button>
+  </form>
+</div>
+{% endblock %}
