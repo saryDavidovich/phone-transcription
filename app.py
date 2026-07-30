@@ -140,11 +140,30 @@ def _migrate_db():
                 id SERIAL PRIMARY KEY,
                 from_email VARCHAR(255) NOT NULL,
                 subject VARCHAR(500),
-                body TEXT,
                 is_read BOOLEAN DEFAULT FALSE,
                 created_at TIMESTAMP DEFAULT NOW()
             )""",
         "CREATE INDEX IF NOT EXISTS ix_general_inbox_messages_created_at ON general_inbox_messages (created_at)",
+        "CREATE INDEX IF NOT EXISTS ix_general_inbox_messages_from_email ON general_inbox_messages (from_email)",
+        "ALTER TABLE general_inbox_messages ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()",
+        # שיחה דו-כיוונית בתיבה הכללית - הודעות בתוך שרשור (ראה models.InboxMessage)
+        """CREATE TABLE IF NOT EXISTS inbox_messages (
+                id SERIAL PRIMARY KEY,
+                thread_id INTEGER NOT NULL REFERENCES general_inbox_messages(id),
+                direction VARCHAR(10) NOT NULL,
+                body TEXT NOT NULL,
+                message_id VARCHAR(255),
+                created_at TIMESTAMP DEFAULT NOW()
+            )""",
+        "CREATE INDEX IF NOT EXISTS ix_inbox_messages_thread_id ON inbox_messages (thread_id)",
+        # מיגרציית נתונים חד-פעמית: אם קיימת עדיין עמודת body ישנה (גרסה קודמת
+        # של הפיצ'ר, לפני שהתיבה הכללית הפכה לשיחה דו-כיוונית) - מעבירים כל
+        # הודעה קיימת להיות ההודעה הראשונה (direction='in') בשרשור שלה.
+        """INSERT INTO inbox_messages (thread_id, direction, body, created_at)
+           SELECT id, 'in', body, created_at FROM general_inbox_messages
+           WHERE body IS NOT NULL
+             AND NOT EXISTS (SELECT 1 FROM inbox_messages WHERE thread_id = general_inbox_messages.id)""",
+        "ALTER TABLE general_inbox_messages DROP COLUMN IF EXISTS body",
     ]
     logger = logging.getLogger(__name__)
     ok, failed = 0, 0
