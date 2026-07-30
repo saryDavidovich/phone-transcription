@@ -223,6 +223,9 @@ textarea.form-input { resize:vertical; min-height:80px; }
     <a href="/admin/broadcast" class="nav-item {% if request.endpoint in ['admin.broadcast_message','admin.broadcast_test','admin.broadcast_send'] %}active{% endif %}">
       <span class="nav-icon">📣</span> הודעה תפוצתית
     </a>
+    <a href="/admin/inbox" class="nav-item {% if request.endpoint in ['admin.general_inbox'] %}active{% endif %}">
+      <span class="nav-icon">📥</span> תיבה כללית
+    </a>
   </nav>
   <div class="sidebar-bottom">
     <a href="/admin/logout" class="logout-btn">
