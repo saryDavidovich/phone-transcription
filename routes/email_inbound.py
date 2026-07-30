@@ -1210,7 +1210,7 @@ def email_inbound():
         body_text = _strip_quoted_reply(body_text) or '(הודעה ריקה)'
 
         with app.app_context():
-            from models import CustomerMessage, ConversationThread, GeneralInboxMessage
+            from models import CustomerMessage, ConversationThread, GeneralInboxMessage, InboxMessage
 
             # לא בפורמט בקשת תמלול, ולא תגובת שיחה - אבל אולי עדיין יש בנושא
             # מספר טלפון שמזהה לקוח קיים (למשל פנייה כללית/שאלה, לא בקשה
@@ -1230,15 +1230,28 @@ def email_inbound():
                 log.info(f"email-inbound: הודעה כללית שויכה ללקוח {matched_customer.phone} (thread_id={thread.id})")
                 return jsonify({'status': 'ok', 'reason': 'matched_to_customer_inbox'}), 200
 
-            # אין שום זיהוי לקוח - לתיבה הכללית, למיון ידני של המנהל
-            inbox_msg = GeneralInboxMessage(
-                from_email=sender_email,
-                subject=(subject or '')[:500],
-                body=body_text,
-            )
+            # אין שום זיהוי לקוח - לתיבה הכללית. אם זו תגובה לשרשור קיים (לפי
+            # In-Reply-To מול הודעת 'out' ששלחנו, או בהעדר זאת - לפי אותה
+            # כתובת שולח) ממשיכים אותו שרשור; אחרת פותחים שרשור חדש.
+            in_reply_to = _extract_header(raw_headers, 'In-Reply-To')
+            thread = None
+            if in_reply_to:
+                prev_msg = InboxMessage.query.filter_by(message_id=in_reply_to).first()
+                if prev_msg:
+                    thread = prev_msg.thread
+            if not thread:
+                thread = GeneralInboxMessage.query.filter_by(from_email=sender_email) \
+                    .order_by(GeneralInboxMessage.updated_at.desc()).first()
+            if not thread:
+                thread = GeneralInboxMessage(from_email=sender_email, subject=(subject or '')[:500])
+                db.session.add(thread)
+                db.session.flush()
+
+            inbox_msg = InboxMessage(thread_id=thread.id, direction='in', body=body_text)
+            thread.is_read = False
             db.session.add(inbox_msg)
             db.session.commit()
-            log.warning(f"email-inbound: הודעה ללא זיהוי לקוח מאת {sender_email} - נשמרה בתיבה הכללית (id={inbox_msg.id})")
+            log.warning(f"email-inbound: הודעה ללא זיהוי לקוח מאת {sender_email} - נשמרה בתיבה הכללית (thread_id={thread.id})")
 
         return jsonify({'status': 'ok', 'reason': 'saved_to_general_inbox'}), 200
 
