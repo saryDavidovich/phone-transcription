@@ -1446,67 +1446,158 @@ def broadcast_send():
 
 
 # ==================== תיבה כללית - מיילים ללא זיהוי לקוח ====================
-# הודעות שהתקבלו בכתובת הראשית, לא תגובה לשיחה קיימת, ולא נמצא בהן מספר
-# טלפון שמזהה לקוח רשום (ראה routes/email_inbound.py: _find_customer_by_phone_anywhere).
-# המנהל יכול למחוק אותן או לשייך אותן ידנית ללקוח - שיוך הופך אותן להודעה
-# רגילה בתוך ה-conversation_threads של אותו לקוח (בדיוק כמו תגובה שהייתה
-# משויכת אוטומטית), ומסיר אותן מהתיבה הכללית.
+# שרשורים עם גורמים שלא זוהו כלקוח רשום (לא נמצא מספר טלפון בנושא שתואם
+# ללקוח קיים) - ראה routes/email_inbound.py: _find_customer_by_phone_anywhere.
+# המנהל יכול להשיב במייל (בדיוק כמו שיחה עם לקוח - הצד השני יכול להשיב
+# בחזרה וזה ימשיך את אותו שרשור), למחוק שרשור, או לשייך אותו ידנית ללקוח -
+# שיוך מעתיק את כל ההודעות לתוך conversation_threads של אותו לקוח ומוחק
+# את השרשור מהתיבה הכללית.
+
+def _send_inbox_reply_email(to_email, subject, body, message_id, in_reply_to=None):
+    """כמו _send_customer_conversation_email, אבל לשרשור אנונימי (לפי מייל,
+    לא לקוח רשום) - נשלח ברקע (thread נפרד) כדי לא לעכב את התגובה למנהל."""
+    from routes.email_inbound import TRANSCRIBE_INBOUND_EMAIL
+    try:
+        import sendgrid
+        from sendgrid.helpers.mail import Mail, Email, ReplyTo, Header
+
+        html = f'''<div dir="rtl" style="font-family:Arial,sans-serif;max-width:600px;margin:auto">
+<h2 style="color:#1e3a8a">הודעה מתמלול פון</h2>
+<div style="background:#eff6ff;border-right:4px solid #3b82f6;padding:16px;margin:16px 0;border-radius:8px;line-height:1.8;white-space:pre-wrap">
+{body}
+</div>
+<p style="color:#6b7280;font-size:13px;line-height:1.6">
+ניתן להשיב למייל זה<br>
+לשירותכם<br>
+צוות תמלול פון<br>
+03-3131795
+</p>
+</div>'''
+
+        sg = sendgrid.SendGridAPIClient(api_key=os.environ.get('SENDGRID_API_KEY'))
+        message = Mail(
+            from_email=Email(os.environ.get('SENDGRID_FROM_EMAIL', os.environ.get('GMAIL_USER', '')), 'תמלול פון'),
+            to_emails=to_email,
+            subject=subject,
+            html_content=html,
+        )
+        message.reply_to = ReplyTo(TRANSCRIBE_INBOUND_EMAIL, 'תמלול פון')
+        message.header = Header('Message-ID', message_id)
+        if in_reply_to:
+            message.header = Header('In-Reply-To', in_reply_to)
+            message.header = Header('References', in_reply_to)
+        sg.send(message)
+    except Exception as e:
+        log.error(f"send_inbox_reply_email failed (to={to_email}): {e}")
+
 
 @admin_bp.route('/inbox')
 @login_required
 def general_inbox():
     from models import GeneralInboxMessage
-    messages = GeneralInboxMessage.query.order_by(GeneralInboxMessage.created_at.desc()).all()
+    threads = GeneralInboxMessage.query.order_by(GeneralInboxMessage.updated_at.desc()).all()
     # צפייה ברשימה מסמנת הכל כ"נקרא" - כמו תיבת דואר רגילה; הספירה האדומה
     # בתפריט תתאפס עד שתגיע הודעה חדשה.
-    unread_ids = [m.id for m in messages if not m.is_read]
+    unread_ids = [t.id for t in threads if not t.is_read]
     if unread_ids:
         GeneralInboxMessage.query.filter(GeneralInboxMessage.id.in_(unread_ids)) \
             .update({'is_read': True}, synchronize_session=False)
         db.session.commit()
-    return render_template('admin/inbox.html', messages=messages)
+    return render_template('admin/inbox.html', threads=threads)
+
+
+@admin_bp.route('/inbox/<int:id>')
+@login_required
+def inbox_thread_detail(id):
+    from models import GeneralInboxMessage
+    thread = GeneralInboxMessage.query.get_or_404(id)
+    if not thread.is_read:
+        thread.is_read = True
+        db.session.commit()
+    return render_template('admin/inbox_thread.html', thread=thread)
+
+
+@admin_bp.route('/inbox/<int:id>/reply', methods=['POST'])
+@login_required
+def reply_inbox_thread(id):
+    import threading, uuid as _uuid
+    from models import GeneralInboxMessage, InboxMessage
+    thread = GeneralInboxMessage.query.get_or_404(id)
+    body = (request.form.get('body') or '').strip()
+    if not body:
+        flash('יש להזין תוכן להודעה')
+        return redirect(url_for('admin.inbox_thread_detail', id=id))
+
+    prev_out = InboxMessage.query.filter_by(thread_id=thread.id, direction='out') \
+        .filter(InboxMessage.message_id.isnot(None)) \
+        .order_by(InboxMessage.created_at.desc()).first()
+    domain = (os.environ.get('SENDGRID_FROM_EMAIL', 'noreply@tamlulphone.co.il')).split('@')[-1]
+    new_message_id = f"<inbox-{thread.id}-{_uuid.uuid4().hex}@{domain}>"
+
+    msg = InboxMessage(thread_id=thread.id, direction='out', body=body, message_id=new_message_id)
+    db.session.add(msg)
+    thread.is_read = True
+    db.session.commit()
+
+    reply_subject = thread.subject or 'תמלול פון'
+    if not reply_subject.lower().startswith('re:'):
+        reply_subject = f'Re: {reply_subject}'
+    in_reply_to = prev_out.message_id if prev_out else None
+    threading.Thread(
+        target=_send_inbox_reply_email,
+        args=(thread.from_email, reply_subject, body, new_message_id, in_reply_to),
+        daemon=True,
+    ).start()
+
+    flash('ההודעה נשלחת...')
+    return redirect(url_for('admin.inbox_thread_detail', id=id))
 
 
 @admin_bp.route('/inbox/<int:id>/delete', methods=['POST'])
 @login_required
 def delete_inbox_message(id):
-    from models import GeneralInboxMessage
-    msg = GeneralInboxMessage.query.get_or_404(id)
-    db.session.delete(msg)
+    from models import GeneralInboxMessage, InboxMessage
+    thread = GeneralInboxMessage.query.get_or_404(id)
+    InboxMessage.query.filter_by(thread_id=thread.id).delete()
+    db.session.delete(thread)
     db.session.commit()
-    flash('ההודעה נמחקה')
+    flash('השרשור נמחק')
     return redirect(url_for('admin.general_inbox'))
 
 
 @admin_bp.route('/inbox/<int:id>/assign', methods=['POST'])
 @login_required
 def assign_inbox_message(id):
-    """משייך הודעה מהתיבה הכללית ללקוח לפי מספר טלפון - יוצר (או ממשיך) שיחה
-    בחשבון שלו עם תוכן ההודעה, ומסיר אותה מהתיבה הכללית."""
-    from models import GeneralInboxMessage, CustomerMessage, ConversationThread
+    """משייך שרשור מהתיבה הכללית ללקוח לפי מספר טלפון - מעתיק את כל ההודעות
+    (בשני הכיוונים, לפי הסדר) לתוך שיחה חדשה בחשבון שלו, ומוחק את השרשור
+    מהתיבה הכללית."""
+    from models import GeneralInboxMessage, InboxMessage, CustomerMessage, ConversationThread
     from routes.email_inbound import _normalize_israeli_phone
-    msg = GeneralInboxMessage.query.get_or_404(id)
+    thread = GeneralInboxMessage.query.get_or_404(id)
     phone = _normalize_israeli_phone(request.form.get('phone', ''))
 
     customer = Customer.query.filter_by(phone=phone).first() if phone else None
     if not customer:
         flash('לא נמצא לקוח עם מספר הטלפון הזה')
-        return redirect(url_for('admin.general_inbox'))
+        return redirect(url_for('admin.inbox_thread_detail', id=id))
 
-    thread = ConversationThread.query.filter_by(customer_id=customer.id) \
-        .order_by(ConversationThread.created_at.desc()).first()
-    if not thread:
-        thread = ConversationThread(customer_id=customer.id)
-        db.session.add(thread)
-        db.session.flush()
+    new_thread = ConversationThread(customer_id=customer.id)
+    db.session.add(new_thread)
+    db.session.flush()
 
-    body = msg.body or ''
-    if msg.subject:
-        body = f'[נושא מקורי: {msg.subject}]\n{body}'
-    new_msg = CustomerMessage(thread_id=thread.id, customer_id=customer.id,
-                               direction='in', body=body, is_read=True)
-    db.session.add(new_msg)
-    db.session.delete(msg)
+    inbox_messages = InboxMessage.query.filter_by(thread_id=thread.id) \
+        .order_by(InboxMessage.created_at.asc()).all()
+    for i, m in enumerate(inbox_messages):
+        body = m.body
+        if i == 0 and thread.subject:
+            body = f'[נושא מקורי: {thread.subject}]\n{body}'
+        db.session.add(CustomerMessage(
+            thread_id=new_thread.id, customer_id=customer.id,
+            direction=m.direction, body=body, is_read=True,
+        ))
+
+    InboxMessage.query.filter_by(thread_id=thread.id).delete()
+    db.session.delete(thread)
     db.session.commit()
-    flash(f'ההודעה שויכה ללקוח {customer.phone}' + (f' ({customer.name})' if customer.name else ''))
+    flash(f'השרשור שויך ללקוח {customer.phone}' + (f' ({customer.name})' if customer.name else ''))
     return redirect(url_for('admin.customer_detail', id=customer.id))
