@@ -1,0 +1,49 @@
+{% extends 'admin/base.html' %}
+{% block title %}הודעה תפוצתית{% endblock %}
+{% block page_title %}📣 הודעה תפוצתית{% endblock %}
+
+{% block content %}
+<div class="card" style="margin-bottom:20px">
+  <p style="color:var(--text2);font-size:13px;line-height:1.7;margin:0">
+    ההודעה תישלח לכל הלקוחות עם כתובת מייל רשומה (כל כתובת פעם אחת בלבד) - כרגע
+    <strong style="color:var(--text)">{{ recipient_count }}</strong> כתובות.
+    אפשר לשלוח קודם ניסיון לכתובת אחת כדי לראות בדיוק איך זה ייראה - שליחת הניסיון
+    לא מוחקת את מה שכתבתם, אפשר להמשיך לערוך אחריה.
+  </p>
+</div>
+
+{% if result %}
+<div class="flash {{ 'flash-success' if result.ok else 'flash-error' }}">
+  {{ '✓' if result.ok else '✗' }} {{ result.text }}
+</div>
+{% endif %}
+
+<div class="card">
+  <form method="POST" id="broadcastForm">
+    <div class="form-group">
+      <label class="form-label">נושא ההודעה (יופיע כנושא המייל)</label>
+      <input class="form-input" type="text" name="subject" value="{{ subject }}" required>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">תוכן ההודעה</label>
+      <textarea class="form-input" name="body" rows="10" required>{{ body }}</textarea>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">שליחת ניסיון - כתובת מייל לבדיקה (לא נשלח לאף לקוח אחר, רק לכתובת הזו)</label>
+      <input class="form-input" type="email" name="test_email" value="{{ test_email }}" placeholder="you@example.com">
+    </div>
+
+    <div style="display:flex;gap:10px;margin-top:8px">
+      <button class="btn btn-ghost" type="submit" formaction="/admin/broadcast/test">שלח ניסיון לכתובת שלמעלה</button>
+      <button
+        class="btn btn-danger"
+        type="submit"
+        formaction="/admin/broadcast/send"
+        onclick="return confirm('לשלוח את ההודעה בפועל לכל {{ recipient_count }} הלקוחות עם מייל? פעולה זו לא הפיכה.');"
+      >שלח לכולם ({{ recipient_count }} לקוחות)</button>
+    </div>
+  </form>
+</div>
+{% endblock %}
