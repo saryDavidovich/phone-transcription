@@ -1303,3 +1303,139 @@ def calls_report_export():
         as_attachment=True,
         download_name=f'calls_report_{start_str}_to_{end_str}.xlsx'
     )
+
+
+# ==================== הודעה תפוצתית לכלל הלקוחות ====================
+# הודעה חד-פעמית שנשלחת לכל הלקוחות עם כתובת מייל רשומה (לא קשור לשיחת
+# CustomerMessage/thread ספציפית - זו הודעה כללית, לא שיחה עם לקוח יחיד).
+# יש "שליחת ניסיון" לכתובת אחת לפני שמאשרים שליחה אמיתית לכולם - הטופס
+# תמיד נטען מחדש עם אותו נושא/תוכן שהוזנו (render_template ולא redirect),
+# כדי שכתיבת ניסיון לא תמחק את ההודעה שעדיין לא נשלחה לכולם.
+
+def _broadcast_recipient_emails():
+    """כתובות מייל ייחודיות של כל הלקוחות עם מייל רשום, בלי קשר לחסימה/יתרה -
+    זו הודעה כללית, לא תמלול בתשלום."""
+    rows = Customer.query.filter(Customer.email.isnot(None), Customer.email != '').all()
+    seen = set()
+    emails = []
+    for c in rows:
+        e = (c.email or '').strip()
+        if e and e.lower() not in seen:
+            seen.add(e.lower())
+            emails.append(e)
+    return emails
+
+
+def _broadcast_email_html(subject, body):
+    """HTML פשוט לפי אותו מיתוג שכבר קיים בהודעות ללקוח (_send_customer_conversation_email) -
+    כותרת, תוכן (עם ירידות שורה), וחתימה קבועה."""
+    from markupsafe import escape
+    safe_body = str(escape(body)).replace('\n', '<br>')
+    return f'''<div dir="rtl" style="font-family:Arial,sans-serif;max-width:600px;margin:auto">
+<h2 style="color:#1e3a8a">{escape(subject)}</h2>
+<div style="background:#eff6ff;border-right:4px solid #3b82f6;padding:16px;margin:16px 0;border-radius:8px;line-height:1.8">
+{safe_body}
+</div>
+<p style="color:#6b7280;font-size:13px;line-height:1.6">
+לשירותכם<br>
+צוות תמלול פון<br>
+03-3131795
+</p>
+</div>'''
+
+
+def _send_broadcast_email(to_email, subject, html):
+    import sendgrid
+    from sendgrid.helpers.mail import Mail, Email
+    sg = sendgrid.SendGridAPIClient(api_key=os.environ.get('SENDGRID_API_KEY'))
+    message = Mail(
+        from_email=Email(os.environ.get('SENDGRID_FROM_EMAIL', os.environ.get('GMAIL_USER', '')), 'תמלול פון'),
+        to_emails=to_email,
+        subject=subject,
+        html_content=html,
+    )
+    sg.send(message)
+
+
+def _send_broadcast_bg(subject, html, recipient_emails):
+    """רץ ב-thread נפרד: שולח לכל הנמענים ברצף (לא thread לכל מייל - כדי לא
+    להציף בהרבה threads כשיש הרבה לקוחות), עם לוג שגיאה לכל כתובת שנכשלה
+    בלי לעצור את שאר השליחה."""
+    sent, failed = 0, 0
+    for email in recipient_emails:
+        try:
+            _send_broadcast_email(email, subject, html)
+            sent += 1
+        except Exception as e:
+            failed += 1
+            log.error(f"broadcast send failed (to={email}): {e}")
+    log.info(f"הודעה תפוצתית הסתיימה: נשלחו {sent}, נכשלו {failed} (מתוך {len(recipient_emails)})")
+
+
+@admin_bp.route('/broadcast', methods=['GET'])
+@login_required
+def broadcast_message():
+    return render_template(
+        'admin/broadcast.html',
+        subject='', body='', test_email='',
+        recipient_count=len(_broadcast_recipient_emails()),
+        result=None,
+    )
+
+
+@admin_bp.route('/broadcast/test', methods=['POST'])
+@login_required
+def broadcast_test():
+    subject = (request.form.get('subject') or '').strip()
+    body = (request.form.get('body') or '').strip()
+    test_email = (request.form.get('test_email') or '').strip()
+    recipient_count = len(_broadcast_recipient_emails())
+
+    result = None
+    if not subject or not body:
+        result = {'ok': False, 'text': 'יש למלא נושא ותוכן לפני שליחת ניסיון.'}
+    elif not test_email:
+        result = {'ok': False, 'text': 'יש להזין כתובת מייל לבדיקה.'}
+    else:
+        try:
+            html = _broadcast_email_html(subject, body)
+            _send_broadcast_email(test_email, f'[בדיקה] {subject}', html)
+            result = {'ok': True, 'text': f'נשלח מייל בדיקה אל {test_email}. ההודעה נשארה כאן למטה - אפשר להמשיך לערוך או ללחוץ "שלח לכולם".'}
+        except Exception as e:
+            log.error(f"broadcast test send failed: {e}")
+            result = {'ok': False, 'text': f'שגיאה בשליחת מייל הבדיקה: {e}'}
+
+    return render_template(
+        'admin/broadcast.html',
+        subject=subject, body=body, test_email=test_email,
+        recipient_count=recipient_count, result=result,
+    )
+
+
+@admin_bp.route('/broadcast/send', methods=['POST'])
+@login_required
+def broadcast_send():
+    import threading
+    subject = (request.form.get('subject') or '').strip()
+    body = (request.form.get('body') or '').strip()
+    recipient_emails = _broadcast_recipient_emails()
+
+    result = None
+    if not subject or not body:
+        result = {'ok': False, 'text': 'יש למלא נושא ותוכן.'}
+    elif not recipient_emails:
+        result = {'ok': False, 'text': 'אין כרגע אף לקוח עם מייל פעיל לשלוח אליו.'}
+    else:
+        html = _broadcast_email_html(subject, body)
+        threading.Thread(
+            target=_send_broadcast_bg,
+            args=(subject, html, recipient_emails),
+            daemon=True,
+        ).start()
+        result = {'ok': True, 'text': f'ההודעה נשלחת ברקע ל-{len(recipient_emails)} לקוחות. זה עשוי לקחת כמה דקות (ראה יומן השרת לפירוט תוצאה סופית).'}
+
+    return render_template(
+        'admin/broadcast.html',
+        subject=subject, body=body, test_email='',
+        recipient_count=len(recipient_emails), result=result,
+    )
