@@ -165,15 +165,32 @@ class CallLog(db.Model):
 
 
 class GeneralInboxMessage(db.Model):
-    """מייל נכנס לכתובת הראשית ששירות הלקוחות (routes/email_inbound.py) לא הצליח
-    לשייך לאף לקוח - לא תגובה לשיחה קיימת, ולא נמצא מספר טלפון בנושא שתואם
-    ללקוח רשום עם אותה כתובת מייל. ממתין למיון ידני של המנהל: שיוך ללקוח
-    (הופך להודעה בתוך conversation_threads שלו) או מחיקה."""
+    """שרשור פנייה מגורם שלא זוהה כלקוח רשום (לא נמצא מספר טלפון בנושא שתואם
+    ללקוח קיים) - מקביל ל-ConversationThread, אבל מזוהה לפי כתובת מייל בלבד
+    (אין customer_id) כדי שגם מי שעדיין לא לקוח רשום יוכל לקבל תשובה במייל
+    עם שרשור אמיתי (Message-ID/In-Reply-To), בדיוק כמו שיחה עם לקוח. is_read
+    מסמן אם יש בשרשור הזה תוכן חדש שהמנהל עוד לא צפה בו."""
     __tablename__ = 'general_inbox_messages'
 
     id = db.Column(db.Integer, primary_key=True)
-    from_email = db.Column(db.String(255), nullable=False)
+    from_email = db.Column(db.String(255), nullable=False, index=True)
     subject = db.Column(db.String(500))
-    body = db.Column(db.Text)
     is_read = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, index=True)
+
+
+class InboxMessage(db.Model):
+    """הודעה בודדת בתוך שרשור GeneralInboxMessage. direction='in' - מהשולח
+    החיצוני, direction='out' - תגובת המנהל. אותו עיקרון בדיוק כמו
+    CustomerMessage, רק ששייכת לשרשור אנונימי (לפי מייל) ולא ללקוח רשום."""
+    __tablename__ = 'inbox_messages'
+
+    id = db.Column(db.Integer, primary_key=True)
+    thread_id = db.Column(db.Integer, db.ForeignKey('general_inbox_messages.id'), nullable=False, index=True)
+    direction = db.Column(db.String(10), nullable=False)  # 'out' | 'in'
+    body = db.Column(db.Text, nullable=False)
+    message_id = db.Column(db.String(255))  # רק להודעות 'out' - לשרשור אמיתי מול תגובות עתידיות
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
+    thread = db.relationship('GeneralInboxMessage', backref=db.backref('messages', order_by='InboxMessage.created_at'))
