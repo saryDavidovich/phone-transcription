@@ -135,6 +135,16 @@ def _migrate_db():
         "ALTER TABLE customer_messages ADD COLUMN IF NOT EXISTS message_id VARCHAR(255)",
         # שיוך הודעה לשיחה (ConversationThread) - נוסף כשעברנו מ"שרשור שטוח" ל"שיחות נפרדות"
         "ALTER TABLE customer_messages ADD COLUMN IF NOT EXISTS thread_id INTEGER REFERENCES conversation_threads(id)",
+        # תיבה כללית - מיילים נכנסים שלא ניתן לשייך לאף לקוח (ראה models.GeneralInboxMessage)
+        """CREATE TABLE IF NOT EXISTS general_inbox_messages (
+                id SERIAL PRIMARY KEY,
+                from_email VARCHAR(255) NOT NULL,
+                subject VARCHAR(500),
+                body TEXT,
+                is_read BOOLEAN DEFAULT FALSE,
+                created_at TIMESTAMP DEFAULT NOW()
+            )""",
+        "CREATE INDEX IF NOT EXISTS ix_general_inbox_messages_created_at ON general_inbox_messages (created_at)",
     ]
     logger = logging.getLogger(__name__)
     ok, failed = 0, 0
