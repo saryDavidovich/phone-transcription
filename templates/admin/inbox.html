@@ -6,8 +6,9 @@
 <div class="card" style="margin-bottom:20px">
   <p style="color:var(--text2);font-size:13px;line-height:1.7;margin:0">
     כאן נכנסים מיילים שהתקבלו בכתובת הראשית ולא היה ניתן לשייך אותם אוטומטית לאף לקוח -
-    לא תגובה לשיחה קיימת, ולא נמצא בהם מספר טלפון שמזהה לקוח רשום. אפשר לשייך כל הודעה
-    ידנית ללקוח לפי מספר הטלפון שלו (זה יעביר אותה לתוך ההתכתבות שלו בחשבון), או למחוק אותה.
+    לא תגובה לשיחה קיימת, ולא נמצא בהם מספר טלפון שמזהה לקוח רשום. אפשר להשיב לכל שרשור
+    (בדיוק כמו שיחה עם לקוח - הצד השני יכול להשיב בחזרה), לשייך אותו ידנית ללקוח לפי טלפון,
+    או למחוק אותו.
   </p>
 </div>
 
@@ -19,33 +20,42 @@
   {% endif %}
 {% endwith %}
 
-{% if not messages %}
-<div class="card">אין הודעות בתיבה הכללית.</div>
-{% endif %}
-
-{% for m in messages %}
-<div class="card" style="margin-bottom:14px">
-  <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
-    <div>
-      <div style="font-weight:700;font-size:14px">{{ m.subject or '(ללא נושא)' }}</div>
-      <div style="color:var(--text2);font-size:12px;margin-top:2px">
-        מאת {{ m.from_email }} · {{ m.created_at | il_time }}
-      </div>
-    </div>
-    <form method="POST" action="{{ url_for('admin.delete_inbox_message', id=m.id) }}"
-          onsubmit="return confirm('למחוק את ההודעה הזו?')">
-      <button type="submit" class="btn btn-danger" style="font-size:12px">🗑 מחק</button>
-    </form>
-  </div>
-
-  <div style="font-size:14px;line-height:1.7;margin-top:12px;white-space:pre-wrap">{{ m.body }}</div>
-
-  <form method="POST" action="{{ url_for('admin.assign_inbox_message', id=m.id) }}"
-        style="display:flex;gap:8px;align-items:center;margin-top:16px;border-top:1px solid var(--border);padding-top:14px">
-    <label class="form-label" style="margin:0;white-space:nowrap">שיוך ללקוח לפי טלפון:</label>
-    <input class="form-input" type="text" name="phone" placeholder="050XXXXXXX" required style="max-width:180px">
-    <button type="submit" class="btn btn-primary" style="font-size:13px">שייך ופתח בחשבון הלקוח</button>
-  </form>
+<div class="table-card">
+  <div class="table-header"><span class="table-title">שרשורים</span></div>
+  {% if not threads %}
+  <div style="padding:16px;color:var(--text2);font-size:13px">אין הודעות בתיבה הכללית.</div>
+  {% else %}
+  <table>
+    <thead>
+      <tr>
+        <th style="width:170px">עדכון אחרון</th>
+        <th>מאת</th>
+        <th>נושא</th>
+        <th style="width:90px">הודעות</th>
+        <th style="width:70px"></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for t in threads %}
+      <tr>
+        <td style="font-size:12px">{{ t.updated_at | il_time }}</td>
+        <td>{{ t.from_email }}</td>
+        <td>
+          <a href="{{ url_for('admin.inbox_thread_detail', id=t.id) }}" style="color:var(--accent);text-decoration:none">
+            {{ t.subject or '(ללא נושא)' }}
+          </a>
+        </td>
+        <td>{{ t.messages|length }}</td>
+        <td>
+          <form method="POST" action="{{ url_for('admin.delete_inbox_message', id=t.id) }}"
+                onsubmit="return confirm('למחוק את השרשור הזה לצמיתות?')">
+            <button type="submit" class="btn btn-danger" style="font-size:12px;padding:4px 10px">🗑</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
 </div>
-{% endfor %}
 {% endblock %}
