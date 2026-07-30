@@ -258,6 +258,31 @@ def _extract_sender_email(from_header):
     return addr.strip().lower()
 
 
+# רצף שנראה כמו מספר טלפון ישראלי, בכל מקום בטקסט - לא רק כטוקן ראשון כמו
+# ב-_parse_subject. משמש לזיהוי לקוח בהודעות "שירות לקוחות" כלליות שלא
+# בפורמט הבקשה לתמלול (בלי טלפון+דרגה+שפה כטוקנים נפרדים).
+_PHONE_CANDIDATE_RE = re.compile(r'(?:\+?972|0)\d{8,9}')
+
+
+def _find_customer_by_phone_anywhere(text, sender_email):
+    """סורק טקסט (בפועל: שורת הנושא) לכל רצף שנראה כמו מספר טלפון ישראלי,
+    ומוודא שכתובת השולח תואמת בדיוק לכתובת הרשומה אצל הלקוח עם אותו טלפון -
+    בדיוק אותה בדיקת אבטחה שקיימת בכל שאר הזרימות כאן. בלי ההתאמה הזו, כל
+    אחד שיודע/מנחש את הטלפון של לקוח אחר היה יכול "להתחזות" ולהיכנס
+    להתכתבות שלו רק בכך שמזכיר את הטלפון שלו בנושא."""
+    if not text:
+        return None
+    from models import Customer
+    for m in _PHONE_CANDIDATE_RE.finditer(text):
+        phone = _normalize_israeli_phone(m.group(0))
+        if not phone or not phone.isdigit():
+            continue
+        customer = Customer.query.filter_by(phone=phone).first()
+        if customer and (customer.email or '').strip().lower() == (sender_email or '').strip().lower():
+            return customer
+    return None
+
+
 _STYLE_SCRIPT_RE = re.compile(r'<(style|script)[^>]*>.*?</\1>', re.IGNORECASE | re.DOTALL)
 _TAG_RE = re.compile(r'<[^>]+>')
 _WHITESPACE_RE = re.compile(r'\s+')
@@ -1181,12 +1206,41 @@ def email_inbound():
     if not parsed:
         raw_text = request.form.get('text') or ''
         raw_html = request.form.get('html') or ''
-        body_text = raw_text.strip() or _strip_html(raw_html)
-        log.warning(f"email-inbound: שורת נושא לא תקינה '{subject}' מאת {sender_email}")
-        if body_text:
-            log.warning(f"email-inbound: תוכן ההודעה: {body_text[:2000]}")
-        # אין למי לענות (אין מספר טלפון תקין) - רק לוג, בלי תגובה
-        return jsonify({'status': 'ignored', 'reason': 'invalid_subject'}), 200
+        body_text = _clean_text(raw_text.strip() or _strip_html(raw_html))
+        body_text = _strip_quoted_reply(body_text) or '(הודעה ריקה)'
+
+        with app.app_context():
+            from models import CustomerMessage, ConversationThread, GeneralInboxMessage
+
+            # לא בפורמט בקשת תמלול, ולא תגובת שיחה - אבל אולי עדיין יש בנושא
+            # מספר טלפון שמזהה לקוח קיים (למשל פנייה כללית/שאלה, לא בקשה
+            # לתמלול קובץ) - במקרה כזה זה נכנס לתוך ההתכתבות שלו, לא נזרק.
+            matched_customer = _find_customer_by_phone_anywhere(subject, sender_email)
+            if matched_customer:
+                thread = ConversationThread.query.filter_by(customer_id=matched_customer.id) \
+                    .order_by(ConversationThread.created_at.desc()).first()
+                if not thread:
+                    thread = ConversationThread(customer_id=matched_customer.id)
+                    db.session.add(thread)
+                    db.session.flush()
+                msg = CustomerMessage(thread_id=thread.id, customer_id=matched_customer.id,
+                                       direction='in', body=body_text, is_read=False)
+                db.session.add(msg)
+                db.session.commit()
+                log.info(f"email-inbound: הודעה כללית שויכה ללקוח {matched_customer.phone} (thread_id={thread.id})")
+                return jsonify({'status': 'ok', 'reason': 'matched_to_customer_inbox'}), 200
+
+            # אין שום זיהוי לקוח - לתיבה הכללית, למיון ידני של המנהל
+            inbox_msg = GeneralInboxMessage(
+                from_email=sender_email,
+                subject=(subject or '')[:500],
+                body=body_text,
+            )
+            db.session.add(inbox_msg)
+            db.session.commit()
+            log.warning(f"email-inbound: הודעה ללא זיהוי לקוח מאת {sender_email} - נשמרה בתיבה הכללית (id={inbox_msg.id})")
+
+        return jsonify({'status': 'ok', 'reason': 'saved_to_general_inbox'}), 200
 
     phone = parsed['phone']
 
