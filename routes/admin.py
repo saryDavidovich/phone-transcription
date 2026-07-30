@@ -15,13 +15,14 @@ admin_bp = Blueprint('admin', __name__)
 
 @admin_bp.context_processor
 def inject_new_messages_count():
-    from models import ManagerMessage, CustomerMessage
+    from models import ManagerMessage, CustomerMessage, GeneralInboxMessage
     try:
         count = ManagerMessage.query.filter(
             ManagerMessage.status == 'new',
             ManagerMessage.rec_url.isnot(None), ManagerMessage.rec_url != ''
         ).count()
         count += CustomerMessage.query.filter_by(direction='in', is_read=False).count()
+        count += GeneralInboxMessage.query.filter_by(is_read=False).count()
     except Exception:
         count = 0
     return {'new_messages_count': count}
@@ -838,8 +839,11 @@ def manager_messages():
     messages = query.order_by(ManagerMessage.created_at.desc()).all()
     unread_replies = CustomerMessage.query.filter_by(direction='in', is_read=False) \
         .order_by(CustomerMessage.created_at.desc()).all()
+    from models import GeneralInboxMessage
+    unread_inbox_count = GeneralInboxMessage.query.filter_by(is_read=False).count()
     return render_template('admin/manager_messages.html', messages=messages,
-        status_filter=status_filter, timedelta=timedelta, unread_replies=unread_replies)
+        status_filter=status_filter, timedelta=timedelta, unread_replies=unread_replies,
+        unread_inbox_count=unread_inbox_count)
 
 
 @admin_bp.route('/messages/<int:id>/play')
@@ -1439,3 +1443,70 @@ def broadcast_send():
         subject=subject, body=body, test_email='',
         recipient_count=len(recipient_emails), result=result,
     )
+
+
+# ==================== תיבה כללית - מיילים ללא זיהוי לקוח ====================
+# הודעות שהתקבלו בכתובת הראשית, לא תגובה לשיחה קיימת, ולא נמצא בהן מספר
+# טלפון שמזהה לקוח רשום (ראה routes/email_inbound.py: _find_customer_by_phone_anywhere).
+# המנהל יכול למחוק אותן או לשייך אותן ידנית ללקוח - שיוך הופך אותן להודעה
+# רגילה בתוך ה-conversation_threads של אותו לקוח (בדיוק כמו תגובה שהייתה
+# משויכת אוטומטית), ומסיר אותן מהתיבה הכללית.
+
+@admin_bp.route('/inbox')
+@login_required
+def general_inbox():
+    from models import GeneralInboxMessage
+    messages = GeneralInboxMessage.query.order_by(GeneralInboxMessage.created_at.desc()).all()
+    # צפייה ברשימה מסמנת הכל כ"נקרא" - כמו תיבת דואר רגילה; הספירה האדומה
+    # בתפריט תתאפס עד שתגיע הודעה חדשה.
+    unread_ids = [m.id for m in messages if not m.is_read]
+    if unread_ids:
+        GeneralInboxMessage.query.filter(GeneralInboxMessage.id.in_(unread_ids)) \
+            .update({'is_read': True}, synchronize_session=False)
+        db.session.commit()
+    return render_template('admin/inbox.html', messages=messages)
+
+
+@admin_bp.route('/inbox/<int:id>/delete', methods=['POST'])
+@login_required
+def delete_inbox_message(id):
+    from models import GeneralInboxMessage
+    msg = GeneralInboxMessage.query.get_or_404(id)
+    db.session.delete(msg)
+    db.session.commit()
+    flash('ההודעה נמחקה')
+    return redirect(url_for('admin.general_inbox'))
+
+
+@admin_bp.route('/inbox/<int:id>/assign', methods=['POST'])
+@login_required
+def assign_inbox_message(id):
+    """משייך הודעה מהתיבה הכללית ללקוח לפי מספר טלפון - יוצר (או ממשיך) שיחה
+    בחשבון שלו עם תוכן ההודעה, ומסיר אותה מהתיבה הכללית."""
+    from models import GeneralInboxMessage, CustomerMessage, ConversationThread
+    from routes.email_inbound import _normalize_israeli_phone
+    msg = GeneralInboxMessage.query.get_or_404(id)
+    phone = _normalize_israeli_phone(request.form.get('phone', ''))
+
+    customer = Customer.query.filter_by(phone=phone).first() if phone else None
+    if not customer:
+        flash('לא נמצא לקוח עם מספר הטלפון הזה')
+        return redirect(url_for('admin.general_inbox'))
+
+    thread = ConversationThread.query.filter_by(customer_id=customer.id) \
+        .order_by(ConversationThread.created_at.desc()).first()
+    if not thread:
+        thread = ConversationThread(customer_id=customer.id)
+        db.session.add(thread)
+        db.session.flush()
+
+    body = msg.body or ''
+    if msg.subject:
+        body = f'[נושא מקורי: {msg.subject}]\n{body}'
+    new_msg = CustomerMessage(thread_id=thread.id, customer_id=customer.id,
+                               direction='in', body=body, is_read=True)
+    db.session.add(new_msg)
+    db.session.delete(msg)
+    db.session.commit()
+    flash(f'ההודעה שויכה ללקוח {customer.phone}' + (f' ({customer.name})' if customer.name else ''))
+    return redirect(url_for('admin.customer_detail', id=customer.id))
