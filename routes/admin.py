@@ -1496,13 +1496,9 @@ def _send_inbox_reply_email(to_email, subject, body, message_id, in_reply_to=Non
 def general_inbox():
     from models import GeneralInboxMessage
     threads = GeneralInboxMessage.query.order_by(GeneralInboxMessage.updated_at.desc()).all()
-    # צפייה ברשימה מסמנת הכל כ"נקרא" - כמו תיבת דואר רגילה; הספירה האדומה
-    # בתפריט תתאפס עד שתגיע הודעה חדשה.
-    unread_ids = [t.id for t in threads if not t.is_read]
-    if unread_ids:
-        GeneralInboxMessage.query.filter(GeneralInboxMessage.id.in_(unread_ids)) \
-            .update({'is_read': True}, synchronize_session=False)
-        db.session.commit()
+    # שימו לב: בכוונה לא מסמנים כאן כלום כ"נקרא" - רק צפייה בפועל בשרשור ספציפי
+    # (inbox_thread_detail למטה) מסמנת אותו. אחרת עצם טעינת הרשימה הזו הייתה
+    # מנקה את כל ההתראות במחי יד, גם עבור שרשורים שלא נפתחו בפועל בכלל.
     return render_template('admin/inbox.html', threads=threads)
 
 
