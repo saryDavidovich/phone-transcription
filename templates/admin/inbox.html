@@ -37,11 +37,12 @@
     </thead>
     <tbody>
       {% for t in threads %}
-      <tr>
+      <tr style="{% if not t.is_read %}font-weight:700{% endif %}">
         <td style="font-size:12px">{{ t.updated_at | il_time }}</td>
         <td>{{ t.from_email }}</td>
         <td>
           <a href="{{ url_for('admin.inbox_thread_detail', id=t.id) }}" style="color:var(--accent);text-decoration:none">
+            {% if not t.is_read %}<span style="color:#ef4444">●</span> {% endif %}
             {{ t.subject or '(ללא נושא)' }}
           </a>
         </td>
