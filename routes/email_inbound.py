@@ -638,7 +638,34 @@ def _ocr_worker(filepath, original_filename, customer_id, customer_email, phone)
         )
 
     except Exception as e:
-        log.error(f"OCR worker error: {e}")
+        log.error(f"OCR worker error: {e}", exc_info=True)
+        keep_file = True  # שומרים את הקובץ המקורי כדי שאפשר יהיה לבדוק/לנסות שוב
+        try:
+            with app.app_context():
+                from models import OcrResult
+                ocr_rec = OcrResult(
+                    customer_id=customer_id,
+                    original_filename=original_filename,
+                    original_file_path=filepath,
+                    ocr_text=None,
+                    char_count=0,
+                    cost=0.0,
+                    engine=ocr_engine if 'ocr_engine' in locals() else 'gemini',
+                    status='error',
+                    delivered_to=customer_email,
+                )
+                db.session.add(ocr_rec)
+                db.session.commit()
+        except Exception as inner_e:
+            log.error(f"OCR worker: גם שמירת רשומת השגיאה נכשלה: {inner_e}", exc_info=True)
+        if customer_email:
+            _send_ocr_result_email(
+                to=customer_email,
+                original_filename=original_filename,
+                ocr_text=None,
+                char_count=0,
+                cost=0,
+            )
     finally:
         # מחיקת הקובץ הזמני - חוץ ממקרה pending_payment לפני עיבוד, שם הקובץ נחוץ לעיבוד מאוחר יותר
         try:
