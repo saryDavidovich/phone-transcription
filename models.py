@@ -142,6 +142,10 @@ class CustomerMessage(db.Model):
     customer_id = db.Column(db.Integer, db.ForeignKey('customers.id'), nullable=False, index=True)
     direction = db.Column(db.String(10), nullable=False)  # 'out' | 'in'
     body = db.Column(db.Text, nullable=False)
+    # ברירת המחדל True מתאימה ל-direction='out' (הודעת מנהל - "נקראה" מטבעה).
+    # כל יצירה של הודעה נכנסת (direction='in') חייבת להעביר is_read=False
+    # במפורש, אחרת היא תיווצר כבר "נקראה" ולעולם לא תפעיל התראה - בדיוק הבאג
+    # שנמצא ותוקן ב-general_inbox() (routes/admin.py).
     is_read = db.Column(db.Boolean, default=True)
     message_id = db.Column(db.String(255))  # Message-ID שקבענו לעצמנו, לשרשור אמיתי (In-Reply-To/References)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
