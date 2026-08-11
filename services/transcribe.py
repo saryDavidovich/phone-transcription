@@ -1185,22 +1185,172 @@ def _get_setting(key, default=''):
     return s.value if s else default
 
 
-def _build_word_doc(name, duration_str, transcript_fixed, transcript_raw=None, title='תמלול שיחה'):
+FONTS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'assets', 'fonts')
+FONT_DISPLAY_NAME = 'Frank Ruhl Libre'  # גופן עברי מסוגנן וקלאסי (עיתונים/ספרים), במקום David/Narkisim הפשוטים
+FONT_REGULAR_PATH = os.path.join(FONTS_DIR, 'FrankRuhlLibre-Regular.ttf')
+FONT_BOLD_PATH = os.path.join(FONTS_DIR, 'FrankRuhlLibre-Bold.ttf')
+
+# רשימת אלמנטי pPr שחייבים לבוא אחרי w:bidi, לפי סדר הסכימה של OOXML.
+# קריטי: אם w:bidi לא נכנס לפני w:jc וכו', וורד מתעלם ממנו בשקט וההתחלה מימין לא באמת קורית.
+_BIDI_SUCCESSORS = (
+    'w:adjustRightInd', 'w:snapToGrid', 'w:spacing', 'w:ind', 'w:contextualSpacing',
+    'w:mirrorIndents', 'w:suppressOverlap', 'w:jc', 'w:textDirection', 'w:textAlignment',
+    'w:textboxTightWrap', 'w:outlineLvl', 'w:divId', 'w:cnfStyle', 'w:rPr', 'w:sectPr', 'w:pPrChange'
+)
+
+
+def _obfuscate_font(font_bytes, guid_str):
+    """מבצע XOR obfuscation ל-32 הבתים הראשונים של קובץ הגופן, לפי אלגוריתם ה-Font Embedding התקני של ECMA-376."""
+    key = bytes.fromhex(guid_str.replace('-', ''))[::-1]
+    data = bytearray(font_bytes)
+    for i in range(32):
+        data[i] ^= key[i % 16]
+    return bytes(data)
+
+
+def _embed_font_in_docx(docx_bytes, font_name, regular_path, bold_path=None):
+    """
+    מטמיע גופן (TrueType) בפועל בתוך קובץ ה-docx, כך שהמסמך ייראה זהה אצל כל נמען
+    גם אם הגופן לא מותקן אצלו במחשב (בין אם פותח בוורד, בין אם מומר ל-PDF לפקס דרך LibreOffice).
+    """
+    import io as _io
+    import re as _re
+    import uuid as _uuid
+    import zipfile as _zipfile
+
+    if not os.path.exists(regular_path):
+        log.warning(f"Font embed skipped: file not found at {regular_path}")
+        return docx_bytes
+
+    W_NS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
+    R_NS = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
+    PR_NS = 'http://schemas.openxmlformats.org/package/2006/relationships'
+
+    try:
+        zin = _zipfile.ZipFile(_io.BytesIO(docx_bytes))
+        data = {n: zin.read(n) for n in zin.namelist()}
+        zin.close()
+
+        with open(regular_path, 'rb') as f:
+            regular_bytes = f.read()
+        guid_regular = str(_uuid.uuid4()).upper()
+        data['word/fonts/font1.odttf'] = _obfuscate_font(regular_bytes, guid_regular)
+        rels_entries = [('rId1', 'font1.odttf')]
+
+        embed_bold_tag = ''
+        if bold_path and os.path.exists(bold_path):
+            with open(bold_path, 'rb') as f:
+                bold_bytes = f.read()
+            guid_bold = str(_uuid.uuid4()).upper()
+            data['word/fonts/font2.odttf'] = _obfuscate_font(bold_bytes, guid_bold)
+            rels_entries.append(('rId2', 'font2.odttf'))
+            embed_bold_tag = f'<w:embedBold r:id="rId2" w:fontKey="{{{guid_bold}}}"/>'
+
+        data['word/fontTable.xml'] = (
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            f'<w:fonts xmlns:w="{W_NS}" xmlns:r="{R_NS}">'
+            f'<w:font w:name="{font_name}">'
+            f'<w:embedRegular r:id="rId1" w:fontKey="{{{guid_regular}}}"/>'
+            f'{embed_bold_tag}'
+            '</w:font></w:fonts>'
+        ).encode('utf-8')
+
+        font_rels_items = ''.join(
+            f'<Relationship Id="{rid}" '
+            f'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/font" '
+            f'Target="fonts/{fname}"/>'
+            for rid, fname in rels_entries
+        )
+        data['word/_rels/fontTable.xml.rels'] = (
+            f'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            f'<Relationships xmlns="{PR_NS}">{font_rels_items}</Relationships>'
+        ).encode('utf-8')
+
+        ct_xml = data['[Content_Types].xml'].decode('utf-8')
+        if 'odttf' not in ct_xml:
+            ct_xml = ct_xml.replace(
+                '</Types>',
+                '<Default Extension="odttf" '
+                'ContentType="application/vnd.openxmlformats-officedocument.obfuscatedFont"/></Types>'
+            )
+        if 'fontTable.xml' not in ct_xml:
+            ct_xml = ct_xml.replace(
+                '</Types>',
+                '<Override PartName="/word/fontTable.xml" '
+                'ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.fontTable+xml"/></Types>'
+            )
+        data['[Content_Types].xml'] = ct_xml.encode('utf-8')
+
+        doc_rels_xml = data['word/_rels/document.xml.rels'].decode('utf-8')
+        if 'Target="fontTable.xml"' not in doc_rels_xml:
+            existing_ids = _re.findall(r'Id="rId(\d+)"', doc_rels_xml)
+            next_id = max(int(x) for x in existing_ids) + 1 if existing_ids else 1
+            new_rel = (
+                f'<Relationship Id="rId{next_id}" '
+                f'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/fontTable" '
+                f'Target="fontTable.xml"/>'
+            )
+            doc_rels_xml = doc_rels_xml.replace('</Relationships>', new_rel + '</Relationships>')
+            data['word/_rels/document.xml.rels'] = doc_rels_xml.encode('utf-8')
+
+        out = _io.BytesIO()
+        with _zipfile.ZipFile(out, 'w', _zipfile.ZIP_DEFLATED) as zout:
+            for n, content in data.items():
+                zout.writestr(n, content)
+        return out.getvalue()
+    except Exception as e:
+        log.error(f"Font embed error (falling back to non-embedded docx): {e}")
+        return docx_bytes
+
+
+def _build_word_doc(name, duration_str, transcript_fixed, transcript_raw=None, title='תמלול שיחה', call_time=None):
     from docx import Document
     from docx.enum.text import WD_ALIGN_PARAGRAPH
     from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
     from docx.shared import Pt, RGBColor
+    from datetime import datetime
     import io
+
+    FONT_NAME = FONT_DISPLAY_NAME
+
+    if call_time is None:
+        try:
+            from zoneinfo import ZoneInfo
+            call_time = datetime.now(ZoneInfo('Asia/Jerusalem'))
+        except Exception:
+            call_time = datetime.now()
+    time_str = call_time.strftime('%d/%m/%Y %H:%M')
+
+    def add_bidi(paragraph):
+        pPr = paragraph._p.get_or_add_pPr()
+        bidi = OxmlElement('w:bidi')
+        pPr.insert_element_before(bidi, *_BIDI_SUCCESSORS)
 
     def set_rtl(paragraph, justify=False):
         paragraph.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY if justify else WD_ALIGN_PARAGRAPH.RIGHT
-        pPr = paragraph._p.get_or_add_pPr()
-        bidi = OxmlElement('w:bidi')
-        pPr.append(bidi)
+        add_bidi(paragraph)
+
+    def set_hebrew_font(run, size=None):
+        run.font.name = FONT_NAME
+        if size:
+            run.font.size = size
+        rPr = run._r.get_or_add_rPr()
+        rFonts = rPr.find(qn('w:rFonts'))
+        if rFonts is None:
+            rFonts = OxmlElement('w:rFonts')
+            rPr.append(rFonts)
+        rFonts.set(qn('w:cs'), FONT_NAME)
+        rFonts.set(qn('w:ascii'), FONT_NAME)
+        rFonts.set(qn('w:hAnsi'), FONT_NAME)
+        lang = rPr.find(qn('w:lang'))
+        if lang is None:
+            lang = OxmlElement('w:lang')
+            rPr.append(lang)
+        lang.set(qn('w:val'), 'he-IL')
+        lang.set(qn('w:bidi'), 'he-IL')
 
     def add_bottom_border(paragraph):
-        from docx.oxml.ns import qn
         pPr = paragraph._p.get_or_add_pPr()
         pBdr = OxmlElement('w:pBdr')
         bottom = OxmlElement('w:bottom')
@@ -1210,52 +1360,120 @@ def _build_word_doc(name, duration_str, transcript_fixed, transcript_raw=None, t
         bottom.set(qn('w:color'), '999999')
         pBdr.append(bottom)
         pPr.append(pBdr)
-        
+
+    def add_page_number_field(paragraph):
+        """שדה מספר עמוד אוטומטי, מוצג תמיד בספרות (1, 2, 3...) ולא באותיות."""
+        run = paragraph.add_run()
+        fld_begin = OxmlElement('w:fldChar')
+        fld_begin.set(qn('w:fldCharType'), 'begin')
+        instr = OxmlElement('w:instrText')
+        instr.set(qn('xml:space'), 'preserve')
+        instr.text = 'PAGE'
+        fld_end = OxmlElement('w:fldChar')
+        fld_end.set(qn('w:fldCharType'), 'end')
+        run._r.append(fld_begin)
+        run._r.append(instr)
+        run._r.append(fld_end)
+        set_hebrew_font(run, size=Pt(10))
+        run.font.color.rgb = RGBColor(0x80, 0x80, 0x80)
+
     def add_footer(doc):
         section = doc.sections[0]
         footer = section.footer
         footer_para = footer.paragraphs[0]
         footer_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        pPr = footer_para._p.get_or_add_pPr()
-        bidi = OxmlElement('w:bidi')
-        pPr.append(bidi)
-        run = footer_para.add_run('הופק באמצעות מערכת תמלול פון 03-3131795')
-        run.font.size = Pt(11)
+        add_bidi(footer_para)
+        run = footer_para.add_run('הופק באמצעות מערכת תמלול פון 03-3131795   |   עמוד ')
+        set_hebrew_font(run, size=Pt(11))
         run.font.color.rgb = RGBColor(0x80, 0x80, 0x80)
+        add_page_number_field(footer_para)
 
     doc = Document()
+
+    # --- הגדרת עברית כשפת ברירת המחדל של כל המסמך ---
+    # פותר את הבעיה שתיקון טקסט קיים / הקלדת שורות קצרות חדשות "נופלת" לאנגלית,
+    # ושהחלפת שפה ידנית באמצע העבודה מקטינה את הכתב.
+    doc.core_properties.language = 'he-IL'
+
+    normal_style = doc.styles['Normal']
+    normal_style.font.name = FONT_NAME
+    normal_rPr = normal_style.element.get_or_add_rPr()
+    n_rFonts = normal_rPr.find(qn('w:rFonts'))
+    if n_rFonts is None:
+        n_rFonts = OxmlElement('w:rFonts')
+        normal_rPr.append(n_rFonts)
+    n_rFonts.set(qn('w:cs'), FONT_NAME)
+    n_rFonts.set(qn('w:ascii'), FONT_NAME)
+    n_rFonts.set(qn('w:hAnsi'), FONT_NAME)
+    n_lang = OxmlElement('w:lang')
+    n_lang.set(qn('w:val'), 'he-IL')
+    n_lang.set(qn('w:eastAsia'), 'he-IL')
+    n_lang.set(qn('w:bidi'), 'he-IL')
+    normal_rPr.append(n_lang)
+
+    # settings.xml - קובע את שפת ברירת המחדל לתיקון אוטומטי/איות עבור טקסט חדש שיוקלד
+    settings_el = doc.settings.element
+    theme_font_lang = settings_el.find(qn('w:themeFontLang'))
+    if theme_font_lang is None:
+        theme_font_lang = OxmlElement('w:themeFontLang')
+        settings_el.append(theme_font_lang)
+    theme_font_lang.set(qn('w:bidi'), 'he-IL')
+
+    # מסמן לוורד שיש גופנים מוטמעים בקובץ, כך שהם ישמשו גם אצל נמענים שאין להם את הגופן מותקן
+    embed_ttf = OxmlElement('w:embedTrueTypeFonts')
+    settings_el.insert_element_before(
+        embed_ttf, 'w:embedSystemFonts', 'w:saveSubsetFonts', 'w:saveFormsData', 'w:mirrorMargins',
+        'w:alignBordersAndEdges', 'w:bordersDoNotSurroundHeader', 'w:bordersDoNotSurroundFooter',
+        'w:gutterAtTop', 'w:hideSpellingErrors', 'w:hideGrammaticalErrors', 'w:activeWritingStyle',
+        'w:proofState', 'w:formsDesign', 'w:attachedTemplate', 'w:linkStyles', 'w:themeFontLang'
+    )
+
     section = doc.sections[0]
     sectPr = section._sectPr
     bidi_doc = OxmlElement('w:bidi')
     sectPr.append(bidi_doc)
+
+    # מספרי עמודים בספרות רגילות (1,2,3) ולא באותיות עבריות (א,ב,ג) - ברירת המחדל במסמך RTL
+    pgNumType = OxmlElement('w:pgNumType')
+    pgNumType.set(qn('w:fmt'), 'decimal')
+    sectPr.append(pgNumType)
+
     add_footer(doc)
 
     title_heading = doc.add_heading(title, 0)
     set_rtl(title_heading)
-    p_info = doc.add_paragraph(f'לקוח: {name} | משך: {duration_str}')
+    for run in title_heading.runs:
+        set_hebrew_font(run)
+
+    h_details = doc.add_heading('פרטי לקוח', level=1)
+    set_rtl(h_details)
+    for run in h_details.runs:
+        set_hebrew_font(run)
+
+    p_info = doc.add_paragraph(f'לקוח: {name}   |   תאריך ושעה: {time_str}   |   משך: {duration_str}')
     set_rtl(p_info)
     add_bottom_border(p_info)
+    for run in p_info.runs:
+        set_hebrew_font(run, size=Pt(11))
+
     h1 = doc.add_heading('תמלול', level=1)
     set_rtl(h1)
+    for run in h1.runs:
+        set_hebrew_font(run)
+
     p = doc.add_paragraph()
     set_rtl(p, justify=True)
     run_body = p.add_run(transcript_fixed or '')
-    run_body.font.size = Pt(13)
-    run_body.font.name = 'David'
-    # הגדרת פונט מפורשת ל-complex script (עברית) — חיוני לחדות ברינדור PDF/LibreOffice
-    rPr = run_body._r.get_or_add_rPr()
-    rFonts = rPr.find(qn('w:rFonts'))
-    if rFonts is None:
-        rFonts = OxmlElement('w:rFonts')
-        rPr.append(rFonts)
-    rFonts.set(qn('w:cs'), 'David')
-    rFonts.set(qn('w:ascii'), 'David')
-    rFonts.set(qn('w:hAnsi'), 'David')
+    set_hebrew_font(run_body, size=Pt(13))
 
     buf = io.BytesIO()
     doc.save(buf)
     buf.seek(0)
-    return buf.read()
+    docx_bytes = buf.read()
+
+    # מטמיע את הגופן בפועל בקובץ, כדי שהמסמך ייראה אותו הדבר אצל כל נמען
+    docx_bytes = _embed_font_in_docx(docx_bytes, FONT_NAME, FONT_REGULAR_PATH, FONT_BOLD_PATH)
+    return docx_bytes
 
 
 def _build_pdf_for_fax(name, duration_str, transcript_fixed):
