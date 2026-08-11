@@ -1250,6 +1250,15 @@ def _embed_font_in_docx(docx_bytes, font_name, regular_path, bold_path=None):
             '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
             f'<w:fonts xmlns:w="{W_NS}" xmlns:r="{R_NS}">'
             f'<w:font w:name="{font_name}">'
+            # מטא-דאטה שוורד (בניגוד ל-LibreOffice) דורש בפועל כדי לסמוך על הגופן המוטמע
+            # עבור טקסט בעברית (complex script) - בלעדיה וורד נופל בשקט לגופן חלופי כלשהו
+            # אצל מי שאין לו את הגופן מותקן. הערכים חושבו ישירות מטבלת ה-OS/2 של קובץ הגופן עצמו.
+            '<w:panose1 w:val="00000000000000000000"/>'
+            '<w:charset w:val="B1"/>'  # B1 = Hebrew charset
+            '<w:family w:val="auto"/>'
+            '<w:pitch w:val="variable"/>'
+            '<w:sig w:usb0="A00008EF" w:usb1="4001205B" w:usb2="00000008" w:usb3="00000000" '
+            'w:csb0="200000B3" w:csb1="00000000"/>'
             f'<w:embedRegular r:id="rId1" w:fontKey="{{{guid_regular}}}"/>'
             f'{embed_bold_tag}'
             '</w:font></w:fonts>'
@@ -1322,10 +1331,28 @@ def _build_word_doc(name, duration_str, transcript_fixed, transcript_raw=None, t
             call_time = datetime.now()
     time_str = call_time.strftime('%d/%m/%Y %H:%M')
 
+    _RPR_RTL_SUCCESSORS = ('w:cs', 'w:em', 'w:lang', 'w:eastAsianLayout', 'w:specVanish', 'w:oMath')
+
     def add_bidi(paragraph):
         pPr = paragraph._p.get_or_add_pPr()
         bidi = OxmlElement('w:bidi')
         pPr.insert_element_before(bidi, *_BIDI_SUCCESSORS)
+        # מסמן גם את "סימן הפסקה" עצמו כ-RTL - קריטי לוורד (בניגוד ל-LibreOffice)
+        # כדי שסימני פיסוק בסוף השורה (נקודה, סימן שאלה) יתמקמו נכון ולא "יברחו" לתחילת השורה
+        mark_rPr = pPr.find(qn('w:rPr'))
+        if mark_rPr is None:
+            mark_rPr = OxmlElement('w:rPr')
+            pPr.insert_element_before(mark_rPr, 'w:sectPr', 'w:pPrChange')
+        mark_rtl = mark_rPr.find(qn('w:rtl'))
+        if mark_rtl is None:
+            mark_rtl = OxmlElement('w:rtl')
+            mark_rPr.insert_element_before(mark_rtl, *_RPR_RTL_SUCCESSORS)
+        mark_lang = mark_rPr.find(qn('w:lang'))
+        if mark_lang is None:
+            mark_lang = OxmlElement('w:lang')
+            mark_rPr.append(mark_lang)
+        mark_lang.set(qn('w:val'), 'he-IL')
+        mark_lang.set(qn('w:bidi'), 'he-IL')
 
     def set_rtl(paragraph, justify=False):
         paragraph.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY if justify else WD_ALIGN_PARAGRAPH.RIGHT
@@ -1343,6 +1370,12 @@ def _build_word_doc(name, duration_str, transcript_fixed, transcript_raw=None, t
         rFonts.set(qn('w:cs'), FONT_NAME)
         rFonts.set(qn('w:ascii'), FONT_NAME)
         rFonts.set(qn('w:hAnsi'), FONT_NAME)
+        # w:rtl (ברמת ה-run) - בלעדיו וורד לפעמים מסדר סימני פיסוק/תווים ניטרליים
+        # (נקודה, סימן שאלה) לפי כיווניות ברירת המחדל (LTR) במקום לפי הקשר עברי
+        rtl = rPr.find(qn('w:rtl'))
+        if rtl is None:
+            rtl = OxmlElement('w:rtl')
+            rPr.insert_element_before(rtl, *_RPR_RTL_SUCCESSORS)
         lang = rPr.find(qn('w:lang'))
         if lang is None:
             lang = OxmlElement('w:lang')
@@ -1359,7 +1392,12 @@ def _build_word_doc(name, duration_str, transcript_fixed, transcript_raw=None, t
         bottom.set(qn('w:space'), '4')
         bottom.set(qn('w:color'), '999999')
         pBdr.append(bottom)
-        pPr.append(pBdr)
+        # w:pBdr חייב לבוא במקום הנכון בסכימה (לפני shd/tabs/bidi/jc/rPr וכו'),
+        # אחרת זו עוד הפרה שקטה של סדר ה-XML שוורד עלול להתעלם ממנה
+        pPr.insert_element_before(
+            pBdr, 'w:shd', 'w:tabs', 'w:suppressAutoHyphens', 'w:kinsoku', 'w:wordWrap',
+            'w:overflowPunct', 'w:topLinePunct', 'w:autoSpaceDE', 'w:autoSpaceDN', 'w:bidi', *_BIDI_SUCCESSORS
+        )
 
     def add_page_number_field(paragraph):
         """שדה מספר עמוד אוטומטי, מוצג תמיד בספרות (1, 2, 3...) ולא באותיות."""
@@ -1397,6 +1435,9 @@ def _build_word_doc(name, duration_str, transcript_fixed, transcript_raw=None, t
 
     normal_style = doc.styles['Normal']
     normal_style.font.name = FONT_NAME
+    normal_pPr = normal_style.element.get_or_add_pPr()
+    normal_pPr_bidi = OxmlElement('w:bidi')
+    normal_pPr.insert_element_before(normal_pPr_bidi, *_BIDI_SUCCESSORS)
     normal_rPr = normal_style.element.get_or_add_rPr()
     n_rFonts = normal_rPr.find(qn('w:rFonts'))
     if n_rFonts is None:
@@ -1405,11 +1446,24 @@ def _build_word_doc(name, duration_str, transcript_fixed, transcript_raw=None, t
     n_rFonts.set(qn('w:cs'), FONT_NAME)
     n_rFonts.set(qn('w:ascii'), FONT_NAME)
     n_rFonts.set(qn('w:hAnsi'), FONT_NAME)
+    n_rtl = OxmlElement('w:rtl')
+    normal_rPr.insert_element_before(n_rtl, 'w:cs', 'w:em', 'w:lang', 'w:eastAsianLayout', 'w:specVanish', 'w:oMath')
     n_lang = OxmlElement('w:lang')
     n_lang.set(qn('w:val'), 'he-IL')
     n_lang.set(qn('w:eastAsia'), 'he-IL')
     n_lang.set(qn('w:bidi'), 'he-IL')
     normal_rPr.append(n_lang)
+
+    # אותו דבר גם ברמת הסגנונות "Title" ו-"Heading 1" עצמם (לא רק בפסקאות שמשתמשות בהם) -
+    # כדי שכותרות יהיו RTL כברירת מחדל של הסגנון ולא יסתמכו רק על עקיפה ידנית לכל פסקה
+    for style_name in ('Title', 'Heading 1'):
+        try:
+            style_el = doc.styles[style_name].element
+        except KeyError:
+            continue
+        style_pPr = style_el.get_or_add_pPr()
+        style_bidi = OxmlElement('w:bidi')
+        style_pPr.insert_element_before(style_bidi, *_BIDI_SUCCESSORS)
 
     # settings.xml - קובע את שפת ברירת המחדל לתיקון אוטומטי/איות עבור טקסט חדש שיוקלד
     settings_el = doc.settings.element
