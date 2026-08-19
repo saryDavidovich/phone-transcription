@@ -60,6 +60,50 @@ def get_customer(phone):
         'name': customer.name or '',
     })
 
+@api_bp.route('/customer/by-student/<student_number>', methods=['GET'])
+def get_customer_by_student(student_number):
+    """נקרא משלוחה 7 ב-IVR (ivr.js, כניסה עם מספר תלמיד) - מיועד בעיקר
+    לתלמידים שאין להם טלפון אישי בכלל (לא רק כאלה שמתקשרים מטלפון שאינו
+    שלהם). מחזיר מזהה "טלפון" קבוע שהתלמיד רשום תחתיו, כדי שהמשך השיחה
+    ימשיך לזהות אותו נכון (כולל חיוב, הקלטות, יתרה) בדיוק כמו כל לקוח -
+    כל שאר המערכת מזהה הכל לפי phone, וזו הדרך הכי פשוטה לעשות שימוש
+    חוזר בכל הצנרת הקיימת בלי לשנות אותה בכל מקום.
+
+    אם לתלמיד אין טלפון רשום כלל (המקרה השכיח) - יוצרים לו כאן, בפעם
+    הראשונה בלבד, מזהה קבוע וייחודי מתוך מספר התלמיד עצמו (למשל
+    "stu482915"), ושומרים אותו בשדה phone. זה לא מספר טלפון אמיתי -
+    שימו לב שהוא עלול להופיע ככה בעמודת "טלפון" בייצוא לאקסל / כרטיס
+    התלמיד בממשק ניהול המוסד. בפעמים הבאות שהתלמיד יתקשר בשלוחה 7 הוא
+    כבר ימצא את אותו מזהה קבוע.
+
+    אוכף כאן גם את שעות השימוש המותרות שהמוסד הגדיר (אם הוגדרו) -
+    מגבלת הש"ח לתלמיד (max_usage_per_student) עדיין לא נאכפת בשום מקום
+    במערכת כרגע ולכן לא נבדקת כאן."""
+    customer = Customer.query.filter_by(student_number=student_number).first()
+    if not customer:
+        return jsonify({'error': 'not_found'}), 404
+
+    if not customer.phone:
+        customer.phone = f"stu{customer.student_number}"
+        db.session.commit()
+
+    institution = customer.institution
+    if institution and institution.allowed_hours_start and institution.allowed_hours_end:
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        now_local = datetime.now(ZoneInfo('Asia/Jerusalem')).strftime('%H:%M')
+        start, end = institution.allowed_hours_start, institution.allowed_hours_end
+        in_range = (start <= now_local <= end) if start <= end else (now_local >= start or now_local <= end)
+        if not in_range:
+            return jsonify({
+                'error': 'outside_allowed_hours',
+                'allowed_hours_start': start,
+                'allowed_hours_end': end,
+            }), 403
+
+    return jsonify({'phone': customer.phone})
+
+
 @api_bp.route('/customer/pending-recordings', methods=['GET'])
 def get_pending_recordings():
     """
