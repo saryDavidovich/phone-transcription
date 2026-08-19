@@ -29,6 +29,11 @@ def inject_new_messages_count():
 
 @login_manager.user_loader
 def load_user(user_id):
+    # מוסדות מתחברים דרך אותו Flask-Login, אבל עם קידומת 'inst-' ב-get_id
+    # (ראה models.Institution.get_id) כדי להבדיל מהתחברות מנהל-על רגילה.
+    if isinstance(user_id, str) and user_id.startswith('inst-'):
+        from models import Institution
+        return Institution.query.get(int(user_id.split('-', 1)[1]))
     return AdminUser.query.get(int(user_id))
 
 def get_setting(key, default=''):
@@ -1597,3 +1602,85 @@ def assign_inbox_message(id):
     db.session.commit()
     flash(f'השרשור שויך ללקוח {customer.phone}' + (f' ({customer.name})' if customer.name else ''))
     return redirect(url_for('admin.customer_detail', id=customer.id))
+
+
+# ===================== מוסדות (ניהול מוסד - super-admin) =====================
+
+@admin_bp.route('/institutions')
+@login_required
+def institutions():
+    from models import Institution
+    insts = Institution.query.order_by(Institution.created_at.desc()).all()
+    return render_template('admin/institutions.html', institutions=insts)
+
+
+@admin_bp.route('/institutions/create', methods=['POST'])
+@login_required
+def create_institution():
+    import random, string
+    from models import Institution
+    name = (request.form.get('name') or '').strip()
+    email = (request.form.get('email') or '').strip() or None
+    phone = (request.form.get('phone') or '').strip() or None
+    if not name or not (email or phone):
+        flash('יש להזין שם, ולפחות מייל או טלפון')
+        return redirect(url_for('admin.institutions'))
+
+    inst = Institution(
+        name=name, email=email, phone=phone,
+        login_code=''.join(random.choices(string.digits, k=6)),
+    )
+    db.session.add(inst)
+    db.session.commit()
+    flash(f'המוסד "{name}" נוצר - קוד כניסה ראשוני: {inst.login_code}')
+    return redirect(url_for('admin.institutions'))
+
+
+@admin_bp.route('/institutions/<int:inst_id>')
+@login_required
+def institution_detail(inst_id):
+    from models import Institution, Customer, InstitutionChargeLog
+    inst = Institution.query.get_or_404(inst_id)
+    students = Customer.query.filter_by(institution_id=inst.id).all()
+    charges = InstitutionChargeLog.query.filter_by(institution_id=inst.id).order_by(InstitutionChargeLog.created_at.desc()).limit(20).all()
+    return render_template('admin/institution_detail.html', inst=inst, students=students, charges=charges)
+
+
+@admin_bp.route('/institutions/<int:inst_id>/adjust-balance', methods=['POST'])
+@login_required
+def adjust_institution_balance(inst_id):
+    from models import Institution
+    inst = Institution.query.get_or_404(inst_id)
+    try:
+        amount = float(request.form.get('amount'))
+    except (TypeError, ValueError):
+        flash('סכום לא תקין')
+        return redirect(url_for('admin.institution_detail', inst_id=inst.id))
+    inst.balance = (inst.balance or 0) + amount
+    db.session.commit()
+    flash('היתרה עודכנה')
+    return redirect(url_for('admin.institution_detail', inst_id=inst.id))
+
+
+@admin_bp.route('/institutions/<int:inst_id>/toggle-block', methods=['POST'])
+@login_required
+def toggle_institution_block(inst_id):
+    from models import Institution
+    inst = Institution.query.get_or_404(inst_id)
+    inst.is_blocked = not inst.is_blocked
+    db.session.commit()
+    flash('המוסד נחסם' if inst.is_blocked else 'החסימה בוטלה')
+    return redirect(url_for('admin.institution_detail', inst_id=inst.id))
+
+
+@admin_bp.route('/institutions/<int:inst_id>/regenerate-code', methods=['POST'])
+@login_required
+def regenerate_institution_code(inst_id):
+    import random, string
+    from models import Institution
+    inst = Institution.query.get_or_404(inst_id)
+    inst.login_code = ''.join(random.choices(string.digits, k=6))
+    inst.password_hash = None  # חוזר למצב "כניסה ראשונה" עם הקוד החדש
+    db.session.commit()
+    flash(f'קוד כניסה חדש למוסד: {inst.login_code}')
+    return redirect(url_for('admin.institution_detail', inst_id=inst.id))

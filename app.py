@@ -40,12 +40,20 @@ def create_app():
     from routes.payment import payment_bp
     from routes.api import api_bp
     from routes.email_inbound import email_bp
-    
+    from routes.institution import institution_bp
+    from routes.institution_billing import institution_billing_bp
+    from routes.institution_transcribe import institution_transcribe_bp
+    from routes.institution_students import institution_students_bp
+
     app.register_blueprint(ivr_bp, url_prefix='/ivr')
     app.register_blueprint(admin_bp, url_prefix='/admin')
     app.register_blueprint(payment_bp, url_prefix='/payment')
     app.register_blueprint(api_bp, url_prefix='/api')
     app.register_blueprint(email_bp, url_prefix='/api')
+    app.register_blueprint(institution_bp, url_prefix='/institution')
+    app.register_blueprint(institution_billing_bp)
+    app.register_blueprint(institution_transcribe_bp)
+    app.register_blueprint(institution_students_bp)
 
     # Route ציבורי לקבצי פקס זמניים
     @app.route('/static/fax_tmp/<filename>')
@@ -164,6 +172,57 @@ def _migrate_db():
            WHERE body IS NOT NULL
              AND NOT EXISTS (SELECT 1 FROM inbox_messages WHERE thread_id = general_inbox_messages.id)""",
         "ALTER TABLE general_inbox_messages DROP COLUMN IF EXISTS body",
+
+        # ===== ניהול מוסד (תלמידים) =====
+        """CREATE TABLE IF NOT EXISTS institutions (
+                id SERIAL PRIMARY KEY,
+                name VARCHAR(200) NOT NULL,
+                email VARCHAR(200),
+                phone VARCHAR(20),
+                login_code VARCHAR(20),
+                password_hash VARCHAR(256),
+                google_id VARCHAR(100) UNIQUE,
+                balance FLOAT DEFAULT 0.0,
+                is_blocked BOOLEAN DEFAULT FALSE,
+                max_usage_per_student FLOAT,
+                allowed_hours_start VARCHAR(5),
+                allowed_hours_end VARCHAR(5),
+                notify_email VARCHAR(200),
+                notify_fax VARCHAR(20),
+                authorized_logins JSONB,
+                card_last4 VARCHAR(4),
+                nedarim_token VARCHAR(200),
+                created_at TIMESTAMP DEFAULT NOW()
+            )""",
+        """CREATE TABLE IF NOT EXISTS institution_charge_logs (
+                id SERIAL PRIMARY KEY,
+                institution_id INTEGER NOT NULL REFERENCES institutions(id),
+                amount FLOAT NOT NULL,
+                status VARCHAR(20) DEFAULT 'pending',
+                provider_ref VARCHAR(200),
+                created_at TIMESTAMP DEFAULT NOW()
+            )""",
+        "CREATE INDEX IF NOT EXISTS ix_institution_charge_logs_institution_id ON institution_charge_logs (institution_id)",
+        # customers.phone הפך לאופציונלי - "תלמיד" עשוי להיות מזוהה רק לפי
+        # מספר תלמיד (student_number), בלי טלפון בכלל
+        "ALTER TABLE customers ALTER COLUMN phone DROP NOT NULL",
+        "ALTER TABLE customers ADD COLUMN IF NOT EXISTS institution_id INTEGER REFERENCES institutions(id)",
+        "ALTER TABLE customers ADD COLUMN IF NOT EXISTS student_number VARCHAR(10) UNIQUE",
+        "ALTER TABLE customers ADD COLUMN IF NOT EXISTS student_display_name VARCHAR(100)",
+        "CREATE INDEX IF NOT EXISTS ix_customers_institution_id ON customers (institution_id)",
+        "CREATE INDEX IF NOT EXISTS ix_customers_student_number ON customers (student_number)",
+        """CREATE TABLE IF NOT EXISTS institution_uploads (
+                id SERIAL PRIMARY KEY,
+                institution_id INTEGER NOT NULL REFERENCES institutions(id),
+                original_filename VARCHAR(255),
+                tier VARCHAR(20) DEFAULT 'gemini',
+                status VARCHAR(20) DEFAULT 'processing',
+                transcript TEXT,
+                docx_filename VARCHAR(255),
+                error_message TEXT,
+                created_at TIMESTAMP DEFAULT NOW()
+            )""",
+        "CREATE INDEX IF NOT EXISTS ix_institution_uploads_institution_id ON institution_uploads (institution_id)",
     ]
     logger = logging.getLogger(__name__)
     ok, failed = 0, 0

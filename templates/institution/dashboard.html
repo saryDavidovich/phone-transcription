@@ -1,0 +1,36 @@
+{% extends "institution/base.html" %}
+{% block title %}דשבורד{% endblock %}
+{% block content %}
+<h1>שלום, {{ inst.name }}</h1>
+
+<div class="grid grid-4" style="margin-bottom:24px;">
+  <div class="card">
+    <div class="stat-value">{{ student_count }}</div>
+    <div class="stat-label">תלמידים מחוברים</div>
+  </div>
+  <div class="card">
+    <div class="stat-value">{{ "%.2f"|format(students_balance_sum) }} ₪</div>
+    <div class="stat-label">סה"כ יתרת תלמידים</div>
+  </div>
+  <div class="card">
+    <div class="stat-value">{{ total_recordings }}</div>
+    <div class="stat-label">הקלטות שבוצעו</div>
+  </div>
+  <div class="card">
+    <div class="stat-value">{{ "%.2f"|format(inst.balance or 0) }} ₪</div>
+    <div class="stat-label">יתרת המוסד הכללית</div>
+  </div>
+</div>
+
+<div class="card">
+  <h2 style="font-size:16px; margin-bottom:14px;">פרטי המוסד</h2>
+  <p style="color:var(--text2); font-size:14px; line-height:2;">
+    שם: {{ inst.name }}<br>
+    מייל: {{ inst.email or '—' }}<br>
+    טלפון: {{ inst.phone or '—' }}
+  </p>
+  <p style="color:var(--text3); font-size:12px; margin-top:14px;">
+    עריכת פרטי המוסד, ניהול תלמידים, יצירת תמלול, הגדרות ומעקב חיובים - בלשוניות הצד, בבנייה.
+  </p>
+</div>
+{% endblock %}

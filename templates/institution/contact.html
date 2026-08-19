@@ -1,0 +1,12 @@
+{% extends "institution/base.html" %}
+{% block title %}צור קשר{% endblock %}
+{% block content %}
+<h1>צור קשר</h1>
+<div class="card" style="max-width:480px;">
+  <p style="font-size:13px; color:var(--text2); margin-bottom:14px;">ההודעה תישלח ישירות להנהלת המערכת.</p>
+  <form method="post">
+    <textarea name="message" required rows="5" placeholder="כתוב את ההודעה שלך כאן..." style="width:100%; padding:10px; border-radius:8px; border:1px solid var(--border); background:var(--surface2); color:var(--text); resize:vertical;"></textarea>
+    <button type="submit" class="btn" style="width:100%; margin-top:12px;">שליחה</button>
+  </form>
+</div>
+{% endblock %}

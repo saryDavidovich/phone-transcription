@@ -5,7 +5,7 @@ from datetime import datetime
 class Customer(db.Model):
     __tablename__ = 'customers'
     id = db.Column(db.Integer, primary_key=True)
-    phone = db.Column(db.String(20), unique=True, nullable=False, index=True)
+    phone = db.Column(db.String(20), unique=True, nullable=True, index=True)
     name = db.Column(db.String(100))
     email = db.Column(db.String(200))
     fax = db.Column(db.String(20))
@@ -17,6 +17,84 @@ class Customer(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     recordings = db.relationship('Recording', backref='customer', lazy=True)
     transactions = db.relationship('Transaction', backref='customer', lazy=True)
+
+    # --- שיוך למוסד (תלמיד) ---
+    # לקוח "רגיל" (הרשמה עצמאית) - institution_id ריק. "תלמיד" ששייך למוסד -
+    # אותה טבלה בדיוק, כדי לעשות שימוש חוזר מלא בצנרת ההקלטה/תמלול/חיוב
+    # הקיימת, רק עם institution_id ומספר תלמיד (student_number) ממולאים.
+    institution_id = db.Column(db.Integer, db.ForeignKey('institutions.id'), nullable=True, index=True)
+    student_number = db.Column(db.String(10), unique=True, nullable=True, index=True)  # 6 ספרות, לזיהוי בשלוחה 7
+    student_display_name = db.Column(db.String(100), nullable=True)  # שם שהמוסד נתן לתלמיד (עשוי להיות שונה מ-name)
+
+
+class Institution(db.Model, UserMixin):
+    """מוסד משלם - מקבל ממשק ניהול לתלמידים משלו. ההתחברות נפרדת לגמרי
+    מ-AdminUser (מנהל-העל של כל המערכת); ראה routes/institution.py."""
+    __tablename__ = 'institutions'
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(200), nullable=False)
+    email = db.Column(db.String(200), nullable=True)   # התחברות אפשרית לפי מייל
+    phone = db.Column(db.String(20), nullable=True)    # התחברות אפשרית לפי טלפון
+    login_code = db.Column(db.String(20), nullable=True)      # קוד שנוצר ע"י מנהל-העל, בשימוש עד שהמוסד מגדיר סיסמה
+    password_hash = db.Column(db.String(256), nullable=True)  # מוגדר בכניסה ראשונה, מחליף את login_code
+    google_id = db.Column(db.String(100), nullable=True, unique=True)  # אימות גוגל אופציונלי, ללא קוד
+    balance = db.Column(db.Float, default=0.0)   # יתרה כללית של המוסד (מוזן ע"י מנהל-העל / חיוב אשראי)
+    is_blocked = db.Column(db.Boolean, default=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    # --- הגדרות מוסד ---
+    max_usage_per_student = db.Column(db.Float, nullable=True)  # מגבלת ש"ח/דקות לתלמיד, ריק = ללא מגבלה
+    allowed_hours_start = db.Column(db.String(5), nullable=True)  # "HH:MM", ריק = ללא הגבלת שעות
+    allowed_hours_end = db.Column(db.String(5), nullable=True)
+    notify_email = db.Column(db.String(200), nullable=True)  # מייל שאליו מגיעים כל התמלולים עם פרטי התלמיד
+    notify_fax = db.Column(db.String(20), nullable=True)
+    authorized_logins = db.Column(db.JSON, nullable=True)  # [{"email":..., "name":...}, ...] - מורשי כניסה נוספים
+
+    # --- הגדרות חיוב (נדרים פלוס - ראו routes/institution_billing.py) ---
+    card_last4 = db.Column(db.String(4), nullable=True)
+    nedarim_token = db.Column(db.String(200), nullable=True)  # טוקן חיוב קבוע, אם נדרים פלוס מספקים כזה
+
+    students = db.relationship('Customer', backref='institution', lazy=True,
+                                foreign_keys='Customer.institution_id')
+
+    def get_id(self):
+        # קידומת ייחודית - כדי שה-user_loader המשותף (routes/admin.py) יידע
+        # להבדיל בין התחברות מוסד להתחברות מנהל-על, ששתיהן משתמשות באותו
+        # Flask-Login LoginManager יחיד.
+        return f'inst-{self.id}'
+
+
+class InstitutionChargeLog(db.Model):
+    """יומן חיובי אשראי בפועל של המוסד (נדרים פלוס), נפרד מ-Transaction
+    שמתעד תנועות ביתרת תלמיד בודד."""
+    __tablename__ = 'institution_charge_logs'
+    id = db.Column(db.Integer, primary_key=True)
+    institution_id = db.Column(db.Integer, db.ForeignKey('institutions.id'), nullable=False, index=True)
+    amount = db.Column(db.Float, nullable=False)
+    status = db.Column(db.String(20), default='pending')  # pending / success / failed
+    provider_ref = db.Column(db.String(200), nullable=True)  # מזהה עסקה אצל נדרים פלוס
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    institution = db.relationship('Institution', backref='charge_logs')
+
+
+class InstitutionUpload(db.Model):
+    """תמלול אד-הוק שמנהל המוסד מעלה בעצמו דרך לשונית 'יצירת תמלול' (לא
+    קשור לתלמיד ספציפי, ולא צורך את יתרת תלמיד - זה כלי עבודה של המוסד
+    עצמו). מעובד ברקע (thread) כדי לא לחסום את הדפדפן; הלשונית מבצעת
+    polling לפי status ומציגה גלגל שיניים עד ל-done."""
+    __tablename__ = 'institution_uploads'
+    id = db.Column(db.Integer, primary_key=True)
+    institution_id = db.Column(db.Integer, db.ForeignKey('institutions.id'), nullable=False, index=True)
+    original_filename = db.Column(db.String(255))
+    tier = db.Column(db.String(20), default='gemini')
+    status = db.Column(db.String(20), default='processing')  # processing / done / error
+    transcript = db.Column(db.Text)
+    docx_filename = db.Column(db.String(255))  # שם קובץ ה-Word המוכן בתוך static/fax_tmp
+    error_message = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    institution = db.relationship('Institution', backref='uploads')
 
 class Recording(db.Model):
     __tablename__ = 'recordings'

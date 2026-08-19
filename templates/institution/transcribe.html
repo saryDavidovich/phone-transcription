@@ -1,0 +1,104 @@
+{% extends "institution/base.html" %}
+{% block title %}יצירת תמלול{% endblock %}
+{% block content %}
+<h1>יצירת תמלול</h1>
+
+<div class="card" style="max-width:520px; margin-bottom:24px;">
+  <form id="uploadForm">
+    <label style="font-size:13px; color:var(--text2);">קובץ הקלטה (אודיו/וידאו)</label>
+    <input type="file" name="audio_file" id="audioFile" required accept="audio/*,video/*" style="width:100%; margin:6px 0 14px; padding:8px; border-radius:8px; border:1px solid var(--border); background:var(--surface2); color:var(--text);">
+
+    <label style="font-size:13px; color:var(--text2);">שפת ההקלטה</label>
+    <select name="language" style="width:100%; margin:6px 0 14px; padding:9px; border-radius:8px; border:1px solid var(--border); background:var(--surface2); color:var(--text);">
+      <option value="he">עברית</option>
+      <option value="en">אנגלית</option>
+      <option value="yi">יידיש</option>
+    </select>
+
+    <button type="submit" class="btn" style="width:100%;">העלאה ותמלול</button>
+  </form>
+  <div id="uploadMsg" style="font-size:13px; margin-top:10px;"></div>
+</div>
+
+<div class="card">
+  <h2 style="font-size:16px; margin-bottom:12px;">תמלולים אחרונים</h2>
+  <div id="uploadsList">
+    {% for u in uploads %}
+    <div class="upload-row" data-id="{{ u.id }}" style="display:flex; justify-content:space-between; align-items:center; padding:10px 0; border-bottom:1px solid var(--border);">
+      <span>{{ u.original_filename }}</span>
+      <span class="row-status" style="font-size:13px; color:var(--text2);">
+        {% if u.status == 'processing' %}
+          <span class="spinner">⚙️</span> מתמלל...
+        {% elif u.status == 'done' %}
+          <a href="/institution/transcribe/download/{{ u.id }}" class="btn" style="padding:4px 12px; font-size:12px;">הורדת Word</a>
+        {% else %}
+          <span style="color:var(--red);">שגיאה</span>
+        {% endif %}
+      </span>
+    </div>
+    {% else %}
+    <p style="color:var(--text2); font-size:13px;">עדיין לא הועלו תמלולים.</p>
+    {% endfor %}
+  </div>
+</div>
+
+<style>
+.spinner { display:inline-block; animation:spin 1.2s linear infinite; }
+@keyframes spin { from{transform:rotate(0deg);} to{transform:rotate(360deg);} }
+</style>
+
+<script>
+document.getElementById('uploadForm').addEventListener('submit', async function (e) {
+  e.preventDefault();
+  var fileInput = document.getElementById('audioFile');
+  if (!fileInput.files.length) return;
+
+  var msgEl = document.getElementById('uploadMsg');
+  msgEl.textContent = 'מעלה קובץ...';
+
+  var fd = new FormData(this);
+  var res = await fetch('/institution/transcribe/upload', { method: 'POST', body: fd });
+  var data = await res.json();
+  if (!res.ok) {
+    msgEl.style.color = 'var(--red)';
+    msgEl.textContent = data.error || 'שגיאה בהעלאה';
+    return;
+  }
+
+  msgEl.style.color = 'var(--accent)';
+  msgEl.textContent = 'הקובץ עלה בהצלחה - מתמלל ברקע, אפשר להמשיך לגלוש באתר.';
+  fileInput.value = '';
+
+  // הוספת שורה חדשה לרשימה מיד (עם גלגל שיניים), בלי רענון עמוד
+  var list = document.getElementById('uploadsList');
+  var row = document.createElement('div');
+  row.className = 'upload-row';
+  row.dataset.id = data.uploadId;
+  row.style = 'display:flex; justify-content:space-between; align-items:center; padding:10px 0; border-bottom:1px solid var(--border);';
+  row.innerHTML = '<span>' + fd.get('audio_file').name + '</span><span class="row-status" style="font-size:13px; color:var(--text2);"><span class="spinner">⚙️</span> מתמלל...</span>';
+  list.prepend(row);
+
+  pollStatus(data.uploadId, row);
+});
+
+function pollStatus(id, row) {
+  var interval = setInterval(async function () {
+    var res = await fetch('/institution/transcribe/status/' + id);
+    var data = await res.json();
+    if (data.status === 'done') {
+      clearInterval(interval);
+      row.querySelector('.row-status').innerHTML =
+        '<a href="' + data.downloadUrl + '" class="btn" style="padding:4px 12px; font-size:12px;">הורדת Word</a>';
+    } else if (data.status === 'error') {
+      clearInterval(interval);
+      row.querySelector('.row-status').innerHTML = '<span style="color:var(--red);">שגיאה</span>';
+    }
+  }, 3000);
+}
+
+// גם שורות קיימות שכבר "processing" בטעינת הדף - ממשיכים לבדוק אותן
+document.querySelectorAll('.upload-row').forEach(function (row) {
+  if (row.querySelector('.spinner')) pollStatus(row.dataset.id, row);
+});
+</script>
+{% endblock %}

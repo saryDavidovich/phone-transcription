@@ -1,0 +1,41 @@
+{% extends 'admin/base.html' %}
+{% block title %}מוסדות{% endblock %}
+{% block page_title %}ניהול מוסדות{% endblock %}
+{% block content %}
+
+<div class="table-card" style="margin-bottom:20px; padding:16px;">
+  <div class="table-title" style="margin-bottom:12px;">➕ יצירת מוסד חדש</div>
+  <form method="post" action="{{ url_for('admin.create_institution') }}" style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+    <input class="form-input" name="name" placeholder="שם המוסד" required style="flex:1; min-width:180px;">
+    <input class="form-input" name="email" placeholder="מייל" style="flex:1; min-width:180px;">
+    <input class="form-input" name="phone" placeholder="טלפון" style="flex:1; min-width:150px;">
+    <button type="submit" class="btn btn-primary">יצירה</button>
+  </form>
+</div>
+
+<div class="table-card">
+  <div class="table-header">
+    <span class="table-title">🏫 מוסדות ({{ institutions|length }})</span>
+  </div>
+  <table>
+    <thead>
+      <tr><th>שם</th><th>מייל</th><th>טלפון</th><th>יתרה</th><th>תלמידים</th><th>סטטוס</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for inst in institutions %}
+      <tr>
+        <td><a href="{{ url_for('admin.institution_detail', inst_id=inst.id) }}">{{ inst.name }}</a></td>
+        <td>{{ inst.email or '—' }}</td>
+        <td>{{ inst.phone or '—' }}</td>
+        <td>{{ "%.2f"|format(inst.balance or 0) }} ₪</td>
+        <td>{{ inst.students|length }}</td>
+        <td>{{ 'חסום' if inst.is_blocked else 'פעיל' }}</td>
+        <td><a href="{{ url_for('admin.institution_detail', inst_id=inst.id) }}" class="btn btn-sm">ניהול</a></td>
+      </tr>
+      {% else %}
+      <tr><td colspan="7">אין עדיין מוסדות.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

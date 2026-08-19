@@ -1,0 +1,57 @@
+{% extends "institution/base.html" %}
+{% block title %}ניהול תלמידים{% endblock %}
+{% block content %}
+<h1>ניהול תלמידים</h1>
+
+<div style="display:flex; gap:12px; margin-bottom:20px; flex-wrap:wrap;">
+  <button class="btn" onclick="document.getElementById('addForm').style.display='block'">+ הוספת תלמיד</button>
+  <form method="post" action="{{ url_for('institution_students.upload_excel') }}" enctype="multipart/form-data" style="display:flex; gap:8px;">
+    <input type="file" name="excel_file" accept=".xlsx,.xls" required style="font-size:13px;">
+    <button type="submit" class="btn" style="background:var(--surface2); color:var(--text);">ייבוא מאקסל</button>
+  </form>
+  <a href="{{ url_for('institution_students.export_excel') }}" class="btn" style="background:var(--surface2); color:var(--text); text-decoration:none;">ייצוא לאקסל</a>
+</div>
+
+<div id="addForm" class="card" style="display:none; max-width:480px; margin-bottom:20px;">
+  <h3 style="font-size:15px; margin-bottom:12px;">הוספת תלמיד</h3>
+  <form method="post" action="{{ url_for('institution_students.add_student') }}">
+    <input name="name" placeholder="שם" required style="width:100%; margin-bottom:8px; padding:8px; border-radius:8px; border:1px solid var(--border); background:var(--surface2); color:var(--text);">
+    <input name="phone" placeholder="טלפון (רשות - אם ריק, ייווצר מספר תלמיד אוטומטי)" style="width:100%; margin-bottom:8px; padding:8px; border-radius:8px; border:1px solid var(--border); background:var(--surface2); color:var(--text);">
+    <input name="email" placeholder="מייל (רשות)" style="width:100%; margin-bottom:8px; padding:8px; border-radius:8px; border:1px solid var(--border); background:var(--surface2); color:var(--text);">
+    <input name="fax" placeholder="פקס (רשות)" style="width:100%; margin-bottom:8px; padding:8px; border-radius:8px; border:1px solid var(--border); background:var(--surface2); color:var(--text);">
+    <input name="initial_balance" type="number" step="0.01" placeholder="זיכוי פתיחה (רשות)" style="width:100%; margin-bottom:12px; padding:8px; border-radius:8px; border:1px solid var(--border); background:var(--surface2); color:var(--text);">
+    <button type="submit" class="btn">הוספה</button>
+  </form>
+</div>
+
+<div class="card">
+  <table style="width:100%; border-collapse:collapse; font-size:14px;">
+    <tr style="text-align:right; border-bottom:1px solid var(--border); color:var(--text2);">
+      <th style="padding:8px 0;">מספר תלמיד</th><th>שם</th><th>טלפון</th><th>יתרה</th><th>סטטוס</th><th></th>
+    </tr>
+    {% for s in students %}
+    <tr style="border-bottom:1px solid var(--border);">
+      <td style="padding:8px 0;"><a href="{{ url_for('institution_students.student_detail', student_id=s.id) }}" style="color:var(--accent); text-decoration:none;">{{ s.student_number or '—' }}</a></td>
+      <td>{{ s.name }}</td>
+      <td>{{ s.phone or '—' }}</td>
+      <td>{{ "%.2f"|format(s.balance or 0) }} ₪</td>
+      <td>{{ 'חסום' if s.is_blocked else 'פעיל' }}</td>
+      <td style="display:flex; gap:6px;">
+        <form method="post" action="{{ url_for('institution_students.credit_student', student_id=s.id) }}" style="display:flex; gap:4px;">
+          <input name="amount" type="number" step="0.01" placeholder="+/- ₪" style="width:80px; padding:4px; border-radius:6px; border:1px solid var(--border); background:var(--surface2); color:var(--text); font-size:12px;">
+          <button type="submit" style="font-size:12px; padding:4px 8px; border-radius:6px; border:1px solid var(--border); background:var(--surface2); color:var(--text); cursor:pointer;">עדכון</button>
+        </form>
+        <form method="post" action="{{ url_for('institution_students.toggle_block', student_id=s.id) }}">
+          <button type="submit" style="font-size:12px; padding:4px 8px; border-radius:6px; border:1px solid var(--border); background:var(--surface2); color:var(--text); cursor:pointer;">{{ 'שחרור' if s.is_blocked else 'חסימה' }}</button>
+        </form>
+        <form method="post" action="{{ url_for('institution_students.remove_student', student_id=s.id) }}" onsubmit="return confirm('להסיר תלמיד זה מהמוסד?')">
+          <button type="submit" style="font-size:12px; padding:4px 8px; border-radius:6px; border:1px solid var(--red); background:transparent; color:var(--red); cursor:pointer;">הסרה</button>
+        </form>
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="6" style="padding:16px 0; color:var(--text2);">עדיין אין תלמידים.</td></tr>
+    {% endfor %}
+  </table>
+</div>
+{% endblock %}

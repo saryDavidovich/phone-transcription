@@ -1,0 +1,84 @@
+{% extends "institution/base.html" %}
+{% block title %}{{ student.name }}{% endblock %}
+{% block content %}
+<a href="{{ url_for('institution_students.students_tab') }}" style="color:var(--text2); font-size:13px; text-decoration:none;">← חזרה לרשימת תלמידים</a>
+<h1 style="margin-top:10px;">{{ student.name }}</h1>
+<p style="color:var(--text2); font-size:13px; margin-bottom:20px;">
+  מספר תלמיד: {{ student.student_number or '—' }} · טלפון: {{ student.phone or '—' }} ·
+  יתרה: {{ "%.2f"|format(student.balance or 0) }} ₪
+</p>
+
+<div class="card" style="max-width:480px; margin-bottom:24px;">
+  <h3 style="font-size:15px; margin-bottom:10px;">העלאת קובץ נוסף לתמלול עבור התלמיד</h3>
+  <form id="studentUploadForm">
+    <input type="file" name="audio_file" id="studentAudioFile" accept="audio/*,video/*" required style="width:100%; margin-bottom:10px; padding:8px; border-radius:8px; border:1px solid var(--border); background:var(--surface2); color:var(--text);">
+    <button type="submit" class="btn">העלאה</button>
+  </form>
+  <div id="studentUploadMsg" style="font-size:13px; margin-top:8px;"></div>
+</div>
+
+<div class="card" style="margin-bottom:20px;">
+  <h3 style="font-size:15px; margin-bottom:10px;">הקלטות ותמלולים</h3>
+  <table style="width:100%; font-size:13px;">
+    <tr style="text-align:right; border-bottom:1px solid var(--border); color:var(--text2);">
+      <th style="padding:6px 0;">תאריך</th><th>קובץ</th><th>עלות</th><th>סטטוס</th><th></th>
+    </tr>
+    {% for r in recordings %}
+    <tr style="border-bottom:1px solid var(--border);">
+      <td style="padding:6px 0;">{{ r.created_at.strftime('%d/%m/%Y %H:%M') if r.created_at else '' }}</td>
+      <td>{{ r.source_filename or '—' }}</td>
+      <td>{{ "%.2f"|format(r.cost or 0) }} ₪</td>
+      <td>{{ 'הושלם' if r.status == 'completed' else ('מעבד' if r.status == 'processing' else r.status) }}</td>
+      <td>{% if r.transcript %}<a href="#" onclick="alert({{ r.transcript|tojson }}); return false;" style="color:var(--accent);">צפייה</a>{% endif %}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="5" style="padding:12px 0; color:var(--text2);">אין עדיין הקלטות.</td></tr>
+    {% endfor %}
+  </table>
+</div>
+
+<div class="card">
+  <h3 style="font-size:15px; margin-bottom:10px;">תנועות יתרה</h3>
+  <table style="width:100%; font-size:13px;">
+    <tr style="text-align:right; border-bottom:1px solid var(--border); color:var(--text2);">
+      <th style="padding:6px 0;">תאריך</th><th>סכום</th><th>תיאור</th>
+    </tr>
+    {% for t in transactions %}
+    <tr style="border-bottom:1px solid var(--border);">
+      <td style="padding:6px 0;">{{ t.created_at.strftime('%d/%m/%Y %H:%M') if t.created_at else '' }}</td>
+      <td style="color:{{ 'var(--accent)' if t.amount >= 0 else 'var(--red)' }};">{{ "%.2f"|format(t.amount) }} ₪</td>
+      <td>{{ t.description or '' }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="3" style="padding:12px 0; color:var(--text2);">אין עדיין תנועות.</td></tr>
+    {% endfor %}
+  </table>
+</div>
+
+<script>
+document.getElementById('studentUploadForm').addEventListener('submit', async function (e) {
+  e.preventDefault();
+  var msgEl = document.getElementById('studentUploadMsg');
+  msgEl.textContent = 'מעלה...';
+  var fd = new FormData(this);
+  var res = await fetch('{{ url_for("institution_students.upload_for_student", student_id=student.id) }}', { method: 'POST', body: fd });
+  var data = await res.json();
+  if (!res.ok) {
+    msgEl.style.color = 'var(--red)';
+    msgEl.textContent = data.error || 'שגיאה';
+    return;
+  }
+  msgEl.style.color = 'var(--accent)';
+  msgEl.textContent = 'עולה ומתמלל ברקע... ⚙️ העמוד יתעדכן אוטומטית כשיסתיים.';
+  var recId = data.recordingId;
+  var interval = setInterval(async function () {
+    var r = await fetch('{{ url_for("institution_students.recording_status", recording_id=0) }}'.replace('0', recId));
+    var d = await r.json();
+    if (d.status === 'completed' || d.status === 'error') {
+      clearInterval(interval);
+      window.location.reload();
+    }
+  }, 3000);
+});
+</script>
+{% endblock %}

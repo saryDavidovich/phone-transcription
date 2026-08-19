@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{% block title %}איזור מוסד{% endblock %} | מערכת תמלול</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0f1117; --surface: #1a1d27; --surface2: #22263a; --border: #2d3150;
+  --accent: #10b981; --accent2: #0d9668;
+  --red: #ef4444; --amber: #f59e0b;
+  --text: #e8eaf6; --text2: #8892b0; --text3: #4a5568;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:'Heebo',sans-serif; background:var(--bg); color:var(--text); min-height:100vh; display:flex; }
+.sidebar {
+  width:230px; min-height:100vh; background:var(--surface); border-left:1px solid var(--border);
+  padding:24px 0; position:fixed; right:0; top:0; bottom:0; z-index:100; display:flex; flex-direction:column;
+}
+.sidebar-logo { padding:0 20px 20px; border-bottom:1px solid var(--border); font-weight:700; font-size:17px; color:var(--accent); }
+.sidebar-nav { flex:1; padding:16px 12px; display:flex; flex-direction:column; gap:2px; }
+.sidebar-nav a {
+  color:var(--text2); text-decoration:none; padding:10px 12px; border-radius:8px; font-size:14px;
+  display:flex; align-items:center; gap:10px; transition:.15s;
+}
+.sidebar-nav a:hover { background:var(--surface2); color:var(--text); }
+.sidebar-nav a.active { background:var(--accent); color:#fff; }
+.sidebar-nav .soon { opacity:.45; cursor:default; }
+.sidebar-footer { padding:12px; border-top:1px solid var(--border); }
+.sidebar-footer a { color:var(--text2); font-size:13px; text-decoration:none; }
+main { flex:1; margin-right:230px; padding:28px 32px; }
+.card { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:20px; }
+.grid { display:grid; gap:16px; }
+.grid-4 { grid-template-columns:repeat(4,1fr); }
+.stat-value { font-size:28px; font-weight:700; color:var(--accent); }
+.stat-label { font-size:13px; color:var(--text2); margin-top:4px; }
+.btn { background:var(--accent); color:#fff; border:none; border-radius:8px; padding:9px 18px; font-family:inherit; font-size:14px; cursor:pointer; }
+.btn:hover { background:var(--accent2); }
+.flash { background:var(--surface2); border:1px solid var(--amber); color:var(--amber); padding:10px 14px; border-radius:8px; margin-bottom:16px; font-size:14px; }
+h1 { font-size:20px; margin-bottom:20px; }
+</style>
+{% block head %}{% endblock %}
+</head>
+<body>
+{% if current_user.is_authenticated %}
+<aside class="sidebar">
+  <div class="sidebar-logo">אזור מוסד</div>
+  <nav class="sidebar-nav">
+    <a href="{{ url_for('institution.dashboard') }}" class="{{ 'active' if request.endpoint == 'institution.dashboard' }}">📊 דשבורד</a>
+    <a href="{{ url_for('institution_students.students_tab') }}" class="{{ 'active' if request.endpoint and request.endpoint.startswith('institution_students.') }}">👥 ניהול תלמידים</a>
+    <a href="{{ url_for('institution_transcribe.transcribe_tab') }}" class="{{ 'active' if request.endpoint == 'institution_transcribe.transcribe_tab' }}">🎙 יצירת תמלול</a>
+    <a href="{{ url_for('institution.settings') }}" class="{{ 'active' if request.endpoint == 'institution.settings' }}">⚙️ הגדרות מוסד</a>
+    <a href="{{ url_for('institution_billing.billing_tab') }}" class="{{ 'active' if request.endpoint == 'institution_billing.billing_tab' }}">💳 הגדרות חיוב</a>
+    <a href="{{ url_for('institution.contact') }}" class="{{ 'active' if request.endpoint == 'institution.contact' }}">✉️ צור קשר</a>
+  </nav>
+  <div class="sidebar-footer">
+    <a href="{{ url_for('institution.logout') }}">התנתקות</a>
+  </div>
+</aside>
+{% endif %}
+<main>
+  {% with messages = get_flashed_messages() %}
+    {% if messages %}{% for m in messages %}<div class="flash">{{ m }}</div>{% endfor %}{% endif %}
+  {% endwith %}
+  {% block content %}{% endblock %}
+</main>
+</body>
+</html>

@@ -196,6 +196,9 @@ textarea.form-input { resize:vertical; min-height:80px; }
     <a href="/admin/customers" class="nav-item {% if request.endpoint in ['admin.customers','admin.customer_detail'] %}active{% endif %}">
       <span class="nav-icon">👥</span> לקוחות
     </a>
+    <a href="/admin/institutions" class="nav-item {% if request.endpoint in ['admin.institutions','admin.institution_detail'] %}active{% endif %}">
+      <span class="nav-icon">🏫</span> מוסדות
+    </a>
     <a href="/admin/recordings" class="nav-item {% if request.endpoint in ['admin.recordings','admin.recording_detail'] %}active{% endif %}">
       <span class="nav-icon">🎧</span> הקלטות
     </a>

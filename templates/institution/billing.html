@@ -1,0 +1,128 @@
+{% extends "institution/base.html" %}
+{% block title %}הגדרות חיוב{% endblock %}
+{% block content %}
+<h1>הגדרות חיוב</h1>
+
+<div class="grid grid-4" style="margin-bottom:24px;">
+  <div class="card">
+    <div class="stat-value">{{ success_count }}</div>
+    <div class="stat-label">חיובים שבוצעו בפועל</div>
+  </div>
+  <div class="card">
+    <div class="stat-value">{{ inst.card_last4 or '—' }}</div>
+    <div class="stat-label">4 ספרות אחרונות של כרטיס אשראי</div>
+  </div>
+  <div class="card">
+    <div class="stat-value">{{ "%.2f"|format(inst.balance or 0) }} ₪</div>
+    <div class="stat-label">יתרת מוסד נוכחית</div>
+  </div>
+</div>
+
+{% if not nedarim_configured %}
+  <div class="flash">חיבור נדרים פלוס לא הוגדר עדיין בצד השרת - נא להגדיר NEDARIM_MOSAD ו-NEDARIM_API_VALID.</div>
+{% endif %}
+
+<div class="card" style="max-width:480px;">
+  <h2 style="font-size:16px; margin-bottom:14px;">טעינת יתרה בכרטיס אשראי</h2>
+
+  <label style="font-size:13px; color:var(--text2);">סכום לטעינה (₪)</label>
+  <input id="topupAmount" type="number" min="5" value="50" style="width:100%; margin:6px 0 14px; padding:10px; border-radius:8px; border:1px solid var(--border); background:var(--surface2); color:var(--text);">
+
+  <iframe id="NedarimFrame" scrolling="no" style="width:100%;border:none;height:0"></iframe>
+
+  <button id="payBtn" class="btn" style="width:100%; margin-top:10px;" {{ 'disabled' if not nedarim_configured }}>תשלום</button>
+  <div id="payMsg" style="font-size:13px; margin-top:10px;"></div>
+</div>
+
+<script>
+(function () {
+  var frame = document.getElementById('NedarimFrame');
+  var payBtn = document.getElementById('payBtn');
+  var msgEl = document.getElementById('payMsg');
+  var busy = false;
+
+  // חובה לרשום את המאזין ולטעון את ה-src פעם אחת בלבד בחיי הדף - נדרים פלוס
+  // מזהירים במפורש שרישום כפול גורם לחיוב כפול.
+  window.addEventListener('message', readPostMessage);
+  frame.onload = function () { postNedarim({ Name: 'GetHeight' }); };
+  frame.src = 'https://www.matara.pro/nedarimplus/iframe/?Picture=Hide';
+
+  function postNedarim(data) {
+    frame.contentWindow.postMessage(data, '*');
+  }
+
+  function readPostMessage(event) {
+    var d = event.data || {};
+    if (d.Name === 'Height') {
+      frame.style.height = (parseInt(d.Value, 10) + 15) + 'px';
+    } else if (d.Name === 'TransactionResponse') {
+      busy = false;
+      payBtn.disabled = false;
+      if (d.Value && d.Value.Status === 'OK') {
+        msgEl.style.color = 'var(--accent)';
+        msgEl.textContent = 'התשלום בוצע! היתרה תתעדכן בעוד רגע (ממתין לאישור סופי מהשרת).';
+        setTimeout(function () { window.location.reload(); }, 3000);
+      } else {
+        msgEl.style.color = 'var(--red)';
+        msgEl.textContent = (d.Value && d.Value.Message) || 'שגיאה בביצוע התשלום';
+      }
+    }
+  }
+
+  payBtn.addEventListener('click', async function () {
+    if (busy) return;
+    var amount = parseFloat(document.getElementById('topupAmount').value);
+    if (!amount || amount < 5) {
+      msgEl.style.color = 'var(--red)';
+      msgEl.textContent = 'סכום מינימלי לטעינה הוא 5 ש"ח';
+      return;
+    }
+    busy = true;
+    payBtn.disabled = true;
+    msgEl.style.color = 'var(--text2)';
+    msgEl.textContent = 'מקים עסקה...';
+
+    try {
+      var res = await fetch('/institution/billing/topup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ amount: amount }),
+      });
+      var data = await res.json();
+      if (!res.ok) {
+        msgEl.style.color = 'var(--red)';
+        msgEl.textContent = data.error || 'שגיאה';
+        busy = false;
+        payBtn.disabled = false;
+        return;
+      }
+      msgEl.textContent = 'נא להזין פרטי כרטיס אשראי למעלה ולאשר...';
+      postNedarim({ Name: 'FinishTransaction', Value: data.nedarimId });
+    } catch (e) {
+      msgEl.style.color = 'var(--red)';
+      msgEl.textContent = 'שגיאת תקשורת, נסה שוב';
+      busy = false;
+      payBtn.disabled = false;
+    }
+  });
+})();
+</script>
+
+<div class="card" style="max-width:480px; margin-top:20px;">
+  <h2 style="font-size:16px; margin-bottom:10px;">היסטוריית חיובים</h2>
+  {% if charges %}
+    <table style="width:100%; font-size:13px; color:var(--text2);">
+      <tr style="text-align:right; border-bottom:1px solid var(--border);"><th>תאריך</th><th>סכום</th><th>סטטוס</th></tr>
+      {% for c in charges %}
+      <tr style="border-bottom:1px solid var(--border);">
+        <td style="padding:6px 0;">{{ c.created_at.strftime('%d/%m/%Y %H:%M') }}</td>
+        <td>{{ "%.2f"|format(c.amount) }} ₪</td>
+        <td>{{ 'הצליח' if c.status == 'success' else ('נכשל' if c.status == 'failed' else 'ממתין') }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+  {% else %}
+    <p style="color:var(--text2); font-size:13px;">אין עדיין חיובים.</p>
+  {% endif %}
+</div>
+{% endblock %}

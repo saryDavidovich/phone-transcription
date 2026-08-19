@@ -1,0 +1,71 @@
+{% extends 'admin/base.html' %}
+{% block title %}{{ inst.name }}{% endblock %}
+{% block page_title %}מוסד: {{ inst.name }}{% endblock %}
+{% block content %}
+
+<div style="display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:20px;">
+  <div class="table-card" style="padding:16px; text-align:center;">
+    <div style="font-size:26px; font-weight:700;">{{ "%.2f"|format(inst.balance or 0) }} ₪</div>
+    <div style="font-size:13px; color:var(--text2);">יתרת מוסד</div>
+  </div>
+  <div class="table-card" style="padding:16px; text-align:center;">
+    <div style="font-size:26px; font-weight:700;">{{ students|length }}</div>
+    <div style="font-size:13px; color:var(--text2);">תלמידים</div>
+  </div>
+  <div class="table-card" style="padding:16px; text-align:center;">
+    <div style="font-size:26px; font-weight:700;">{{ inst.card_last4 or '—' }}</div>
+    <div style="font-size:13px; color:var(--text2);">4 ספרות כרטיס</div>
+  </div>
+  <div class="table-card" style="padding:16px; text-align:center;">
+    <div style="font-size:26px; font-weight:700;">{{ 'חסום' if inst.is_blocked else 'פעיל' }}</div>
+    <div style="font-size:13px; color:var(--text2);">סטטוס</div>
+  </div>
+</div>
+
+<div style="display:flex; gap:16px; flex-wrap:wrap; margin-bottom:20px;">
+  <div class="table-card" style="padding:16px; flex:1; min-width:260px;">
+    <div class="table-title" style="margin-bottom:10px;">עדכון יתרת מוסד</div>
+    <form method="post" action="{{ url_for('admin.adjust_institution_balance', inst_id=inst.id) }}" style="display:flex; gap:8px;">
+      <input class="form-input" name="amount" type="number" step="0.01" placeholder="+/- ₪">
+      <button type="submit" class="btn btn-primary">עדכון</button>
+    </form>
+  </div>
+  <div class="table-card" style="padding:16px; flex:1; min-width:260px;">
+    <div class="table-title" style="margin-bottom:10px;">כניסה</div>
+    <form method="post" action="{{ url_for('admin.regenerate_institution_code', inst_id=inst.id) }}" onsubmit="return confirm('ליצור קוד כניסה חדש? (יידרס סיסמה קיימת)')" style="margin-bottom:8px;">
+      <button type="submit" class="btn">יצירת קוד כניסה חדש</button>
+    </form>
+    <form method="post" action="{{ url_for('admin.toggle_institution_block', inst_id=inst.id) }}">
+      <button type="submit" class="btn {{ 'btn-primary' if inst.is_blocked else 'btn-danger' }}">{{ 'ביטול חסימה' if inst.is_blocked else 'חסימת מוסד' }}</button>
+    </form>
+  </div>
+</div>
+
+<div class="table-card" style="margin-bottom:20px;">
+  <div class="table-header"><span class="table-title">תלמידי המוסד</span></div>
+  <table>
+    <thead><tr><th>מספר תלמיד</th><th>שם</th><th>טלפון</th><th>יתרה</th></tr></thead>
+    <tbody>
+      {% for s in students %}
+      <tr><td>{{ s.student_number or '—' }}</td><td>{{ s.name }}</td><td>{{ s.phone or '—' }}</td><td>{{ "%.2f"|format(s.balance or 0) }} ₪</td></tr>
+      {% else %}
+      <tr><td colspan="4">אין תלמידים.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="table-card">
+  <div class="table-header"><span class="table-title">היסטוריית חיובים</span></div>
+  <table>
+    <thead><tr><th>תאריך</th><th>סכום</th><th>סטטוס</th></tr></thead>
+    <tbody>
+      {% for c in charges %}
+      <tr><td>{{ c.created_at | il_time }}</td><td>{{ "%.2f"|format(c.amount) }} ₪</td><td>{{ c.status }}</td></tr>
+      {% else %}
+      <tr><td colspan="3">אין חיובים.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}
