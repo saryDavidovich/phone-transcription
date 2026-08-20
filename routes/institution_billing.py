@@ -37,6 +37,11 @@ NEDARIM_CREATE_URL = 'https://matara.pro/nedarimplus/V6/Files/WebServices/DebitI
 # כל מי שמנחש/מנסה charge_id יכול היה "לזכות" יתרה למוסד בלי לשלם בפועל,
 # כי אין שום סוד/חתימה משותפת בין הצדדים מלבד כתובת ה-IP.
 NEDARIM_CALLBACK_IPS = {'18.196.146.117', '18.194.219.73'}
+# קטגוריה קבועה שמתייגת כל תשלום ששייך למערכת "תמלול פון" בנדרים פלוס - הן
+# תשלומי מוסדות (כאן) והן תשלומי לקוחות בודדים (ראו routes/payment.py). כך
+# ה-Webhook ברמת המוסד (routes/payment.py) יודע לזהות בוודאות שמדובר בתשלום
+# שלנו ולא בתשלום אחר שמתבצע תחת אותו מספר מוסד בנדרים פלוס.
+NEDARIM_CATEGORY = 'תמלול פון'
 
 
 def _client_ip():
@@ -85,7 +90,13 @@ def topup():
     db.session.add(charge)
     db.session.commit()
 
-    app_url = os.environ.get('APP_URL', request.url_root.rstrip('/'))
+    app_url = os.environ.get('APP_URL', '').rstrip('/') or request.url_root.rstrip('/')
+    if app_url.startswith('http://'):
+        # נדרים פלוס דורשים https לכתובת CallBack - אם הגענו לכאן עם http (למשל
+        # כי אין ProxyFix/APP_URL ואנחנו מאחורי פרוקסי), נכריח https במקום
+        # לשלוח כתובת שהם עלולים לדחות/להתעלם ממנה בשקט.
+        log.warning(f'topup: callback base url came out as http:// ({app_url}) - forcing https, but check APP_URL env var')
+        app_url = 'https://' + app_url[len('http://'):]
     callback_url = f"{app_url}/api/nedarim/callback/{charge.id}"
 
     try:
@@ -99,6 +110,10 @@ def topup():
             'FirstName': inst.name,
             'Mail': inst.email or '',
             'Phone': inst.phone or '',
+            'Groupe': NEDARIM_CATEGORY,  # תיוג קטגוריה קבוע - כך שגם הווידג'וק
+            # ברמת המוסד (עדכוני עסקאות, ראו routes/payment.py) יודע לזהות
+            # שמדובר בתשלום ששייך למערכת תמלול פון ולא לתשלום אחר כלשהו
+            # שמתבצע תחת אותו מספר מוסד בנדרים פלוס.
             'Comment': f'טעינת יתרה - מוסד #{inst.id}',
             'Param1': str(charge.id),
             'CallBack': callback_url,

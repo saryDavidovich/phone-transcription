@@ -5,6 +5,183 @@ payment_bp = Blueprint('payment', __name__)
 log = logging.getLogger(__name__)
 
 
+def _client_ip():
+    fwd = request.headers.get('X-Forwarded-For', '')
+    if fwd:
+        return fwd.split(',')[0].strip()
+    return request.remote_addr
+
+
+@payment_bp.route('/nedarim/topup-link/<phone>')
+def nedarim_topup_link(phone):
+    """מפנה טלפון נתון לדף התשלום המתארח של נדרים פלוס (שיטת ה-Redirect
+    הפשוטה מהתיעוד הרשמי שלהם - בלי שום פיתוח בצד שלנו: לא CreateTransaction,
+    לא אייפרם) עם הטלפון וקטגוריית "תמלול פון" ממולאים מראש. זו הדרך לתת
+    לכל לקוח בקצה - לא רק מוסדות - לינק אישי לטעינת יתרה בנדרים פלוס; הזיכוי
+    בפועל קורה כשמגיע עדכון ל-Webhook ברמת המוסד (ראו nedarim_webhook למטה),
+    לא מהדפדפן. אפשר לשלוח את הקישור הזה ב-SMS/מייל ללקוח, או לקשר אליו
+    מתוך שלוחת IVR.
+    """
+    import os
+    import urllib.parse
+    from flask import redirect
+
+    mosad = os.environ.get('NEDARIM_MOSAD', '')
+    if not mosad:
+        return 'חיבור נדרים פלוס לא הוגדר עדיין בצד השרת', 500
+
+    from routes.institution_billing import NEDARIM_CATEGORY
+    params = {
+        'mosad': mosad,
+        'Phone': phone,
+        'Groupe': NEDARIM_CATEGORY,
+        'GroupeLock': '1',
+    }
+    return redirect('https://www.matara.pro/nedarimplus/online/?' + urllib.parse.urlencode(params))
+
+
+NEDARIM_WEBHOOK_IPS = {'18.196.146.117', '18.194.219.73'}
+
+
+@payment_bp.route('/nedarim/webhook', methods=['POST'])
+def nedarim_webhook():
+    """Webhook קבוע ברמת המוסד בנדרים פלוס (מוגדר עצמאית אצלם, בתפריט
+    'עוד' > 'Webhook', בשדה 'עדכוני עסקאות') - נשלח על **כל** עסקת אשראי
+    מוצלחת תחת מספר המוסד שלנו, ולא רק על עסקאות שהוקמו דרך ה-API שלנו עם
+    CallBack מפורש (למשל תשלום דרך קישור ה-Redirect הפשוט של
+    nedarim_topup_link, או תשלום שמנהל המוסד ביצע ידנית דרך הדשבורד של
+    נדרים פלוס עצמם). זה בדיוק מה שהיה חסר כדי שתשלומים "יידעו לאן להגיע".
+
+    לצורך אבטחה/דיוק:
+    1. מאמתים שהבקשה מגיעה מאחת מכתובות ה-IP הרשמיות של נדרים פלוס (התיעוד
+       מציין רק את שתי הכתובות האלה עבור כל מנגנוני ה-CallBack/Webhook שלהם).
+    2. מזכים יתרה **רק** לעסקאות שמתויגות בקטגוריה (Groupe) "תמלול פון" -
+       כדי לא לגעת בתשלומים אחרים שאולי מתבצעים תחת אותו מספר מוסד למטרה
+       שונה (אם יש כאלה).
+    3. זיהוי היעד לזיכוי: קודם לפי מספר טלפון (Institution.phone /
+       Customer.phone), ואם לא נמצא - לפי שם בדיוק כפי שמופיע אצל נדרים
+       פלוס (ClientName מול Institution.name).
+    4. מניעת זיכוי כפול: בודקים אם TransactionId הזה כבר טופל לפני שמזכים.
+    """
+    from app import db
+    from models import Institution, InstitutionChargeLog, Customer, Transaction, ManagerMessage
+
+    ip = _client_ip()
+    if ip not in NEDARIM_WEBHOOK_IPS:
+        log.warning(f'Nedarim webhook REJECTED - unexpected IP: {ip}')
+        return jsonify({'ok': False, 'error': 'forbidden'}), 403
+
+    data = request.get_json(force=True, silent=True) or {}
+    if not data:
+        log.warning(f'Nedarim webhook: empty/unparsable body, raw={request.get_data(as_text=True)[:500]}')
+        return jsonify({'ok': True})  # אין מה לעשות עם זה, אבל לא נחזיר שגיאה
+
+    tx_id = str(data.get('TransactionId') or data.get('ID') or '').strip()
+    groupe = (data.get('Groupe') or '').strip()
+    phone = (data.get('Phone') or '').strip()
+    client_name = (data.get('ClientName') or '').strip()
+    try:
+        amount = float(data.get('Amount') or 0)
+    except (TypeError, ValueError):
+        amount = 0
+
+    from routes.institution_billing import NEDARIM_CATEGORY
+    if groupe != NEDARIM_CATEGORY:
+        # לא שייך למערכת שלנו (מוסד בנדרים פלוס עשוי לשמש גם למטרות אחרות) -
+        # מתעלמים בשקט, זו לא שגיאה.
+        log.info(f'Nedarim webhook: ignoring transaction {tx_id} - Groupe={groupe!r} != {NEDARIM_CATEGORY!r}')
+        return jsonify({'ok': True})
+
+    if amount <= 0 or not tx_id:
+        log.warning(f'Nedarim webhook: missing amount/tx_id, data={data}')
+        return jsonify({'ok': True})
+
+    # מניעת זיכוי כפול - בודקים אם ה-TransactionId הזה כבר נקלט אצלנו
+    if InstitutionChargeLog.query.filter_by(provider_ref=tx_id).first():
+        log.info(f'Nedarim webhook: transaction {tx_id} already processed (institution), skipping')
+        return jsonify({'ok': True})
+    if Transaction.query.filter(Transaction.description.contains(f'[נדרים:{tx_id}]')).first():
+        log.info(f'Nedarim webhook: transaction {tx_id} already processed (customer), skipping')
+        return jsonify({'ok': True})
+
+    # 1. ניסיון התאמה למוסד - לפי טלפון או שם מדויק כפי שמופיע בנדרים פלוס
+    institution = None
+    if phone:
+        institution = Institution.query.filter_by(phone=phone).first()
+    if not institution and client_name:
+        institution = Institution.query.filter_by(name=client_name).first()
+
+    if institution:
+        institution.balance = (institution.balance or 0) + amount
+        charge = InstitutionChargeLog(
+            institution_id=institution.id, amount=amount, status='success', provider_ref=tx_id,
+        )
+        db.session.add(charge)
+        db.session.commit()
+        log.info(f'Nedarim webhook: credited institution {institution.id} +{amount} (tx {tx_id})')
+        return jsonify({'ok': True})
+
+    # 2. ניסיון התאמה ללקוח בודד - לפי טלפון
+    customer = Customer.query.filter_by(phone=phone).first() if phone else None
+    if customer:
+        bonus = _calculate_bonus_public(amount)
+        total_credit = amount + bonus
+        customer.balance = (customer.balance or 0) + total_credit
+        desc = f'טעינת יתרה דרך נדרים פלוס ₪{amount:.2f}'
+        if bonus > 0:
+            desc += f' + בונוס ₪{bonus:.2f} = סה"כ ₪{total_credit:.2f}'
+        desc += f' [נדרים:{tx_id}]'
+        txn = Transaction(customer_id=customer.id, amount=total_credit, type='charge', description=desc)
+        db.session.add(txn)
+        db.session.commit()
+        log.info(f'Nedarim webhook: credited customer {customer.id} +{total_credit} (tx {tx_id})')
+
+        from services.transcribe import process_pending_recordings
+        from routes.email_inbound import process_pending_ocr
+        import threading, time
+
+        def _delayed_process(customer_id):
+            time.sleep(3)
+            process_pending_recordings(customer_id)
+            process_pending_ocr(customer_id)
+
+        threading.Thread(target=_delayed_process, args=(customer.id,), daemon=True).start()
+
+        if customer.email:
+            from routes.admin import get_setting
+            threading.Thread(
+                target=_issue_receipt_and_send,
+                args=(tx_id, customer.email, amount, bonus, total_credit, get_setting),
+                daemon=True,
+            ).start()
+        return jsonify({'ok': True})
+
+    # 3. לא נמצא זיהוי - התשלום התקבל בפועל אצל נדרים פלוס אבל לא ידוע למי
+    # לזכות (טלפון/שם לא תואמים אצלנו). לא מזכים אף אחד באופן שגוי - במקום
+    # זאת פותחים הודעה בתיבת "הודעות למנהל" לטיפול ידני, עם תיוג אדום.
+    log.warning(f'Nedarim webhook: unmatched payment, tx={tx_id}, phone={phone}, name={client_name}, amount={amount}')
+    try:
+        msg = ManagerMessage(
+            phone=phone or '—',
+            name=client_name or None,
+            transcript=f'תשלום בסך ₪{amount:.2f} התקבל בנדרים פלוס (קטגוריה: {NEDARIM_CATEGORY}, מזהה עסקה: {tx_id}) אך לא נמצא מוסד/לקוח עם טלפון או שם תואם. יש לזכות ידנית ולבדוק את פרטי הזיהוי.',
+            source='nedarim_unmatched',
+        )
+        db.session.add(msg)
+        db.session.commit()
+    except Exception:
+        log.exception('Nedarim webhook: failed to create unmatched-payment notice')
+
+    return jsonify({'ok': True})
+
+
+def _calculate_bonus_public(amount):
+    """עטיפה קטנה סביב _calculate_bonus כדי שגם nedarim_webhook יוכל
+    להשתמש בה בלי תלות ב-request context שכבר קיים ב-get_setting."""
+    from routes.admin import get_setting
+    return _calculate_bonus(amount, get_setting)
+
+
 @payment_bp.route('/nedarim/callback', methods=['GET', 'POST'])
 def nedarim_callback():
     """

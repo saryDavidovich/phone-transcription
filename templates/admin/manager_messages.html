@@ -96,6 +96,7 @@
       <!-- שם / מייל -->
       <td style="font-size:11px">
         {% if msg.source == 'institution_contact' %}<span class="badge bg-danger" style="font-size:10px;">🏫 הודעת מוסד</span><br>{% endif %}
+        {% if msg.source == 'nedarim_unmatched' %}<span class="badge bg-danger" style="font-size:10px;">💳 תשלום לא מזוהה</span><br>{% endif %}
         {% if msg.name %}{{ msg.name }}<br>{% endif %}
         {% if msg.email %}<span class="text-muted">{{ msg.email }}</span>{% endif %}
       </td>

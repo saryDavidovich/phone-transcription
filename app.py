@@ -3,11 +3,21 @@ import logging
 from flask import Flask, send_from_directory
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager
+from werkzeug.middleware.proxy_fix import ProxyFix
 db = SQLAlchemy()
 login_manager = LoginManager()
 def create_app():
     app = Flask(__name__)
-    
+
+    # האפליקציה רצה מאחורי Reverse Proxy (Railway/וכו') שמסיים את ה-HTTPS
+    # ומדבר עם התהליך שלנו פנימית ב-HTTP רגיל. בלי ProxyFix, כל דבר שמסתמך
+    # על הכתובת הנוכחית (request.url_root, url_for(..., _external=True)) -
+    # למשל כתובת ה-CallBack שנשלחת לנדרים פלוס, או ה-redirect_uri של כניסת
+    # Google - "יחשוב" בטעות שהאתר רץ ב-http:// ולא ב-https://. נדרים פלוס
+    # דורשים https לכתובת ה-Webhook/CallBack שלהם - כתובת http שגויה בשקט
+    # היא הסבר סביר מאוד לכך שהם "לא יודעים לאן לשלוח" עדכון תשלום.
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+
     app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'change-this')
     database_url = os.environ.get('DATABASE_URL', 'sqlite:///transcription.db')
     if database_url.startswith('postgres://'):

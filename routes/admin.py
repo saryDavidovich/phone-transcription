@@ -22,7 +22,7 @@ def inject_new_messages_count():
             ManagerMessage.status == 'new',
             or_(
                 and_(ManagerMessage.rec_url.isnot(None), ManagerMessage.rec_url != ''),
-                ManagerMessage.source == 'institution_contact',
+                ManagerMessage.source != 'ivr',
             )
         ).count()
         count += CustomerMessage.query.filter_by(direction='in', is_read=False).count()
@@ -845,7 +845,7 @@ def manager_messages():
     from sqlalchemy import or_, and_
     query = ManagerMessage.query.filter(or_(
         and_(ManagerMessage.rec_url.isnot(None), ManagerMessage.rec_url != ''),
-        ManagerMessage.source == 'institution_contact',
+        ManagerMessage.source != 'ivr',
     ))
     if status_filter:
         query = query.filter_by(status=status_filter)
