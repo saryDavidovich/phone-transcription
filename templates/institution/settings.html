@@ -3,54 +3,79 @@
 {% block content %}
 <h1>הגדרות מוסד</h1>
 
-<div class="card" style="max-width:480px; margin-bottom:20px;">
+<div class="grid grid-2" style="align-items:start;">
+<div class="card" style="margin-bottom:20px;">
   <h3 style="font-size:15px; margin-bottom:12px;">מגבלות ותפוצה</h3>
   <form method="post">
-    <label style="font-size:13px; color:var(--text2);">מגבלת שימוש לתלמיד (₪, ריק = ללא הגבלה)</label>
-    <input name="max_usage_per_student" type="number" step="0.01" value="{{ inst.max_usage_per_student or '' }}" style="width:100%; margin:6px 0 14px; padding:8px; border-radius:8px; border:1px solid var(--border); background:var(--surface2); color:var(--text);">
-
-    <label style="font-size:13px; color:var(--text2);">שעות שימוש מותרות לתלמידים</label>
-    <div style="display:flex; gap:8px; margin:6px 0 14px;">
-      <input name="allowed_hours_start" type="time" value="{{ inst.allowed_hours_start or '' }}" style="flex:1; padding:8px; border-radius:8px; border:1px solid var(--border); background:var(--surface2); color:var(--text);">
-      <input name="allowed_hours_end" type="time" value="{{ inst.allowed_hours_end or '' }}" style="flex:1; padding:8px; border-radius:8px; border:1px solid var(--border); background:var(--surface2); color:var(--text);">
+    <div class="field">
+      <label>מגבלת שימוש לתלמיד (בזמן)</label>
+      <div style="display:flex; gap:8px;">
+        <input class="input" name="max_minutes_per_period" type="number" min="1" step="1"
+               value="{{ inst.max_minutes_per_period|int if inst.max_minutes_per_period else '' }}"
+               placeholder="דקות" style="flex:1;">
+        <select class="input" name="limit_period" style="flex:1;">
+          <option value="day" {{ 'selected' if inst.limit_period == 'day' }}>ליום</option>
+          <option value="week" {{ 'selected' if inst.limit_period == 'week' }}>לשבוע</option>
+        </select>
+      </div>
+      <div style="font-size:12px; color:var(--text3); margin-top:6px;">
+        לדוגמה: 60 דקות ליום - כל תלמיד יוכל ליצור עד שעה של תמלולים ביום. השאירו ריק לביטול הגבלה.
+      </div>
     </div>
 
-    <label style="font-size:13px; color:var(--text2);">מייל לקבלת כל התמלולים (ברירת מחדל לתלמיד ללא מייל אישי)</label>
-    <input name="notify_email" value="{{ inst.notify_email or '' }}" style="width:100%; margin:6px 0 14px; padding:8px; border-radius:8px; border:1px solid var(--border); background:var(--surface2); color:var(--text);">
+    <div class="field">
+      <label>שעות שימוש מותרות לתלמידים</label>
+      <div style="display:flex; gap:8px;">
+        <input class="input" name="allowed_hours_start" type="time" value="{{ inst.allowed_hours_start or '' }}" style="flex:1;">
+        <input class="input" name="allowed_hours_end" type="time" value="{{ inst.allowed_hours_end or '' }}" style="flex:1;">
+      </div>
+    </div>
 
-    <label style="font-size:13px; color:var(--text2);">מספר פקס לקבלת כל התמלולים</label>
-    <input name="notify_fax" value="{{ inst.notify_fax or '' }}" style="width:100%; margin:6px 0 18px; padding:8px; border-radius:8px; border:1px solid var(--border); background:var(--surface2); color:var(--text);">
+    <div class="field">
+      <label>מייל לקבלת כל התמלולים (ברירת מחדל לתלמיד ללא מייל אישי)</label>
+      <input class="input" name="notify_email" value="{{ inst.notify_email or '' }}">
+    </div>
 
-    <button type="submit" class="btn" style="width:100%;">שמירת הגדרות</button>
+    <div class="field">
+      <label>מספר פקס לקבלת כל התמלולים</label>
+      <input class="input" name="notify_fax" value="{{ inst.notify_fax or '' }}">
+    </div>
+
+    <button type="submit" class="btn btn-block">שמירת הגדרות</button>
   </form>
 </div>
 
-<div class="card" style="max-width:480px; margin-bottom:20px;">
-  <h3 style="font-size:15px; margin-bottom:12px;">מורשי כניסה נוספים</h3>
-  <p style="font-size:12px; color:var(--text3); margin-bottom:10px;">אנשים נוספים שיכולים להתחבר לאותו חשבון מוסד, עם אותה סיסמה.</p>
+<div>
+<div class="card" style="margin-bottom:20px;">
+  <h3 style="font-size:15px; margin-bottom:8px;">מורשי כניסה נוספים</h3>
+  <p style="font-size:12px; color:var(--text3); margin-bottom:10px;">אנשים נוספים שיכולים להתחבר לאותו חשבון מוסד, עם מייל או טלפון משלהם ואותה סיסמה.</p>
   {% for a in (inst.authorized_logins or []) %}
-  <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-bottom:1px solid var(--border); font-size:13px;">
-    <span>{{ a.name }} · {{ a.email }}</span>
+  <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid var(--border); font-size:13px;">
+    <span>{{ a.name }} · {{ a.email or a.phone }}</span>
     <form method="post" action="{{ url_for('institution.remove_authorized') }}">
-      <input type="hidden" name="email" value="{{ a.email }}">
-      <button type="submit" style="font-size:12px; color:var(--red); background:none; border:none; cursor:pointer;">הסרה</button>
+      <input type="hidden" name="email" value="{{ a.email or '' }}">
+      <input type="hidden" name="phone" value="{{ a.phone or '' }}">
+      <button type="submit" class="btn-sm btn-danger" style="border-radius:8px; border:none; cursor:pointer;">הסרה</button>
     </form>
   </div>
   {% endfor %}
-  <form method="post" action="{{ url_for('institution.add_authorized') }}" style="display:flex; gap:6px; margin-top:12px;">
-    <input name="auth_name" placeholder="שם" style="flex:1; padding:7px; border-radius:8px; border:1px solid var(--border); background:var(--surface2); color:var(--text); font-size:13px;">
-    <input name="email" placeholder="מייל" required style="flex:1; padding:7px; border-radius:8px; border:1px solid var(--border); background:var(--surface2); color:var(--text); font-size:13px;">
-    <button type="submit" class="btn" style="font-size:13px;">הוספה</button>
+  <form method="post" action="{{ url_for('institution.add_authorized') }}" style="margin-top:14px;">
+    <div class="field"><label>שם</label><input class="input" name="auth_name" placeholder="שם"></div>
+    <div class="field"><label>מייל</label><input class="input" name="email" placeholder="מייל (אפשר להשאיר ריק אם ממלאים טלפון)"></div>
+    <div class="field"><label>טלפון</label><input class="input" name="auth_phone" placeholder="טלפון (אפשר להשאיר ריק אם ממלאים מייל)"></div>
+    <button type="submit" class="btn btn-block">הוספה</button>
   </form>
 </div>
 
-<div class="card" style="max-width:480px;">
+<div class="card">
   <h3 style="font-size:15px; margin-bottom:12px;">קוד כניסה</h3>
   <p style="font-size:12px; color:var(--text3); margin-bottom:10px;">
-    ליצירת קוד זמני חדש עבור מורשה כניסה חדש (הוא יזין אותו בכניסה הראשונה שלו ואז יגדיר סיסמה משלו... בפועל כרגע כל המורשים חולקים אותה סיסמה - הקוד שימושי בעיקר לאיפוס).
+    ליצירת קוד זמני חדש - שימושי לכל מורשה כניסה חדש, או במקרה של שכחת הסיסמה (ראו גם "שכחתי סיסמה" בדף הכניסה - זוהי הדרך הנוחה יותר לכך).
   </p>
-  <form method="post" action="{{ url_for('institution.regenerate_code') }}" onsubmit="return confirm('ליצור קוד כניסה זמני חדש?')">
-    <button type="submit" class="btn">יצירת קוד חדש</button>
+  <form method="post" action="{{ url_for('institution.regenerate_code') }}" onsubmit="return confirm('ליצור קוד כניסה זמני חדש? הסיסמה הקבועה תתאפס.')">
+    <button type="submit" class="btn btn-secondary btn-block">יצירת קוד חדש</button>
   </form>
+</div>
+</div>
 </div>
 {% endblock %}

@@ -3,14 +3,10 @@
 {% block content %}
 <h1>הגדרות חיוב</h1>
 
-<div class="grid grid-4" style="margin-bottom:24px;">
+<div class="grid grid-2" style="margin-bottom:24px;">
   <div class="card">
     <div class="stat-value">{{ success_count }}</div>
     <div class="stat-label">חיובים שבוצעו בפועל</div>
-  </div>
-  <div class="card">
-    <div class="stat-value">{{ inst.card_last4 or '—' }}</div>
-    <div class="stat-label">4 ספרות אחרונות של כרטיס אשראי</div>
   </div>
   <div class="card">
     <div class="stat-value">{{ "%.2f"|format(inst.balance or 0) }} ₪</div>
@@ -26,7 +22,7 @@
   <h2 style="font-size:16px; margin-bottom:14px;">טעינת יתרה בכרטיס אשראי</h2>
 
   <label style="font-size:13px; color:var(--text2);">סכום לטעינה (₪)</label>
-  <input id="topupAmount" type="number" min="5" value="50" style="width:100%; margin:6px 0 14px; padding:10px; border-radius:8px; border:1px solid var(--border); background:var(--surface2); color:var(--text);">
+  <input id="topupAmount" type="number" min="1" value="1000" style="width:100%; margin:6px 0 14px; padding:10px; border-radius:8px; border:1px solid var(--border); background:var(--surface2); color:var(--text);">
 
   <iframe id="NedarimFrame" scrolling="no" style="width:100%;border:none;height:0"></iframe>
 
@@ -72,9 +68,9 @@
   payBtn.addEventListener('click', async function () {
     if (busy) return;
     var amount = parseFloat(document.getElementById('topupAmount').value);
-    if (!amount || amount < 5) {
+    if (!amount || amount <= 0) {
       msgEl.style.color = 'var(--red)';
-      msgEl.textContent = 'סכום מינימלי לטעינה הוא 5 ש"ח';
+      msgEl.textContent = 'נא להזין סכום תקין';
       return;
     }
     busy = true;

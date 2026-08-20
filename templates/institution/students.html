@@ -5,23 +5,42 @@
 
 <div style="display:flex; gap:12px; margin-bottom:20px; flex-wrap:wrap;">
   <button class="btn" onclick="document.getElementById('addForm').style.display='block'">+ הוספת תלמיד</button>
-  <form method="post" action="{{ url_for('institution_students.upload_excel') }}" enctype="multipart/form-data" style="display:flex; gap:8px;">
-    <input type="file" name="excel_file" accept=".xlsx,.xls" required style="font-size:13px;">
-    <button type="submit" class="btn" style="background:var(--surface2); color:var(--text);">ייבוא מאקסל</button>
-  </form>
-  <a href="{{ url_for('institution_students.export_excel') }}" class="btn" style="background:var(--surface2); color:var(--text); text-decoration:none;">ייצוא לאקסל</a>
+  <button class="btn btn-secondary" onclick="openImportModal()">📥 ייבוא מאקסל</button>
+  <a href="{{ url_for('institution_students.export_excel') }}" class="btn btn-secondary" style="text-decoration:none;">📤 ייצוא לאקסל</a>
 </div>
 
 <div id="addForm" class="card" style="display:none; max-width:480px; margin-bottom:20px;">
   <h3 style="font-size:15px; margin-bottom:12px;">הוספת תלמיד</h3>
   <form method="post" action="{{ url_for('institution_students.add_student') }}">
-    <input name="name" placeholder="שם" required style="width:100%; margin-bottom:8px; padding:8px; border-radius:8px; border:1px solid var(--border); background:var(--surface2); color:var(--text);">
-    <input name="phone" placeholder="טלפון (רשות - אם ריק, ייווצר מספר תלמיד אוטומטי)" style="width:100%; margin-bottom:8px; padding:8px; border-radius:8px; border:1px solid var(--border); background:var(--surface2); color:var(--text);">
-    <input name="email" placeholder="מייל (רשות)" style="width:100%; margin-bottom:8px; padding:8px; border-radius:8px; border:1px solid var(--border); background:var(--surface2); color:var(--text);">
-    <input name="fax" placeholder="פקס (רשות)" style="width:100%; margin-bottom:8px; padding:8px; border-radius:8px; border:1px solid var(--border); background:var(--surface2); color:var(--text);">
-    <input name="initial_balance" type="number" step="0.01" placeholder="זיכוי פתיחה (רשות)" style="width:100%; margin-bottom:12px; padding:8px; border-radius:8px; border:1px solid var(--border); background:var(--surface2); color:var(--text);">
+    <div class="field"><label>שם</label><input class="input" name="name" required></div>
+    <div class="field"><label>טלפון (רשות - אם ריק, ייווצר מספר תלמיד אוטומטי)</label><input class="input" name="phone"></div>
+    <div class="field"><label>מייל (רשות)</label><input class="input" name="email"></div>
+    <div class="field"><label>פקס (רשות)</label><input class="input" name="fax"></div>
+    <div class="field"><label>זיכוי פתיחה (רשות)</label><input class="input" name="initial_balance" type="number" step="0.01"></div>
     <button type="submit" class="btn">הוספה</button>
   </form>
+</div>
+
+<div id="importModal" class="modal-backdrop hidden">
+  <div class="modal-box" style="max-width:440px;">
+    <button class="modal-close" onclick="closeImportModal()">✕</button>
+    <h3>ייבוא תלמידים מאקסל</h3>
+    <p style="font-size:13px;color:var(--text2);margin-bottom:14px;">
+      הורידו את קובץ התבנית, מלאו אותו, וגררו אותו לכאן להעלאה.
+    </p>
+    <a href="{{ url_for('institution_students.download_excel_template') }}" class="btn btn-secondary btn-block" style="text-decoration:none;margin-bottom:16px;">⬇️ הורדת קובץ תבנית</a>
+
+    <form id="importForm" method="post" action="{{ url_for('institution_students.upload_excel') }}" enctype="multipart/form-data">
+      <div class="dropzone" id="importDz">
+        <div class="dz-icon">📊</div>
+        <div class="dz-title">גררו קובץ אקסל לכאן או לחצו לבחירה</div>
+        <div class="dz-sub">קבצי xlsx / xls בלבד</div>
+        <div class="dz-filename" id="importFilename"></div>
+        <input type="file" name="excel_file" id="importFile" accept=".xlsx,.xls" required>
+      </div>
+      <button type="submit" class="btn btn-block" style="margin-top:14px;" id="importSubmitBtn">ייבוא</button>
+    </form>
+  </div>
 </div>
 
 <div class="card">
@@ -54,4 +73,41 @@
     {% endfor %}
   </table>
 </div>
+
+<script>
+var importModal = document.getElementById('importModal');
+function openImportModal() { importModal.classList.remove('hidden'); }
+function closeImportModal() { importModal.classList.add('hidden'); }
+importModal.addEventListener('click', function (e) { if (e.target === importModal) closeImportModal(); });
+
+var dz = document.getElementById('importDz');
+var fileInput = document.getElementById('importFile');
+var filenameEl = document.getElementById('importFilename');
+
+function showFilename() {
+  filenameEl.textContent = fileInput.files.length ? '📄 ' + fileInput.files[0].name : '';
+}
+fileInput.addEventListener('change', showFilename);
+
+['dragover', 'dragenter'].forEach(function (ev) {
+  dz.addEventListener(ev, function (e) { e.preventDefault(); dz.classList.add('dragover'); });
+});
+['dragleave', 'dragend'].forEach(function (ev) {
+  dz.addEventListener(ev, function () { dz.classList.remove('dragover'); });
+});
+dz.addEventListener('drop', function (e) {
+  e.preventDefault();
+  dz.classList.remove('dragover');
+  if (e.dataTransfer.files.length) {
+    fileInput.files = e.dataTransfer.files;
+    showFilename();
+  }
+});
+
+document.getElementById('importForm').addEventListener('submit', function () {
+  var btn = document.getElementById('importSubmitBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-ring"></span> מייבא...';
+});
+</script>
 {% endblock %}

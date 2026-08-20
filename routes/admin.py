@@ -17,9 +17,13 @@ admin_bp = Blueprint('admin', __name__)
 def inject_new_messages_count():
     from models import ManagerMessage, CustomerMessage, GeneralInboxMessage
     try:
+        from sqlalchemy import or_, and_
         count = ManagerMessage.query.filter(
             ManagerMessage.status == 'new',
-            ManagerMessage.rec_url.isnot(None), ManagerMessage.rec_url != ''
+            or_(
+                and_(ManagerMessage.rec_url.isnot(None), ManagerMessage.rec_url != ''),
+                ManagerMessage.source == 'institution_contact',
+            )
         ).count()
         count += CustomerMessage.query.filter_by(direction='in', is_read=False).count()
         count += GeneralInboxMessage.query.filter_by(is_read=False).count()
@@ -838,7 +842,11 @@ def manager_messages():
     # שהקליט, או הקיש סולמית בלי להשאיר תוכן) - ל-Yemot עדיין דרוש שריון ID
     # מראש כדי שמספר ההודעה בשלוחה יתאים למספר בממשק, אבל אין סיבה להציג
     # רשומות בלי rec_url בפועל כאילו הן הודעות אמיתיות.
-    query = ManagerMessage.query.filter(ManagerMessage.rec_url.isnot(None), ManagerMessage.rec_url != '')
+    from sqlalchemy import or_, and_
+    query = ManagerMessage.query.filter(or_(
+        and_(ManagerMessage.rec_url.isnot(None), ManagerMessage.rec_url != ''),
+        ManagerMessage.source == 'institution_contact',
+    ))
     if status_filter:
         query = query.filter_by(status=status_filter)
     messages = query.order_by(ManagerMessage.created_at.desc()).all()

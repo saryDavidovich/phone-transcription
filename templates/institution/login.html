@@ -1,19 +1,90 @@
 {% extends "institution/base.html" %}
 {% block title %}התחברות{% endblock %}
 {% block content %}
-<div style="max-width:380px; margin:80px auto;">
-  <div class="card">
-    <h1 style="text-align:center;">כניסת מוסד</h1>
+<div style="max-width:400px; width:100%;">
+  <div class="card" style="box-shadow:var(--shadow-lg);">
+    <div style="text-align:center; margin-bottom:18px;">
+      <div style="width:44px;height:44px;border-radius:12px;background:var(--accent-soft);display:flex;align-items:center;justify-content:center;margin:0 auto 12px;font-size:22px;">🏫</div>
+      <h1 style="margin-bottom:4px;">כניסת מוסד</h1>
+      <p style="font-size:13px;color:var(--text2);">מערכת ניהול תמלול לתלמידים</p>
+    </div>
+
     <form method="post">
-      <label style="font-size:13px; color:var(--text2);">מייל או טלפון</label>
-      <input name="identifier" required style="width:100%; margin:6px 0 14px; padding:10px; border-radius:8px; border:1px solid var(--border); background:var(--surface2); color:var(--text);">
-      <label style="font-size:13px; color:var(--text2);">קוד / סיסמה</label>
-      <input type="password" name="code" required style="width:100%; margin:6px 0 18px; padding:10px; border-radius:8px; border:1px solid var(--border); background:var(--surface2); color:var(--text);">
-      <button type="submit" class="btn" style="width:100%;">כניסה</button>
+      <div class="field">
+        <label>מייל או טלפון</label>
+        <input class="input" name="identifier" required autocomplete="username">
+      </div>
+      <div class="field">
+        <label>קוד זמני / סיסמה</label>
+        <input class="input" type="password" name="code" required autocomplete="current-password">
+      </div>
+      <button type="submit" class="btn btn-block">כניסה</button>
     </form>
-    <p style="font-size:12px; color:var(--text3); margin-top:16px; text-align:center;">
-      בכניסה ראשונה יש להשתמש בקוד שקיבלת ממנהל המערכת. לאחריה תוכל להגדיר סיסמה קבועה.
+
+    <div style="text-align:center; margin-top:12px;">
+      <button type="button" id="forgotBtn" style="background:none;border:none;color:var(--accent2);font-size:13px;cursor:pointer;font-family:inherit;">שכחתי סיסמה</button>
+    </div>
+
+    <div style="display:flex; align-items:center; gap:10px; margin:18px 0;">
+      <div style="flex:1;height:1px;background:var(--border);"></div>
+      <span style="font-size:12px;color:var(--text3);">או</span>
+      <div style="flex:1;height:1px;background:var(--border);"></div>
+    </div>
+
+    <a href="{{ url_for('institution.google_auth_start') }}" class="btn btn-secondary btn-block" style="text-decoration:none;">
+      <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3c-1.6 4.7-6.1 8-11.3 8-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34.5 6.2 29.5 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.7-.4-3.5z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.6 15.9 18.9 13 24 13c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34.5 6.2 29.5 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.4 0 10.3-2.1 14-5.5l-6.5-5.5c-2 1.4-4.6 2.3-7.5 2.3-5.2 0-9.6-3.3-11.3-8l-6.6 5.1C9.6 39.6 16.3 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.3-2.2 4.3-4 5.7l6.5 5.5C41.5 36 44 30.5 44 24c0-1.3-.1-2.7-.4-3.5z"/></svg>
+      כניסה עם Google
+    </a>
+
+    <p style="font-size:12px; color:var(--text3); margin-top:18px; text-align:center;">
+      בעיה בכניסה? פנו למנהל המערכת או השתמשו ב"שכחתי סיסמה" למעלה.
     </p>
   </div>
 </div>
+
+<div id="forgotModal" class="modal-backdrop hidden">
+  <div class="modal-box" style="max-width:380px;">
+    <button class="modal-close" onclick="closeForgot()">✕</button>
+    <h3>שחזור גישה</h3>
+    <p style="font-size:13px;color:var(--text2);margin-bottom:14px;">הזינו את כתובת המייל של המוסד - אם היא רשומה במערכת, יישלח אליה קוד כניסה זמני חדש.</p>
+    <div class="field">
+      <label>כתובת מייל</label>
+      <input class="input" type="email" id="forgotEmail" required>
+    </div>
+    <button class="btn btn-block" id="forgotSubmit" onclick="submitForgot()">שליחת קוד</button>
+    <div id="forgotMsg" style="font-size:13px;margin-top:10px;text-align:center;"></div>
+  </div>
+</div>
+
+<script>
+var forgotModal = document.getElementById('forgotModal');
+document.getElementById('forgotBtn').addEventListener('click', function () {
+  forgotModal.classList.remove('hidden');
+});
+function closeForgot() { forgotModal.classList.add('hidden'); }
+forgotModal.addEventListener('click', function (e) { if (e.target === forgotModal) closeForgot(); });
+
+function submitForgot() {
+  var email = document.getElementById('forgotEmail').value.trim();
+  var msgEl = document.getElementById('forgotMsg');
+  var btn = document.getElementById('forgotSubmit');
+  if (!email) { msgEl.style.color = 'var(--red)'; msgEl.textContent = 'נא להזין מייל'; return; }
+  btn.disabled = true;
+  msgEl.style.color = 'var(--text2)';
+  msgEl.textContent = 'שולח...';
+  fetch('{{ url_for("institution.forgot_password") }}', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: email }),
+  }).then(function (r) { return r.json(); }).then(function (data) {
+    btn.disabled = false;
+    msgEl.style.color = 'var(--accent)';
+    msgEl.textContent = data.message || 'אם המייל רשום במערכת, נשלח אליו קוד חדש.';
+  }).catch(function () {
+    btn.disabled = false;
+    msgEl.style.color = 'var(--red)';
+    msgEl.textContent = 'שגיאת תקשורת, נסה שוב';
+  });
+}
+</script>
 {% endblock %}

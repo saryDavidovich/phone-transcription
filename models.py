@@ -43,7 +43,9 @@ class Institution(db.Model, UserMixin):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     # --- הגדרות מוסד ---
-    max_usage_per_student = db.Column(db.Float, nullable=True)  # מגבלת ש"ח/דקות לתלמיד, ריק = ללא מגבלה
+    max_usage_per_student = db.Column(db.Float, nullable=True)  # ישן, לא בשימוש יותר - הוחלף ע"י max_minutes_per_period+limit_period
+    max_minutes_per_period = db.Column(db.Float, nullable=True)  # מגבלת דקות תמלול לתלמיד בתקופה (יומית/שבועית), ריק = ללא הגבלה
+    limit_period = db.Column(db.String(10), nullable=True)  # 'day' או 'week'
     allowed_hours_start = db.Column(db.String(5), nullable=True)  # "HH:MM", ריק = ללא הגבלת שעות
     allowed_hours_end = db.Column(db.String(5), nullable=True)
     notify_email = db.Column(db.String(200), nullable=True)  # מייל שאליו מגיעים כל התמלולים עם פרטי התלמיד
@@ -92,6 +94,8 @@ class InstitutionUpload(db.Model):
     transcript = db.Column(db.Text)
     docx_filename = db.Column(db.String(255))  # שם קובץ ה-Word המוכן בתוך static/fax_tmp
     error_message = db.Column(db.Text)
+    duration_seconds = db.Column(db.Integer, nullable=True)
+    cost = db.Column(db.Float, nullable=True)  # מנוכה מיתרת המוסד (Institution.balance)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     institution = db.relationship('Institution', backref='uploads')
@@ -167,6 +171,10 @@ class ManagerMessage(db.Model):
     admin_note = db.Column(db.Text)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    # 'ivr' (ברירת מחדל, הודעה קולית משלוחת "השארת הודעה למנהל") או
+    # 'institution_contact' (טופס "צור קשר" בממשק ניהול מוסד - אין rec_url,
+    # אז חייבים דגל נפרד כדי שלא ייפלו תחת הסינון שמסתיר "שריונים ריקים")
+    source = db.Column(db.String(30), default='ivr')
 
 
 class OcrResult(db.Model):

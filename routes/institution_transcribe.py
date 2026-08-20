@@ -2,7 +2,8 @@
 לשונית 'יצירת תמלול' עבור מנהל המוסד - העלאת קובץ, תמלול ברקע (thread,
 לא חוסם את הדפדפן), והורדת התוצאה כקובץ Word. נפרד מהזרימה הרגילה של
 תלמידים (routes/ivr.py + services/transcribe.py) - זהו כלי עבודה אישי
-של המוסד עצמו, לא נצרך מיתרת תלמיד.
+של המוסד עצמו, לא נצרך מיתרת תלמיד, אבל כן נצרך מיתרת המוסד עצמו
+(לפי מחירון המנהל הראשי, בדיוק כמו תמלול תלמיד).
 """
 import os
 import uuid
@@ -38,6 +39,9 @@ def upload():
     file = request.files.get('audio_file')
     if not file or not file.filename:
         return jsonify({'error': 'יש לבחור קובץ'}), 400
+
+    if (current_user.balance or 0) <= 0:
+        return jsonify({'error': 'אין למוסד יתרה מספיקה לביצוע תמלול. נא לטעון יתרה בלשונית "הגדרות חיוב".'}), 402
 
     tier = request.form.get('tier', 'gemini')
     language = request.form.get('language', 'he')
@@ -84,8 +88,25 @@ def _process_upload(flask_app, upload_id, rec_url, tier, language, output_langua
                 db.session.commit()
                 return
 
+            # חיוב יתרת המוסד לפי מחירון המנהל הראשי (יחידות של 20 דקות,
+            # מעוגל כלפי מעלה) - בדיוק כמו תמלול תלמיד. בכוונה לא חוסמים כאן
+            # אם התוצאה חורגת מעט מהיתרה שנותרה (העבודה כבר בוצעה בפועל) -
+            # החסימה האמיתית היא לפני תחילת ההעלאה (upload route).
+            import math
+            from routes.admin import get_setting
+            from models import Institution
+            price_per_20min = float(get_setting('price_per_20min_basic', '0.90'))
+            units = math.ceil((duration or 0) / 1200) or 1
+            cost = round(units * price_per_20min, 2)
+
+            institution = Institution.query.get(record.institution_id)
+            if institution:
+                institution.balance = max(0, (institution.balance or 0) - cost)
+
             docx_filename = _make_docx(transcript, record.original_filename)
             record.transcript = transcript
+            record.duration_seconds = duration
+            record.cost = cost
             record.docx_filename = docx_filename
             record.status = 'done'
             db.session.commit()
@@ -124,6 +145,8 @@ def status(upload_id):
         'status': record.status,
         'error': record.error_message,
         'downloadUrl': f'/institution/transcribe/download/{record.id}' if record.status == 'done' else None,
+        'durationSeconds': record.duration_seconds,
+        'cost': record.cost,
     })
 
 
@@ -134,4 +157,9 @@ def download(upload_id):
     if not record or not record.docx_filename:
         return 'לא נמצא', 404
     path = os.path.join(STATIC_TMP_DIR, record.docx_filename)
-    return send_file(path, as_attachment=True, download_name=f"תמלול - {record.original_filename or 'הקלטה'}.docx")
+    return send_file(
+        path,
+        as_attachment=True,
+        download_name=f"תמלול - {record.original_filename or 'הקלטה'}.docx",
+        mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    )

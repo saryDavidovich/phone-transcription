@@ -223,6 +223,16 @@ def _migrate_db():
                 created_at TIMESTAMP DEFAULT NOW()
             )""",
         "CREATE INDEX IF NOT EXISTS ix_institution_uploads_institution_id ON institution_uploads (institution_id)",
+        # הודעה למנהל: מקור ('ivr' ברירת מחדל, או 'institution_contact' לטופס
+        # "צור קשר" בממשק ניהול מוסד - שאין לו rec_url בכלל)
+        "ALTER TABLE manager_messages ADD COLUMN IF NOT EXISTS source VARCHAR(30) DEFAULT 'ivr'",
+        # משך/עלות תמלול אד-הוק של המוסד עצמו (לשונית "יצירת תמלול")
+        "ALTER TABLE institution_uploads ADD COLUMN IF NOT EXISTS duration_seconds INTEGER",
+        "ALTER TABLE institution_uploads ADD COLUMN IF NOT EXISTS cost FLOAT",
+        # מגבלת שימוש לתלמיד: יומית/שבועית בדקות, במקום מגבלת ₪ ישנה
+        # (max_usage_per_student נשארת בטבלה בלי שימוש, לתאימות לאחור)
+        "ALTER TABLE institutions ADD COLUMN IF NOT EXISTS max_minutes_per_period FLOAT",
+        "ALTER TABLE institutions ADD COLUMN IF NOT EXISTS limit_period VARCHAR(10)",
     ]
     logger = logging.getLogger(__name__)
     ok, failed = 0, 0

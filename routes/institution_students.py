@@ -44,9 +44,14 @@ def add_student():
     email = (request.form.get('email') or '').strip() or None
     fax = (request.form.get('fax') or '').strip() or None
     initial_balance = float(request.form.get('initial_balance') or 0)
+    inst = current_user
 
     if phone and Customer.query.filter_by(phone=phone).first():
         flash('מספר הטלפון הזה כבר קיים במערכת')
+        return redirect(url_for('institution_students.students_tab'))
+
+    if initial_balance > 0 and (inst.balance or 0) < initial_balance:
+        flash(f'אין למוסד מספיק יתרה לזיכוי הפתיחה שביקשת (יתרת המוסד: {inst.balance or 0:.2f} ₪). נא לטעון יתרה בלשונית "הגדרות חיוב", או להוסיף את התלמיד בלי זיכוי פתיחה.')
         return redirect(url_for('institution_students.students_tab'))
 
     student = Customer(
@@ -60,6 +65,8 @@ def add_student():
     db.session.commit()
 
     if initial_balance:
+        if initial_balance > 0:
+            inst.balance = (inst.balance or 0) - initial_balance
         db.session.add(Transaction(customer_id=student.id, amount=initial_balance, type='credit', description='זיכוי פתיחה ע"י המוסד'))
         db.session.commit()
 
@@ -71,11 +78,20 @@ def add_student():
 @institution_login_required
 def credit_student(student_id):
     student = Customer.query.filter_by(id=student_id, institution_id=current_user.id).first_or_404()
+    inst = current_user
     try:
         amount = float(request.form.get('amount'))
     except (TypeError, ValueError):
         flash('סכום לא תקין')
         return redirect(url_for('institution_students.students_tab'))
+
+    # זיכוי תלמיד (סכום חיובי) יורד בפועל מיתרת המוסד עצמה - אחרת נוצר "כסף
+    # מהאוויר". חיוב תלמיד (סכום שלילי) לא נוגע ביתרת המוסד.
+    if amount > 0:
+        if (inst.balance or 0) < amount:
+            flash(f'אין למוסד מספיק יתרה לזיכוי הזה (יתרת המוסד: {inst.balance or 0:.2f} ₪). נא לטעון יתרה בלשונית "הגדרות חיוב".')
+            return redirect(url_for('institution_students.students_tab'))
+        inst.balance = (inst.balance or 0) - amount
 
     student.balance = (student.balance or 0) + amount
     db.session.add(Transaction(
@@ -111,6 +127,31 @@ def remove_student(student_id):
     return redirect(url_for('institution_students.students_tab'))
 
 
+@institution_students_bp.route('/institution/students/excel-template')
+@institution_login_required
+def download_excel_template():
+    """קובץ אקסל לדוגמה עם העמודות הנכונות - נלחץ מתוך המודל 'ייבוא מאקסל'
+    בעמוד ניהול תלמידים, כדי שהמוסד ידע בדיוק לפי איזה פורמט למלא."""
+    import openpyxl
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = 'תלמידים'
+    ws.append(['name', 'phone', 'email', 'balance'])
+    ws.append(['ישראל ישראלי', '0501234567', 'israel@example.com', 20])
+    ws.append(['דוגמה בלי טלפון', '', '', 0])
+    ws.column_dimensions['A'].width = 22
+    ws.column_dimensions['B'].width = 16
+    ws.column_dimensions['C'].width = 26
+    ws.column_dimensions['D'].width = 10
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return send_file(
+        buf, as_attachment=True, download_name='תבנית_ייבוא_תלמידים.xlsx',
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    )
+
+
 @institution_students_bp.route('/institution/students/upload-excel', methods=['POST'])
 @institution_login_required
 def upload_excel():
@@ -135,17 +176,30 @@ def upload_excel():
     idx_email = col('email', 'מייל', 'אימייל')
     idx_balance = col('balance', 'יתרה')
 
+    inst = current_user
+    remaining_inst_balance = inst.balance or 0
     added = 0
+    skipped_balance = 0
     for row in ws.iter_rows(min_row=2, values_only=True):
         if not row or all(v is None for v in row):
             continue
         name = str(row[idx_name]).strip() if idx_name is not None and row[idx_name] else ''
         phone = str(row[idx_phone]).strip() if idx_phone is not None and row[idx_phone] else None
         email = str(row[idx_email]).strip() if idx_email is not None and row[idx_email] else None
-        balance = float(row[idx_balance]) if idx_balance is not None and row[idx_balance] else 0.0
+        requested_balance = float(row[idx_balance]) if idx_balance is not None and row[idx_balance] else 0.0
 
         if phone and Customer.query.filter_by(phone=phone).first():
             continue  # דילוג על טלפון כפול, לא עוצר את כל הייבוא
+
+        # לא נותנים לתלמיד יתרת פתיחה שהמוסד בפועל לא מכסה - התלמיד עדיין
+        # מיובא, רק בלי הזיכוי (או עם חלק ממנו אם היתרה הצטמצמה באמצע הקובץ).
+        balance = 0.0
+        if requested_balance > 0:
+            if remaining_inst_balance >= requested_balance:
+                balance = requested_balance
+                remaining_inst_balance -= requested_balance
+            else:
+                skipped_balance += 1
 
         student = Customer(
             name=name, phone=phone, email=email, balance=balance,
@@ -156,8 +210,12 @@ def upload_excel():
         db.session.add(student)
         added += 1
 
+    inst.balance = remaining_inst_balance
     db.session.commit()
-    flash(f'יובאו {added} תלמידים בהצלחה')
+    msg = f'יובאו {added} תלמידים בהצלחה'
+    if skipped_balance:
+        msg += f' - שימו לב: ל-{skipped_balance} מהם לא ניתנה יתרת הפתיחה שביקשתם כי יתרת המוסד לא הספיקה'
+    flash(msg)
     return redirect(url_for('institution_students.students_tab'))
 
 
@@ -191,6 +249,36 @@ def student_detail(student_id):
     return render_template('institution/student_detail.html', student=student, recordings=recordings, transactions=transactions)
 
 
+@institution_students_bp.route('/institution/students/<int:student_id>/recording/<int:recording_id>/download')
+@institution_login_required
+def download_student_recording(student_id, recording_id):
+    """הורדת התמלול של הקלטה בודדת של תלמיד כקובץ Word - מחליף את כפתור
+    "צפייה" הקודם (שהיה מציג alert() עם הטקסט, ולא באמת עבד)."""
+    student = Customer.query.filter_by(id=student_id, institution_id=current_user.id).first_or_404()
+    recording = Recording.query.filter_by(id=recording_id, customer_id=student.id).first_or_404()
+    if not recording.transcript:
+        return 'אין עדיין תמלול להקלטה הזו', 404
+
+    from docx import Document
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    doc = Document()
+    title = doc.add_heading(f'תמלול: {student.name or ""}', level=1)
+    title.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    for line in recording.transcript.split('\n'):
+        p = doc.add_paragraph(line)
+        p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+
+    output = io.BytesIO()
+    doc.save(output)
+    output.seek(0)
+    return send_file(
+        output,
+        as_attachment=True,
+        download_name=f"תמלול - {student.name or 'תלמיד'} - {recording.created_at.strftime('%d-%m-%Y') if recording.created_at else recording.id}.docx",
+        mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    )
+
+
 @institution_students_bp.route('/institution/students/<int:student_id>/upload', methods=['POST'])
 @institution_login_required
 def upload_for_student(student_id):
@@ -201,6 +289,11 @@ def upload_for_student(student_id):
     file = request.files.get('audio_file')
     if not file or not file.filename:
         return jsonify({'error': 'יש לבחור קובץ'}), 400
+
+    from routes.institution import student_usage_limit_error
+    limit_error = student_usage_limit_error(student)
+    if limit_error:
+        return jsonify({'error': limit_error}), 403
 
     import uuid
     static_dir = os.path.join(os.path.dirname(__file__), '..', 'static', 'fax_tmp')
@@ -238,8 +331,14 @@ def _process_student_upload(flask_app, recording_id, rec_url):
                 db.session.commit()
                 return
 
-            price_per_30min = flask_app.config.get('PRICE_PER_30MIN', 5.0)
-            cost = round((duration or 0) / 1800 * price_per_30min, 2)
+            # מחיר לפי מחירון המנהל הראשי (מחירון בסיסי, יחידות של 20 דקות -
+            # מעוגל כלפי מעלה, בדיוק כמו בכל שאר המערכת) - לא PRICE_PER_30MIN
+            # הישן שלא היה קשור בכלל למחירון האמיתי.
+            import math
+            from routes.admin import get_setting
+            price_per_20min = float(get_setting('price_per_20min_basic', '0.90'))
+            units = math.ceil((duration or 0) / 1200) or 1
+            cost = round(units * price_per_20min, 2)
 
             recording.transcript = transcript
             recording.duration_seconds = duration

@@ -3,19 +3,26 @@
 {% block content %}
 <h1>יצירת תמלול</h1>
 
-<div class="card" style="max-width:520px; margin-bottom:24px;">
+<div class="card" style="max-width:560px; margin-bottom:24px;">
   <form id="uploadForm">
-    <label style="font-size:13px; color:var(--text2);">קובץ הקלטה (אודיו/וידאו)</label>
-    <input type="file" name="audio_file" id="audioFile" required accept="audio/*,video/*" style="width:100%; margin:6px 0 14px; padding:8px; border-radius:8px; border:1px solid var(--border); background:var(--surface2); color:var(--text);">
+    <div class="dropzone" id="transcribeDz">
+      <div class="dz-icon">🎧</div>
+      <div class="dz-title">גררו קובץ אודיו/וידאו לכאן או לחצו לבחירה</div>
+      <div class="dz-sub">כל סוגי קבצי השמע והווידאו הנפוצים</div>
+      <div class="dz-filename" id="transcribeDzFilename"></div>
+      <input type="file" name="audio_file" id="audioFile" required accept="audio/*,video/*">
+    </div>
 
-    <label style="font-size:13px; color:var(--text2);">שפת ההקלטה</label>
-    <select name="language" style="width:100%; margin:6px 0 14px; padding:9px; border-radius:8px; border:1px solid var(--border); background:var(--surface2); color:var(--text);">
-      <option value="he">עברית</option>
-      <option value="en">אנגלית</option>
-      <option value="yi">יידיש</option>
-    </select>
+    <div class="field" style="margin-top:16px;">
+      <label>שפת ההקלטה</label>
+      <select class="input" name="language">
+        <option value="he">עברית</option>
+        <option value="en">אנגלית</option>
+        <option value="yi">יידיש</option>
+      </select>
+    </div>
 
-    <button type="submit" class="btn" style="width:100%;">העלאה ותמלול</button>
+    <button type="submit" class="btn btn-block" id="uploadBtn">העלאה ותמלול</button>
   </form>
   <div id="uploadMsg" style="font-size:13px; margin-top:10px;"></div>
 </div>
@@ -28,9 +35,12 @@
       <span>{{ u.original_filename }}</span>
       <span class="row-status" style="font-size:13px; color:var(--text2);">
         {% if u.status == 'processing' %}
-          <span class="spinner">⚙️</span> מתמלל...
+          <span class="spinner-ring"></span> מתמלל...
         {% elif u.status == 'done' %}
-          <a href="/institution/transcribe/download/{{ u.id }}" class="btn" style="padding:4px 12px; font-size:12px;">הורדת Word</a>
+          <a href="/institution/transcribe/download/{{ u.id }}" class="word-btn">
+            <svg width="20" height="20" viewBox="0 0 48 48"><rect x="6" y="4" width="30" height="40" rx="3" fill="#2b579a"/><path d="M26 4l10 10H26z" fill="#1a3f6e"/><text x="21" y="30" font-size="14" fill="#fff" text-anchor="middle" font-family="Arial" font-weight="bold">W</text></svg>
+            הורדת Word
+          </a>
         {% else %}
           <span style="color:var(--red);">שגיאה</span>
         {% endif %}
@@ -43,39 +53,84 @@
 </div>
 
 <style>
-.spinner { display:inline-block; animation:spin 1.2s linear infinite; }
-@keyframes spin { from{transform:rotate(0deg);} to{transform:rotate(360deg);} }
+.word-btn {
+  display:inline-flex; align-items:center; gap:8px; text-decoration:none;
+  background:var(--accent-soft); color:#1a3f6e; font-weight:700; font-size:13.5px;
+  padding:8px 16px; border-radius:10px; border:1px solid rgba(43,87,154,.15); transition:.15s;
+}
+.word-btn:hover { background:#e7eefc; transform:translateY(-1px); }
 </style>
 
 <script>
+var transcribeDz = document.getElementById('transcribeDz');
+var audioFileInput = document.getElementById('audioFile');
+var transcribeDzFilename = document.getElementById('transcribeDzFilename');
+
+function showTranscribeFilename() {
+  transcribeDzFilename.textContent = audioFileInput.files.length ? '📄 ' + audioFileInput.files[0].name : '';
+}
+audioFileInput.addEventListener('change', showTranscribeFilename);
+
+['dragover', 'dragenter'].forEach(function (ev) {
+  transcribeDz.addEventListener(ev, function (e) { e.preventDefault(); transcribeDz.classList.add('dragover'); });
+});
+['dragleave', 'dragend'].forEach(function (ev) {
+  transcribeDz.addEventListener(ev, function () { transcribeDz.classList.remove('dragover'); });
+});
+transcribeDz.addEventListener('drop', function (e) {
+  e.preventDefault();
+  transcribeDz.classList.remove('dragover');
+  if (e.dataTransfer.files.length) {
+    audioFileInput.files = e.dataTransfer.files;
+    showTranscribeFilename();
+  }
+});
+
 document.getElementById('uploadForm').addEventListener('submit', async function (e) {
   e.preventDefault();
   var fileInput = document.getElementById('audioFile');
   if (!fileInput.files.length) return;
 
   var msgEl = document.getElementById('uploadMsg');
-  msgEl.textContent = 'מעלה קובץ...';
+  var btn = document.getElementById('uploadBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-ring"></span> מעלה...';
+  msgEl.style.color = 'var(--text2)';
+  msgEl.textContent = '';
 
   var fd = new FormData(this);
-  var res = await fetch('/institution/transcribe/upload', { method: 'POST', body: fd });
-  var data = await res.json();
+  var res, data;
+  try {
+    res = await fetch('/institution/transcribe/upload', { method: 'POST', body: fd });
+    data = await res.json();
+  } catch (err) {
+    btn.disabled = false;
+    btn.textContent = 'העלאה ותמלול';
+    msgEl.style.color = 'var(--red)';
+    msgEl.textContent = 'שגיאת תקשורת, נסה שוב';
+    return;
+  }
   if (!res.ok) {
+    btn.disabled = false;
+    btn.textContent = 'העלאה ותמלול';
     msgEl.style.color = 'var(--red)';
     msgEl.textContent = data.error || 'שגיאה בהעלאה';
     return;
   }
 
+  btn.disabled = false;
+  btn.textContent = 'העלאה ותמלול';
   msgEl.style.color = 'var(--accent)';
   msgEl.textContent = 'הקובץ עלה בהצלחה - מתמלל ברקע, אפשר להמשיך לגלוש באתר.';
   fileInput.value = '';
+  transcribeDzFilename.textContent = '';
 
-  // הוספת שורה חדשה לרשימה מיד (עם גלגל שיניים), בלי רענון עמוד
   var list = document.getElementById('uploadsList');
   var row = document.createElement('div');
   row.className = 'upload-row';
   row.dataset.id = data.uploadId;
   row.style = 'display:flex; justify-content:space-between; align-items:center; padding:10px 0; border-bottom:1px solid var(--border);';
-  row.innerHTML = '<span>' + fd.get('audio_file').name + '</span><span class="row-status" style="font-size:13px; color:var(--text2);"><span class="spinner">⚙️</span> מתמלל...</span>';
+  row.innerHTML = '<span>' + fd.get('audio_file').name + '</span><span class="row-status" style="font-size:13px; color:var(--text2);"><span class="spinner-ring"></span> מתמלל...</span>';
   list.prepend(row);
 
   pollStatus(data.uploadId, row);
@@ -88,7 +143,9 @@ function pollStatus(id, row) {
     if (data.status === 'done') {
       clearInterval(interval);
       row.querySelector('.row-status').innerHTML =
-        '<a href="' + data.downloadUrl + '" class="btn" style="padding:4px 12px; font-size:12px;">הורדת Word</a>';
+        '<a href="' + data.downloadUrl + '" class="word-btn">' +
+        '<svg width="20" height="20" viewBox="0 0 48 48"><rect x="6" y="4" width="30" height="40" rx="3" fill="#2b579a"/><path d="M26 4l10 10H26z" fill="#1a3f6e"/><text x="21" y="30" font-size="14" fill="#fff" text-anchor="middle" font-family="Arial" font-weight="bold">W</text></svg>' +
+        'הורדת Word</a>';
     } else if (data.status === 'error') {
       clearInterval(interval);
       row.querySelector('.row-status').innerHTML = '<span style="color:var(--red);">שגיאה</span>';
@@ -96,9 +153,8 @@ function pollStatus(id, row) {
   }, 3000);
 }
 
-// גם שורות קיימות שכבר "processing" בטעינת הדף - ממשיכים לבדוק אותן
 document.querySelectorAll('.upload-row').forEach(function (row) {
-  if (row.querySelector('.spinner')) pollStatus(row.dataset.id, row);
+  if (row.querySelector('.spinner-ring')) pollStatus(row.dataset.id, row);
 });
 </script>
 {% endblock %}

@@ -24,13 +24,10 @@
 
 <div class="card">
   <h2 style="font-size:16px; margin-bottom:14px;">פרטי המוסד</h2>
-  <p style="color:var(--text2); font-size:14px; line-height:2;">
-    שם: {{ inst.name }}<br>
-    מייל: {{ inst.email or '—' }}<br>
-    טלפון: {{ inst.phone or '—' }}
-  </p>
-  <p style="color:var(--text3); font-size:12px; margin-top:14px;">
-    עריכת פרטי המוסד, ניהול תלמידים, יצירת תמלול, הגדרות ומעקב חיובים - בלשוניות הצד, בבנייה.
-  </p>
+  <div class="form-grid" style="color:var(--text2); font-size:14px; line-height:2.1;">
+    <div>שם: <strong style="color:var(--text);">{{ inst.name }}</strong></div>
+    <div>מייל: <strong style="color:var(--text);">{{ inst.email or '—' }}</strong></div>
+    <div>טלפון: <strong style="color:var(--text);">{{ inst.phone or '—' }}</strong></div>
+  </div>
 </div>
 {% endblock %}

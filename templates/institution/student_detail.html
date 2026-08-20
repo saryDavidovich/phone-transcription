@@ -8,31 +8,50 @@
   יתרה: {{ "%.2f"|format(student.balance or 0) }} ₪
 </p>
 
-<div class="card" style="max-width:480px; margin-bottom:24px;">
-  <h3 style="font-size:15px; margin-bottom:10px;">העלאת קובץ נוסף לתמלול עבור התלמיד</h3>
+<div class="card" style="max-width:520px; margin-bottom:24px;">
+  <h3 style="font-size:15px; margin-bottom:12px;">העלאת קובץ נוסף לתמלול עבור התלמיד</h3>
   <form id="studentUploadForm">
-    <input type="file" name="audio_file" id="studentAudioFile" accept="audio/*,video/*" required style="width:100%; margin-bottom:10px; padding:8px; border-radius:8px; border:1px solid var(--border); background:var(--surface2); color:var(--text);">
-    <button type="submit" class="btn">העלאה</button>
+    <div class="dropzone" id="studentDz">
+      <div class="dz-icon">🎧</div>
+      <div class="dz-title">גררו קובץ אודיו/וידאו לכאן או לחצו לבחירה</div>
+      <div class="dz-sub">כל סוגי קבצי השמע והווידאו הנפוצים</div>
+      <div class="dz-filename" id="studentDzFilename"></div>
+      <input type="file" name="audio_file" id="studentAudioFile" accept="audio/*,video/*" required>
+    </div>
+    <button type="submit" class="btn btn-block" style="margin-top:14px;" id="studentUploadBtn">העלאה</button>
   </form>
-  <div id="studentUploadMsg" style="font-size:13px; margin-top:8px;"></div>
+  <div id="studentUploadMsg" style="font-size:13px; margin-top:10px;"></div>
 </div>
 
 <div class="card" style="margin-bottom:20px;">
   <h3 style="font-size:15px; margin-bottom:10px;">הקלטות ותמלולים</h3>
   <table style="width:100%; font-size:13px;">
     <tr style="text-align:right; border-bottom:1px solid var(--border); color:var(--text2);">
-      <th style="padding:6px 0;">תאריך</th><th>קובץ</th><th>עלות</th><th>סטטוס</th><th></th>
+      <th style="padding:6px 0;">תאריך</th><th>קובץ</th><th>משך</th><th>עלות</th><th>סטטוס</th><th></th>
     </tr>
     {% for r in recordings %}
     <tr style="border-bottom:1px solid var(--border);">
       <td style="padding:6px 0;">{{ r.created_at.strftime('%d/%m/%Y %H:%M') if r.created_at else '' }}</td>
       <td>{{ r.source_filename or '—' }}</td>
+      <td>{% if r.duration_seconds %}{{ '%d:%02d'|format((r.duration_seconds // 60), (r.duration_seconds % 60)) }}{% else %}—{% endif %}</td>
       <td>{{ "%.2f"|format(r.cost or 0) }} ₪</td>
-      <td>{{ 'הושלם' if r.status == 'completed' else ('מעבד' if r.status == 'processing' else r.status) }}</td>
-      <td>{% if r.transcript %}<a href="#" onclick="alert({{ r.transcript|tojson }}); return false;" style="color:var(--accent);">צפייה</a>{% endif %}</td>
+      <td>
+        {% if r.status == 'completed' %}<span class="badge badge-green">הושלם</span>
+        {% elif r.status == 'processing' %}<span class="badge badge-amber"><span class="spinner-ring"></span> מעבד</span>
+        {% else %}<span class="badge badge-gray">{{ r.status }}</span>{% endif %}
+      </td>
+      <td>
+        {% if r.transcript %}
+        <a href="{{ url_for('institution_students.download_student_recording', student_id=student.id, recording_id=r.id) }}"
+           class="btn btn-sm btn-secondary" style="text-decoration:none;display:inline-flex;align-items:center;gap:6px;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M6 2h9l5 5v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z" fill="#2b579a"/><path d="M15 2v5h5" fill="#1a3f6e"/><text x="12" y="17" font-size="7" fill="#fff" text-anchor="middle" font-family="Arial" font-weight="bold">W</text></svg>
+          הורדת Word
+        </a>
+        {% endif %}
+      </td>
     </tr>
     {% else %}
-    <tr><td colspan="5" style="padding:12px 0; color:var(--text2);">אין עדיין הקלטות.</td></tr>
+    <tr><td colspan="6" style="padding:12px 0; color:var(--text2);">אין עדיין הקלטות.</td></tr>
     {% endfor %}
   </table>
 </div>
@@ -56,20 +75,60 @@
 </div>
 
 <script>
+var studentDz = document.getElementById('studentDz');
+var studentFileInput = document.getElementById('studentAudioFile');
+var studentDzFilename = document.getElementById('studentDzFilename');
+
+function showStudentFilename() {
+  studentDzFilename.textContent = studentFileInput.files.length ? '📄 ' + studentFileInput.files[0].name : '';
+}
+studentFileInput.addEventListener('change', showStudentFilename);
+
+['dragover', 'dragenter'].forEach(function (ev) {
+  studentDz.addEventListener(ev, function (e) { e.preventDefault(); studentDz.classList.add('dragover'); });
+});
+['dragleave', 'dragend'].forEach(function (ev) {
+  studentDz.addEventListener(ev, function () { studentDz.classList.remove('dragover'); });
+});
+studentDz.addEventListener('drop', function (e) {
+  e.preventDefault();
+  studentDz.classList.remove('dragover');
+  if (e.dataTransfer.files.length) {
+    studentFileInput.files = e.dataTransfer.files;
+    showStudentFilename();
+  }
+});
+
 document.getElementById('studentUploadForm').addEventListener('submit', async function (e) {
   e.preventDefault();
   var msgEl = document.getElementById('studentUploadMsg');
-  msgEl.textContent = 'מעלה...';
+  var btn = document.getElementById('studentUploadBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-ring"></span> מעלה...';
+  msgEl.style.color = 'var(--text2)';
+  msgEl.textContent = '';
   var fd = new FormData(this);
-  var res = await fetch('{{ url_for("institution_students.upload_for_student", student_id=student.id) }}', { method: 'POST', body: fd });
-  var data = await res.json();
+  var res, data;
+  try {
+    res = await fetch('{{ url_for("institution_students.upload_for_student", student_id=student.id) }}', { method: 'POST', body: fd });
+    data = await res.json();
+  } catch (err) {
+    btn.disabled = false;
+    btn.textContent = 'העלאה';
+    msgEl.style.color = 'var(--red)';
+    msgEl.textContent = 'שגיאת תקשורת, נסה שוב';
+    return;
+  }
   if (!res.ok) {
+    btn.disabled = false;
+    btn.textContent = 'העלאה';
     msgEl.style.color = 'var(--red)';
     msgEl.textContent = data.error || 'שגיאה';
     return;
   }
+  btn.innerHTML = '<span class="spinner-ring"></span> מתמלל...';
   msgEl.style.color = 'var(--accent)';
-  msgEl.textContent = 'עולה ומתמלל ברקע... ⚙️ העמוד יתעדכן אוטומטית כשיסתיים.';
+  msgEl.textContent = 'הקובץ עולה ומתמלל...';
   var recId = data.recordingId;
   var interval = setInterval(async function () {
     var r = await fetch('{{ url_for("institution_students.recording_status", recording_id=0) }}'.replace('0', recId));
