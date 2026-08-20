@@ -12,6 +12,27 @@ def _client_ip():
     return request.remote_addr
 
 
+def _phone_match_candidates(raw_phone):
+    """מייצר את כל צורות הכתיב הסבירות של מספר טלפון ישראלי, כדי להשוות
+    מול DB בלי תלות בפורמט המדויק שבו נדרים פלוס מחזירים את השדה Phone
+    (עם/בלי מקפים ורווחים, עם/בלי קידומת 0, עם/בלי קידומת מדינה 972) -
+    בפרט כשמדובר במספר שכבר קיים אצלנו בפורמט שונה במקצת מזה שהמשלם הקליד
+    בנדרים פלוס."""
+    import re
+    digits = re.sub(r'\D', '', raw_phone or '')
+    if not digits:
+        return []
+    candidates = {digits}
+    if digits.startswith('972'):
+        candidates.add('0' + digits[3:])
+    elif digits.startswith('0'):
+        candidates.add('972' + digits[1:])
+    else:
+        candidates.add('0' + digits)
+        candidates.add('972' + digits)
+    return list(candidates)
+
+
 @payment_bp.route('/nedarim/topup-link/<phone>')
 def nedarim_topup_link(phone):
     """מפנה טלפון נתון לדף התשלום המתארח של נדרים פלוס (שיטת ה-Redirect
@@ -85,10 +106,18 @@ def nedarim_webhook():
     except (TypeError, ValueError):
         amount = 0
 
+    # לוג מלא של כל בקשה תקינה שמגיעה - חיוני לאבחון: אם לא מגיע כלום ללוג
+    # הזה אחרי חיוב אמיתי, הבעיה היא לפני שהבקשה בכלל מגיעה לשרת (למשל
+    # הכתובת שנשמרה אצל נדרים פלוס שגויה, או שהקוד הזה עדיין לא פרוס בפועל
+    # ב-Railway) - לא בלוגיקת ההתאמה/הקטגוריה שבהמשך.
+    log.info(f'Nedarim webhook received: tx_id={tx_id}, groupe={groupe!r}, phone={phone!r}, client_name={client_name!r}, amount={amount}')
+
     from routes.institution_billing import NEDARIM_CATEGORY
+    # דרישה נוקשה: מזכים רק עסקה שמתויגת בדיוק בקטגוריה "תמלול פון" - זו
+    # הקטגוריה היחידה שהלקוח יכול לבחור אצלכם לפני תשלום, אז זה תקין שהיא
+    # תמיד תגיע ממולאת. כל דבר אחר (או ריק) נחסם, כדי לא לגעת בטעות בתשלום
+    # שלא שייך למערכת הזו.
     if groupe != NEDARIM_CATEGORY:
-        # לא שייך למערכת שלנו (מוסד בנדרים פלוס עשוי לשמש גם למטרות אחרות) -
-        # מתעלמים בשקט, זו לא שגיאה.
         log.info(f'Nedarim webhook: ignoring transaction {tx_id} - Groupe={groupe!r} != {NEDARIM_CATEGORY!r}')
         return jsonify({'ok': True})
 
@@ -104,10 +133,16 @@ def nedarim_webhook():
         log.info(f'Nedarim webhook: transaction {tx_id} already processed (customer), skipping')
         return jsonify({'ok': True})
 
+    # מגוון צורות כתיב אפשריות לאותו מספר (עם/בלי 0 מוביל, עם/בלי קידומת
+    # מדינה) - כדי לא לפספס התאמה למספר שכבר קיים אצלנו בפורמט מעט שונה
+    # מזה שנדרים פלוס מחזירים בשדה Phone.
+    phone_candidates = _phone_match_candidates(phone)
+    local_phone = next((c for c in phone_candidates if c.startswith('0')), phone)
+
     # 1. ניסיון התאמה למוסד - לפי טלפון או שם מדויק כפי שמופיע בנדרים פלוס
     institution = None
-    if phone:
-        institution = Institution.query.filter_by(phone=phone).first()
+    if phone_candidates:
+        institution = Institution.query.filter(Institution.phone.in_(phone_candidates)).first()
     if not institution and client_name:
         institution = Institution.query.filter_by(name=client_name).first()
 
@@ -121,8 +156,18 @@ def nedarim_webhook():
         log.info(f'Nedarim webhook: credited institution {institution.id} +{amount} (tx {tx_id})')
         return jsonify({'ok': True})
 
-    # 2. ניסיון התאמה ללקוח בודד - לפי טלפון
-    customer = Customer.query.filter_by(phone=phone).first() if phone else None
+    # 2. ניסיון התאמה ללקוח בודד - לפי טלפון. אם אין עדיין לקוח עם הטלפון
+    # הזה - יוצרים לו כרטיס לקוח חדש ומזכים אותו (זה בדיוק הרעיון: "כל
+    # משתמש במערכת" יכול לטעון יתרה, גם מי שמעולם לא התקשר/נרשם קודם -
+    # הטעינה עצמה היא מה שיוצרת לו חשבון).
+    customer = None
+    if phone_candidates:
+        customer = Customer.query.filter(Customer.phone.in_(phone_candidates)).first()
+        if not customer:
+            customer = Customer(phone=local_phone, name=client_name or None, balance=0.0)
+            db.session.add(customer)
+            db.session.flush()
+            log.info(f'Nedarim webhook: creating new customer for phone={local_phone} (tx {tx_id})')
     if customer:
         bonus = _calculate_bonus_public(amount)
         total_credit = amount + bonus
@@ -156,9 +201,9 @@ def nedarim_webhook():
             ).start()
         return jsonify({'ok': True})
 
-    # 3. לא נמצא זיהוי - התשלום התקבל בפועל אצל נדרים פלוס אבל לא ידוע למי
-    # לזכות (טלפון/שם לא תואמים אצלנו). לא מזכים אף אחד באופן שגוי - במקום
-    # זאת פותחים הודעה בתיבת "הודעות למנהל" לטיפול ידני, עם תיוג אדום.
+    # 3. אין בכלל מספר טלפון בעדכון (ולא נמצא גם מוסד לפי שם) - אין למי
+    # לזכות אוטומטית. לא מזכים אף אחד באופן שגוי - במקום זאת פותחים הודעה
+    # בתיבת "הודעות למנהל" לטיפול ידני, עם תיוג אדום.
     log.warning(f'Nedarim webhook: unmatched payment, tx={tx_id}, phone={phone}, name={client_name}, amount={amount}')
     try:
         msg = ManagerMessage(
