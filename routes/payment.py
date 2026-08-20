@@ -97,6 +97,15 @@ def nedarim_webhook():
         log.warning(f'Nedarim webhook: empty/unparsable body, raw={request.get_data(as_text=True)[:500]}')
         return jsonify({'ok': True})  # אין מה לעשות עם זה, אבל לא נחזיר שגיאה
 
+    # לוג של כל השדות שנדרים פלוס שולחים, בלי שום סינון - לפני כל בדיקת
+    # קטגוריה/כפילות/התאמה. זה חיוני לאבחון ולהשוואה ידנית מול קובץ הלוג של
+    # ימות (למשל DealSuccessfully מול TransactionId): אם אחרי חיוב אמיתי
+    # השורה הזו לא מופיעה בכלל בלוגים של Railway - הבעיה היא לפני שהבקשה
+    # בכלל הגיעה לשרת שלנו (למשל כתובת שגויה אצל נדרים פלוס, או שהקוד עדיין
+    # לא פרוס), לא בלוגיקה שבהמשך. אפשר לחפש בלוגים לפי "NEDARIM_FULL_PAYLOAD".
+    import json as _json
+    log.info(f'NEDARIM_FULL_PAYLOAD: {_json.dumps(data, ensure_ascii=False)}')
+
     tx_id = str(data.get('TransactionId') or data.get('ID') or '').strip()
     groupe = (data.get('Groupe') or '').strip()
     phone = (data.get('Phone') or '').strip()
@@ -106,11 +115,7 @@ def nedarim_webhook():
     except (TypeError, ValueError):
         amount = 0
 
-    # לוג מלא של כל בקשה תקינה שמגיעה - חיוני לאבחון: אם לא מגיע כלום ללוג
-    # הזה אחרי חיוב אמיתי, הבעיה היא לפני שהבקשה בכלל מגיעה לשרת (למשל
-    # הכתובת שנשמרה אצל נדרים פלוס שגויה, או שהקוד הזה עדיין לא פרוס בפועל
-    # ב-Railway) - לא בלוגיקת ההתאמה/הקטגוריה שבהמשך.
-    log.info(f'Nedarim webhook received: tx_id={tx_id}, groupe={groupe!r}, phone={phone!r}, client_name={client_name!r}, amount={amount}')
+    log.info(f'Nedarim webhook parsed: tx_id={tx_id}, groupe={groupe!r}, phone={phone!r}, client_name={client_name!r}, amount={amount}')
 
     from routes.institution_billing import NEDARIM_CATEGORY
     # דרישה נוקשה: מזכים רק עסקה שמתויגת בדיוק בקטגוריה "תמלול פון" - זו
@@ -171,11 +176,56 @@ def nedarim_webhook():
     if customer:
         bonus = _calculate_bonus_public(amount)
         total_credit = amount + bonus
+
+        # הגנה מפני זיכוי כפול חוצה-מנגנונים: אם הטעינה בוצעה בפועל דרך
+        # שלוחת התשלום הטלפונית של ימות המשיח (שלוחה 200) שמסלקת גם היא מול
+        # נדרים פלוס - אותה עסקה עלולה לעדכן אותנו פעמיים: פעם דרך ה-callback
+        # הקיים של ימות (nedarim_callback, לפי קובץ הלוג שלהם) ופעם דרך
+        # ה-Webhook הזה (ישירות מנדרים פלוס).
+        #
+        # בדיקה ראשית ומדויקת: קובץ הלוג של ימות מכיל שדה DealSuccessfully
+        # שאותו הקוד הקיים (_issue_receipt_and_send_inner) כבר שולח בתור
+        # TransactionId להפקת קבלה אצל נדרים פלוס עצמם - וזה מצליח, מה
+        # שמוכיח בפועל ש-DealSuccessfully הוא בדיוק אותו מזהה עסקה (מה
+        # שמגיע לכאן בתור tx_id). לכן קודם כל בודקים התאמה מדויקת לפי המזהה
+        # הזה מול הרישום שה-callback של ימות משאיר בתיאור ("אישור: <מזהה>").
+        exact_dup = Transaction.query.filter(
+            Transaction.customer_id == customer.id,
+            Transaction.description.contains(f'אישור: {tx_id}'),
+        ).first()
+        if exact_dup:
+            log.info(f'Nedarim webhook: transaction {tx_id} already processed via yemot callback '
+                     f'(exact match, transaction #{exact_dup.id}) - skipping')
+            db.session.commit()
+            return jsonify({'ok': True})
+
+        # בדיקת עתודה (פחות מדויקת, למקרה שהמזהים לא יתאימו במקרה מסוים):
+        # אם ללקוח כבר נזקפה טעינה באותו סכום בדיוק בחמש הדקות האחרונות.
+        # (פשרה מכוונת: שתי טעינות אמיתיות באותו סכום תוך פחות מ-5 דקות
+        # תידחה השנייה בטעות - עדיף על פני זיכוי כפול בטעות.)
+        from datetime import datetime, timedelta
+        from sqlalchemy import func as sa_func
+        recent_dup = Transaction.query.filter(
+            Transaction.customer_id == customer.id,
+            Transaction.type == 'charge',
+            Transaction.created_at >= datetime.utcnow() - timedelta(minutes=5),
+            sa_func.abs(Transaction.amount - total_credit) < 0.01,
+        ).first()
+        if recent_dup:
+            log.warning(f'Nedarim webhook: possible double-credit avoided for customer {customer.id} '
+                        f'(matches recent transaction #{recent_dup.id} within 5 min, tx={tx_id}) - skipping')
+            db.session.commit()  # שומרים את כרטיס הלקוח החדש אם נוצר כרגע, גם אם לא מזכים
+            return jsonify({'ok': True})
+
         customer.balance = (customer.balance or 0) + total_credit
         desc = f'טעינת יתרה דרך נדרים פלוס ₪{amount:.2f}'
         if bonus > 0:
             desc += f' + בונוס ₪{bonus:.2f} = סה"כ ₪{total_credit:.2f}'
-        desc += f' [נדרים:{tx_id}]'
+        # פורמט "אישור: <מזהה>" נשמר בכוונה (בנוסף ל-[נדרים:...]) - זה בדיוק
+        # הפורמט שה-callback הישן של ימות (nedarim_callback) בודק כפילות
+        # לפיו, כך שאם העדכון של ימות יגיע אחרי זה עם אותו מזהה - הוא יזהה
+        # שכבר טופל ולא יזכה שוב.
+        desc += f' | אישור: {tx_id} [נדרים:{tx_id}]'
         txn = Transaction(customer_id=customer.id, amount=total_credit, type='charge', description=desc)
         db.session.add(txn)
         db.session.commit()
@@ -280,6 +330,7 @@ def nedarim_callback():
         resp.raise_for_status()
         contents = resp.json().get('contents', '')
         log.info(f"Yemot log file read: {len(contents)} chars")
+        log.info(f"YEMOT_RAW_LOG_CONTENTS: {contents[-2000:]}")  # שורות אחרונות - די לצורך אבחון
     except Exception as e:
         log.error(f"Failed to read yemot log: {e}")
         return 'go_to_folder=/', 200, {'Content-Type': 'text/plain; charset=utf-8'}
@@ -306,6 +357,10 @@ def nedarim_callback():
             try:
                 amount = float(line_amount)
                 approval = line_approval
+                # לוג של כל השדות שימות מחזירים לשורה הזו (לא רק phone/amount/
+                # approval) - כדי להשוות ידנית מול NEDARIM_FULL_PAYLOAD ולוודא
+                # ש-DealSuccessfully אכן זהה ל-TransactionId שנדרים פלוס שולחים.
+                log.info(f"YEMOT_FULL_LINE: {fields}")
                 log.info(f"Found transaction: phone={phone}, amount={amount}, approval={approval}")
             except ValueError:
                 pass
@@ -320,7 +375,12 @@ def nedarim_callback():
         log.warning(f"Customer not found for phone={phone}")
         return 'go_to_folder=/', 200, {'Content-Type': 'text/plain; charset=utf-8'}
 
-    # בדיקת כפילות לפי מספר אישור
+    # בדיקת כפילות לפי מספר אישור - זה גם בדיוק המזהה (DealSuccessfully)
+    # שנשלח כ-TransactionId להפקת קבלה אצל נדרים פלוס (ראה
+    # _issue_receipt_and_send_inner), כלומר זהה בפועל למזהה TransactionId
+    # שמגיע ב-Webhook הכללי (nedarim_webhook). אותו webhook כותב את התיאור
+    # שלו בפורמט "...| אישור: <מזהה> [נדרים:<מזהה>]" בדיוק כדי שהבדיקה
+    # הזו תתפוס גם אותו אם הוא הגיע ראשון לאותה עסקה.
     if approval:
         existing = Transaction.query.filter(
             Transaction.customer_id == customer.id,
@@ -333,6 +393,21 @@ def nedarim_callback():
     # חישוב בונוס
     bonus = _calculate_bonus(amount, get_setting)
     total_credit = amount + bonus
+
+    # הגנת עתודה נוספת (פחות מדויקת) למקרה שהמזהים לא יתאימו בכל זאת: אם
+    # ללקוח כבר נזקפה טעינה באותו סכום בדיוק בחמש הדקות האחרונות.
+    from datetime import datetime, timedelta
+    from sqlalchemy import func as sa_func
+    recent_dup = Transaction.query.filter(
+        Transaction.customer_id == customer.id,
+        Transaction.type == 'charge',
+        Transaction.created_at >= datetime.utcnow() - timedelta(minutes=5),
+        sa_func.abs(Transaction.amount - total_credit) < 0.01,
+    ).first()
+    if recent_dup:
+        log.warning(f"Nedarim callback (yemot): possible double-credit avoided for customer {customer.id} "
+                    f"(matches recent transaction #{recent_dup.id} within 5 min) - skipping")
+        return 'go_to_folder=/', 200, {'Content-Type': 'text/plain; charset=utf-8'}
 
     customer.balance += total_credit
 
