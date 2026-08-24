@@ -68,6 +68,37 @@ def _wav_looks_truncated(content):
     return False
 
 
+def _fetch_wav(url, recording_id, label):
+    """מנסה להביא קובץ הקלטה מכתובת נתונה, עם ניסיון חוזר אחד אם הקובץ
+    שחוזר נראה קצוץ. מחזיר (content, content_type) בהצלחה, או None בכישלון
+    (עם לוג מפורט שמסביר בדיוק למה - קוד שגיאה/חריגה - כדי שאפשר יהיה
+    לאבחן מה בדיוק השתבש בלי לנחש)."""
+    for attempt in (1, 2):
+        try:
+            upstream = requests.get(url, timeout=120, headers=_YEMOT_REQUEST_HEADERS)
+            upstream.raise_for_status()
+        except Exception as e:
+            log.warning(f'Recording download proxy [{label}]: recording {recording_id} attempt {attempt} '
+                        f'failed fetching {url!r}: {e}')
+            if attempt == 1:
+                time.sleep(1)
+                continue
+            return None
+        content = upstream.content
+        content_type = upstream.headers.get('Content-Type') or 'audio/wav'
+        if not _wav_looks_truncated(content):
+            return content, content_type
+        log.warning(f'Recording download proxy [{label}]: recording {recording_id} attempt {attempt} '
+                    f'looks truncated ({len(content)} bytes)')
+        if attempt == 1:
+            time.sleep(2)
+            continue
+        # אחרי 2 ניסיונות עדיין קצוץ - עדיף להחזיר את מה שיש (חלקי) מאשר
+        # כלום, במיוחד אם זה מקור הגיבוי האחרון שיש לנו
+        return content, content_type
+    return None
+
+
 def _serializer(app=None):
     app = app or current_app
     return URLSafeSerializer(app.config['SECRET_KEY'], salt=_SALT)
@@ -99,53 +130,51 @@ def download_recording(token):
         log.warning(f'Recording download proxy: recording {recording_id} not found')
         abort(404)
 
-    # מקור ראשי: בונים מחדש את כתובת ה-DownloadFile הקבועה (עם token) לפי
-    # call_id, בדיוק כמו שנעשה במקומות אחרים בקוד (למשל admin.send_recordings
-    # לפני התיקון הזה) - אומת בפועל שזו כתובת אמינה שמחזירה את הקובץ המלא,
-    # בניגוד ל-RecordingUrl הדינמי שימות המשיח שולחים ב-webhook של סיום שיחה
-    # (rec.rec_url) - זה נמצא בבדיקה בפועל כמחזיר לעיתים קרובות קובץ קצוץ/
-    # חלקי (לא ברור למה מצד ימות, אבל זה עקבי וחוזר). משתמשים ב-rec.rec_url
-    # רק כגיבוי אם משום מה אין לנו call_id או טוקן מוגדר.
+    # רשימת כתובות מועמדות לניסיון, לפי סדר עדיפות - עוברים לבאה בתור רק אם
+    # הקודמת נכשלת/מחזירה שגיאה, כדי שלקוח לעולם לא יקבל דף שגיאה כל עוד יש
+    # לנו איזושהי דרך חלופית להביא את ההקלטה:
+    # 1. YEMOT_TOKEN ממשתנה סביבה - זו בדיוק הכתובת/האימות שהיו בשימוש
+    #    במקום אחר בקוד (admin.send_recordings, לפני שהוחלף בפרוקסי הזה)
+    #    ועבדו בפועל בפרודקשן לאורך זמן.
+    # 2. yemot_token מהגדרות ה-DB (בפורמט "מספר_מערכת:סיסמה") - פחות בטוח
+    #    שמתאים ל-DownloadFile (הוגדר במקור עבור GetTextFile), אבל שווה
+    #    ניסיון אם משתנה הסביבה לא מוגדר.
+    # 3. rec.rec_url - כתובת ה-RecordingUrl הדינמית שימות שולחים ב-webhook.
+    #    נמצא בבדיקה בפועל כלא אמינה (מחזירה קבצים קצוצים) - לכן אחרונה
+    #    בעדיפות, אבל עדיין עדיפה על שום תוצאה.
+    env_token = os.environ.get('YEMOT_TOKEN', '')
     from routes.admin import get_setting
-    yemot_token = get_setting('yemot_token', '') or os.environ.get('YEMOT_TOKEN', '')
+    setting_token = get_setting('yemot_token', '')
 
-    fetch_url = None
-    if rec.call_id and yemot_token:
-        fetch_url = (f'https://www.call2all.co.il/ym/api/DownloadFile'
-                     f'?token={yemot_token}&path=ivr2:/recordings/{rec.call_id}.wav')
-    elif rec.rec_url:
-        fetch_url = rec.rec_url
+    candidates = []
+    if rec.call_id and env_token:
+        candidates.append(('env-token', f'https://www.call2all.co.il/ym/api/DownloadFile'
+                                         f'?token={env_token}&path=ivr2:/recordings/{rec.call_id}.wav'))
+    if rec.call_id and setting_token and setting_token != env_token:
+        candidates.append(('setting-token', f'https://www.call2all.co.il/ym/api/DownloadFile'
+                                             f'?token={setting_token}&path=ivr2:/recordings/{rec.call_id}.wav'))
+    if rec.rec_url:
+        candidates.append(('recording-url', rec.rec_url))
 
-    if not fetch_url:
+    if not candidates:
         log.warning(f'Recording download proxy: recording {recording_id} - no way to fetch '
-                     f'(call_id={rec.call_id!r}, yemot_token configured={bool(yemot_token)}, rec_url={rec.rec_url!r})')
+                    f'(call_id={rec.call_id!r}, env_token configured={bool(env_token)}, '
+                    f'setting_token configured={bool(setting_token)}, rec_url={rec.rec_url!r})')
         abort(404)
 
-    try:
-        # תמיד מביאים את הקובץ המלא לזיכרון בצד השרת - צריך את כל הבייטים
-        # כדי לקודד ל-base64 ולהטמיע בעמוד ה-HTML (ראו למטה).
-        upstream = requests.get(fetch_url, timeout=120, headers=_YEMOT_REQUEST_HEADERS)
-        upstream.raise_for_status()
-        content = upstream.content
-        content_type = upstream.headers.get('Content-Type') or 'audio/wav'
+    result = None
+    for label, url in candidates:
+        result = _fetch_wav(url, recording_id, label)
+        if result:
+            log.info(f'Recording download proxy: recording {recording_id} served via [{label}]')
+            break
 
-        # אם הקובץ שקיבלנו מימות המשיח נראה קצוץ (הכותרת שלו מצהירה על יותר
-        # בייטים ממה שבפועל קיבלנו) - ננסה שוב פעם אחת לפני שמוותרים.
-        if _wav_looks_truncated(content):
-            log.warning(f'Recording download proxy: recording {recording_id} looks truncated '
-                        f'({len(content)} bytes) on first fetch - retrying once')
-            time.sleep(2)
-            upstream = requests.get(fetch_url, timeout=120, headers=_YEMOT_REQUEST_HEADERS)
-            upstream.raise_for_status()
-            content = upstream.content
-            content_type = upstream.headers.get('Content-Type') or content_type
-            if _wav_looks_truncated(content):
-                log.error(f'Recording download proxy: recording {recording_id} STILL looks '
-                          f'truncated after retry ({len(content)} bytes) - serving it anyway, '
-                          f'better than nothing, but this needs investigation with Yemot.')
-    except Exception:
-        log.exception(f'Recording download proxy: failed to fetch upstream for recording {recording_id}')
+    if not result:
+        log.error(f'Recording download proxy: recording {recording_id} - ALL {len(candidates)} '
+                  f'source(s) failed, giving up')
         abort(502)
+
+    content, content_type = result
 
     from routes.download_utils import render_data_uri_download_page
     return render_data_uri_download_page(
