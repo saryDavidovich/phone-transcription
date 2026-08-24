@@ -636,7 +636,15 @@ def download_audio(id):
     rec_url = f'https://www.call2all.co.il/ym/api/DownloadFile?username={yemot_username}&password={yemot_password}&path=ivr2:/recordings/{call_id}.wav'
 
     try:
-        r = req.get(rec_url, timeout=60)
+        # User-Agent "רגיל" - ראו הערה מפורטת ב-routes/recording_proxy.py:
+        # בלי זה ימות המשיח (או הגנה שיושבת לפניהם) מגיבים לפעמים עם שגיאת
+        # 418 לבקשות שרת-לשרת "חשודות". אם השגיאה נמשכת גם עם ה-header הזה,
+        # כדאי לבדוק שמשתני הסביבה YEMOT_USERNAME/YEMOT_PASSWORD אכן מוגדרים
+        # נכון בריילוואי - אם הם ריקים, הבקשה נשלחת עם username/password ריקים.
+        r = req.get(rec_url, timeout=60, headers={
+            'User-Agent': ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+                            '(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'),
+        })
         r.raise_for_status()
         return send_file(
             io.BytesIO(r.content),
@@ -662,7 +670,10 @@ def play_audio(id):
     rec_url = f'https://www.call2all.co.il/ym/api/DownloadFile?username={yemot_username}&password={yemot_password}&path=ivr2:/recordings/{call_id}.wav'
 
     try:
-        r = req.get(rec_url, timeout=60)
+        r = req.get(rec_url, timeout=60, headers={
+            'User-Agent': ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+                            '(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'),
+        })
         r.raise_for_status()
         response = make_response(r.content)
         response.headers['Content-Type'] = 'audio/wav'
