@@ -68,6 +68,33 @@ def _wav_looks_truncated(content):
     return False
 
 
+def _fetch_wav_plain(url, recording_id, label):
+    """בדיוק אותה שיטת הורדה שמשמשת בפועל, ובאופן מוכח עובד, את צינור
+    התמלול (services/transcribe.py:_gemini_from_url) - קריאת requests.get
+    פשוטה יחידה, בלי User-Agent מיוחד, בלי ניסיון חוזר, timeout ארוך.
+    ההיגיון (לפי הצעת המשתמש): אם ההורדה לצורך תמלול - שקורית מיד אחרי סיום
+    השיחה, מאותה כתובת rec_url בדיוק - תמיד מביאה קובץ שלם (אחרת התמלולים
+    היו יוצאים חתוכים), אז יכול להיות שהתוספות שלנו (User-Agent מזויף,
+    timeout קצר יותר, ניסיון חוזר מהיר) הן עצמן הגורם לבעיה, ולא פתרון לה.
+    מחזיר (content, content_type) תמיד (גם אם קצוץ - משאירים את ההחלטה
+    למי שקורא לפונקציה), או None אם הבקשה נכשלה לגמרי."""
+    try:
+        upstream = requests.get(url, timeout=300)
+        upstream.raise_for_status()
+    except Exception as e:
+        log.warning(f'Recording download proxy [{label}]: recording {recording_id} '
+                    f'(plain fetch, like transcription) failed fetching {url!r}: {e}')
+        return None
+    content = upstream.content
+    content_type = upstream.headers.get('Content-Type') or 'audio/wav'
+    declared_len = upstream.headers.get('Content-Length')
+    truncated = _wav_looks_truncated(content)
+    log.info(f'Recording download proxy [{label}]: recording {recording_id} (plain fetch, like '
+             f'transcription) - status={upstream.status_code}, declared Content-Length={declared_len!r}, '
+             f'actual received={len(content)} bytes, looks_truncated={truncated}')
+    return content, content_type
+
+
 def _fetch_wav(url, recording_id, label):
     """מנסה להביא קובץ הקלטה מכתובת נתונה, עם ניסיון חוזר אחד אם הקובץ
     שחוזר נראה קצוץ. מחזיר (content, content_type) בהצלחה, או None בכישלון
@@ -86,10 +113,28 @@ def _fetch_wav(url, recording_id, label):
             return None
         content = upstream.content
         content_type = upstream.headers.get('Content-Type') or 'audio/wav'
+        declared_len = upstream.headers.get('Content-Length')
         if not _wav_looks_truncated(content):
+            log.info(f'Recording download proxy [{label}]: recording {recording_id} attempt {attempt} OK - '
+                     f'status={upstream.status_code}, url={url!r}, declared Content-Length={declared_len!r}, '
+                     f'actual received={len(content)} bytes')
             return content, content_type
+        # אבחון קריטי: האם ימות בעצמם כבר הצהירו על גודל קטן (כלומר זה כל מה
+        # שהיה להם לתת לנו באותו רגע - תומך בכיוון של תזמון/קובץ שעדיין לא
+        # נגמר להיכתב אצלם), או שהם הצהירו על הגודל המלא אבל בפועל קיבלנו
+        # פחות בייטים מזה (תומך בכיוון של חיבור שנחתך באמצע - תקלת רשת/תשתית)?
+        mismatch = ''
+        try:
+            if declared_len is not None and int(declared_len) != len(content):
+                mismatch = (f' *** MISMATCH: server declared {declared_len} bytes but we only '
+                            f'received {len(content)} - connection cut mid-transfer ***')
+            elif declared_len is not None:
+                mismatch = f' (server itself only declared {declared_len} bytes - this is genuinely all they sent)'
+        except (TypeError, ValueError):
+            pass
         log.warning(f'Recording download proxy [{label}]: recording {recording_id} attempt {attempt} '
-                    f'looks truncated ({len(content)} bytes)')
+                    f'looks truncated - status={upstream.status_code}, url={url!r}, '
+                    f'declared Content-Length={declared_len!r}, actual received={len(content)} bytes{mismatch}')
         if attempt == 1:
             time.sleep(2)
             continue
@@ -130,8 +175,27 @@ def download_recording(token):
         log.warning(f'Recording download proxy: recording {recording_id} not found')
         abort(404)
 
-    # רשימת כתובות מועמדות לניסיון, לפי סדר עדיפות - עוברים לבאה בתור רק אם
-    # הקודמת נכשלת/מחזירה שגיאה, כדי שלקוח לעולם לא יקבל דף שגיאה כל עוד יש
+    # ניסיון ראשון ועיקרי: בדיוק אותה שיטה שמוכחת עובדת בפועל בצינור התמלול
+    # (services/transcribe.py:_gemini_from_url) - rec.rec_url, requests.get
+    # פשוט בלי כותרות מיוחדות. אם זה מחזיר קובץ שלם - זהו, סיימנו, בלי צורך
+    # בשום דבר נוסף.
+    plain_result = None
+    if rec.rec_url:
+        plain_result = _fetch_wav_plain(rec.rec_url, recording_id, 'recording-url-plain')
+
+    if plain_result and not _wav_looks_truncated(plain_result[0]):
+        log.info(f'Recording download proxy: recording {recording_id} served via [recording-url-plain]')
+        content, content_type = plain_result
+        from routes.download_utils import render_data_uri_download_page
+        return render_data_uri_download_page(
+            content,
+            hebrew_filename=f'הקלטה {recording_id}.wav',
+            mimetype=content_type,
+            page_title='ההקלטה מוכנה להורדה',
+        )
+
+    # השיטה ה"פשוטה" נכשלה/החזירה קובץ קצוץ - עוברים לרשימת מקורות גיבוי
+    # (עם כותרות/ניסיון חוזר), כדי שלקוח לעולם לא יקבל דף שגיאה כל עוד יש
     # לנו איזושהי דרך חלופית להביא את ההקלטה:
     # 1. YEMOT_TOKEN ממשתנה סביבה - זו בדיוק הכתובת/האימות שהיו בשימוש
     #    במקום אחר בקוד (admin.send_recordings, לפני שהוחלף בפרוקסי הזה)
@@ -139,9 +203,7 @@ def download_recording(token):
     # 2. yemot_token מהגדרות ה-DB (בפורמט "מספר_מערכת:סיסמה") - פחות בטוח
     #    שמתאים ל-DownloadFile (הוגדר במקור עבור GetTextFile), אבל שווה
     #    ניסיון אם משתנה הסביבה לא מוגדר.
-    # 3. rec.rec_url - כתובת ה-RecordingUrl הדינמית שימות שולחים ב-webhook.
-    #    נמצא בבדיקה בפועל כלא אמינה (מחזירה קבצים קצוצים) - לכן אחרונה
-    #    בעדיפות, אבל עדיין עדיפה על שום תוצאה.
+    # 3. rec.rec_url שוב, אבל עם כותרות + ניסיון חוזר (למקרה שזה כן עוזר).
     env_token = os.environ.get('YEMOT_TOKEN', '')
     from routes.admin import get_setting
     setting_token = get_setting('yemot_token', '')
@@ -154,25 +216,26 @@ def download_recording(token):
         candidates.append(('setting-token', f'https://www.call2all.co.il/ym/api/DownloadFile'
                                              f'?token={setting_token}&path=ivr2:/recordings/{rec.call_id}.wav'))
     if rec.rec_url:
-        candidates.append(('recording-url', rec.rec_url))
-
-    if not candidates:
-        log.warning(f'Recording download proxy: recording {recording_id} - no way to fetch '
-                    f'(call_id={rec.call_id!r}, env_token configured={bool(env_token)}, '
-                    f'setting_token configured={bool(setting_token)}, rec_url={rec.rec_url!r})')
-        abort(404)
+        candidates.append(('recording-url-retry', rec.rec_url))
 
     result = None
     for label, url in candidates:
         result = _fetch_wav(url, recording_id, label)
-        if result:
+        if result and not _wav_looks_truncated(result[0]):
             log.info(f'Recording download proxy: recording {recording_id} served via [{label}]')
             break
+        result = None
 
     if not result:
-        log.error(f'Recording download proxy: recording {recording_id} - ALL {len(candidates)} '
-                  f'source(s) failed, giving up')
-        abort(502)
+        # אף מקור לא החזיר קובץ שלם - עדיף להחזיר את התוצאה ה"פשוטה" (אם יש,
+        # גם אם קצוצה) מאשר שגיאה גמורה ללקוח
+        if plain_result:
+            log.error(f'Recording download proxy: recording {recording_id} - all sources truncated/failed, '
+                      f'falling back to (truncated) plain-fetch result rather than an error page')
+            result = plain_result
+        else:
+            log.error(f'Recording download proxy: recording {recording_id} - ALL sources failed, giving up')
+            abort(502)
 
     content, content_type = result
 
