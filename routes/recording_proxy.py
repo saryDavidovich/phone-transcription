@@ -18,7 +18,7 @@
 import os
 import logging
 import requests
-from flask import Blueprint, Response, abort, stream_with_context, current_app
+from flask import Blueprint, Response, abort, current_app
 from itsdangerous import URLSafeSerializer, BadSignature
 
 log = logging.getLogger(__name__)
@@ -60,25 +60,24 @@ def download_recording(token):
         abort(404)
 
     try:
-        upstream = requests.get(rec.rec_url, stream=True, timeout=30)
+        # בכוונה בלי stream=True: מביאים את הקובץ המלא לזיכרון בצד השרת לפני
+        # שמחזירים אותו ללקוח. הסיבה: סינוני תוכן כמו נטפרי מריצים את ההורדה
+        # דרך פרוקסי סריקה משלהם, וחלק מהם דורשים לדעת מראש את גודל הקובץ
+        # המדויק (Content-Length) כדי לאשר/לסרוק אותו - תגובה עם
+        # Transfer-Encoding: chunked (גודל לא ידוע מראש) עלולה להיכשל אצלם
+        # בשקט ("סוג קובץ לא נתמך בסינון אוטומטי"). קבצי ההקלטה לא גדולים
+        # מספיק כדי שזה יהווה בעיית זיכרון אמיתית (זהה לדפוס הקיים כבר
+        # ב-admin.download_audio/play_audio, שגם הם לא עושים streaming).
+        upstream = requests.get(rec.rec_url, timeout=120)
         upstream.raise_for_status()
     except Exception:
         log.exception(f'Recording download proxy: failed to fetch upstream for recording {recording_id}')
         abort(502)
 
     content_type = upstream.headers.get('Content-Type') or 'audio/wav'
+    content = upstream.content
 
-    def generate():
-        try:
-            for chunk in upstream.iter_content(chunk_size=65536):
-                if chunk:
-                    yield chunk
-        finally:
-            upstream.close()
-
-    resp = Response(stream_with_context(generate()), content_type=content_type)
+    resp = Response(content, content_type=content_type)
     resp.headers['Content-Disposition'] = f'attachment; filename="recording_{recording_id}.wav"'
-    content_length = upstream.headers.get('Content-Length')
-    if content_length:
-        resp.headers['Content-Length'] = content_length
+    resp.headers['Content-Length'] = str(len(content))
     return resp
