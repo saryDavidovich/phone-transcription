@@ -83,10 +83,19 @@ def nedarim_webhook():
        Customer.phone), ואם לא נמצא - לפי שם בדיוק כפי שמופיע אצל נדרים
        פלוס (ClientName מול Institution.name).
     4. מניעת זיכוי כפול: למוסדות - לפי TransactionId מול provider_ref שכבר
-       נשמר ב-CreateTransaction. ללקוח בודד - לפי מספר האישור (Confirmation),
-       שמתאים בפועל למספר DealSuccessfully שימות המשיח מחזירים בטעינה
-       טלפונית (שלוחה 200) - כדי לא לזכות פעמיים את אותה עסקה כשהיא מדווחת
-       גם דרך ימות וגם ישירות מנדרים פלוס.
+       נשמר ב-CreateTransaction. ללקוח בודד - לפי TransactionId שנשמר בתיאור
+       העסקה שלנו ([נדרים:<מזהה>]) - כדי שאם הוובהוק הזה נקרא פעמיים על אותה
+       עסקה (למשל בגלל retry מצד נדרים פלוס), לא נזכה פעמיים.
+
+    הערה חשובה: זהו כעת המנגנון ה**יחיד** שמזכה יתרת לקוח בודד על טעינה
+    טלפונית דרך שלוחת ימות המשיח (200) - ה-callback הישן שקורא את קובץ הלוג
+    של ימות (nedarim_callback, להלן) עדיין קיים כדי שימות לא יקבל שגיאה, אבל
+    כבר לא נוגע ביתרה בכלל. הסיבה: מספר "האישור" שימות מחזיר (DealSuccessfully)
+    לא תמיד תואם בפועל למספר ה-Confirmation שמגיע כאן מנדרים פלוס (נבדק
+    ונמצא שלא זהים בכל המקרים), מה שגרם לזיכוי כפול אמיתי אצל לקוחות. מאחר
+    שהזיכוי הכפול עצמו הוכיח שהוובהוק הזה כן נורה כראוי גם על טעינות שמקורן
+    בימות (מתויגות Groupe="תמלול פון" עם הטלפון הנכון) - אין שום צורך במנגנון
+    השני, וההסתמכות הבלעדית על הוובהוק פותרת את הכפילות מהשורש.
     """
     from app import db
     from models import Institution, InstitutionChargeLog, Customer, Transaction, ManagerMessage
@@ -102,10 +111,11 @@ def nedarim_webhook():
         return jsonify({'ok': True})  # אין מה לעשות עם זה, אבל לא נחזיר שגיאה
 
     # tx_id (TransactionId/ID) = המזהה הפנימי של נדרים פלוס עצמם - משמש
-    # להתאמה/כפילות בצד המוסדות (InstitutionChargeLog.provider_ref, שנשמר
-    # כבר ב-CreateTransaction). confirmation = מספר האישור מהבנק (Confirmation)
-    # - זה השדה שווידאתם בלוגים בפועל שזהה למה שימות מחזירים כ-DealSuccessfully,
-    # ולכן הוא זה שמשמש להתאמת כפילות מול הטעינה הטלפונית של לקוח בודד.
+    # להתאמה/כפילות גם בצד המוסדות (InstitutionChargeLog.provider_ref, שנשמר
+    # כבר ב-CreateTransaction) וגם בצד לקוח בודד (מוטבע בתיאור העסקה
+    # כ-[נדרים:<tx_id>]). confirmation נשמר רק לצורך תיעוד/לוג - התברר בפועל
+    # שהוא לא בהכרח זהה למספר האישור שימות המשיח מחזיר, ולכן אינו משמש עוד
+    # להתאמת כפילות (ראו הערה בתחילת הפונקציה).
     tx_id = str(data.get('TransactionId') or data.get('ID') or '').strip()
     confirmation = str(data.get('Confirmation') or '').strip()
     groupe = (data.get('Groupe') or '').strip()
@@ -178,33 +188,14 @@ def nedarim_webhook():
         bonus = _calculate_bonus_public(amount)
         total_credit = amount + bonus
 
-        # הגנה מפני זיכוי כפול חוצה-מנגנונים: אם הטעינה בוצעה בפועל דרך
-        # שלוחת התשלום הטלפונית של ימות המשיח (שלוחה 200) שמסלקת גם היא מול
-        # נדרים פלוס - אותה עסקה עלולה לעדכן אותנו פעמיים: פעם דרך ה-callback
-        # הקיים של ימות (nedarim_callback, לפי קובץ הלוג שלהם) ופעם דרך
-        # ה-Webhook הזה (ישירות מנדרים פלוס). מספר האישור (Confirmation) שנדרים
-        # פלוס שולחים כאן זהה בפועל למה שימות מחזירים כ-DealSuccessfully (וודא
-        # זאת בלוגים) - זו ההתאמה היחידה שבודקים, לפי מספר עסקה בלבד.
-        if confirmation:
-            exact_dup = Transaction.query.filter(
-                Transaction.customer_id == customer.id,
-                Transaction.description.contains(f'אישור: {confirmation}'),
-            ).first()
-            if exact_dup:
-                log.info(f'Nedarim webhook: confirmation {confirmation} already processed via yemot callback '
-                         f'(transaction #{exact_dup.id}) - skipping')
-                db.session.commit()
-                return jsonify({'ok': True})
-
         customer.balance = (customer.balance or 0) + total_credit
         desc = f'טעינת יתרה דרך נדרים פלוס ₪{amount:.2f}'
         if bonus > 0:
             desc += f' + בונוס ₪{bonus:.2f} = סה"כ ₪{total_credit:.2f}'
-        # פורמט "אישור: <מספר אישור>" נשמר בכוונה - זה בדיוק הפורמט שה-callback
-        # הישן של ימות (nedarim_callback) בודק כפילות לפיו, כך שאם העדכון של
-        # ימות יגיע אחרי זה עם אותו מספר אישור - הוא יזהה שכבר טופל ולא יזכה שוב.
         if confirmation:
             desc += f' | אישור: {confirmation}'
+        # [נדרים:<tx_id>] הוא המזהה היחיד ששימוש בו למניעת זיכוי כפול (בדיקה
+        # למעלה, לפני שהגענו לכאן) - ראו הבדיקה תחת "מניעת זיכוי כפול".
         desc += f' [נדרים:{tx_id}]'
         txn = Transaction(customer_id=customer.id, amount=total_credit, type='charge', description=desc)
         db.session.add(txn)
@@ -260,11 +251,24 @@ def _calculate_bonus_public(amount):
 @payment_bp.route('/nedarim/callback', methods=['GET', 'POST'])
 def nedarim_callback():
     """
-    נקרא משלוחה 200 אחרי סליקה מוצלחת.
-    קורא את קובץ הלוג מימות ומעדכן יתרה.
+    נקרא משלוחה 200 (ימות המשיח) אחרי סליקה מוצלחת.
+
+    הערה חשובה: הפונקציה הזו **כבר לא מזכה יתרה ולא שולחת קבלה** - היא
+    נשארת רק כדי שימות המשיח יקבל תשובה תקינה (go_to_folder=/) ולא יציג
+    שגיאה למשתמש בשלוחה. הזיכוי בפועל על טעינות טלפוניות (בדיוק כמו כל
+    טעינה אחרת) מתבצע אך ורק דרך nedarim_webhook (ה-Webhook הקבוע ברמת
+    המוסד בנדרים פלוס), שיורה גם על עסקאות שמקורן בימות (כל עוד הן מתויגות
+    Groupe="תמלול פון" עם הטלפון הנכון - וזה תמיד המצב כאן).
+
+    הסיבה לשינוי: בעבר הפונקציה הזו כן זיכתה יתרה (בהתבסס על קובץ הלוג של
+    ימות), עם הגנת כפילות לפי מספר "אישור" (DealSuccessfully) שהיה אמור
+    להיות זהה למספר Confirmation שנדרים פלוס שולחים ב-Webhook. בפועל
+    התברר שהמספרים האלה לא תמיד תואמים, מה שגרם לזיכוי כפול אמיתי אצל
+    לקוחות (טעינה אחת -> שני זיכויים, אחד מכאן ואחד מה-Webhook). מכיוון
+    שהזיכוי הכפול עצמו מוכיח שה-Webhook כבר יורה כראוי גם על טעינות
+    שמקורן בימות, ההסתמכות הבלעדית עליו (ורק עליו) פותרת את הכפילות
+    מהשורש בלי לאבד שום פונקציונליות.
     """
-    from app import db
-    from models import Customer, Transaction
     from routes.admin import get_setting
     import requests as req
 
@@ -342,74 +346,16 @@ def nedarim_callback():
             break
 
     if amount <= 0:
-        log.warning(f"No valid amount found for phone={phone}")
+        log.info(f"Nedarim callback (yemot): no valid amount found for phone={phone} - "
+                 f"no action taken, balance updates now flow only through nedarim_webhook")
         return 'go_to_folder=/', 200, {'Content-Type': 'text/plain; charset=utf-8'}
 
-    customer = Customer.query.filter_by(phone=phone).first()
-    if not customer:
-        log.warning(f"Customer not found for phone={phone}")
-        return 'go_to_folder=/', 200, {'Content-Type': 'text/plain; charset=utf-8'}
-
-    # בדיקת כפילות לפי מספר אישור (DealSuccessfully) - זהה בפועל למספר
-    # Confirmation שנדרים פלוס שולחים ב-Webhook הכללי (nedarim_webhook, מאומת
-    # ידנית מול הלוגים). אותו webhook כותב את התיאור שלו בפורמט
-    # "...| אישור: <מספר אישור> [נדרים:<מזהה>]" בדיוק כדי שהבדיקה הזו תתפוס
-    # גם אותו אם הוא הגיע ראשון לאותה עסקה - וההפך: הבדיקה שם תופסת את זה.
-    # ההתאמה היא לפי מספר עסקה בלבד, בלי חלון זמן/סכום נוסף.
-    if approval:
-        existing = Transaction.query.filter(
-            Transaction.customer_id == customer.id,
-            Transaction.description.contains(f'אישור: {approval}')
-        ).first()
-        if existing:
-            log.warning(f"Transaction {approval} already processed, skipping")
-            return 'go_to_folder=/', 200, {'Content-Type': 'text/plain; charset=utf-8'}
-
-    # חישוב בונוס
-    bonus = _calculate_bonus(amount, get_setting)
-    total_credit = amount + bonus
-
-    customer.balance += total_credit
-
-    desc = f'טעינת ארנק ₪{amount:.2f}'
-    if bonus > 0:
-        desc += f' + בונוס ₪{bonus:.2f} = סה"כ ₪{total_credit:.2f}'
-    if approval:
-        desc += f' | אישור: {approval}'
-
-    txn = Transaction(
-        customer_id=customer.id,
-        amount=total_credit,
-        type='charge',
-        description=desc,
-    )
-    db.session.add(txn)
-    db.session.commit()
-
-    log.info(f"Payment OK: customer={customer.id}, +{total_credit}, balance={customer.balance}")
-
-    # הפעל הקלטות ממתינות ב-thread נפרד — המתן 3 שניות כדי לוודא שהטעינה נרשמה ב-DB
-    from services.transcribe import process_pending_recordings
-    from routes.email_inbound import process_pending_ocr
-    import threading, time
-
-    def _delayed_process(customer_id):
-        time.sleep(3)
-        process_pending_recordings(customer_id)
-        process_pending_ocr(customer_id)
-
-    t = threading.Thread(target=_delayed_process, args=(customer.id,), daemon=True)
-    t.start()
-
-    # הפקת קבלה ושליחה למייל - ב-thread נפרד כדי לא לעכב את ימות
-    if approval and customer.email:
-        import threading
-        t = threading.Thread(
-            target=_issue_receipt_and_send,
-            args=(approval, customer.email, amount, bonus, total_credit, get_setting),
-            daemon=True
-        )
-        t.start()
+    # שים לב: מכוונה, מ-כאן ואילך הפונקציה **לא** נוגעת ביתרה ולא שולחת קבלה.
+    # השורה הזו נשארת כדי שיהיה תיעוד בלוגים של מה שהתקבל מימות (לצורך מעקב/
+    # השוואה בלבד) - הזיכוי בפועל קורה אך ורק ב-nedarim_webhook כשהעדכון
+    # מגיע ישירות מנדרים פלוס.
+    log.info(f"Nedarim callback (yemot): phone={phone}, amount={amount}, approval={approval} - "
+             f"logged only, balance NOT updated here (handled exclusively by nedarim_webhook)")
 
     return 'go_to_folder=/', 200, {'Content-Type': 'text/plain; charset=utf-8'}
 

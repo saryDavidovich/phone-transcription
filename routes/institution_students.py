@@ -146,9 +146,11 @@ def download_excel_template():
     buf = io.BytesIO()
     wb.save(buf)
     buf.seek(0)
-    return send_file(
-        buf, as_attachment=True, download_name='תבנית_ייבוא_תלמידים.xlsx',
+    from routes.download_utils import send_file_with_hebrew_name
+    return send_file_with_hebrew_name(
+        send_file, buf, 'תבנית_ייבוא_תלמידים.xlsx',
         mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        ascii_fallback='students_import_template.xlsx',
     )
 
 
@@ -236,8 +238,12 @@ def export_excel():
     buf = io.BytesIO()
     wb.save(buf)
     buf.seek(0)
-    return send_file(buf, as_attachment=True, download_name='תלמידים.xlsx',
-                      mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    from routes.download_utils import send_file_with_hebrew_name
+    return send_file_with_hebrew_name(
+        send_file, buf, 'תלמידים.xlsx',
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        ascii_fallback='students.xlsx',
+    )
 
 
 @institution_students_bp.route('/institution/students/<int:student_id>')
@@ -271,11 +277,12 @@ def download_student_recording(student_id, recording_id):
     output = io.BytesIO()
     doc.save(output)
     output.seek(0)
-    return send_file(
-        output,
-        as_attachment=True,
-        download_name=f"תמלול - {student.name or 'תלמיד'} - {recording.created_at.strftime('%d-%m-%Y') if recording.created_at else recording.id}.docx",
+    from routes.download_utils import send_file_with_hebrew_name
+    hebrew_name = f"תמלול - {student.name or 'תלמיד'} - {recording.created_at.strftime('%d-%m-%Y') if recording.created_at else recording.id}.docx"
+    return send_file_with_hebrew_name(
+        send_file, output, hebrew_name,
         mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        ascii_fallback=f'transcript_{recording.id}.docx',
     )
 
 
