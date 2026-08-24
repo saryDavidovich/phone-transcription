@@ -20,12 +20,25 @@
 
 עדכון 2 (אומת בפועל): גם עמוד ה-data: URI עצמו, כשהוא גדול (הקלטה של כמה
 שניות -> ~175KB אחרי base64), הגיע קצוץ למשתמש הסופי - למרות שהשרת שלנו
-קיבל/שלח את הכל במלואו (אומת בלוגים). ההשערה: מתווך שלא מריץ JavaScript
-(למשל בוט/סורק קישורים אוטומטי) קורא רק חלק מהתגובה. הפתרון: דו-שלבי -
-עמוד HTML ראשוני קטן וקליל בלי שום תוכן כבד (download_recording), ורק
-לאחר טעינתו בדפדפן אמיתי, JavaScript מושך בנפרד את תוכן הקובץ כ-JSON
-(download_recording_data) ובונה ממנו קובץ מקומי (Blob) - ראו הסבר מפורט
-ב-render_lazy_download_page שב-download_utils.py.
+קיבל/שלח את הכל במלואו (אומת בלוגים). ניסינו דף HTML קטן + JSON אחד גדול
+שה-JavaScript מביא בנפרד (עדיין נחתך - אומת עם כלי הפיתוח של הדפדפן:
+Size בפועל היה חלק קטן ממה שהיה צריך, אף שהשרת שלח הכל).
+
+עדכון 3 (ניסיון שננטש): פיצול להורדה בהרבה חתיכות JSON קטנות (~9KB כל
+אחת) עם הרכבה מחדש ב-JavaScript. עבד בבדיקה מלאכותית אך המשתמש ביקש
+לחזור לגישה הפשוטה והסטנדרטית במקום להמשיך לפצל תגובות.
+
+עדכון 4 (הפתרון הנוכחי): הקלטה מובאת מימות ומוגשת ללקוח כהורדת קובץ
+**רגילה וסטנדרטית** לגמרי - send_file עם Content-Disposition: attachment
+ושם עברי תקין, בדיוק כמו כל הורדת קובץ רגילה. מגישים ישירות מהזיכרון
+(BytesIO, לא קובץ בדיסק) - כך אין בכלל צורך "לזכור למחוק" שום דבר; ניסיתי
+במקור לשמור לדיסק ולמחוק אחרי השליחה, אבל גיליתי ש-send_file כ-attachment
+עובד במצב passthrough שמדלג בדיוק על מנגנון ה-cleanup (call_on_close) -
+אומת בבדיקה עצמאית. הזיכרון פשוט משתחרר לבד כשהבקשה מסתיימת.
+
+שימו לב: זו אותה צורת תגובה (attachment בינארי) שבמקור גרמה לחסימת נטפרי
+לפני שעברנו ל-data: URI (ראו עדכון 1) - יכול להיות שנחזור לאותה בעיה,
+הבדיקה בפועל תגיד.
 """
 import os
 import time
@@ -246,34 +259,33 @@ def _fetch_recording_audio(recording_id, rec):
 
 @download_bp.route('/dl/rec/<token>')
 def download_recording(token):
-    """שלב 1: עמוד HTML קטן וקליל בלבד (בלי הקובץ בפנים!) - ראו הסבר מפורט
-    ב-render_lazy_download_page שב-download_utils.py. הדפדפן של הלקוח הוא
-    זה שיריץ את ה-JavaScript שמושך את תוכן הקובץ בפועל, מה-route השני
-    למטה (dl/rec/<token>/data)."""
-    recording_id, rec = _resolve_recording_id(token)  # מוודא תקינות מוקדם, גם אם לא בשימוש ישיר כאן
-    from routes.download_utils import render_lazy_download_page
-    return render_lazy_download_page(
-        fetch_url=f'/dl/rec/{token}/data',
-        page_title='ההקלטה מוכנה להורדה',
-        loading_text='מביאים את ההקלטה מימות המשיח...',
-    )
+    """מביאה את ההקלטה מימות, ומגישה אותה ללקוח כקובץ הורדה **רגיל
+    וסטנדרטי** (send_file, עם Content-Disposition: attachment ושם עברי
+    תקין) - בדיוק כמו כל הורדת קובץ רגילה משרת, בלי data: URI, בלי JSON,
+    בלי חתיכות.
 
+    הערה על "שמירה בשרת ואז מחיקה": ניסיתי במקור לשמור לקובץ זמני בדיסק
+    ולמחוק אותו אחרי השליחה (response.call_on_close) - אבל גיליתי בבדיקה
+    ש-send_file של Flask, כשמוגש כ-attachment, עובד במצב "direct passthrough"
+    שמדלג בדיוק על מנגנון ה-cleanup הזה (אימתתי את זה בבדיקה עצמאית - ה-
+    callback פשוט לא הופעל). הפתרון הפשוט והבטוח יותר: לא לגעת בדיסק בכלל -
+    מגישים ישירות מהזיכרון (BytesIO). כך אין שום עקבה על הדיסק מלכתחילה,
+    ואין שום קובץ שצריך "לזכור" למחוק.
 
-@download_bp.route('/dl/rec/<token>/data')
-def download_recording_data(token):
-    """שלב 2: נטען רק ע"י JavaScript מתוך הדף שב-download_recording, לא
-    ע"י בקשת ניווט ישירה של הדפדפן. מחזיר JSON עם הקובץ מקודד ב-base64 -
-    לא HTML גדול, ולא תגובת attachment בינארית (משתי הסיבות שכבר טיפלנו
-    בהן: לא רוצים שסורק שלא מריץ JS יראה/יקטע תוכן כבד, ולא רוצים תגובת
-    קובץ בינארי גולמית שסינון תוכן עלול לחסום)."""
-    import base64
-    from flask import jsonify
+    שימו לב: זו אותה צורת תגובה (attachment בינארי) שבמקור גרמה לחסימת
+    נטפרי לפני שעברנו ל-data: URI (ראו עדכון 1 למעלה) - יכול להיות שנחזור
+    לאותה בעיה, הבדיקה בפועל תגיד."""
+    import io
+    from flask import send_file
+    from routes.download_utils import send_file_with_hebrew_name
 
     recording_id, rec = _resolve_recording_id(token)
     content, content_type = _fetch_recording_audio(recording_id, rec)
 
-    return jsonify({
-        'filename': f'הקלטה {recording_id}.wav',
-        'mimetype': content_type,
-        'b64': base64.b64encode(content).decode('ascii'),
-    })
+    return send_file_with_hebrew_name(
+        send_file,
+        io.BytesIO(content),
+        hebrew_filename=f'הקלטה {recording_id}.wav',
+        mimetype=content_type or 'audio/wav',
+        ascii_fallback=f'recording_{recording_id}.wav',
+    )

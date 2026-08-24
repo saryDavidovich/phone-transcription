@@ -188,3 +188,117 @@ def render_lazy_download_page(fetch_url, page_title='הקובץ מוכן להו�
 </body>
 </html>'''
     return Response(page, mimetype='text/html; charset=utf-8')
+
+
+def render_chunked_download_page(chunk_url_base, page_title='הקובץ מוכן להורדה', loading_text='מכינים את הקובץ...'):
+    """כמו render_lazy_download_page, אבל מביאה את הקובץ בהרבה בקשות JSON
+    **קטנות** ברצף (חתיכה-חתיכה, לפי אינדקס) במקום בבקשה אחת גדולה, ומרכיבה
+    אותן מחדש בצד הדפדפן לפני שמירת הקובץ.
+
+    למה זה קיים (אומת בפועל): גם עמוד HTML גדול עם data: URI וגם בקשת JSON
+    אחת גדולה - שתיהן הגיעו קצוצות למשתמש הסופי, אף שהשרת שלח/קיבל את הכל
+    במלואו (אומת בלוגים ובכלי הפיתוח של הדפדפן: ה-Size בפועל שהתקבל היה
+    הרבה יותר קטן ממה שהיה אמור). כלומר משהו בדרך בין השרת ללקוח מקטין
+    תגובות HTTP "כבדות" מדי, בלי קשר אם הן HTML או JSON. הפתרון שעוקף את זה
+    בלי תלות במי בדיוק עושה את זה: לא לשלוח אף פעם תגובה אחת גדולה - לפצל
+    לכמה עשרות תגובות קטנות (כמה KB כל אחת), ולהרכיב אותן מחדש בדפדפן.
+
+    chunk_url_base צריך להיות הבסיס לנתיב חתיכות, כך שהוספת '/<אינדקס>'
+    (למשל chunk_url_base + '/0') מחזירה JSON בפורמט:
+    {"filename": "...", "mimetype": "...", "index": 0, "total_chunks": N,
+     "is_last": bool, "b64_chunk": "..."}."""
+    import html as _html
+    from flask import Response
+
+    safe_title = _html.escape(page_title)
+    safe_loading = _html.escape(loading_text)
+    safe_chunk_base = _html.escape(chunk_url_base, quote=True)
+
+    page = f'''<!DOCTYPE html>
+<html dir="rtl" lang="he">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{safe_title}</title>
+<style>
+  body {{ font-family: Arial, Helvetica, sans-serif; background:#f8fafc; display:flex;
+         align-items:center; justify-content:center; min-height:100vh; margin:0; }}
+  .card {{ background:#fff; border-radius:12px; box-shadow:0 2px 12px rgba(0,0,0,.08);
+          padding:32px 28px; text-align:center; max-width:420px; }}
+  h2 {{ color:#1d4ed8; margin:0 0 8px; }}
+  p {{ color:#6b7280; margin:0 0 20px; word-break:break-word; }}
+  a.btn {{ display:inline-block; background:#ea580c; color:#fff; font-weight:700;
+          padding:12px 28px; border-radius:8px; text-decoration:none; font-size:16px; }}
+  a.btn:hover {{ background:#c2410c; }}
+  #err {{ color:#dc2626; display:none; }}
+  #bar {{ background:#e5e7eb; border-radius:6px; height:8px; margin:0 0 16px; overflow:hidden; }}
+  #barFill {{ background:#1d4ed8; height:100%; width:0%; transition:width .15s; }}
+</style>
+</head>
+<body>
+<div class="card">
+  <h2>{safe_title}</h2>
+  <div id="bar"><div id="barFill"></div></div>
+  <p id="status">{safe_loading}</p>
+  <p id="err"></p>
+</div>
+<script>
+(function() {{
+  var statusEl = document.getElementById('status');
+  var errEl = document.getElementById('err');
+  var barFill = document.getElementById('barFill');
+  var chunks = [];
+  var filename = 'file';
+  var mimetype = 'application/octet-stream';
+
+  function fetchChunk(i) {{
+    return fetch('{safe_chunk_base}/' + i)
+      .then(function(r) {{
+        if (!r.ok) throw new Error('שגיאה בשרת (' + r.status + ')');
+        return r.json();
+      }})
+      .then(function(data) {{
+        chunks[data.index] = data.b64_chunk;
+        filename = data.filename || filename;
+        mimetype = data.mimetype || mimetype;
+        var pct = Math.round(((data.index + 1) / data.total_chunks) * 100);
+        barFill.style.width = pct + '%';
+        statusEl.textContent = 'מוריד... (' + (data.index + 1) + '/' + data.total_chunks + ')';
+        if (!data.is_last) {{
+          return fetchChunk(data.index + 1);
+        }}
+      }});
+  }}
+
+  fetchChunk(0)
+    .then(function() {{
+      var b64 = chunks.join('');
+      var bin = atob(b64);
+      var bytes = new Uint8Array(bin.length);
+      for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      var blob = new Blob([bytes], {{type: mimetype}});
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      statusEl.textContent = 'ההורדה הופעלה. אם לא התחילה אוטומטית, ';
+      var retry = document.createElement('a');
+      retry.className = 'btn';
+      retry.href = url;
+      retry.download = filename;
+      retry.textContent = '⬇️ לחצו כאן להורדה';
+      document.querySelector('.card').appendChild(retry);
+    }})
+    .catch(function(e) {{
+      statusEl.style.display = 'none';
+      errEl.style.display = 'block';
+      errEl.textContent = 'אירעה שגיאה בהבאת הקובץ: ' + e.message + '. נסו לרענן את הדף.';
+    }});
+}})();
+</script>
+</body>
+</html>'''
+    return Response(page, mimetype='text/html; charset=utf-8')
