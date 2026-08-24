@@ -14,11 +14,15 @@
 בפועל לימות המשיח (בצד שרת, עם הפרטים האמיתיים ששמורים אצלנו ב-DB/משתני
 סביבה) ומזרים את קובץ ההקלטה חזרה ללקוח. כך מערכת ימות המשיח שלנו לעולם
 לא נחשפת ללקוח הקצה.
+
+עדכון (אומת בפועל): מגישים עמוד HTML עם הקובץ מוטמע כ-data: URI, ולא תגובת
+קובץ ישירה - ראו הסבר מפורט ב-render_data_uri_download_page שב-download_utils.py.
+זה מה שגורם לנטפרי (ושירותי סינון תוכן דומים) לא לחסום את ההורדה.
 """
 import os
 import logging
 import requests
-from flask import Blueprint, Response, abort, current_app
+from flask import Blueprint, abort, current_app
 from itsdangerous import URLSafeSerializer, BadSignature
 
 log = logging.getLogger(__name__)
@@ -60,14 +64,8 @@ def download_recording(token):
         abort(404)
 
     try:
-        # בכוונה בלי stream=True: מביאים את הקובץ המלא לזיכרון בצד השרת לפני
-        # שמחזירים אותו ללקוח. הסיבה: סינוני תוכן כמו נטפרי מריצים את ההורדה
-        # דרך פרוקסי סריקה משלהם, וחלק מהם דורשים לדעת מראש את גודל הקובץ
-        # המדויק (Content-Length) כדי לאשר/לסרוק אותו - תגובה עם
-        # Transfer-Encoding: chunked (גודל לא ידוע מראש) עלולה להיכשל אצלם
-        # בשקט ("סוג קובץ לא נתמך בסינון אוטומטי"). קבצי ההקלטה לא גדולים
-        # מספיק כדי שזה יהווה בעיית זיכרון אמיתית (זהה לדפוס הקיים כבר
-        # ב-admin.download_audio/play_audio, שגם הם לא עושים streaming).
+        # תמיד מביאים את הקובץ המלא לזיכרון בצד השרת - צריך את כל הבייטים
+        # כדי לקודד ל-base64 ולהטמיע בעמוד ה-HTML (ראו למטה).
         upstream = requests.get(rec.rec_url, timeout=120)
         upstream.raise_for_status()
     except Exception:
@@ -75,9 +73,11 @@ def download_recording(token):
         abort(502)
 
     content_type = upstream.headers.get('Content-Type') or 'audio/wav'
-    content = upstream.content
 
-    resp = Response(content, content_type=content_type)
-    resp.headers['Content-Disposition'] = f'attachment; filename="recording_{recording_id}.wav"'
-    resp.headers['Content-Length'] = str(len(content))
-    return resp
+    from routes.download_utils import render_data_uri_download_page
+    return render_data_uri_download_page(
+        upstream.content,
+        hebrew_filename=f'הקלטה {recording_id}.wav',
+        mimetype=content_type,
+        page_title='ההקלטה מוכנה להורדה',
+    )

@@ -157,10 +157,13 @@ def download(upload_id):
     if not record or not record.docx_filename:
         return 'לא נמצא', 404
     path = os.path.join(STATIC_TMP_DIR, record.docx_filename)
-    from routes.download_utils import send_file_with_hebrew_name
+    if not os.path.exists(path):
+        return 'הקובץ אינו זמין', 404
+    from routes.download_utils import render_data_uri_download_page
     hebrew_name = f"תמלול - {record.original_filename or 'הקלטה'}.docx"
-    return send_file_with_hebrew_name(
-        send_file, path, hebrew_name,
+    with open(path, 'rb') as f:
+        file_bytes = f.read()
+    return render_data_uri_download_page(
+        file_bytes, hebrew_name,
         mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-        ascii_fallback=f'transcript_{upload_id}.docx',
     )
