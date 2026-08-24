@@ -94,3 +94,97 @@ def render_data_uri_download_page(file_bytes, hebrew_filename, mimetype, page_ti
 </body>
 </html>'''
     return Response(page, mimetype='text/html; charset=utf-8')
+
+
+def render_lazy_download_page(fetch_url, page_title='הקובץ מוכן להורדה', loading_text='מכינים את הקובץ...'):
+    """עמוד HTML קטן וקליל (בלי שום תוכן כבד מוטמע בתוכו!) שמושך את הקובץ
+    בפועל בבקשת JavaScript נפרדת (fetch) רק אחרי שהדף כבר נטען בדפדפן -
+    ורק אז בונה ממנו קובץ מקומי (Blob) ומפעיל הורדה.
+
+    למה זה קיים (אומת בפועל): כש-render_data_uri_download_page מטמיעה קובץ
+    גדול (למשל הקלטת שיחה, מגיע ל-~175KB אחרי קידוד base64) ישירות בתוך
+    ה-HTML הראשוני עצמו, וידאנו שהקובץ שמגיע בסוף למשתמש קצוץ (רק כמה
+    אלפי בייטים מתוך הכל) - למרות שהשרת שלנו שלח/קיבל את הכל במלואו, ולמרות
+    ששלילנו שזו נטפרי. ההשערה המובילה: מתווך ברשת (כנראה בוט/סורק שלא
+    מריץ JavaScript - כגון מנגנון סריקת קישורים אוטומטי של תוכנת מייל/
+    אבטחה שבודק את הקישור לפני שהמשתמש בכלל לוחץ עליו, או תוך כדי) קורא רק
+    את תחילת התגובה (איזור של כמה KB, אולי לפי גודל buffer קבוע) ועוצר שם -
+    וזה מה שנשמר/מגיע בפועל למשתמש.
+
+    הפתרון: הדף הראשוני קטן וקליל - בלי שום תוכן "כבד" בפנים. כל בוט/סורק
+    "טיפש" (שלא מריץ JS) יראה רק דף טקסט קטן וחסר תוכן רגיש, ואין שום סיכון
+    לקטיעה כי אין מה לקטוע. רק דפדפן אמיתי (שמריץ JavaScript בפועל) יבצע את
+    הבקשה השנייה, הנפרדת, שמביאה את תוכן הקובץ עצמו - ורק הוא בונה ושומר
+    את הקובץ. fetch_url צריך להחזיר JSON בפורמט {"filename": "...",
+    "mimetype": "...", "b64": "..."}."""
+    import html as _html
+    from flask import Response
+
+    safe_title = _html.escape(page_title)
+    safe_loading = _html.escape(loading_text)
+    safe_fetch_url = _html.escape(fetch_url, quote=True)
+
+    page = f'''<!DOCTYPE html>
+<html dir="rtl" lang="he">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{safe_title}</title>
+<style>
+  body {{ font-family: Arial, Helvetica, sans-serif; background:#f8fafc; display:flex;
+         align-items:center; justify-content:center; min-height:100vh; margin:0; }}
+  .card {{ background:#fff; border-radius:12px; box-shadow:0 2px 12px rgba(0,0,0,.08);
+          padding:32px 28px; text-align:center; max-width:420px; }}
+  h2 {{ color:#1d4ed8; margin:0 0 8px; }}
+  p {{ color:#6b7280; margin:0 0 20px; word-break:break-word; }}
+  a.btn {{ display:inline-block; background:#ea580c; color:#fff; font-weight:700;
+          padding:12px 28px; border-radius:8px; text-decoration:none; font-size:16px; }}
+  a.btn:hover {{ background:#c2410c; }}
+  #err {{ color:#dc2626; display:none; }}
+</style>
+</head>
+<body>
+<div class="card">
+  <h2>{safe_title}</h2>
+  <p id="status">{safe_loading}</p>
+  <p id="err"></p>
+</div>
+<script>
+(function() {{
+  var statusEl = document.getElementById('status');
+  var errEl = document.getElementById('err');
+  fetch('{safe_fetch_url}')
+    .then(function(r) {{
+      if (!r.ok) throw new Error('שגיאה בשרת (' + r.status + ')');
+      return r.json();
+    }})
+    .then(function(data) {{
+      var bin = atob(data.b64);
+      var bytes = new Uint8Array(bin.length);
+      for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      var blob = new Blob([bytes], {{type: data.mimetype || 'application/octet-stream'}});
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url;
+      a.download = data.filename || 'file';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      statusEl.textContent = 'ההורדה הופעלה. אם לא התחילה אוטומטית, ';
+      var retry = document.createElement('a');
+      retry.className = 'btn';
+      retry.href = url;
+      retry.download = data.filename || 'file';
+      retry.textContent = '⬇️ לחצו כאן להורדה';
+      document.querySelector('.card').appendChild(retry);
+    }})
+    .catch(function(e) {{
+      statusEl.style.display = 'none';
+      errEl.style.display = 'block';
+      errEl.textContent = 'אירעה שגיאה בהבאת הקובץ: ' + e.message + '. נסו לרענן את הדף.';
+    }});
+}})();
+</script>
+</body>
+</html>'''
+    return Response(page, mimetype='text/html; charset=utf-8')

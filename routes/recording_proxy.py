@@ -15,9 +15,17 @@
 סביבה) ומזרים את קובץ ההקלטה חזרה ללקוח. כך מערכת ימות המשיח שלנו לעולם
 לא נחשפת ללקוח הקצה.
 
-עדכון (אומת בפועל): מגישים עמוד HTML עם הקובץ מוטמע כ-data: URI, ולא תגובת
-קובץ ישירה - ראו הסבר מפורט ב-render_data_uri_download_page שב-download_utils.py.
-זה מה שגורם לנטפרי (ושירותי סינון תוכן דומים) לא לחסום את ההורדה.
+עדכון 1 (אומת בפועל): מגישים עמוד HTML עם הקובץ מוטמע כ-data: URI, ולא תגובת
+קובץ ישירה - כדי שלא ייחסם ע"י סינון תוכן שמזהה הורדות בינאריות (כמו נטפרי).
+
+עדכון 2 (אומת בפועל): גם עמוד ה-data: URI עצמו, כשהוא גדול (הקלטה של כמה
+שניות -> ~175KB אחרי base64), הגיע קצוץ למשתמש הסופי - למרות שהשרת שלנו
+קיבל/שלח את הכל במלואו (אומת בלוגים). ההשערה: מתווך שלא מריץ JavaScript
+(למשל בוט/סורק קישורים אוטומטי) קורא רק חלק מהתגובה. הפתרון: דו-שלבי -
+עמוד HTML ראשוני קטן וקליל בלי שום תוכן כבד (download_recording), ורק
+לאחר טעינתו בדפדפן אמיתי, JavaScript מושך בנפרד את תוכן הקובץ כ-JSON
+(download_recording_data) ובונה ממנו קובץ מקומי (Blob) - ראו הסבר מפורט
+ב-render_lazy_download_page שב-download_utils.py.
 """
 import os
 import time
@@ -160,39 +168,35 @@ def recording_download_url(recording_id):
     return f'{base}/dl/rec/{token}'
 
 
-@download_bp.route('/dl/rec/<token>')
-def download_recording(token):
+def _resolve_recording_id(token):
+    """מפענח את הטוקן, בודק שההקלטה קיימת, ומחזיר (recording_id, rec) או
+    שקורא ל-abort(404) בעצמו אם משהו לא תקין."""
     from models import Recording
-
     try:
         data = _serializer().loads(token)
         recording_id = int(data.get('rid'))
     except (BadSignature, ValueError, TypeError, AttributeError, KeyError):
         abort(404)
-
     rec = Recording.query.get(recording_id)
     if not rec:
         log.warning(f'Recording download proxy: recording {recording_id} not found')
         abort(404)
+    return recording_id, rec
 
+
+def _fetch_recording_audio(recording_id, rec):
+    """מביאה את בייטי ההקלטה בפועל מימות המשיח, ומחזירה (content, content_type).
+    קוראת ל-abort(502) אם אף מקור לא החזיר תוצאה שימושית."""
     # ניסיון ראשון ועיקרי: בדיוק אותה שיטה שמוכחת עובדת בפועל בצינור התמלול
     # (services/transcribe.py:_gemini_from_url) - rec.rec_url, requests.get
-    # פשוט בלי כותרות מיוחדות. אם זה מחזיר קובץ שלם - זהו, סיימנו, בלי צורך
-    # בשום דבר נוסף.
+    # פשוט בלי כותרות מיוחדות. אם זה מחזיר קובץ שלם - זהו, סיימנו.
     plain_result = None
     if rec.rec_url:
         plain_result = _fetch_wav_plain(rec.rec_url, recording_id, 'recording-url-plain')
 
     if plain_result and not _wav_looks_truncated(plain_result[0]):
         log.info(f'Recording download proxy: recording {recording_id} served via [recording-url-plain]')
-        content, content_type = plain_result
-        from routes.download_utils import render_data_uri_download_page
-        return render_data_uri_download_page(
-            content,
-            hebrew_filename=f'הקלטה {recording_id}.wav',
-            mimetype=content_type,
-            page_title='ההקלטה מוכנה להורדה',
-        )
+        return plain_result
 
     # השיטה ה"פשוטה" נכשלה/החזירה קובץ קצוץ - עוברים לרשימת מקורות גיבוי
     # (עם כותרות/ניסיון חוזר), כדי שלקוח לעולם לא יקבל דף שגיאה כל עוד יש
@@ -237,12 +241,39 @@ def download_recording(token):
             log.error(f'Recording download proxy: recording {recording_id} - ALL sources failed, giving up')
             abort(502)
 
-    content, content_type = result
+    return result
 
-    from routes.download_utils import render_data_uri_download_page
-    return render_data_uri_download_page(
-        content,
-        hebrew_filename=f'הקלטה {recording_id}.wav',
-        mimetype=content_type,
+
+@download_bp.route('/dl/rec/<token>')
+def download_recording(token):
+    """שלב 1: עמוד HTML קטן וקליל בלבד (בלי הקובץ בפנים!) - ראו הסבר מפורט
+    ב-render_lazy_download_page שב-download_utils.py. הדפדפן של הלקוח הוא
+    זה שיריץ את ה-JavaScript שמושך את תוכן הקובץ בפועל, מה-route השני
+    למטה (dl/rec/<token>/data)."""
+    recording_id, rec = _resolve_recording_id(token)  # מוודא תקינות מוקדם, גם אם לא בשימוש ישיר כאן
+    from routes.download_utils import render_lazy_download_page
+    return render_lazy_download_page(
+        fetch_url=f'/dl/rec/{token}/data',
         page_title='ההקלטה מוכנה להורדה',
+        loading_text='מביאים את ההקלטה מימות המשיח...',
     )
+
+
+@download_bp.route('/dl/rec/<token>/data')
+def download_recording_data(token):
+    """שלב 2: נטען רק ע"י JavaScript מתוך הדף שב-download_recording, לא
+    ע"י בקשת ניווט ישירה של הדפדפן. מחזיר JSON עם הקובץ מקודד ב-base64 -
+    לא HTML גדול, ולא תגובת attachment בינארית (משתי הסיבות שכבר טיפלנו
+    בהן: לא רוצים שסורק שלא מריץ JS יראה/יקטע תוכן כבד, ולא רוצים תגובת
+    קובץ בינארי גולמית שסינון תוכן עלול לחסום)."""
+    import base64
+    from flask import jsonify
+
+    recording_id, rec = _resolve_recording_id(token)
+    content, content_type = _fetch_recording_audio(recording_id, rec)
+
+    return jsonify({
+        'filename': f'הקלטה {recording_id}.wav',
+        'mimetype': content_type,
+        'b64': base64.b64encode(content).decode('ascii'),
+    })
