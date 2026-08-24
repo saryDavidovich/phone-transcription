@@ -314,7 +314,9 @@ def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, durat
 
             if delivery_method == 'email':
                 source_filename = rec.source_filename if rec else None
-                _send_email(delivered_to, transcript_fixed, customer, rec_url, duration_seconds, source_filename=source_filename)
+                from routes.recording_proxy import recording_download_url
+                download_url = recording_download_url(rec.id) if rec else ''
+                _send_email(delivered_to, transcript_fixed, customer, download_url, duration_seconds, source_filename=source_filename)
             elif delivery_method == 'fax':
                 _send_fax(delivered_to, transcript_fixed, customer, duration_seconds, call_id)
 
@@ -386,7 +388,8 @@ def process_pending_recordings(customer_id):
                 # שלח למייל/פקס
                 from services.transcribe import _send_email, _send_fax
                 if rec.delivery_method == 'email' and rec.delivered_to:
-                    _send_email(rec.delivered_to, rec.transcript, customer, rec.rec_url, rec.duration_seconds or 0, is_premium=(rec.transcription_tier == 'premium'))
+                    from routes.recording_proxy import recording_download_url
+                    _send_email(rec.delivered_to, rec.transcript, customer, recording_download_url(rec.id), rec.duration_seconds or 0, is_premium=(rec.transcription_tier == 'premium'))
                 elif rec.delivery_method == 'fax' and rec.delivered_to:
                     _send_fax(rec.delivered_to, rec.transcript, customer, rec.duration_seconds or 0, rec.call_id)
                 continue
@@ -615,9 +618,9 @@ def finalize_alefbot_recording(call_id, transcript_text):
                 db.session.add(txn)
                 db.session.commit()
 
-            rec_url = rec.rec_url or ''
             if rec.delivery_method == 'email':
-                _send_email(rec.delivered_to, transcript_text, customer, rec_url, duration_seconds, source_filename=rec.source_filename, is_premium=True)
+                from routes.recording_proxy import recording_download_url
+                _send_email(rec.delivered_to, transcript_text, customer, recording_download_url(rec.id), duration_seconds, source_filename=rec.source_filename, is_premium=True)
             elif rec.delivery_method == 'fax':
                 _send_fax(rec.delivered_to, transcript_text, customer, duration_seconds, call_id)
 
@@ -1770,7 +1773,7 @@ def _send_email(to, transcript, customer, rec_url, duration_seconds, source_file
         word_b64 = base64.b64encode(word_bytes).decode('utf-8')
 
         download_block = ''
-        if not source_filename:
+        if not source_filename and rec_url:
             download_block = f'''<div style="background:#fff7ed;border-right:4px solid #f97316;padding:16px;margin:16px 0;border-radius:8px">
 <a href="{rec_url}" style="color:#ea580c;font-weight:600;font-size:15px;text-decoration:none">⬇️ להורדת ההקלטה לחצו כאן</a>
 </div>'''

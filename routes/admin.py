@@ -448,7 +448,8 @@ def send_recordings(id):
         if not rec or not rec.transcript:
             continue
         try:
-            rec_url = f'https://www.call2all.co.il/ym/api/DownloadFile?token={os.environ.get("YEMOT_TOKEN","")}&path=ivr2:/recordings/{rec.call_id}.wav'
+            from routes.recording_proxy import recording_download_url
+            rec_url = recording_download_url(rec.id)
             if send_method == 'email':
                 _send_email(send_to, rec.transcript, customer, rec_url, rec.duration_seconds, source_filename=rec.source_filename, is_premium=(rec.transcription_tier == 'premium'))
             else:
