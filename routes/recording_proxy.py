@@ -95,26 +95,47 @@ def download_recording(token):
         abort(404)
 
     rec = Recording.query.get(recording_id)
-    if not rec or not rec.rec_url:
-        log.warning(f'Recording download proxy: recording {recording_id} not found or has no rec_url')
+    if not rec:
+        log.warning(f'Recording download proxy: recording {recording_id} not found')
+        abort(404)
+
+    # מקור ראשי: בונים מחדש את כתובת ה-DownloadFile הקבועה (עם token) לפי
+    # call_id, בדיוק כמו שנעשה במקומות אחרים בקוד (למשל admin.send_recordings
+    # לפני התיקון הזה) - אומת בפועל שזו כתובת אמינה שמחזירה את הקובץ המלא,
+    # בניגוד ל-RecordingUrl הדינמי שימות המשיח שולחים ב-webhook של סיום שיחה
+    # (rec.rec_url) - זה נמצא בבדיקה בפועל כמחזיר לעיתים קרובות קובץ קצוץ/
+    # חלקי (לא ברור למה מצד ימות, אבל זה עקבי וחוזר). משתמשים ב-rec.rec_url
+    # רק כגיבוי אם משום מה אין לנו call_id או טוקן מוגדר.
+    from routes.admin import get_setting
+    yemot_token = get_setting('yemot_token', '') or os.environ.get('YEMOT_TOKEN', '')
+
+    fetch_url = None
+    if rec.call_id and yemot_token:
+        fetch_url = (f'https://www.call2all.co.il/ym/api/DownloadFile'
+                     f'?token={yemot_token}&path=ivr2:/recordings/{rec.call_id}.wav')
+    elif rec.rec_url:
+        fetch_url = rec.rec_url
+
+    if not fetch_url:
+        log.warning(f'Recording download proxy: recording {recording_id} - no way to fetch '
+                     f'(call_id={rec.call_id!r}, yemot_token configured={bool(yemot_token)}, rec_url={rec.rec_url!r})')
         abort(404)
 
     try:
         # תמיד מביאים את הקובץ המלא לזיכרון בצד השרת - צריך את כל הבייטים
         # כדי לקודד ל-base64 ולהטמיע בעמוד ה-HTML (ראו למטה).
-        upstream = requests.get(rec.rec_url, timeout=120, headers=_YEMOT_REQUEST_HEADERS)
+        upstream = requests.get(fetch_url, timeout=120, headers=_YEMOT_REQUEST_HEADERS)
         upstream.raise_for_status()
         content = upstream.content
         content_type = upstream.headers.get('Content-Type') or 'audio/wav'
 
         # אם הקובץ שקיבלנו מימות המשיח נראה קצוץ (הכותרת שלו מצהירה על יותר
-        # בייטים ממה שבפועל קיבלנו) - ננסה שוב פעם אחת לפני שמוותרים. נצפה
-        # בפועל שזה קורה מדי פעם, כנראה בגלל ניתוק חיבור מוקדם מצד ימות.
+        # בייטים ממה שבפועל קיבלנו) - ננסה שוב פעם אחת לפני שמוותרים.
         if _wav_looks_truncated(content):
             log.warning(f'Recording download proxy: recording {recording_id} looks truncated '
                         f'({len(content)} bytes) on first fetch - retrying once')
             time.sleep(2)
-            upstream = requests.get(rec.rec_url, timeout=120, headers=_YEMOT_REQUEST_HEADERS)
+            upstream = requests.get(fetch_url, timeout=120, headers=_YEMOT_REQUEST_HEADERS)
             upstream.raise_for_status()
             content = upstream.content
             content_type = upstream.headers.get('Content-Type') or content_type
