@@ -24,27 +24,47 @@
 שה-JavaScript מביא בנפרד (עדיין נחתך - אומת עם כלי הפיתוח של הדפדפן:
 Size בפועל היה חלק קטן ממה שהיה צריך, אף שהשרת שלח הכל).
 
-עדכון 3 (ניסיון שננטש): פיצול להורדה בהרבה חתיכות JSON קטנות (~9KB כל
-אחת) עם הרכבה מחדש ב-JavaScript. עבד בבדיקה מלאכותית אך המשתמש ביקש
-לחזור לגישה הפשוטה והסטנדרטית במקום להמשיך לפצל תגובות.
+עדכון 3 (אז "ננטש", עכשיו מוחזר כרשת ביטחון - ראו עדכון 5): פיצול להורדה
+בהרבה חתיכות JSON קטנות (~9KB כל אחת) עם הרכבה מחדש ב-JavaScript. בזמנו
+עבר לצד כי המשתמש ביקש לחזור לגישה הפשוטה והסטנדרטית (עדכון 4) - אבל זו
+התבררה כחסומה לגמרי (ראו שם), אז חתיכות ה-JSON חוזרות עכשיו כרשת ביטחון.
 
-עדכון 4 (הפתרון הנוכחי): הקלטה מובאת מימות ומוגשת ללקוח כהורדת קובץ
-**רגילה וסטנדרטית** לגמרי - send_file עם Content-Disposition: attachment
-ושם עברי תקין, בדיוק כמו כל הורדת קובץ רגילה. מגישים ישירות מהזיכרון
-(BytesIO, לא קובץ בדיסק) - כך אין בכלל צורך "לזכור למחוק" שום דבר; ניסיתי
-במקור לשמור לדיסק ולמחוק אחרי השליחה, אבל גיליתי ש-send_file כ-attachment
-עובד במצב passthrough שמדלג בדיוק על מנגנון ה-cleanup (call_on_close) -
-אומת בבדיקה עצמאית. הזיכרון פשוט משתחרר לבד כשהבקשה מסתיימת.
+עדכון 4 (נבדק ואומת בפרודקשן - זה גרם לחסימה!): ניסינו הורדת קובץ **רגילה
+וסטנדרטית** - send_file עם Content-Disposition: attachment ושם עברי תקין,
+מוגש ישירות מהזיכרון (BytesIO), בדיוק כמו כל הורדת קובץ רגילה משרת.
+**המשתמש אישר בפועל שזה נחסם ע"י נטפרי** ("צדקת יש חסימה של נטפרי"), בדיוק
+כמו הבעיה המקורית שהתחלנו איתה לפני שעברנו ל-data: URI. זה מאשר במאה אחוז:
+נטפרי חוסמת תגובת attachment בינארית, נקודה - וזו לא הייתה הסיבה לקיצוץ
+שראינו קודם עם data: URI/JSON (שם לא הייתה חסימה גלויה בכלל, רק תוכן קצוץ
+בשקט - תופעה שונה, גורם שונה). מסקנה: attachment פסול לגמרי כדרך הגשה,
+לא משנה מי בונה אותו.
 
-שימו לב: זו אותה צורת תגובה (attachment בינארי) שבמקור גרמה לחסימת נטפרי
-לפני שעברנו ל-data: URI (ראו עדכון 1) - יכול להיות שנחזור לאותה בעיה,
-הבדיקה בפועל תגיד.
+עדכון 5 (הפתרון הנוכחי) - proxy שקוף מול שירות Node.js נפרד: הפרויקט הזה
+מורכב בפועל משני שירותים נפרדים בפריסה - זה (Flask/Python, מטפל בכל מה
+שאינו שיחות ימות עצמן) ו-`phone-transcription-ivr` (Node.js/Express, שירות
+נפרד שכן מדבר ישירות עם ימות המשיח לאורך כל השיחה). ההשערה המובילה לקיצוץ
+בעדכון 2: כל הניסיונות שם חלקו תכונה משותפת - הפייתון עצמו בנה מחרוזת
+תגובה שלמה בזיכרון (HTML/JSON עם base64) ואז שלח אותה כתגובה אחת גדולה עם
+Content-Length ידוע מראש; משהו ב-gunicorn (worker סינכרוני, יחד עם
+threading.Thread של התמלול באותו תהליך) קוטע כתיבות חוסמות גדולות כאלה.
+נוד ג'יי אס לא סבל מאותה תופעה בפרויקט נפרד (הפורומים) עם תבנית תגובה
+זהה. הפתרון: הפייתון (שהדומיין שלו כבר סומך עליו נטפרי, ולכן נשאר הכתובת
+היחידה שהלקוח בדפדפן פונה אליה) מעביר את בניית עמוד ההורדה בפועל לנוד
+(נקודת קצה פנימית `/internal/download-page`, שרת-לשרת בלבד, מוגנת בסוד
+משותף INTERNAL_PROXY_SECRET - הלקוח בדפדפן לעולם לא נוגע בכתובת הזו או
+בדומיין של הנוד), ורק **מזרים** (streaming, עם requests(stream=True) +
+iter_content, בלי buffering מלא ובלי Content-Length ידוע מראש - כתובת
+chunked-transfer אמיתית) את מה שהנוד מחזיר ישירות ללקוח. אם ה-relay לנוד
+נכשל מכל סיבה (לא מוגדר / timeout / שגיאת רשת / סטטוס לא תקין) - נופלים
+בחזרה לרשת הביטחון: חתיכות JSON קטנות (עדכון 3), שלא נבדקו סופית מול הבאג
+המקורי אבל בטוח יותר לא-חסום מ-attachment, ולא נבנות כמחרוזת ענקית אחת.
 """
 import os
 import time
 import logging
+import tempfile
 import requests
-from flask import Blueprint, abort, current_app
+from flask import Blueprint, abort, current_app, Response, stream_with_context
 from itsdangerous import URLSafeSerializer, BadSignature
 
 log = logging.getLogger(__name__)
@@ -52,6 +72,21 @@ log = logging.getLogger(__name__)
 download_bp = Blueprint('download', __name__)
 
 _SALT = 'recording-download-v1'
+
+# תיקיית מטמון זמנית לבייטי הקלטה שכבר הובאו מימות, לצורך רשת הביטחון
+# (הורדה מחולקת לחתיכות קטנות - ראו _get_or_fetch_cached_audio ו-
+# download_recording_chunk למטה). דיסק מקומי (לא משתנה זיכרון) כי gunicorn
+# רץ עם כמה worker processes נפרדים (--workers 3) שלא חולקים זיכרון Python
+# ביניהם - אבל כן חולקים את אותה מערכת קבצים מקומית (כולם על אותו קונטיינר).
+_CACHE_DIR = os.path.join(tempfile.gettempdir(), 'rec_download_cache')
+_CHUNK_CHARS = 12000  # תווי base64 לכל חתיכה (~9KB בפועל אחרי פענוח)
+
+# הגדרות ה-proxy השקוף מול שירות ה-Node.js (phone-transcription-ivr) - ראו
+# "עדכון 5" בראש הקובץ. שני משתני הסביבה האלה חייבים להיות מוגדרים (ולהיות
+# זהים בין שני השירותים עבור הסוד) כדי שנתיב הנוד יופעל בכלל - אם אחד מהם
+# חסר, פשוט נופלים בשקט לרשת הביטחון (חתיכות JSON).
+_NODE_IVR_URL = os.environ.get('NODE_IVR_URL', '').rstrip('/')
+_INTERNAL_PROXY_SECRET = os.environ.get('INTERNAL_PROXY_SECRET', '')
 
 # User-Agent "רגיל" של דפדפן - כמה שרתים/הגנות אנטי-בוט (וכנראה גם ימות
 # המשיח, בהתבסס על שגיאת 418 שראינו בנתיב אחר שפונה אליהם בלי User-Agent
@@ -199,7 +234,8 @@ def _resolve_recording_id(token):
 
 def _fetch_recording_audio(recording_id, rec):
     """מביאה את בייטי ההקלטה בפועל מימות המשיח, ומחזירה (content, content_type).
-    קוראת ל-abort(502) אם אף מקור לא החזיר תוצאה שימושית."""
+    קוראת ל-abort(502) אם אף מקור לא החזיר תוצאה שימושית. משמשת רק את רשת
+    הביטחון (חתיכות JSON) - כשה-relay לנוד עובד, הנוד הוא זה ששולף בעצמו."""
     # ניסיון ראשון ועיקרי: בדיוק אותה שיטה שמוכחת עובדת בפועל בצינור התמלול
     # (services/transcribe.py:_gemini_from_url) - rec.rec_url, requests.get
     # פשוט בלי כותרות מיוחדות. אם זה מחזיר קובץ שלם - זהו, סיימנו.
@@ -257,35 +293,156 @@ def _fetch_recording_audio(recording_id, rec):
     return result
 
 
+def _cache_paths(recording_id):
+    os.makedirs(_CACHE_DIR, exist_ok=True)
+    bin_path = os.path.join(_CACHE_DIR, f'{recording_id}.bin')
+    type_path = os.path.join(_CACHE_DIR, f'{recording_id}.type')
+    return bin_path, type_path
+
+
+def _get_or_fetch_cached_audio(recording_id, rec):
+    """מביאה את בייטי ההקלטה, עם מטמון על דיסק מקומי (משותף בין כל
+    worker processes של gunicorn על אותו קונטיינר) - כדי שכל חתיכה שנבקש
+    בהמשך לא תצטרך לפנות שוב לימות המשיח מההתחלה. משמשת רק את רשת הביטחון."""
+    bin_path, type_path = _cache_paths(recording_id)
+    if os.path.exists(bin_path) and os.path.exists(type_path):
+        try:
+            with open(bin_path, 'rb') as f:
+                content = f.read()
+            with open(type_path, 'r', encoding='utf-8') as f:
+                content_type = f.read().strip() or 'audio/wav'
+            if content:
+                return content, content_type
+        except Exception as e:
+            log.warning(f'Recording download proxy: recording {recording_id} - cache read failed: {e}')
+
+    content, content_type = _fetch_recording_audio(recording_id, rec)
+    try:
+        with open(bin_path, 'wb') as f:
+            f.write(content)
+        with open(type_path, 'w', encoding='utf-8') as f:
+            f.write(content_type or 'audio/wav')
+    except Exception as e:
+        log.warning(f'Recording download proxy: recording {recording_id} - failed to write cache: {e}')
+    return content, content_type
+
+
+def _clear_cache(recording_id):
+    bin_path, type_path = _cache_paths(recording_id)
+    for p in (bin_path, type_path):
+        try:
+            os.remove(p)
+        except OSError:
+            pass
+
+
+def _stream_via_node(recording_id, rec):
+    """מנסה להעביר את בניית עמוד ההורדה לשירות ה-Node.js
+    (phone-transcription-ivr) ולהזרים את התגובה שלו הלאה ללקוח, בלי לבנות
+    אותה מחדש בזיכרון (ראו "עדכון 5" בראש הקובץ להסבר המלא). מחזיר Response
+    streaming בהצלחה, או None אם צריך ליפול חזרה לרשת הביטחון (לא מוגדר /
+    נכשל / סטטוס לא תקין)."""
+    if not (_NODE_IVR_URL and _INTERNAL_PROXY_SECRET):
+        return None
+
+    filename = f'הקלטה {recording_id}.wav'
+    payload = {'filename': filename}
+    if rec.rec_url:
+        payload['url'] = rec.rec_url
+    if rec.call_id:
+        payload['call_id'] = rec.call_id
+    if 'url' not in payload and 'call_id' not in payload:
+        return None
+
+    try:
+        upstream = requests.post(
+            f'{_NODE_IVR_URL}/internal/download-page',
+            json=payload,
+            headers={'X-Internal-Secret': _INTERNAL_PROXY_SECRET},
+            timeout=150,
+            stream=True,
+        )
+    except Exception as e:
+        log.warning(f'Recording download proxy: recording {recording_id} - Node relay request failed: {e}')
+        return None
+
+    if upstream.status_code != 200:
+        log.warning(f'Recording download proxy: recording {recording_id} - Node relay returned '
+                    f'status {upstream.status_code}')
+        upstream.close()
+        return None
+
+    log.info(f'Recording download proxy: recording {recording_id} - streaming response via Node relay')
+
+    def generate():
+        try:
+            for chunk in upstream.iter_content(chunk_size=8192):
+                if chunk:
+                    yield chunk
+        finally:
+            upstream.close()
+
+    # בכוונה בלי content_length - כדי שהתגובה תישלח כ-chunked transfer
+    # אמיתי (כתיבות קטנות עם הגעתן), לא נבנית/נמדדת כמחרוזת שלמה מראש.
+    # content_type= (ולא mimetype=) כדי לא לקבל כפילות "charset=utf-8;
+    # charset=utf-8" - Werkzeug מוסיף charset בעצמו כש-mimetype מתחיל ב-text/.
+    return Response(stream_with_context(generate()), content_type='text/html; charset=utf-8')
+
+
 @download_bp.route('/dl/rec/<token>')
 def download_recording(token):
-    """מביאה את ההקלטה מימות, ומגישה אותה ללקוח כקובץ הורדה **רגיל
-    וסטנדרטי** (send_file, עם Content-Disposition: attachment ושם עברי
-    תקין) - בדיוק כמו כל הורדת קובץ רגילה משרת, בלי data: URI, בלי JSON,
-    בלי חתיכות.
+    """נקודת ההורדה שהלקוח בדפדפן פונה אליה. מנסה קודם כל proxy שקוף מול
+    שירות ה-Node.js (_stream_via_node, ראו "עדכון 5" בראש הקובץ). אם זה לא
+    זמין/נכשל - נופל בחזרה לרשת הביטחון: עמוד HTML קטן וקליל (בלי הקובץ
+    בפנים!) שה-JavaScript בו מושך את הקובץ בחתיכות JSON קטנות ברצף
+    מ-download_recording_chunk למטה (לא attachment - כדי שנטפרי לא תחסום;
+    קטנות - כדי שלא ייחתכו בדרך)."""
+    recording_id, rec = _resolve_recording_id(token)
 
-    הערה על "שמירה בשרת ואז מחיקה": ניסיתי במקור לשמור לקובץ זמני בדיסק
-    ולמחוק אותו אחרי השליחה (response.call_on_close) - אבל גיליתי בבדיקה
-    ש-send_file של Flask, כשמוגש כ-attachment, עובד במצב "direct passthrough"
-    שמדלג בדיוק על מנגנון ה-cleanup הזה (אימתתי את זה בבדיקה עצמאית - ה-
-    callback פשוט לא הופעל). הפתרון הפשוט והבטוח יותר: לא לגעת בדיסק בכלל -
-    מגישים ישירות מהזיכרון (BytesIO). כך אין שום עקבה על הדיסק מלכתחילה,
-    ואין שום קובץ שצריך "לזכור" למחוק.
+    streamed = _stream_via_node(recording_id, rec)
+    if streamed is not None:
+        return streamed
 
-    שימו לב: זו אותה צורת תגובה (attachment בינארי) שבמקור גרמה לחסימת
-    נטפרי לפני שעברנו ל-data: URI (ראו עדכון 1 למעלה) - יכול להיות שנחזור
-    לאותה בעיה, הבדיקה בפועל תגיד."""
-    import io
-    from flask import send_file
-    from routes.download_utils import send_file_with_hebrew_name
+    log.info(f'Recording download proxy: recording {recording_id} - Node relay unavailable, '
+             f'falling back to chunked JSON download')
+    from routes.download_utils import render_chunked_download_page
+    return render_chunked_download_page(
+        chunk_url_base=f'/dl/rec/{token}/chunk',
+        page_title='ההקלטה מוכנה להורדה',
+        loading_text='מביאים את ההקלטה מימות המשיח...',
+    )
+
+
+@download_bp.route('/dl/rec/<token>/chunk/<int:index>')
+def download_recording_chunk(token, index):
+    """חלק מרשת הביטחון בלבד (כשה-relay לנוד לא זמין) - מוריד את הקובץ
+    בחתיכות קטנות (~9KB בפועל לחתיכה), כל אחת בבקשת JSON נפרדת."""
+    import base64
+    from flask import jsonify
 
     recording_id, rec = _resolve_recording_id(token)
-    content, content_type = _fetch_recording_audio(recording_id, rec)
+    content, content_type = _get_or_fetch_cached_audio(recording_id, rec)
+    b64_full = base64.b64encode(content).decode('ascii')
 
-    return send_file_with_hebrew_name(
-        send_file,
-        io.BytesIO(content),
-        hebrew_filename=f'הקלטה {recording_id}.wav',
-        mimetype=content_type or 'audio/wav',
-        ascii_fallback=f'recording_{recording_id}.wav',
-    )
+    total_chunks = max(1, (len(b64_full) + _CHUNK_CHARS - 1) // _CHUNK_CHARS)
+    if index < 0 or index >= total_chunks:
+        abort(404)
+
+    start = index * _CHUNK_CHARS
+    piece = b64_full[start:start + _CHUNK_CHARS]
+    is_last = index == total_chunks - 1
+
+    log.info(f'Recording download proxy: recording {recording_id} chunk {index + 1}/{total_chunks} '
+             f'({len(piece)} b64 chars)')
+
+    if is_last:
+        _clear_cache(recording_id)
+
+    return jsonify({
+        'filename': f'הקלטה {recording_id}.wav',
+        'mimetype': content_type,
+        'index': index,
+        'total_chunks': total_chunks,
+        'is_last': is_last,
+        'b64_chunk': piece,
+    })
