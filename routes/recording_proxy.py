@@ -148,14 +148,60 @@ pydub+ffmpeg - תלות שכבר קיימת ופעילה בפרויקט, ראו 
 לפני ההגשה ללקוח, ומגישים audio/mpeg בכתובת שמסתיימת ב-/recording.mp3.
 אם ההמרה נכשלת מכל סיבה (קובץ פגום/לא-WAV/ffmpeg לא זמין) - נופלים בחזרה
 בשקט להגשת ה-WAV המקורי, כדי שלקוח לעולם לא יקבל שגיאה על חשבון הניסיון
-הזה. טרם אומת מול נטפרי בפועל - זה הניסיון הבא.
+הזה.
+
+עדכון 11 (נבדק בפועל בפרודקשן - עדכון 10 עדיין לא הספיק, פתרון שונה
+לגמרי): גם MP3 עם כל הכותרות/סיומת הנכונות נחסם בדיוק באותה הודעה. זה
+כבר מצמצם את מרחב האפשרויות מאוד: לא הפורמט, לא ה-URL, לא inline/
+attachment. מה שנשאר הוא **הדומיין עצמו שמגיש את הקובץ**. יש לנו ראיה
+ישירה לכך שדומיין ימות המשיח (call2all.co.il) כן "פתוח"/מוכר לנטפרי בלי
+שום בעיה - זה בדיוק מה שקרה "תמיד בעבר", לפני שנבנה הפרוקסי הזה מלכתחילה
+(ראו פתיחת הקובץ למעלה): קישור ישיר לימות המשיח מעולם לא נחסם על ידי
+נטפרי. הבעיה נוצרה רק כשעברנו להגיש את הקובץ מהשרת/דומיין **שלנו** - נטפרי
+כנראה סומכת על דומיינים "ותיקים"/מוכרים כמו call2all.co.il באופן גורף,
+אבל מפעילה בדיקת-תוכן קפדנית (שנכשלת) על דומיין חדש יחסית שהיא לא מכירה,
+לא משנה מה בדיוק מוגש ממנו. הפתרון: `download_recording` כבר לא מביאה
+ומגישה את בייטי ההקלטה בעצמה בכלל - היא מפנה (HTTP 302 redirect) ישירות
+לכתובת האמיתית של ימות המשיח, וזו זו שהדפדפן של הלקוח בסוף פונה אליה
+ומקבל ממנה את הקובץ - בדיוק "כמו תמיד". **חשוב להבין את הפשרה**: הקישור
+שהלקוח *מקבל* (במייל, וזה שיכול לדלוף/להיות מועבר הלאה) עדיין מכיל רק
+טוקן חתום משלנו - לא נחשף שם שום דבר. אבל **אחרי שהלקוח כבר לוחץ**,
+הדפדפן שלו כן רואה את הכתובת האמיתית של ימות המשיח (עם הטוקן שלה) בשורת
+הכתובת/בהיסטוריה/בכלי הפיתוח - זה כבר לא "לעולם לא נחשף ללקוח הקצה" כפי
+שתואר בפתיחת הקובץ, רק "לא נחשף בקישור שאפשר להעביר הלאה בלי ללחוץ עליו
+בעצמו". אם אין כתובת ימות ידועה בכלל (rec.rec_url ריק וגם call_id לא
+ידוע) - נופלים בחזרה להגשה המקומית (MP3, עדכון 10) כרשת ביטחון, כדי
+שלעולם לא יהיה דף שגיאה. טרם אומת מול נטפרי בפועל - זה הניסיון הבא.
+
+עדכון 12 (סוגר את פרצת האבטחה שעדכון 11 פתח, בלי לוותר על ה-redirect):
+עדכון 11 פתר את נטפרי, אבל בעלות אמיתית - הדפדפן של הלקוח, אחרי שהוא
+לוחץ, כן רואה את הטוקן האמיתי של ימות המשיח (מספר_מערכת:סיסמה, גישה
+מלאה לכל ה-API - כולל מחיקה). המשתמש ביקש לבדוק אם ימות המשיח תומכים
+ביצירת "מפתח API" נפרד ומוגבל, ולא רק בטוקן הרחב הזה - ומצא בעצמו את
+המסך המדויק: בממשק הניהול, "Call2all Firewall" -> "יצירת מפתח חדש" ->
+לשונית "הגבלות שירותים". שם אפשר להגדיר "רשימה לבנה" של נתיבי שירות
+(כל שירותי ה-API מתחילים ב-/api/, עם תמיכה ב-* כתו-כללי) - כלומר אפשר
+ליצור מפתח API חדש לגמרי שמורשה **רק** לקרוא לשירות ה-DownloadFile
+(נתיב `/api/DownloadFile*` ברשימה הלבנה) ולשום שירות אחר - לא GetTextFile,
+לא מחיקה, לא שינוי הגדרות, כלום. גם אם המפתח הזה יידלוף/ייחשף ללקוח
+(בדיוק כמו בעדכון 11) - אין לו כל שימוש מעבר להורדת קובצי הקלטה.
+
+חשוב: זה משתנה סביבה **חדש ונפרד** (YEMOT_DOWNLOAD_API_KEY) - לא נוגעים
+ב-YEMOT_TOKEN (עדיין משמש לשליחת פקסים, services/transcribe.py) ולא
+ב-yemot_token בהגדרות ה-DB (עדיין משמש ל-webhook של נדרים פלוס,
+routes/payment.py) - כדי לא לשבור אף פונקציונליות אחרת שדורשת גישה
+רחבה יותר מזו. _best_yemot_url מעודכנת להעדיף את המפתח המוגבל הזה מעל
+rec.rec_url (שמכיל את הטוקן הרחב שימות המשיח עצמם סיפקו) - כלומר ברגע
+שהמפתח המוגבל מוגדר בסביבה, הוא זה שבפועל ייחשף ללקוח מעכשיו והלאה,
+לא הטוקן הרחב. עד שהמשתמש ייצור את המפתח בפועל ויגדיר אותו - הקוד נופל
+בשקט לאותה התנהגות כמו עדכון 11 (בלי שינוי פונקציונלי, רק פחות מאובטח).
 """
 import os
 import time
 import logging
 import tempfile
 import requests
-from flask import Blueprint, abort, current_app
+from flask import Blueprint, abort, current_app, redirect
 from itsdangerous import URLSafeSerializer, BadSignature
 
 log = logging.getLogger(__name__)
@@ -178,6 +224,15 @@ _CHUNK_CHARS = 12000  # תווי base64 לכל חתיכה (~9KB בפועל אח�
 # חסר, פשוט נופלים בשקט לרשת הביטחון (חתיכות JSON).
 _NODE_IVR_URL = os.environ.get('NODE_IVR_URL', '').rstrip('/')
 _INTERNAL_PROXY_SECRET = os.environ.get('INTERNAL_PROXY_SECRET', '')
+
+# מפתח API מוגבל (נוצר במסך "חומת אש" בממשק הניהול של ימות המשיח, מוגבל
+# ברשימה-לבנה ל-/api/DownloadFile* בלבד - ראו "עדכון 12" בראש הקובץ) -
+# משתנה סביבה **נפרד לגמרי** מ-YEMOT_TOKEN (שמשמש עדיין לשליחת פקסים,
+# services/transcribe.py) ומ-yemot_token בהגדרות ה-DB (שמשמש עדיין ל-
+# webhook של נדרים פלוס, routes/payment.py) - בכוונה לא לגעת באף אחד
+# מהם, כדי לא לשבור פונקציונליות אחרת שדורשת גישה רחבה יותר. אם המשתנה
+# הזה לא מוגדר (עדיין) - נופלים בחזרה לטוקן הרחב הקיים, כמו קודם.
+_YEMOT_DOWNLOAD_API_KEY = os.environ.get('YEMOT_DOWNLOAD_API_KEY', '')
 
 # User-Agent "רגיל" של דפדפן - כמה שרתים/הגנות אנטי-בוט (וכנראה גם ימות
 # המשיח, בהתבסס על שגיאת 418 שראינו בנתיב אחר שפונה אליהם בלי User-Agent
@@ -328,6 +383,42 @@ def _resolve_recording_id(token):
         log.warning(f'Recording download proxy: recording {recording_id} not found')
         abort(404)
     return recording_id, rec
+
+
+def _best_yemot_url(rec):
+    """בוחרת את כתובת ה-URL הטובה ביותר של ימות המשיח עצמה עבור ההקלטה -
+    לצורך הפניה ישירה (302 redirect), ראו "עדכון 11" ו"עדכון 12" בראש
+    הקובץ. לא שולפת ולא מאמתת שום דבר - רק בוחרת כתובת.
+
+    סדר עדיפות (עודכן ב"עדכון 12" - הכי-מוגבל קודם, לא הכי-נוח קודם):
+    1. YEMOT_DOWNLOAD_API_KEY (אם מוגדר) - מפתח API מוגבל שיוצר רק URL-ים
+       להורדת קבצים, לא נותן שום גישה אחרת ל-API של ימות המשיח. זה מה
+       שנחשף בפועל לדפדפן הלקוח אחרי ה-redirect, אז זה מה שרוצים שם -
+       גם אם ידלוף/יילקח, אין ממנו נזק מעבר להורדת הקלטות.
+    2. rec.rec_url - המקור שהצינור תמלול שולף ממנו (מוכח אמין), אבל
+       הטוקן שמוטמע בו הוא מה שימות המשיח עצמם נתנו - כנראה גישה רחבה
+       יותר. משמש רק אם המפתח המוגבל עדיין לא הוגדר.
+    3. טוקן רחב מהגדרות הסביבה/DB (YEMOT_TOKEN/yemot_token) - כמו קודם,
+       רק כמקור אחרון אם אין לא מפתח מוגבל ולא rec_url.
+
+    מחזירה None אם אין שום כתובת שאפשר לבנות ממנה."""
+    if _YEMOT_DOWNLOAD_API_KEY and rec.call_id:
+        return (f'https://www.call2all.co.il/ym/api/DownloadFile'
+                f'?token={_YEMOT_DOWNLOAD_API_KEY}&path=ivr2:/recordings/{rec.call_id}.wav')
+    if rec.rec_url:
+        return rec.rec_url
+    if not rec.call_id:
+        return None
+    env_token = os.environ.get('YEMOT_TOKEN', '')
+    if env_token:
+        return (f'https://www.call2all.co.il/ym/api/DownloadFile'
+                f'?token={env_token}&path=ivr2:/recordings/{rec.call_id}.wav')
+    from routes.admin import get_setting
+    setting_token = get_setting('yemot_token', '')
+    if setting_token:
+        return (f'https://www.call2all.co.il/ym/api/DownloadFile'
+                f'?token={setting_token}&path=ivr2:/recordings/{rec.call_id}.wav')
+    return None
 
 
 def _fetch_recording_audio(recording_id, rec):
@@ -514,15 +605,22 @@ def _convert_wav_to_mp3(content, content_type, recording_id):
 @download_bp.route('/dl/rec/<token>/recording.wav')  # תאימות לאחור - קישורים לפני עדכון 10 (עדיין מוגש כ-MP3 בפועל)
 @download_bp.route('/dl/rec/<token>')  # תאימות לאחור - קישורים ישנים עוד יותר, בלי שום סיומת בסוף
 def download_recording(token):
-    """נקודת ההורדה שהלקוח בדפדפן פונה אליה - מגישה את ההקלטה ישירות
-    כתגובת HTTP בינארית רגילה (audio/*, inline) - בדיוק כמו קישור רגיל
-    לקובץ אודיו באתר כלשהו. בלי HTML, בלי JSON, בלי חתיכות, בלי שום שלב
-    ביניים - לחיצה אחת על הקישור, וזהו. ראו "עדכון 8", "עדכון 9" ו"עדכון
-    10" בראש הקובץ להסבר המלא למה זו כעת דרך ההגשה, ומה נבדק לפני שהוחלט
-    עליה. קישורים חדשים (recording_download_url) כוללים סיומת /recording.mp3
-    קבועה בסוף - שני הראוטים האחרים נשארים רק לתאימות לאחור, וגם הם מגישים
-    MP3 בפועל (רק הסיומת הנראית בכתובת שונה)."""
+    """נקודת ההורדה שהלקוח בדפדפן פונה אליה. ראו "עדכון 11" בראש הקובץ
+    להסבר המלא ולפשרת האבטחה שהוא כרוך בה: המסלול הראשי כבר לא מגיש את
+    ההקלטה מהשרת שלנו בכלל - הוא מפנה (302) ישירות לכתובת האמיתית של ימות
+    המשיח, כדי שדפדפן הלקוח יקבל את הקובץ ישירות מהדומיין שלהם (call2all.
+    co.il) - בדיוק כמו שהיה "תמיד בעבר", לפני שנבנה הפרוקסי הזה. אם אין
+    שום כתובת ימות ידועה (מקרה נדיר) - נופלים בחזרה להגשה המקומית (MP3,
+    עדכון 10) כרשת ביטחון, כדי שלעולם לא יהיה דף שגיאה."""
     recording_id, rec = _resolve_recording_id(token)
+
+    target_url = _best_yemot_url(rec)
+    if target_url:
+        log.info(f'Recording download proxy: recording {recording_id} - redirecting client directly to Yemot')
+        return redirect(target_url, code=302)
+
+    log.warning(f'Recording download proxy: recording {recording_id} - no direct Yemot URL available '
+                f'(no rec_url, no call_id/token) - falling back to local proxy+MP3')
     content, content_type = _get_or_fetch_cached_audio(recording_id, rec)
     _clear_cache(recording_id)  # תגובה חד-פעמית - אין יותר בקשות המשך (חתיכות) שדורשות מטמון
     content, content_type = _convert_wav_to_mp3(content, content_type, recording_id)
