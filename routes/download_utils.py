@@ -37,6 +37,37 @@ def send_file_with_hebrew_name(send_file_func, buffer_or_path, hebrew_filename, 
     return response
 
 
+def plain_audio_response(content, content_type, hebrew_filename, ascii_fallback='recording.wav'):
+    """מחזירה את בייטי הקובץ כתגובת HTTP בינארית ישירה ורגילה - Content-Type
+    אמיתי (למשל audio/wav), Content-Disposition: inline (לא attachment!) -
+    בדיוק כמו קישור רגיל לקובץ אודיו/מדיה באתר כלשהו, בלי HTML, בלי data:
+    URI, בלי JSON.
+
+    למה זה קיים (ראו "עדכון 8" ב-recording_proxy.py להסבר המלא): כל
+    הניסיונות הקודמים שהגיעו קצוצים בפועל אצל הלקוח (עמוד HTML עם data:
+    URI מוטמע, JSON גדול, אפילו הרבה חתיכות JSON קטנות) חלקו תכונה משותפת -
+    הם תמיד עטפו את הקובץ בתוך HTML/JSON, ולעולם לא הגישו את הקובץ עצמו
+    כתגובה בינארית "רגילה". attachment בינארי כן נבדק ואומת בפרודקשן
+    כחסום ע"י נטפרי (עדכון 4 שם) - אבל inline (בלי בקשת הורדה כפויה, בדיוק
+    כמו נגן מדיה/קישור אודיו רגיל שמוטמע בדף) הוא צורת תגובה שונה לגמרי
+    מבחינת כלי סינון תוכן, ולא נבדקה קודם לכן. אומת בנפרד (פרויקט מבודד,
+    שרת אמיתי + קובץ WAV אמיתי + דפדפן Chromium אמיתי) שהצורה הזו מגיעה
+    שלמה בייט-בבייט, לפני שהוכנסה כאן.
+
+    משתמשת באותה תחבולת filename*=UTF-8'' כמו send_file_with_hebrew_name
+    למעלה, כדי שהשם היפה (עברי) יעבוד בקוראים מודרניים וגם יהיה פולבק
+    ASCII תקין לקוראים קפדניים יותר."""
+    from flask import Response
+
+    response = Response(content, mimetype=content_type)
+    response.headers['Content-Disposition'] = (
+        f'inline; filename="{ascii_fallback}"; '
+        f"filename*=UTF-8''{quote(hebrew_filename, safe='')}"
+    )
+    response.headers['Content-Length'] = str(len(content))
+    return response
+
+
 def render_data_uri_download_page(file_bytes, hebrew_filename, mimetype, page_title='הקובץ מוכן להורדה'):
     """מחזיר עמוד HTML (לא תגובת קובץ ישירה!) עם הקובץ מוטמע בתוכו כ-data:
     URI, במקום Content-Disposition: attachment רגיל.
@@ -93,7 +124,7 @@ def render_data_uri_download_page(file_bytes, hebrew_filename, mimetype, page_ti
 </script>
 </body>
 </html>'''
-    return Response(page, mimetype='text/html; charset=utf-8')
+    return Response(page, content_type='text/html; charset=utf-8')
 
 
 def render_lazy_download_page(fetch_url, page_title='הקובץ מוכן להורדה', loading_text='מכינים את הקובץ...'):
@@ -187,7 +218,7 @@ def render_lazy_download_page(fetch_url, page_title='הקובץ מוכן להו�
 </script>
 </body>
 </html>'''
-    return Response(page, mimetype='text/html; charset=utf-8')
+    return Response(page, content_type='text/html; charset=utf-8')
 
 
 def render_chunked_download_page(chunk_url_base, page_title='הקובץ מוכן להורדה', loading_text='מכינים את הקובץ...'):
@@ -301,4 +332,4 @@ def render_chunked_download_page(chunk_url_base, page_title='הקובץ מוכן
 </script>
 </body>
 </html>'''
-    return Response(page, mimetype='text/html; charset=utf-8')
+    return Response(page, content_type='text/html; charset=utf-8')
