@@ -133,6 +133,22 @@ attachment מול inline כנראה לא ההבדל שקבע כאן. ההשער�
 recording_download_url מעודכנת לייצר קישורים חדשים עם הסיומת הזו; הראוט
 הישן (בלי סיומת) נשאר פעיל לתאימות לאחור, למקרה שיש קישורים ישנים שכבר
 נשלחו. טרם אומת מול נטפרי בפועל - זה הניסיון הבא.
+
+עדכון 10 (נבדק בפועל בפרודקשן - עדכון 9 עדיין לא הספיק): אחרי פריסת עדכון
+9 (כתובת שמסתיימת ב-/recording.wav, Content-Type: audio/wav) המשתמש עדיין
+קיבל בדיוק אותה הודעת חסימה מנטפרי ("סוג הקובץ לא נתמך בסינון אוטומטי") -
+כלומר גם סיומת URL אמיתית לא הספיקה. זה מצמצם את החשודים: לא ה-URL, לא
+inline/attachment - נשאר **הפורמט של הקובץ עצמו**. השערת המשתמש (סבירה
+ומתבקשת בשלב הזה): נטפרי (ורוב שירותי סינון תוכן) מזהים ומכירים בביטחון
+פורמטים "רגילים"/נפוצים באינטרנט (בעיקר MP3), ואילו WAV - פורמט נדיר
+הרבה יותר כקובץ שמופץ ברשת (בעיקר משמש להקלטה/עריכה, לא להפצה) - פשוט
+לא נמצא ברשימת הסוגים המוכרים שלהם, ולכן "לא נתמך בסינון אוטומטי" גם
+כשה-URL/הכותרות תקינות. הפתרון: ממירים את ה-WAV ל-MP3 בצד השרת (עם
+pydub+ffmpeg - תלות שכבר קיימת ופעילה בפרויקט, ראו services/transcribe.py)
+לפני ההגשה ללקוח, ומגישים audio/mpeg בכתובת שמסתיימת ב-/recording.mp3.
+אם ההמרה נכשלת מכל סיבה (קובץ פגום/לא-WAV/ffmpeg לא זמין) - נופלים בחזרה
+בשקט להגשת ה-WAV המקורי, כדי שלקוח לעולם לא יקבל שגיאה על חשבון הניסיון
+הזה. טרם אומת מול נטפרי בפועל - זה הניסיון הבא.
 """
 import os
 import time
@@ -285,17 +301,17 @@ def recording_download_url(recording_id):
     יש לקרוא לפונקציה הזו מתוך app context פעיל (כל מקומות הקריאה כבר
     רצים בתוך with app.app_context()).
 
-    שימו לב לסיומת /recording.wav הקבועה בסוף - ראו "עדכון 9" בראש הקובץ
-    להסבר המלא: זו לא קישוט - נטפרי חסם את התגובה הבינארית (inline) גם
-    היא, עם בדיוק אותה הודעה שמופיעה כשהיא לא מזהה את סוג הקובץ, וההשערה
-    המובילה היא שהיא נעזרת בסיומת שנראית בכתובת ה-URL עצמה כדי לסווג,
-    לא רק ב-Content-Type. הטוקן עצמו (itsdangerous) עלול להכיל '.' בתוכו,
-    אז הסיומת חייבת להיות מקטע נתיב נפרד בסוף - לא מוצמדת ישירות לטוקן."""
+    שימו לב לסיומת /recording.mp3 הקבועה בסוף - ראו "עדכון 9" ו"עדכון 10"
+    בראש הקובץ להסבר המלא: זו לא קישוט - נטפרי חסמה גם תגובה בינארית
+    (inline, audio/wav, כתובת שהסתיימה ב-/recording.wav) עם בדיוק אותה
+    הודעה שמופיעה כשהיא לא מזהה את סוג הקובץ. הטוקן עצמו (itsdangerous)
+    עלול להכיל '.' בתוכו, אז הסיומת חייבת להיות מקטע נתיב נפרד בסוף - לא
+    מוצמדת ישירות לטוקן."""
     if not recording_id:
         return ''
     base = os.environ.get('APP_BASE_URL', os.environ.get('APP_URL', '')).rstrip('/')
     token = _serializer().dumps({'rid': int(recording_id)})
-    return f'{base}/dl/rec/{token}/recording.wav'
+    return f'{base}/dl/rec/{token}/recording.mp3'
 
 
 def _resolve_recording_id(token):
@@ -468,24 +484,55 @@ def _fetch_via_node(recording_id, rec):
     return content, content_type
 
 
-@download_bp.route('/dl/rec/<token>/recording.wav')
-@download_bp.route('/dl/rec/<token>')  # תאימות לאחור - קישורים ישנים שכבר נשלחו לפני עדכון 9, בלי הסיומת בסוף
+def _convert_wav_to_mp3(content, content_type, recording_id):
+    """ממירה WAV ל-MP3 (audio/mpeg) לפני ההגשה - ראו "עדכון 10" בראש הקובץ.
+    משתמשת ב-pydub (וב-ffmpeg שכבר מותקן בפועל ובשימוש בפרודקשן - ראו
+    services/transcribe.py, אותה טכניקה בדיוק) שכבר תלויות קיימות בפרויקט,
+    אז אין כאן שום תלות חדשה. אם content כבר לא-WAV (או שההמרה נכשלת מכל
+    סיבה), מחזירה את הבייטים המקוריים כמו שהם בלי לזרוק שגיאה - עדיף
+    להגיש WAV תקין מאשר לקרוס או להחזיר שגיאה ללקוח. מחזירה תמיד
+    (content, content_type)."""
+    if content_type != 'audio/wav' and not (len(content) >= 4 and content[:4] == b'RIFF'):
+        return content, content_type  # כבר לא WAV - אין מה להמיר
+    try:
+        import io as _io
+        from pydub import AudioSegment
+        seg = AudioSegment.from_file(_io.BytesIO(content), format='wav')
+        out = _io.BytesIO()
+        seg.export(out, format='mp3', bitrate='64k')
+        mp3_bytes = out.getvalue()
+        log.info(f'Recording download proxy: recording {recording_id} - converted WAV->MP3 '
+                  f'({len(content)} bytes -> {len(mp3_bytes)} bytes)')
+        return mp3_bytes, 'audio/mpeg'
+    except Exception as e:
+        log.warning(f'Recording download proxy: recording {recording_id} - WAV->MP3 conversion '
+                    f'failed, serving original WAV instead: {e}')
+        return content, content_type or 'audio/wav'
+
+
+@download_bp.route('/dl/rec/<token>/recording.mp3')
+@download_bp.route('/dl/rec/<token>/recording.wav')  # תאימות לאחור - קישורים לפני עדכון 10 (עדיין מוגש כ-MP3 בפועל)
+@download_bp.route('/dl/rec/<token>')  # תאימות לאחור - קישורים ישנים עוד יותר, בלי שום סיומת בסוף
 def download_recording(token):
     """נקודת ההורדה שהלקוח בדפדפן פונה אליה - מגישה את ההקלטה ישירות
     כתגובת HTTP בינארית רגילה (audio/*, inline) - בדיוק כמו קישור רגיל
     לקובץ אודיו באתר כלשהו. בלי HTML, בלי JSON, בלי חתיכות, בלי שום שלב
-    ביניים - לחיצה אחת על הקישור, וזהו. ראו "עדכון 8" ו"עדכון 9" בראש
-    הקובץ להסבר המלא למה זו כעת דרך ההגשה, ומה נבדק לפני שהוחלט עליה.
-    קישורים חדשים (recording_download_url) כוללים סיומת /recording.wav
-    קבועה בסוף - הראוט השני (בלי הסיומת) נשאר רק לתאימות לאחור."""
+    ביניים - לחיצה אחת על הקישור, וזהו. ראו "עדכון 8", "עדכון 9" ו"עדכון
+    10" בראש הקובץ להסבר המלא למה זו כעת דרך ההגשה, ומה נבדק לפני שהוחלט
+    עליה. קישורים חדשים (recording_download_url) כוללים סיומת /recording.mp3
+    קבועה בסוף - שני הראוטים האחרים נשארים רק לתאימות לאחור, וגם הם מגישים
+    MP3 בפועל (רק הסיומת הנראית בכתובת שונה)."""
     recording_id, rec = _resolve_recording_id(token)
     content, content_type = _get_or_fetch_cached_audio(recording_id, rec)
     _clear_cache(recording_id)  # תגובה חד-פעמית - אין יותר בקשות המשך (חתיכות) שדורשות מטמון
+    content, content_type = _convert_wav_to_mp3(content, content_type, recording_id)
     from routes.download_utils import plain_audio_response
+    ext = 'mp3' if content_type == 'audio/mpeg' else 'wav'
     return plain_audio_response(
         content=content,
         content_type=content_type,
-        hebrew_filename=f'הקלטה {recording_id}.wav',
+        hebrew_filename=f'הקלטה {recording_id}.{ext}',
+        ascii_fallback=f'recording.{ext}',
     )
 
 
