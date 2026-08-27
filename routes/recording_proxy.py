@@ -76,13 +76,52 @@ Recording.duration_seconds ב-DB, ב-payload['expected_duration_seconds']),
 הגרסה המלאה בהצלחה), וגם תרחיש שבו הוא אף פעם לא נהיה מוכן (מחזיר את
 הגרסה הכי טובה שהייתה בלי לקרוס). אם duration_seconds לא ידוע/0 - הבדיקה
 הזו פשוט מדלגת, וממשיכים כמו בעדכון 5 (רק בדיקת "נחתך באמצע").
+
+עדכון 7 (נבדק בפועל מול לוגים אמיתיים - הפריך את השערת עדכון 5!): לאחר
+פריסת עדכון 6, בדיקה עם הקלטה של 15 שניות עדיין יצאה פחות משנייה אצל
+הלקוח. הלוגים האמיתיים (Railway) הראו משהו מכריע: `fetchOnceWithRetries
+[primary-url] attempt 1: declared Content-Length=254604, actual
+received=254604 bytes, wav duration=15.91s, expected duration=15s,
+looks_truncated=false` - כלומר **השליפה מימות הצליחה במלואה כבר בניסיון
+הראשון**, ומיד אחר כך `routes.recording_proxy: ... streaming response via
+Node relay` - כלומר גם הפייתון קיבל מהנוד תגובה תקינה (200) והתחיל להזרים
+אותה. ובכל זאת הלקוח קיבל פחות משנייה. זה מוכיח בוודאות: הבעיה **איננה**
+בשליפה מימות (תמיד הייתה שלמה), **ואיננה** קשורה ל"האם הפייתון בונה
+מחרוזת שלמה בזיכרון לפני השליחה מול מזרים אותה" - כי גם הזרמה (streaming
+אמיתי, בלי buffering, בדיוק כמו שעדכון 5 הציע) עדיין הגיעה קצוצה. הפתרון
+שנוסה: מפרידים בין "מי שולף מימות" (הנוד, `/internal/fetch-recording-bytes`
+- הוכח אמין) לבין "איך מגישים ללקוח" (הרבה חתיכות JSON קטנות ונפרדות,
+render_chunked_download_page מעדכון 3).
+
+עדכון 8 (הפתרון הנוכחי - נבדק ואומת בנפרד לפני שהוכנס לכאן): גם הרבה
+חתיכות JSON קטנות (עדכון 7) נבדקו בפרודקשן על מערכת אחרת לגמרי (פרויקט
+הפורומים, Next.js, שרת/דומיין נפרדים - כדי לבודד את הבעיה) - ועדיין
+הגיעו קצוצות אצל הלקוח, על אף שהשרת שם חישב ושלח את הגודל הנכון במלואו
+(אומת ישירות על המסך: "גודל בפועל: 119,884 בייטים" - ועדיין ירדה הקלטה
+של פחות משנייה). זה הוכיח שהבעיה **איננה** תשתית Python/gunicorn/Railway
+הספציפית שלנו, וגם **איננה** קשורה ל"ניווט ישיר מול fetch מדף שכבר טעון" -
+היא חוזרת בדיוק אותו דבר בכל וריאציה שבה הקובץ **מוטמע כ-data: URI בתוך
+HTML/JSON** (עדכונים 1-3, 6, 7 - כל התגובות ה"חסומות בשקט" האלה חלקו
+בדיוק את התכונה הזו). מה שלא נבדק אף פעם עד עכשיו: תגובת HTTP בינארית
+אמיתית ורגילה של קובץ אודיו - Content-Type: audio/wav, Content-Disposition:
+inline (לא attachment - attachment כבר אומת כחסום ע"י נטפרי, ראו עדכון 4;
+inline הוא צורה שונה לגמרי מבחינת סינון תוכן, בדיוק כמו קישור רגיל לקובץ
+אודיו/מדיה שכבר עובד בכל אתר אחר). נבדק בנפרד לפני ההטמעה כאן (פרויקט
+מבודד, שרת Next.js אמיתי, קובץ WAV אמיתי של 15 שניות בדיוק, גם curl וגם
+דפדפן Chromium אמיתי) - הגיע שלם, בייט-בבייט זהה למקור, עם הכותרות
+הנכונות. הפתרון: `download_recording` למטה כבר לא מגישה שום עמוד HTML/
+JSON - היא מביאה את בייטי ההקלטה (דרך `_get_or_fetch_cached_audio`, שהיא
+עצמה נשארת ללא שינוי - הנוד `_fetch_via_node` והבדיקת האורך מעדכון 6-7
+עדיין תקפות ומועילות, הן לא היו הבעיה) ומחזירה אותם ישירות ללקוח דרך
+`plain_audio_response` (ב-download_utils.py) - קישור אחד, לחיצה אחת, בלי
+שום שלב ביניים שהמשתמש צריך להבין או לבנות בעצמו.
 """
 import os
 import time
 import logging
 import tempfile
 import requests
-from flask import Blueprint, abort, current_app, Response, stream_with_context
+from flask import Blueprint, abort, current_app
 from itsdangerous import URLSafeSerializer, BadSignature
 
 log = logging.getLogger(__name__)
@@ -321,7 +360,10 @@ def _cache_paths(recording_id):
 def _get_or_fetch_cached_audio(recording_id, rec):
     """מביאה את בייטי ההקלטה, עם מטמון על דיסק מקומי (משותף בין כל
     worker processes של gunicorn על אותו קונטיינר) - כדי שכל חתיכה שנבקש
-    בהמשך לא תצטרך לפנות שוב לימות המשיח מההתחלה. משמשת רק את רשת הביטחון."""
+    בהמשך לא תצטרך לפנות שוב לימות המשיח מההתחלה. מנסה קודם את הנוד
+    (_fetch_via_node - שולף אמין עם בדיקת אורך + ניסיון חוזר, ראו "עדכון 7"
+    בראש הקובץ), ורק אם זה לא זמין/נכשל נופלת לשליפה הישירה של הפייתון
+    (_fetch_recording_audio)."""
     bin_path, type_path = _cache_paths(recording_id)
     if os.path.exists(bin_path) and os.path.exists(type_path):
         try:
@@ -334,7 +376,11 @@ def _get_or_fetch_cached_audio(recording_id, rec):
         except Exception as e:
             log.warning(f'Recording download proxy: recording {recording_id} - cache read failed: {e}')
 
-    content, content_type = _fetch_recording_audio(recording_id, rec)
+    node_result = _fetch_via_node(recording_id, rec)
+    if node_result:
+        content, content_type = node_result
+    else:
+        content, content_type = _fetch_recording_audio(recording_id, rec)
     try:
         with open(bin_path, 'wb') as f:
             f.write(content)
@@ -354,93 +400,74 @@ def _clear_cache(recording_id):
             pass
 
 
-def _stream_via_node(recording_id, rec):
-    """מנסה להעביר את בניית עמוד ההורדה לשירות ה-Node.js
-    (phone-transcription-ivr) ולהזרים את התגובה שלו הלאה ללקוח, בלי לבנות
-    אותה מחדש בזיכרון (ראו "עדכון 5" בראש הקובץ להסבר המלא). מחזיר Response
-    streaming בהצלחה, או None אם צריך ליפול חזרה לרשת הביטחון (לא מוגדר /
-    נכשל / סטטוס לא תקין)."""
+def _fetch_via_node(recording_id, rec):
+    """מבקשת מהנוד (phone-transcription-ivr) לשלוף את ההקלטה מימות בעצמו
+    (עם בדיקת אורך מול duration_seconds + ניסיון חוזר, ראו
+    fetchOnceWithRetries ב-ivr.js - זה כן הוכח עובד היטב בלוגים אמיתיים)
+    ומחזירה (content, content_type), או None אם צריך ליפול לשליפה הישירה
+    של הפייתון (_fetch_recording_audio). ראו "עדכון 7" בראש הקובץ."""
     if not (_NODE_IVR_URL and _INTERNAL_PROXY_SECRET):
         return None
 
-    filename = f'הקלטה {recording_id}.wav'
-    payload = {'filename': filename}
+    payload = {}
     if rec.rec_url:
         payload['url'] = rec.rec_url
     if rec.call_id:
         payload['call_id'] = rec.call_id
-    if 'url' not in payload and 'call_id' not in payload:
+    if not payload:
         return None
     # אורך השיחה האמיתי (אם ידוע) - מאפשר לנוד לזהות שהקובץ שקיבל מימות
     # קצר מדי (למשל אם ימות עדיין לא סיימו "לכתוב" את הקובץ באותו רגע)
-    # ולנסות שוב עם המתנה, במקום להסתפק בקובץ תקין אבל חלקי. ראו
-    # fetchOnceWithRetries ב-ivr.js.
+    # ולנסות שוב עם המתנה, במקום להסתפק בקובץ תקין אבל חלקי.
     if rec.duration_seconds:
         payload['expected_duration_seconds'] = int(rec.duration_seconds)
 
     try:
         upstream = requests.post(
-            f'{_NODE_IVR_URL}/internal/download-page',
+            f'{_NODE_IVR_URL}/internal/fetch-recording-bytes',
             json=payload,
             headers={'X-Internal-Secret': _INTERNAL_PROXY_SECRET},
             timeout=240,
-            stream=True,
         )
+        upstream.raise_for_status()
+        data = upstream.json()
+        import base64
+        content = base64.b64decode(data['b64'])
+        content_type = data.get('mimetype') or 'audio/wav'
     except Exception as e:
-        log.warning(f'Recording download proxy: recording {recording_id} - Node relay request failed: {e}')
+        log.warning(f'Recording download proxy: recording {recording_id} - Node fetch failed: {e}')
         return None
 
-    if upstream.status_code != 200:
-        log.warning(f'Recording download proxy: recording {recording_id} - Node relay returned '
-                    f'status {upstream.status_code}')
-        upstream.close()
-        return None
-
-    log.info(f'Recording download proxy: recording {recording_id} - streaming response via Node relay')
-
-    def generate():
-        try:
-            for chunk in upstream.iter_content(chunk_size=8192):
-                if chunk:
-                    yield chunk
-        finally:
-            upstream.close()
-
-    # בכוונה בלי content_length - כדי שהתגובה תישלח כ-chunked transfer
-    # אמיתי (כתיבות קטנות עם הגעתן), לא נבנית/נמדדת כמחרוזת שלמה מראש.
-    # content_type= (ולא mimetype=) כדי לא לקבל כפילות "charset=utf-8;
-    # charset=utf-8" - Werkzeug מוסיף charset בעצמו כש-mimetype מתחיל ב-text/.
-    return Response(stream_with_context(generate()), content_type='text/html; charset=utf-8')
+    log.info(f'Recording download proxy: recording {recording_id} - fetched via Node '
+             f'({len(content)} bytes, looks_truncated={_wav_looks_truncated(content)})')
+    return content, content_type
 
 
 @download_bp.route('/dl/rec/<token>')
 def download_recording(token):
-    """נקודת ההורדה שהלקוח בדפדפן פונה אליה. מנסה קודם כל proxy שקוף מול
-    שירות ה-Node.js (_stream_via_node, ראו "עדכון 5" בראש הקובץ). אם זה לא
-    זמין/נכשל - נופל בחזרה לרשת הביטחון: עמוד HTML קטן וקליל (בלי הקובץ
-    בפנים!) שה-JavaScript בו מושך את הקובץ בחתיכות JSON קטנות ברצף
-    מ-download_recording_chunk למטה (לא attachment - כדי שנטפרי לא תחסום;
-    קטנות - כדי שלא ייחתכו בדרך)."""
+    """נקודת ההורדה שהלקוח בדפדפן פונה אליה - מגישה את ההקלטה ישירות
+    כתגובת HTTP בינארית רגילה (audio/*, inline) - בדיוק כמו קישור רגיל
+    לקובץ אודיו באתר כלשהו. בלי HTML, בלי JSON, בלי חתיכות, בלי שום שלב
+    ביניים - לחיצה אחת על הקישור, וזהו. ראו "עדכון 8" בראש הקובץ להסבר
+    המלא למה זו כעת דרך ההגשה, ומה נבדק לפני שהוחלט עליה."""
     recording_id, rec = _resolve_recording_id(token)
-
-    streamed = _stream_via_node(recording_id, rec)
-    if streamed is not None:
-        return streamed
-
-    log.info(f'Recording download proxy: recording {recording_id} - Node relay unavailable, '
-             f'falling back to chunked JSON download')
-    from routes.download_utils import render_chunked_download_page
-    return render_chunked_download_page(
-        chunk_url_base=f'/dl/rec/{token}/chunk',
-        page_title='ההקלטה מוכנה להורדה',
-        loading_text='מביאים את ההקלטה מימות המשיח...',
+    content, content_type = _get_or_fetch_cached_audio(recording_id, rec)
+    _clear_cache(recording_id)  # תגובה חד-פעמית - אין יותר בקשות המשך (חתיכות) שדורשות מטמון
+    from routes.download_utils import plain_audio_response
+    return plain_audio_response(
+        content=content,
+        content_type=content_type,
+        hebrew_filename=f'הקלטה {recording_id}.wav',
     )
 
 
 @download_bp.route('/dl/rec/<token>/chunk/<int:index>')
 def download_recording_chunk(token, index):
-    """חלק מרשת הביטחון בלבד (כשה-relay לנוד לא זמין) - מוריד את הקובץ
-    בחתיכות קטנות (~9KB בפועל לחתיכה), כל אחת בבקשת JSON נפרדת."""
+    """שמור כרשת ביטחון/תאימות לאחור בלבד - נקודת הקצה הזו כבר לא בשימוש
+    ע"י download_recording למעלה (ראו "עדכון 8" בראש הקובץ: ההגשה בחתיכות
+    JSON קטנות התבררה כלא-הפתרון - היא נבדקה ונכשלה באותו אופן בדיוק כמו
+    כל וריאציה אחרת שמטמיעה את הקובץ בתוך HTML/JSON). נשארת כאן רק כדי
+    שקישורי חתיכה ישנים שכבר נשלחו (אם יש) לא יקרסו עם 404 מיידי."""
     import base64
     from flask import jsonify
 
