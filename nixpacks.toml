@@ -1,3 +1,8 @@
-# מתקין LibreOffice (soffice) - נדרש להמרת Word ל-PDF לצורך שליחת פקס
+# מתקין LibreOffice (soffice) - נדרש להמרת Word ל-PDF לצורך שליחת פקס.
+# מתקין גם ffmpeg במפורש - pydub (services/transcribe.py, וכעת גם
+# routes/recording_proxy.py להמרת WAV->MP3 בהורדה, ראו "עדכון 10" שם)
+# תלוי בבינארי ffmpeg בזמן ריצה כדי לעבוד בכלל, ובלי שורה מפורשת כאן אין
+# ודאות שהוא מותקן בסביבת הפריסה (Nixpacks) - אם הוא חסר, pydub נכשל
+# בשקט (יש טיפול בזה בקוד) והקובץ יישאר WAV בפועל בלי שאף אחד ידע למה.
 [phases.setup]
-nixPkgs = ['...', 'libreoffice-fresh']
+nixPkgs = ['...', 'libreoffice-fresh', 'ffmpeg']
