@@ -195,12 +195,31 @@ rec.rec_url (שמכיל את הטוקן הרחב שימות המשיח עצמם 
 שהמפתח המוגבל מוגדר בסביבה, הוא זה שבפועל ייחשף ללקוח מעכשיו והלאה,
 לא הטוקן הרחב. עד שהמשתמש ייצור את המפתח בפועל ויגדיר אותו - הקוד נופל
 בשקט לאותה התנהגות כמו עדכון 11 (בלי שינוי פונקציונלי, רק פחות מאובטח).
+
+עדכון 13 (נבדק בפועל בפרודקשן - עדכון 12 שבר את ההורדה!): אחרי שהמשתמש
+הגדיר בפועל YEMOT_DOWNLOAD_API_KEY, ההורדה הפסיקה לעבוד לגמרי - ימות
+המשיח החזירו "הקובץ המבוקש אינו קיים" (שגיאה מצד ימות עצמם, לא מהשרת
+שלנו - כלומר הבקשה כן הגיעה עם המפתח החדש, אבל לנתיב לא נכון). הסיבה:
+_best_yemot_url (בגרסה הקודמת) בנתה את כתובת ה-URL עבור המפתח המוגבל
+ע"י **ניחוש** של הנתיב הפנימי של הקובץ אצל ימות - `path=ivr2:/recordings/
+{call_id}.wav`. הניחוש הזה מעולם לא היה מאומת בפועל: הוא הועתק מתבנית
+שהייתה קיימת כבר קודם רק כמקור-גיבוי-אחרון (env_token/setting_token
+למטה), שכמעט אף פעם לא הופעלה בפועל כי כמעט תמיד היה זמין rec.rec_url
+(המקור שכן מוכח עובד - ראו הערה #2 בסדר העדיפויות). ברגע שהמפתח המוגבל
+הוגדר וקיבל עדיפות ראשונה *לפני* rec.rec_url, כל בקשה החלה להשתמש בניחוש
+השגוי הזה - ומכאן החסימה המוחלטת. התיקון: לא מנחשים נתיב בכלל. לוקחים
+את rec.rec_url המקורי (המוכח עובד - בדיוק אותה כתובת שצינור התמלול
+משתמש בה בהצלחה) ופשוט **מחליפים בתוכו את פרמטר ה-token** בטוקן המוגבל
+החדש, בלי לגעת בשום חלק אחר של הכתובת (כולל ה-path האמיתי, שאותו לא
+צריך ולא כדאי לנחש - הוא כבר שם, נכון, בתוך rec.rec_url). כך מקבלים גם
+את הביטחון של מפתח מוגבל וגם את הנתיב האמיתי הנכון בלי ניחושים.
 """
 import os
 import time
 import logging
 import tempfile
 import requests
+from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 from flask import Blueprint, abort, current_app, redirect
 from itsdangerous import URLSafeSerializer, BadSignature
 
@@ -385,26 +404,47 @@ def _resolve_recording_id(token):
     return recording_id, rec
 
 
+def _with_replaced_token(url, new_token):
+    """מחליפה את פרמטר ה-token בתוך כתובת URL קיימת בטוקן חדש, ומשאירה כל
+    חלק אחר של הכתובת (כולל ה-path/פרמטרים האחרים) בדיוק כמו שהוא. ראו
+    "עדכון 13" בראש הקובץ: זה נועד להחליף רק את האימות בתוך rec.rec_url
+    המוכח-עובד, במקום לנחש path משלנו (הניחוש הזה היה הבאג שגרם ל"הקובץ
+    המבוקש אינו קיים"). מחזירה None אם אין ב-URL בכלל פרמטר token - כדי
+    לא לגעת במבנה שלא מכירים ולא מבינים."""
+    try:
+        parts = urlsplit(url)
+        query_pairs = parse_qsl(parts.query, keep_blank_values=True)
+        if not any(k == 'token' for k, _ in query_pairs):
+            return None
+        new_pairs = [(k, new_token if k == 'token' else v) for k, v in query_pairs]
+        new_query = urlencode(new_pairs)
+        return urlunsplit((parts.scheme, parts.netloc, parts.path, new_query, parts.fragment))
+    except Exception:
+        return None
+
+
 def _best_yemot_url(rec):
     """בוחרת את כתובת ה-URL הטובה ביותר של ימות המשיח עצמה עבור ההקלטה -
-    לצורך הפניה ישירה (302 redirect), ראו "עדכון 11" ו"עדכון 12" בראש
-    הקובץ. לא שולפת ולא מאמתת שום דבר - רק בוחרת כתובת.
+    לצורך הפניה ישירה (302 redirect), ראו "עדכון 11", "עדכון 12" ו"עדכון 13"
+    בראש הקובץ. לא שולפת ולא מאמתת שום דבר - רק בוחרת כתובת.
 
-    סדר עדיפות (עודכן ב"עדכון 12" - הכי-מוגבל קודם, לא הכי-נוח קודם):
-    1. YEMOT_DOWNLOAD_API_KEY (אם מוגדר) - מפתח API מוגבל שיוצר רק URL-ים
-       להורדת קבצים, לא נותן שום גישה אחרת ל-API של ימות המשיח. זה מה
-       שנחשף בפועל לדפדפן הלקוח אחרי ה-redirect, אז זה מה שרוצים שם -
-       גם אם ידלוף/יילקח, אין ממנו נזק מעבר להורדת הקלטות.
-    2. rec.rec_url - המקור שהצינור תמלול שולף ממנו (מוכח אמין), אבל
-       הטוקן שמוטמע בו הוא מה שימות המשיח עצמם נתנו - כנראה גישה רחבה
-       יותר. משמש רק אם המפתח המוגבל עדיין לא הוגדר.
-    3. טוקן רחב מהגדרות הסביבה/DB (YEMOT_TOKEN/yemot_token) - כמו קודם,
-       רק כמקור אחרון אם אין לא מפתח מוגבל ולא rec_url.
+    סדר עדיפות (עודכן ב"עדכון 13" - מפתח מוגבל, אבל עם הנתיב האמיתי
+    מ-rec.rec_url ולא נתיב מנוחש):
+    1. rec.rec_url עם טוקן ה-YEMOT_DOWNLOAD_API_KEY המוגבל מוחלף בתוכו
+       (אם גם המפתח המוגבל מוגדר וגם יש rec.rec_url תקין עם פרמטר token
+       להחליף) - הנתיב האמיתי (מוכח עובד) יחד עם האימות המוגבל/הבטוח.
+    2. rec.rec_url כמו שהוא (הטוקן הרחב שימות המשיח עצמם נתנו) - אם
+       המפתח המוגבל לא מוגדר, או שההחלפה לא הצליחה (מבנה URL לא מוכר).
+    3. טוקן רחב מהגדרות הסביבה/DB (YEMOT_TOKEN/yemot_token), עם path
+       *מנוחש* לפי call_id (ivr2:/recordings/{call_id}.wav) - זהו עדיין
+       מקור אחרון בלבד, שמופעל רק כשאין בכלל rec.rec_url; הניחוש הזה לא
+       אומת בפועל (ראו האזהרה ב"עדכון 13"), אבל עדיף על דף שגיאה מוחלט.
 
     מחזירה None אם אין שום כתובת שאפשר לבנות ממנה."""
-    if _YEMOT_DOWNLOAD_API_KEY and rec.call_id:
-        return (f'https://www.call2all.co.il/ym/api/DownloadFile'
-                f'?token={_YEMOT_DOWNLOAD_API_KEY}&path=ivr2:/recordings/{rec.call_id}.wav')
+    if _YEMOT_DOWNLOAD_API_KEY and rec.rec_url:
+        swapped = _with_replaced_token(rec.rec_url, _YEMOT_DOWNLOAD_API_KEY)
+        if swapped:
+            return swapped
     if rec.rec_url:
         return rec.rec_url
     if not rec.call_id:
