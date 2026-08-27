@@ -1,8 +1,17 @@
 # מתקין LibreOffice (soffice) - נדרש להמרת Word ל-PDF לצורך שליחת פקס.
-# מתקין גם ffmpeg במפורש - pydub (services/transcribe.py, וכעת גם
-# routes/recording_proxy.py להמרת WAV->MP3 בהורדה, ראו "עדכון 10" שם)
-# תלוי בבינארי ffmpeg בזמן ריצה כדי לעבוד בכלל, ובלי שורה מפורשת כאן אין
-# ודאות שהוא מותקן בסביבת הפריסה (Nixpacks) - אם הוא חסר, pydub נכשל
-# בשקט (יש טיפול בזה בקוד) והקובץ יישאר WAV בפועל בלי שאף אחד ידע למה.
+#
+# לגבי ffmpeg: בכוונה *לא* מוסיפים אותו כאן במפורש, למרות ש-pydub
+# (services/transcribe.py וגם routes/recording_proxy.py, "עדכון 10") תלוי
+# בו בזמן ריצה. הסיבה: Nixpacks כבר מזהה לבד שיש ffmpeg-python/pydub
+# ב-requirements.txt ומוסיף אוטומטית חבילת ffmpeg-headless משלו לשלב
+# ה-setup (רואים את זה בלוג הבנייה: "setup | python3, ..., ffmpeg-headless,
+# ...").  כשניסינו להוסיף כאן גם 'ffmpeg' במפורש (עדכון 10), שתי החבילות
+# ניסו להתקין קובץ באותו נתיב (bin/ffprobe) וה-build קרס עם:
+#   error: collision between `.../ffmpeg-headless-7.1-bin/bin/ffprobe' and
+#   `.../ffmpeg-7.1-bin/bin/ffprobe'
+#   error: builder for '....env.drv' failed with exit code 255
+# זו הייתה הסיבה לשלוש הפריסות שנכשלו ברצף. אם ffmpeg בכל זאת חסר בזמן
+# ריצה, pydub נכשל בשקט (יש טיפול בזה בקוד) והקובץ יישאר WAV בפועל -
+# אבל אין להוסיף כאן שוב חבילת ffmpeg מפורשת, כדי לא לשחזר את ההתנגשות.
 [phases.setup]
-nixPkgs = ['...', 'libreoffice-fresh', 'ffmpeg']
+nixPkgs = ['...', 'libreoffice-fresh']
