@@ -1,0 +1,52 @@
+{% extends 'admin/base.html' %}
+{% block title %}הקראת כתבי-יד{% endblock %}
+{% block page_title %}תור הקראת כתבי-יד{% endblock %}
+{% block content %}
+
+<div style="display:flex;gap:8px;margin-bottom:16px">
+  <a href="/admin/dictate?status=open" class="btn {% if status_filter=='open' %}btn-primary{% else %}btn-ghost{% endif %}" style="font-size:13px">🕓 בתור</a>
+  <a href="/admin/dictate?status=done" class="btn {% if status_filter=='done' %}btn-primary{% else %}btn-ghost{% endif %}" style="font-size:13px">✅ הושלמו</a>
+</div>
+
+<div class="table-card">
+  <div class="table-header">
+    <span class="table-title">🎤 דפים ({{ pages|length }})</span>
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th>לקוח</th>
+        <th>קובץ</th>
+        <th>סטטוס</th>
+        <th>מנוע</th>
+        <th>שויך ל-</th>
+        <th>התקבל</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for p in pages %}
+      <tr>
+        <td onclick="location='/admin/dictate/{{p.id}}'" style="cursor:pointer"><strong>{{ p.customer.phone }}</strong></td>
+        <td onclick="location='/admin/dictate/{{p.id}}'" style="cursor:pointer;color:#8892b0;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ p.original_filename }}</td>
+        <td onclick="location='/admin/dictate/{{p.id}}'" style="cursor:pointer">
+          {% if p.status == 'pending' %}<span class="badge badge-gray">ממתין</span>
+          {% elif p.status == 'recording' %}<span class="badge badge-blue">בהקלטה</span>
+          {% elif p.status == 'processing' %}<span class="badge badge-amber">מתמלל...</span>
+          {% elif p.status == 'review' %}<span class="badge badge-amber">ממתין לאישור</span>
+          {% elif p.status == 'done' %}<span class="badge badge-green">נשלח</span>
+          {% else %}<span class="badge badge-red">שגיאה</span>{% endif %}
+        </td>
+        <td onclick="location='/admin/dictate/{{p.id}}'" style="cursor:pointer;color:#8892b0;font-size:12px">{% if p.engine == 'gemini' %}ג׳מיני{% elif p.engine == 'openai' %}OpenAI{% else %}—{% endif %}</td>
+        <td onclick="location='/admin/dictate/{{p.id}}'" style="cursor:pointer;color:#8892b0">{{ p.claimed_by or '—' }}</td>
+        <td onclick="location='/admin/dictate/{{p.id}}'" style="cursor:pointer;color:#8892b0">{{ p.created_at | il_time }}</td>
+        <td><a href="/admin/dictate/{{p.id}}" class="btn btn-ghost" style="font-size:12px;padding:4px 10px">{% if p.status=='done' %}צפייה{% else %}פתח{% endif %}</a></td>
+      </tr>
+      {% else %}
+      <tr><td colspan="7" style="text-align:center;color:#8892b0;padding:24px">אין דפים כרגע</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% endblock %}

@@ -32,6 +32,7 @@ import os
 import re
 import time
 import uuid
+import shutil
 import logging
 import threading
 
@@ -75,6 +76,13 @@ def _is_system_inbound_address(email):
 # תיקייה לשמירת קבצי אודיו שהתקבלו במייל (משם הם מוגשים חזרה כ-rec_url)
 RECORDINGS_EMAIL_DIR = os.environ.get('RECORDINGS_EMAIL_DIR', 'recordings_email')
 os.makedirs(RECORDINGS_EMAIL_DIR, exist_ok=True)
+
+# עותק עצמאי ובר-קיימא של כל דף כתב-יד שמתקבל, בשביל תור ההקראה/הקלטה החדש
+# (routes/dictate.py) - במתכוון בתיקייה נפרדת מ-RECORDINGS_EMAIL_DIR, כי זו
+# מתנקה אוטומטית אחרי RECORDINGS_EMAIL_MAX_AGE_DAYS ואנחנו לא רוצים שדף
+# שעדיין מחכה בתור להקראה ייעלם מתחת לרגליים
+MANUSCRIPT_DIR = os.environ.get('MANUSCRIPT_DIR', 'manuscripts')
+os.makedirs(MANUSCRIPT_DIR, exist_ok=True)
 
 # מחיקה אוטומטית של קבצי הקלטה שהתקבלו במייל - לאחר כמה ימים נחשבים "ישנים"
 RECORDINGS_EMAIL_MAX_AGE_DAYS = float(os.environ.get('RECORDINGS_EMAIL_MAX_AGE_DAYS', '2'))
@@ -508,6 +516,41 @@ def _pick_file():
             return f, 'audio'  # ברירת מחדל - תמלול
 
     return None, None
+
+
+def _capture_manuscript_page(filepath, original_filename, customer, db):
+    """
+    שומר עותק עצמאי של דף כתב-היד עבור תור ההקראה/הקלטה החדש (routes/dictate.py) -
+    רץ בשקט לגמרי במקביל לצנרת ה-OCR הקיימת, לא תלוי בה ולא משפיע עליה, והלקוח
+    אינו נחשף לזה בשום צורה (שלב א' - ראו שיחה עם המשתמש). כל כשל כאן חייב
+    להישאר מקומי ולא לחסום/לשבש את זרימת ה-OCR הרגילה בשום מקרה.
+    """
+    try:
+        from models import ManuscriptPage
+        ext = os.path.splitext(filepath)[1] or '.jpg'
+        dest_name = f"{uuid.uuid4().hex}{ext}"
+        dest_path = os.path.join(MANUSCRIPT_DIR, dest_name)
+        shutil.copy2(filepath, dest_path)
+
+        page = ManuscriptPage(
+            customer_id=customer.id,
+            original_filename=original_filename,
+            file_path=dest_path,
+            status='pending',
+        )
+        db.session.add(page)
+        db.session.commit()
+        log.info(f"manuscript page captured for dictation queue: customer={customer.id}, file={original_filename}")
+    except Exception as e:
+        # קריטי: אם ה-commit נכשל (constraint, ניתוק זמני וכו'), ה-session
+        # של SQLAlchemy נכנס למצב "פגום" (PendingRollbackError) עד שקוראים
+        # rollback - וכל שימוש נוסף באותו session, כולל _process_ocr_email
+        # שרץ מיד אחרי זה על אותו db object, ייכשל גם הוא. בלי ה-rollback כאן
+        # כשל שקט בפיצ'ר הצדדי הזה היה עלול לשבור בפועל את זרימת ה-OCR
+        # הרגילה שהלקוחות תלויים בה - זו בדיוק התוצאה שהפונקציה הזו נועדה
+        # למנוע (ראו docstring למעלה).
+        db.session.rollback()
+        log.error(f"manuscript capture error (non-blocking, OCR flow continues): {e}", exc_info=True)
 
 
 def _process_ocr_email(filepath, original_filename, customer, sender_email, phone, db):
@@ -1367,6 +1410,7 @@ def email_inbound():
 
         # --- ניתוב: OCR או תמלול ---
         if file_type == 'image':
+            _capture_manuscript_page(filepath, original_filename, customer, db)
             _process_ocr_email(
                 filepath=filepath,
                 original_filename=original_filename,

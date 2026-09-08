@@ -55,6 +55,7 @@ def create_app():
     from routes.institution_transcribe import institution_transcribe_bp
     from routes.institution_students import institution_students_bp
     from routes.recording_proxy import download_bp
+    from routes.dictate import dictate_bp
 
     app.register_blueprint(ivr_bp, url_prefix='/ivr')
     app.register_blueprint(admin_bp, url_prefix='/admin')
@@ -66,6 +67,7 @@ def create_app():
     app.register_blueprint(institution_transcribe_bp)
     app.register_blueprint(institution_students_bp)
     app.register_blueprint(download_bp)
+    app.register_blueprint(dictate_bp, url_prefix='/admin/dictate')
 
     # Route ציבורי לקבצי פקס זמניים
     @app.route('/static/fax_tmp/<filename>')

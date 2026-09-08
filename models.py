@@ -177,6 +177,38 @@ class ManagerMessage(db.Model):
     source = db.Column(db.String(30), default='ivr')
 
 
+class ManuscriptPage(db.Model):
+    """דף כתב-יד שהתקבל במייל - עותק מקביל ובלתי-תלוי לגמרי בצנרת ה-OCR
+    (OcrResult). המטרה: נציג צוות פותח את התמונה, מקריא את הטקסט בקול, ומסמן
+    עיצוב (מודגש/קו תחתון/כותרת) תוך כדי ההקראה עם כפתורים - ראו routes/dictate.py.
+    שלב א' (נוכחי): רץ בשקט לגמרי במקביל ל-OCR, הלקוח לא נחשף לזה בשום צורה.
+    """
+    __tablename__ = 'manuscript_pages'
+
+    id = db.Column(db.Integer, primary_key=True)
+    customer_id = db.Column(db.Integer, db.ForeignKey('customers.id'), nullable=False, index=True)
+    original_filename = db.Column(db.String(255))
+    file_path = db.Column(db.String(512))  # עותק עצמאי ובר-קיימא לצורך ההקלטה (לא תלוי בקובץ של ה-OCR)
+    status = db.Column(db.String(20), default='pending', index=True)
+    # pending -> ממתין להקלטה
+    # recording -> נציג פתח את הדף ומקליט/עורך כרגע (claimed_by נעול)
+    # processing -> אודיו הועלה, מחכה לתמלול (לפי engine) ולבניית התוכן מהקטעים
+    # review -> תומלל בהצלחה, ממתין לאישור/שליחה של הנציג
+    # error -> תמלול נכשל
+    engine = db.Column(db.String(20), nullable=True)  # 'gemini' | 'openai' - איזה מנוע תימלל את ההקלטה הזו (לצורך השוואה)
+    content = db.Column(db.JSON, nullable=True)  # [{heading: bool, runs: [{text, bold, underline}, ...]}, ...]
+    docx_filename = db.Column(db.String(255), nullable=True)  # קובץ ה-Word המוכן, בתוך static/fax_tmp
+    claimed_by = db.Column(db.String(100), nullable=True)  # username של הנציג שפתח את הדף (נעילה רכה)
+    claimed_at = db.Column(db.DateTime, nullable=True)
+    error_message = db.Column(db.Text, nullable=True)
+    sent_at = db.Column(db.DateTime, nullable=True)
+    sent_to = db.Column(db.String(255), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    customer = db.relationship('Customer', backref='manuscript_pages')
+
+
 class OcrResult(db.Model):
     __tablename__ = 'ocr_results'
 

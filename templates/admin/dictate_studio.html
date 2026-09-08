@@ -1,0 +1,387 @@
+{% extends 'admin/base.html' %}
+{% block title %}הקראה - {{ page.original_filename }}{% endblock %}
+{% block page_title %}הקראת כתב יד{% endblock %}
+{% block content %}
+
+<style>
+  .ds-wrap { display:grid; grid-template-columns: 1fr 1fr; gap:20px; align-items:start; }
+  @media (max-width: 980px) { .ds-wrap { grid-template-columns: 1fr; } }
+
+  .ds-imgcard { position:sticky; top:16px; }
+  .ds-imgbox { max-height:80vh; overflow:auto; border-radius:10px; background:var(--surface2); text-align:center; }
+  .ds-imgbox img { max-width:100%; display:block; margin:0 auto; cursor:zoom-in; transition:max-width .15s; }
+  .ds-imgbox.zoomed img { max-width:180%; cursor:zoom-out; }
+
+  .ds-recordbar { display:flex; align-items:center; gap:14px; padding:16px; background:var(--surface2); border-radius:10px; margin-bottom:14px; }
+  .ds-recbtn {
+    display:flex; align-items:center; gap:8px; padding:12px 22px; border-radius:999px; border:none;
+    font-family:'Heebo',sans-serif; font-size:15px; font-weight:700; cursor:pointer; color:#fff; background:var(--red);
+  }
+  .ds-recbtn.idle { background:var(--accent); }
+  .ds-recbtn:disabled { opacity:.5; cursor:not-allowed; }
+  .ds-dot { width:10px; height:10px; border-radius:50%; background:#fff; }
+  .ds-recbtn.rec .ds-dot { animation: ds-pulse 1s infinite; }
+  @keyframes ds-pulse { 0%,100%{opacity:1} 50%{opacity:.25} }
+  .ds-timer { font-family:'JetBrains Mono', monospace; color:var(--text2); font-size:14px; min-width:52px; }
+
+  .ds-formatrow { display:flex; gap:8px; flex-wrap:wrap; padding:0 4px 14px; }
+  .ds-fbtn {
+    min-width:44px; padding:9px 14px; border-radius:8px; border:1px solid var(--border); background:var(--surface);
+    color:var(--text); cursor:pointer; font-family:'Heebo',sans-serif; font-size:14px; font-weight:700;
+  }
+  .ds-fbtn:disabled { opacity:.4; cursor:not-allowed; }
+  .ds-fbtn.active { background:var(--accent); color:#fff; border-color:var(--accent); }
+  .ds-fbtn u, .ds-fbtn b { pointer-events:none; }
+  .ds-hint { color:var(--text3); font-size:12px; padding:0 4px 10px; }
+
+  .ds-state { padding:20px; text-align:center; color:var(--text2); }
+  .ds-error { color:var(--red); }
+
+  .ds-preview { line-height:1.9; }
+  .ds-para { margin:0 0 10px; direction:rtl; text-align:right; }
+  .ds-para.heading { font-weight:800; font-size:19px; border-bottom:1px solid var(--border); padding-bottom:6px; }
+  .ds-run { outline:none; }
+  .ds-run:focus { background:rgba(79,110,247,.15); border-radius:3px; }
+  .ds-run.bold { font-weight:800; }
+  .ds-run.underline { text-decoration:underline; }
+
+  .ds-sendrow { display:flex; gap:8px; margin-top:16px; flex-wrap:wrap; }
+  .ds-sendrow input[type=email] { flex:1; min-width:220px; padding:9px 12px; border-radius:8px; border:1px solid var(--border); background:var(--surface); color:var(--text); font-family:'Heebo',sans-serif; }
+
+  .ds-enginerow { display:flex; align-items:center; gap:8px; padding:0 4px 12px; font-size:13px; color:var(--text2); }
+  .ds-enginerow select { padding:6px 10px; border-radius:8px; border:1px solid var(--border); background:var(--surface); color:var(--text); font-family:'Heebo',sans-serif; font-size:13px; }
+</style>
+
+<div style="display:flex;gap:8px;margin-bottom:16px;align-items:center;flex-wrap:wrap">
+  <a href="/admin/dictate" class="btn btn-ghost">← חזרה לתור</a>
+  <a href="/admin/customers/{{ page.customer_id }}" class="btn btn-ghost">👤 {{ page.customer.phone }}</a>
+  <span id="statusBadge" class="badge badge-gray">{{ page.status }}</span>
+  <span id="engineBadge" style="color:var(--text3);font-size:12px">{% if page.engine %}מנוע: {{ 'ג׳מיני' if page.engine == 'gemini' else 'OpenAI' }}{% endif %}</span>
+  {% if page.claimed_by %}<span style="color:var(--text3);font-size:12px">נפתח ע"י {{ page.claimed_by }}</span>{% endif %}
+</div>
+
+<div class="ds-wrap">
+  <div class="card ds-imgcard">
+    <div class="card-title">📄 {{ page.original_filename }}</div>
+    {% set ext = page.original_filename.rsplit('.', 1)[-1].lower() if page.original_filename and '.' in page.original_filename else '' %}
+    <div class="ds-imgbox" id="imgBox" onclick="this.classList.toggle('zoomed')">
+      {% if ext == 'pdf' %}
+        <a href="/admin/dictate/{{ page.id }}/file" target="_blank" class="btn btn-primary" style="margin:16px">📄 פתח PDF בכרטיסייה נפרדת</a>
+      {% else %}
+        <img src="/admin/dictate/{{ page.id }}/file" alt="כתב יד">
+      {% endif %}
+    </div>
+    <p class="ds-hint">לחיצה על התמונה מגדילה/מקטינה</p>
+  </div>
+
+  <div class="card">
+    <div class="card-title">🎤 הקראה</div>
+
+    <div class="ds-enginerow">
+      מנוע תמלול:
+      <select id="engineSelect">
+        <option value="gemini" {% if (page.engine or default_engine) == 'gemini' %}selected{% endif %}>ג׳מיני (Gemini)</option>
+        <option value="openai" {% if (page.engine or default_engine) == 'openai' %}selected{% endif %}>OpenAI (gpt-transcribe)</option>
+      </select>
+      <span style="color:var(--text3)">- אפשר להריץ את אותו דף עם שני המנועים ולהשוות</span>
+    </div>
+
+    <div class="ds-recordbar">
+      <button id="recBtn" class="ds-recbtn idle" onclick="toggleRecording()">
+        <span class="ds-dot"></span>
+        <span id="recBtnLabel">התחל הקלטה</span>
+      </button>
+      <span class="ds-timer" id="timer">00:00</span>
+    </div>
+
+    <div class="ds-formatrow">
+      <button class="ds-fbtn" id="btnBold" disabled onclick="pushEvent('bold')"><b>B</b> מודגש</button>
+      <button class="ds-fbtn" id="btnUnderline" disabled onclick="pushEvent('underline')"><u>U</u> קו תחתון</button>
+      <button class="ds-fbtn" id="btnHeading" disabled onclick="pushEvent('heading')">כותרת / רגיל</button>
+      <button class="ds-fbtn" id="btnEnter" disabled onclick="pushEvent('enter')">↵ שורה חדשה</button>
+    </div>
+    <p class="ds-hint">אפשר גם במקלדת תוך כדי הקלטה: B, U, H (כותרת), Enter</p>
+
+    <div id="resultArea">
+      {% if page.status == 'processing' %}
+        <div class="ds-state">⏳ מתמלל את ההקלטה...</div>
+      {% elif page.status == 'error' %}
+        <div class="ds-state ds-error">⚠ {{ page.error_message or 'שגיאה בתמלול' }}</div>
+        <div style="text-align:center"><button class="btn btn-primary" onclick="redo()">נסה שוב</button></div>
+      {% elif page.content %}
+        <div id="previewWrap"></div>
+        <div class="ds-sendrow">
+          <input type="email" id="toEmail" placeholder="כתובת מייל ליעד" value="{{ page.customer.email or '' }}">
+          <button class="btn btn-primary" onclick="sendResult()">📤 שלח</button>
+          <button class="btn btn-ghost" onclick="saveEdits()">💾 שמור תיקונים</button>
+          <button class="btn btn-danger" onclick="redo()">🔄 הקלט מחדש</button>
+        </div>
+        <div id="sendMsg" style="margin-top:8px;font-size:13px"></div>
+      {% else %}
+        <div class="ds-state">לחצו "התחל הקלטה" והקריאו את הטקסט מהתמונה</div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<script>
+const PAGE_ID = {{ page.id }};
+
+// --- הקלטה מבוססת-סגמנטים ---
+// כל לחיצת כפתור (B/U/כותרת/Enter) סוגרת את סגמנט האודיו הנוכחי ופותחת סגמנט
+// חדש עם מצב העיצוב המעודכן - כך שכל סגמנט "יודע" בעצמו איזה עיצוב חל עליו,
+// בלי צורך בשום ניחוש לפי חותמות זמן בצד השרת (ראה routes/dictate.py).
+let mediaStream = null, segRecorder = null, segChunks = [], segStartMeta = null;
+let segments = []; // {blob, bold, underline, heading, new_paragraph}
+let recording = false, recordStartTime = 0, timerInterval = null;
+let state = { bold: false, underline: false, heading: false };
+let currentContent = {{ page.content | tojson if page.content else 'null' }};
+
+function fmtTime(sec) {
+  const m = Math.floor(sec / 60).toString().padStart(2, '0');
+  const s = Math.floor(sec % 60).toString().padStart(2, '0');
+  return m + ':' + s;
+}
+
+function updateToggleUI() {
+  document.getElementById('btnBold').classList.toggle('active', state.bold);
+  document.getElementById('btnUnderline').classList.toggle('active', state.underline);
+  document.getElementById('btnHeading').classList.toggle('active', state.heading);
+}
+
+function setFormatButtonsEnabled(on) {
+  ['btnBold', 'btnUnderline', 'btnHeading', 'btnEnter'].forEach(id => {
+    document.getElementById(id).disabled = !on;
+  });
+}
+
+async function toggleRecording() {
+  if (!recording) await startRecording();
+  else stopRecording();
+}
+
+async function startRecording() {
+  try {
+    mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (e) {
+    alert('לא ניתן לגשת למיקרופון: ' + e.message);
+    return;
+  }
+  segments = [];
+  state = { bold: false, underline: false, heading: false };
+  updateToggleUI();
+  recording = true;
+  recordStartTime = performance.now();
+
+  const btn = document.getElementById('recBtn');
+  btn.classList.remove('idle');
+  btn.classList.add('rec');
+  document.getElementById('recBtnLabel').textContent = 'עצור הקלטה';
+  setFormatButtonsEnabled(true);
+  document.getElementById('engineSelect').disabled = true;
+
+  timerInterval = setInterval(() => {
+    document.getElementById('timer').textContent = fmtTime((performance.now() - recordStartTime) / 1000);
+  }, 200);
+
+  beginSegment(false);
+}
+
+function beginSegment(startsNewParagraph) {
+  segStartMeta = {
+    bold: state.bold, underline: state.underline, heading: state.heading,
+    new_paragraph: !!startsNewParagraph,
+  };
+  segChunks = [];
+  segRecorder = new MediaRecorder(mediaStream);
+  segRecorder.ondataavailable = e => { if (e.data.size > 0) segChunks.push(e.data); };
+  segRecorder.start();
+}
+
+function endSegmentThen(afterFn) {
+  const meta = segStartMeta;
+  const chunksRef = segChunks;
+  const rec = segRecorder;
+  rec.onstop = () => {
+    const blob = new Blob(chunksRef, { type: 'audio/webm' });
+    segments.push(Object.assign({ blob: blob }, meta));
+    afterFn();
+  };
+  rec.stop();
+}
+
+function pushEvent(type) {
+  if (!recording) return;
+  let opensNewParagraph = false;
+  if (type === 'bold') state.bold = !state.bold;
+  else if (type === 'underline') state.underline = !state.underline;
+  else if (type === 'heading') state.heading = !state.heading;
+  else if (type === 'enter') opensNewParagraph = true;
+  updateToggleUI();
+  endSegmentThen(() => beginSegment(opensNewParagraph));
+}
+
+document.addEventListener('keydown', e => {
+  if (!recording) return;
+  const tag = (document.activeElement.tagName || '').toLowerCase();
+  if (tag === 'input' || tag === 'textarea' || document.activeElement.isContentEditable) return;
+  if (e.key === 'b' || e.key === 'B') { pushEvent('bold'); e.preventDefault(); }
+  else if (e.key === 'u' || e.key === 'U') { pushEvent('underline'); e.preventDefault(); }
+  else if (e.key === 'h' || e.key === 'H') { pushEvent('heading'); e.preventDefault(); }
+  else if (e.key === 'Enter') { pushEvent('enter'); e.preventDefault(); }
+});
+
+function stopRecording() {
+  if (!recording || !segRecorder) return;
+  recording = false;
+  clearInterval(timerInterval);
+  const btn = document.getElementById('recBtn');
+  btn.classList.remove('rec');
+  btn.classList.add('idle');
+  btn.disabled = true;
+  document.getElementById('recBtnLabel').textContent = 'ממתין...';
+  setFormatButtonsEnabled(false);
+
+  mediaStream.getTracks().forEach(t => t.stop());
+  endSegmentThen(() => uploadAllSegments());
+}
+
+async function uploadAllSegments() {
+  document.getElementById('resultArea').innerHTML = '<div class="ds-state">⏳ מעלה ומתמלל...</div>';
+  const fd = new FormData();
+  const meta = [];
+  segments.forEach((seg, i) => {
+    fd.append('segments', seg.blob, `seg${i}.webm`);
+    meta.push({ bold: seg.bold, underline: seg.underline, heading: seg.heading, new_paragraph: seg.new_paragraph });
+  });
+  fd.append('meta', JSON.stringify(meta));
+  fd.append('engine', document.getElementById('engineSelect').value);
+  try {
+    const res = await fetch(`/admin/dictate/${PAGE_ID}/process`, { method: 'POST', body: fd });
+    if (!res.ok) throw new Error('שגיאת שרת');
+    pollStatus();
+  } catch (e) {
+    document.getElementById('resultArea').innerHTML = `<div class="ds-state ds-error">⚠ העלאה נכשלה: ${e.message}</div>`;
+    resetRecordButton();
+  }
+}
+
+async function pollStatus() {
+  const res = await fetch(`/admin/dictate/${PAGE_ID}/status`);
+  const data = await res.json();
+  if (data.status === 'processing') { setTimeout(pollStatus, 1500); return; }
+  if (data.status === 'error') {
+    document.getElementById('resultArea').innerHTML =
+      `<div class="ds-state ds-error">⚠ ${data.error_message || 'שגיאה בתמלול'}</div>
+       <div style="text-align:center"><button class="btn btn-primary" onclick="redo()">נסה שוב</button></div>`;
+    document.getElementById('statusBadge').textContent = 'error';
+    document.getElementById('engineSelect').disabled = false;
+    return;
+  }
+  currentContent = data.content;
+  renderReview();
+  document.getElementById('statusBadge').textContent = data.status;
+  document.getElementById('engineBadge').textContent = data.engine ? ('מנוע: ' + (data.engine === 'gemini' ? 'ג׳מיני' : 'OpenAI')) : '';
+}
+
+function resetRecordButton() {
+  const btn = document.getElementById('recBtn');
+  btn.disabled = false;
+  btn.classList.remove('rec');
+  btn.classList.add('idle');
+  document.getElementById('recBtnLabel').textContent = 'התחל הקלטה';
+  document.getElementById('engineSelect').disabled = false;
+}
+
+function renderReview() {
+  const area = document.getElementById('resultArea');
+  area.innerHTML = `
+    <div id="previewWrap"></div>
+    <div class="ds-sendrow">
+      <input type="email" id="toEmail" placeholder="כתובת מייל ליעד" value="{{ page.customer.email or '' }}">
+      <button class="btn btn-primary" onclick="sendResult()">📤 שלח</button>
+      <button class="btn btn-ghost" onclick="saveEdits()">💾 שמור תיקונים</button>
+      <button class="btn btn-danger" onclick="redo()">🔄 הקלט מחדש</button>
+    </div>
+    <div id="sendMsg" style="margin-top:8px;font-size:13px"></div>
+  `;
+  renderPreview();
+}
+
+function renderPreview() {
+  const wrap = document.getElementById('previewWrap');
+  if (!wrap) return;
+  if (!currentContent || !currentContent.length) {
+    wrap.innerHTML = '<p style="color:var(--text3)">לא זוהה תוכן</p>';
+    return;
+  }
+  wrap.className = 'ds-preview';
+  wrap.innerHTML = currentContent.map((para, pi) => {
+    const runs = (para.runs || []).map((run, ri) => {
+      const cls = ['ds-run', run.bold ? 'bold' : '', run.underline ? 'underline' : ''].join(' ').trim();
+      return `<span class="${cls}" contenteditable="true" data-pi="${pi}" data-ri="${ri}">${escapeHtml(run.text)}</span>`;
+    }).join('');
+    return `<div class="ds-para${para.heading ? ' heading' : ''}">${runs}</div>`;
+  }).join('');
+}
+
+function escapeHtml(s) {
+  const d = document.createElement('div');
+  d.textContent = s || '';
+  return d.innerHTML;
+}
+
+function collectEditedContent() {
+  document.querySelectorAll('.ds-run').forEach(el => {
+    const pi = +el.dataset.pi, ri = +el.dataset.ri;
+    if (currentContent[pi] && currentContent[pi].runs[ri]) {
+      currentContent[pi].runs[ri].text = el.textContent;
+    }
+  });
+  return currentContent;
+}
+
+async function saveEdits() {
+  const content = collectEditedContent();
+  const res = await fetch(`/admin/dictate/${PAGE_ID}/content`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content })
+  });
+  const msg = document.getElementById('sendMsg');
+  msg.textContent = res.ok ? '✔ נשמר' : '⚠ שמירה נכשלה';
+  msg.style.color = res.ok ? 'var(--green)' : 'var(--red)';
+}
+
+async function sendResult() {
+  await saveEdits();
+  const toEmail = document.getElementById('toEmail').value.trim();
+  const fd = new FormData();
+  if (toEmail) fd.append('to_email', toEmail);
+  const msg = document.getElementById('sendMsg');
+  msg.textContent = 'שולח...';
+  msg.style.color = 'var(--text2)';
+  try {
+    const res = await fetch(`/admin/dictate/${PAGE_ID}/send`, { method: 'POST', body: fd });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'שליחה נכשלה');
+    msg.textContent = `✔ נשלח אל ${data.to}`;
+    msg.style.color = 'var(--green)';
+    document.getElementById('statusBadge').textContent = 'done';
+  } catch (e) {
+    msg.textContent = '⚠ ' + e.message;
+    msg.style.color = 'var(--red)';
+  }
+}
+
+async function redo() {
+  if (!confirm('להתחיל הקלטה מחדש לדף הזה? התוצאה הנוכחית תימחק.')) return;
+  await fetch(`/admin/dictate/${PAGE_ID}/redo`, { method: 'POST' });
+  location.reload();
+}
+
+if (currentContent) {
+  setTimeout(() => { if (document.getElementById('previewWrap')) renderPreview(); }, 0);
+}
+</script>
+
+{% endblock %}
