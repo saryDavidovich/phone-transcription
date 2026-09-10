@@ -45,6 +45,8 @@
   .ds-run.bold { font-weight:800; }
   .ds-run.underline { text-decoration:underline; }
 
+  .ds-charcount { color:var(--text3); font-size:12px; margin-top:10px; }
+
   .ds-sendrow { display:flex; gap:8px; margin-top:16px; flex-wrap:wrap; }
   .ds-sendrow input[type=email] { flex:1; min-width:220px; padding:9px 12px; border-radius:8px; border:1px solid var(--border); background:var(--surface); color:var(--text); font-family:'Heebo',sans-serif; }
 
@@ -102,6 +104,16 @@
     </div>
     <p class="ds-hint">אפשר גם במקלדת תוך כדי הקלטה: B, U, H (כותרת), Enter</p>
 
+    <div class="ds-formatrow" id="punctRow">
+      <button class="ds-fbtn" id="btnParenOpen" disabled onclick="insertPunct('btnParenOpen')">(</button>
+      <button class="ds-fbtn" id="btnParenClose" disabled onclick="insertPunct('btnParenClose')">)</button>
+      <button class="ds-fbtn" id="btnBracketOpen" disabled onclick="insertPunct('btnBracketOpen')">[</button>
+      <button class="ds-fbtn" id="btnBracketClose" disabled onclick="insertPunct('btnBracketClose')">]</button>
+      <button class="ds-fbtn" id="btnDash" disabled onclick="insertPunct('btnDash')">-</button>
+      <button class="ds-fbtn" id="btnColon" disabled onclick="insertPunct('btnColon')">:</button>
+    </div>
+    <p class="ds-hint">סימני פיסוק אלו מוכנסים ישירות בלחיצה (לא צריך להקריא אותם בקול) - סימני פיסוק בסיסיים (נקודה, פסיק) מזוהים ע"י המנוע מהדיבור עצמו. אפשר גם במקלדת: ( ) [ ] - :</p>
+
     <div id="resultArea">
       {% if page.status == 'processing' %}
         <div class="ds-state">⏳ מתמלל את ההקלטה...</div>
@@ -110,6 +122,7 @@
         <div style="text-align:center"><button class="btn btn-primary" onclick="redo()">נסה שוב</button></div>
       {% elif page.content %}
         <div id="previewWrap"></div>
+        <div class="ds-charcount">מספר תווים (כולל רווחים): <strong id="charCountValue">0</strong></div>
         <div class="ds-sendrow">
           <input type="email" id="toEmail" placeholder="כתובת מייל ליעד" value="{{ page.customer.email or '' }}">
           <button class="btn btn-primary" onclick="sendResult()">📤 שלח</button>
@@ -132,10 +145,22 @@ const PAGE_ID = {{ page.id }};
 // חדש עם מצב העיצוב המעודכן - כך שכל סגמנט "יודע" בעצמו איזה עיצוב חל עליו,
 // בלי צורך בשום ניחוש לפי חותמות זמן בצד השרת (ראה routes/dictate.py).
 let mediaStream = null, segRecorder = null, segChunks = [], segStartMeta = null;
-let segments = []; // {blob, bold, underline, heading, new_paragraph}
+let segments = []; // {blob, bold, underline, heading, new_paragraph} (אודיו) או {literal, bold, underline, heading, new_paragraph, no_space_before, no_space_after} (סימן פיסוק)
 let recording = false, recordStartTime = 0, timerInterval = null;
 let state = { bold: false, underline: false, heading: false };
 let currentContent = {{ page.content | tojson if page.content else 'null' }};
+
+// סימני פיסוק שמוכנסים ישירות בלחיצה, בלי להקליט/לתמלל אותם - סימני פיסוק
+// בסיסיים (נקודה, פסיק) כבר מזוהים ע"י מנוע התמלול עצמו מתוך הדיבור.
+// no_space_before/no_space_after שולטים על רווח אוטומטי צמוד (ראו routes/dictate.py).
+const PUNCT_BUTTONS = [
+  { id: 'btnParenOpen',    char: '(', key: '(', noSpaceAfter: true },
+  { id: 'btnParenClose',   char: ')', key: ')', noSpaceBefore: true },
+  { id: 'btnBracketOpen',  char: '[', key: '[', noSpaceAfter: true },
+  { id: 'btnBracketClose', char: ']', key: ']', noSpaceBefore: true },
+  { id: 'btnDash',         char: '-', key: '-', noSpaceBefore: true, noSpaceAfter: true },
+  { id: 'btnColon',        char: ':', key: ':', noSpaceBefore: true },
+];
 
 function fmtTime(sec) {
   const m = Math.floor(sec / 60).toString().padStart(2, '0');
@@ -150,8 +175,10 @@ function updateToggleUI() {
 }
 
 function setFormatButtonsEnabled(on) {
-  ['btnBold', 'btnUnderline', 'btnHeading', 'btnEnter'].forEach(id => {
-    document.getElementById(id).disabled = !on;
+  const ids = ['btnBold', 'btnUnderline', 'btnHeading', 'btnEnter'].concat(PUNCT_BUTTONS.map(p => p.id));
+  ids.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.disabled = !on;
   });
 }
 
@@ -221,6 +248,25 @@ function pushEvent(type) {
   endSegmentThen(() => beginSegment(opensNewParagraph));
 }
 
+// מכניס סימן פיסוק ישירות לתוכן (לא כאודיו לתמלול) - סוגר את סגמנט האודיו
+// הנוכחי, מוסיף אחריו "סגמנט" טקסטואלי קבוע עם הסימן, ואז ממשיך להקליט
+// סגמנט אודיו חדש (אותו מצב עיצוב, לא פותח פסקה חדשה).
+function insertPunct(btnId) {
+  if (!recording) return;
+  const def = PUNCT_BUTTONS.find(p => p.id === btnId);
+  if (!def) return;
+  endSegmentThen(() => {
+    segments.push({
+      literal: def.char,
+      bold: state.bold, underline: state.underline, heading: state.heading,
+      new_paragraph: false,
+      no_space_before: !!def.noSpaceBefore,
+      no_space_after: !!def.noSpaceAfter,
+    });
+    beginSegment(false);
+  });
+}
+
 document.addEventListener('keydown', e => {
   if (!recording) return;
   const tag = (document.activeElement.tagName || '').toLowerCase();
@@ -229,6 +275,10 @@ document.addEventListener('keydown', e => {
   else if (e.key === 'u' || e.key === 'U') { pushEvent('underline'); e.preventDefault(); }
   else if (e.key === 'h' || e.key === 'H') { pushEvent('heading'); e.preventDefault(); }
   else if (e.key === 'Enter') { pushEvent('enter'); e.preventDefault(); }
+  else {
+    const p = PUNCT_BUTTONS.find(p => p.key === e.key);
+    if (p) { insertPunct(p.id); e.preventDefault(); }
+  }
 });
 
 function stopRecording() {
@@ -251,8 +301,17 @@ async function uploadAllSegments() {
   const fd = new FormData();
   const meta = [];
   segments.forEach((seg, i) => {
-    fd.append('segments', seg.blob, `seg${i}.webm`);
-    meta.push({ bold: seg.bold, underline: seg.underline, heading: seg.heading, new_paragraph: seg.new_paragraph });
+    if (seg.literal !== undefined) {
+      // סימן פיסוק - טקסט ידוע מראש, בלי קובץ אודיו וללא תמלול
+      meta.push({
+        type: 'literal', text: seg.literal,
+        bold: seg.bold, underline: seg.underline, heading: seg.heading, new_paragraph: seg.new_paragraph,
+        no_space_before: !!seg.no_space_before, no_space_after: !!seg.no_space_after,
+      });
+    } else {
+      fd.append('segments', seg.blob, `seg${i}.webm`);
+      meta.push({ type: 'audio', bold: seg.bold, underline: seg.underline, heading: seg.heading, new_paragraph: seg.new_paragraph });
+    }
   });
   fd.append('meta', JSON.stringify(meta));
   fd.append('engine', document.getElementById('engineSelect').value);
@@ -297,6 +356,7 @@ function renderReview() {
   const area = document.getElementById('resultArea');
   area.innerHTML = `
     <div id="previewWrap"></div>
+    <div class="ds-charcount">מספר תווים (כולל רווחים): <strong id="charCountValue">0</strong></div>
     <div class="ds-sendrow">
       <input type="email" id="toEmail" placeholder="כתובת מייל ליעד" value="{{ page.customer.email or '' }}">
       <button class="btn btn-primary" onclick="sendResult()">📤 שלח</button>
@@ -313,6 +373,7 @@ function renderPreview() {
   if (!wrap) return;
   if (!currentContent || !currentContent.length) {
     wrap.innerHTML = '<p style="color:var(--text3)">לא זוהה תוכן</p>';
+    updateCharCount();
     return;
   }
   wrap.className = 'ds-preview';
@@ -323,6 +384,22 @@ function renderPreview() {
     }).join('');
     return `<div class="ds-para${para.heading ? ' heading' : ''}">${runs}</div>`;
   }).join('');
+  // עדכון חי של ספירת התווים בכל תיקון ידני בתצוגה (contenteditable) - לא רק בטעינה
+  wrap.addEventListener('input', updateCharCount);
+  updateCharCount();
+}
+
+// סופר תווים בפועל (textContent, כולל רווחים) ישירות מה-DOM של התצוגה - כך
+// שהמספר תמיד משקף את מה שבאמת רואים/מתקנים, גם אחרי תיקון ידני.
+function updateCharCount() {
+  const valueEl = document.getElementById('charCountValue');
+  if (!valueEl) return;
+  const wrap = document.getElementById('previewWrap');
+  let total = 0;
+  if (wrap) {
+    wrap.querySelectorAll('.ds-run').forEach(r => { total += (r.textContent || '').length; });
+  }
+  valueEl.textContent = total;
 }
 
 function escapeHtml(s) {
