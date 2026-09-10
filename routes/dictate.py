@@ -177,12 +177,19 @@ def _transcribe_segment_openai(wav_bytes, client):
 # לפי חותמות זמן - כל סגמנט כבר "מגיע" עם העיצוב הנכון שלו (ראו הסבר בראש
 # הקובץ), אז זו רק הרכבה: heading פותח/סוגר פסקה, new_paragraph (מ-Enter)
 # פותח פסקה חדשה, bold/underline קובעים אם להצמיד לריצה האחרונה או לפתוח חדשה.
+#
+# no_space_before/no_space_after: סגמנטים של סימני פיסוק שהוכנסו בלחיצת כפתור
+# (סוגריים/מקף/נקודותיים - ראו PUNCTUATION_BUTTONS בסטודיו) מסמנים את זה כדי
+# שלא ייכנס רווח מיותר צמוד לסימן (למשל "(שלום)" ולא "( שלום )"). סגמנט אודיו
+# רגיל תמיד מקבל רווח מפריד לפניו כברירת מחדל, בדיוק כמו קודם.
 # --------------------------------------------------------------------------
 def _build_content_from_segments(segments):
     """segments: רשימת dict-ים לפי סדר ההקלטה, כל אחד
-       {'text', 'bold', 'underline', 'heading', 'new_paragraph'}."""
+       {'text', 'bold', 'underline', 'heading', 'new_paragraph',
+        'no_space_before'?, 'no_space_after'?}."""
     paragraphs = []
     pending_new_paragraph = True  # הסגמנט הראשון תמיד פותח פסקה
+    prev_no_space_after = True    # אין רווח לפני התו הראשון בפסקה
 
     for seg in segments:
         if seg.get('new_paragraph'):
@@ -193,15 +200,19 @@ def _build_content_from_segments(segments):
         if pending_new_paragraph or not paragraphs:
             paragraphs.append({'heading': bool(seg.get('heading')), 'runs': []})
             pending_new_paragraph = False
+            prev_no_space_after = True  # תו ראשון בפסקה חדשה - בלי רווח מוביל
 
         para = paragraphs[-1]
         runs = para['runs']
-        prefixed = (' ' + text) if runs else text
+        suppress_space = prev_no_space_after or bool(seg.get('no_space_before'))
+        prefixed = text if (not runs or suppress_space) else (' ' + text)
         bold, underline = bool(seg.get('bold')), bool(seg.get('underline'))
         if runs and runs[-1]['bold'] == bold and runs[-1]['underline'] == underline:
             runs[-1]['text'] += prefixed
         else:
             runs.append({'text': prefixed, 'bold': bold, 'underline': underline})
+
+        prev_no_space_after = bool(seg.get('no_space_after'))
 
     return paragraphs
 
@@ -210,9 +221,14 @@ def _build_content_from_segments(segments):
 # worker ברקע: ממיר+מתמלל כל סגמנט (במקביל, עד 6 בו-זמנית), מרכיב לפסקאות, שומר
 # --------------------------------------------------------------------------
 def _dictation_worker(app, page_id, segment_files, segment_meta, engine=None):
-    """segment_files: נתיבים לקבצי אודיו זמניים, לפי סדר ההקלטה.
-       segment_meta: רשימה מקבילה של {'bold','underline','heading','new_paragraph'}.
-       engine: 'gemini' או 'openai' - איזה מנוע תמלול להשתמש בו לסגמנטים האלה."""
+    """segment_files: נתיבים לקבצי אודיו זמניים, לפי סדר ההקלטה - אך ורק
+       עבור פריטי meta מסוג 'audio' (ראו process() למטה); פריטי 'literal'
+       (סימני פיסוק שהוכנסו בלחיצת כפתור - ראו PUNCTUATION_BUTTONS בסטודיו)
+       לא מקבלים קובץ בכלל, כי הטקסט שלהם כבר ידוע ואין מה לתמלל.
+       segment_meta: רשימה לפי סדר ההקלטה המלא (אודיו + literal ביחד) של
+       {'type': 'audio'|'literal', 'text'? (ל-literal בלבד),
+        'bold','underline','heading','new_paragraph','no_space_before'?,'no_space_after'?}.
+       engine: 'gemini' או 'openai' - איזה מנוע תמלול להשתמש בו לסגמנטי האודיו."""
     engine = engine if engine in ENGINES else DEFAULT_DICTATION_ENGINE
     with app.app_context():
         from models import ManuscriptPage
@@ -222,34 +238,52 @@ def _dictation_worker(app, page_id, segment_files, segment_meta, engine=None):
         if not page:
             return
         try:
+            # מיפוי: הקובץ ה-j-י שהועלה שייך לפריט ה-meta ה-i-י שהוא מסוג 'audio',
+            # לפי אותו סדר יחסי (ראו process()).
+            audio_meta_indices = [i for i, m in enumerate(segment_meta) if m.get('type', 'audio') == 'audio']
+            if len(audio_meta_indices) != len(segment_files):
+                log.warning(
+                    f"dictation worker: audio meta count ({len(audio_meta_indices)}) "
+                    f"!= uploaded files ({len(segment_files)}) for page={page_id}"
+                )
+            meta_idx_to_file_j = {i: j for j, i in enumerate(audio_meta_indices)}
+
             if engine == 'openai':
                 from openai import OpenAI
                 client = OpenAI(api_key=os.environ.get('OPENAI_API_KEY'))
 
                 def _process_one(item):
-                    idx, path = item
+                    j, path = item
                     with open(path, 'rb') as f:
                         raw = f.read()
                     wav_bytes = _webm_to_wav_16k_mono(raw)
-                    return idx, _transcribe_segment_openai(wav_bytes, client)
+                    return j, _transcribe_segment_openai(wav_bytes, client)
             else:
                 from google import genai
                 from google.genai import types as gtypes
                 client = genai.Client(api_key=os.environ.get('GOOGLE_API_KEY'))
 
                 def _process_one(item):
-                    idx, path = item
+                    j, path = item
                     with open(path, 'rb') as f:
                         raw = f.read()
                     wav_bytes = _webm_to_wav_16k_mono(raw)
-                    return idx, _transcribe_segment_gemini(wav_bytes, client, gtypes)
+                    return j, _transcribe_segment_gemini(wav_bytes, client, gtypes)
 
-            texts_by_idx = {}
+            texts_by_file_j = {}
             with ThreadPoolExecutor(max_workers=6) as ex:
-                for idx, text in ex.map(_process_one, list(enumerate(segment_files))):
-                    texts_by_idx[idx] = text
+                for j, text in ex.map(_process_one, list(enumerate(segment_files))):
+                    texts_by_file_j[j] = text
 
-            segments = [dict(meta, text=texts_by_idx.get(i, '')) for i, meta in enumerate(segment_meta)]
+            segments = []
+            for i, meta in enumerate(segment_meta):
+                if meta.get('type') == 'literal':
+                    text = meta.get('text', '')
+                else:
+                    file_j = meta_idx_to_file_j.get(i)
+                    text = texts_by_file_j.get(file_j, '') if file_j is not None else ''
+                segments.append(dict(meta, text=text))
+
             content = _build_content_from_segments(segments)
 
             if not content:
@@ -262,7 +296,10 @@ def _dictation_worker(app, page_id, segment_files, segment_meta, engine=None):
             page.status = 'review'
             page.error_message = None
             db.session.commit()
-            log.info(f"dictation processed: page={page_id}, engine={engine}, paragraphs={len(content)}, segments={len(segment_files)}")
+            log.info(
+                f"dictation processed: page={page_id}, engine={engine}, paragraphs={len(content)}, "
+                f"segments={len(segment_meta)} (audio={len(segment_files)}, literal={len(segment_meta) - len(segment_files)})"
+            )
         except Exception as e:
             log.error(f"dictation worker error (page={page_id}): {e}", exc_info=True)
             page.status = 'error'
@@ -482,21 +519,30 @@ def process(page_id):
 
     audio_files = request.files.getlist('segments')
     meta_raw = request.form.get('meta', '[]')
-    if not audio_files:
-        return jsonify({'error': 'לא התקבל אודיו'}), 400
-
-    engine = request.form.get('engine') or DEFAULT_DICTATION_ENGINE
-    if engine not in ENGINES:
-        engine = DEFAULT_DICTATION_ENGINE
 
     try:
         segment_meta = json.loads(meta_raw)
     except Exception:
         segment_meta = []
-    # הגנה - אם מספר הפריטים לא תואם מכל סיבה, לא קורסים, פשוט משלימים ברירת מחדל
-    if len(segment_meta) != len(audio_files):
-        log.warning(f"process: meta length ({len(segment_meta)}) != files ({len(audio_files)}), padding")
-        segment_meta = (segment_meta + [{}] * len(audio_files))[:len(audio_files)]
+
+    if not segment_meta:
+        return jsonify({'error': 'לא התקבלה הקלטה'}), 400
+
+    engine = request.form.get('engine') or DEFAULT_DICTATION_ENGINE
+    if engine not in ENGINES:
+        engine = DEFAULT_DICTATION_ENGINE
+
+    # כל פריט meta מסוג 'audio' (או בלי type בכלל - תאימות לאחור) אמור להגיע
+    # עם קובץ תואם ב-audio_files, לפי אותו סדר יחסי. פריטי 'literal' (סימני
+    # פיסוק שהוכנסו בלחיצת כפתור) לא מגיעים עם קובץ בכלל - זה תקין ומכוון,
+    # לא "חוסר". _dictation_worker מתמודד בעצמו עם אי-התאמה (טקסט ריק לאותו
+    # סגמנט) בלי לקרוס, אז כאן רק רושמים אזהרה ל-log.
+    expected_audio_count = sum(1 for m in segment_meta if m.get('type', 'audio') == 'audio')
+    if expected_audio_count != len(audio_files):
+        log.warning(
+            f"process: expected {expected_audio_count} audio files per meta "
+            f"but got {len(audio_files)} (page={page_id})"
+        )
 
     segment_paths = []
     for f in audio_files:
