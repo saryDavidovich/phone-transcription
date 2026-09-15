@@ -532,10 +532,17 @@ def _capture_manuscript_page(filepath, original_filename, customer, db):
         dest_path = os.path.join(MANUSCRIPT_DIR, dest_name)
         shutil.copy2(filepath, dest_path)
 
+        # שומרים את תוכן הקובץ גם ב-DB עצמו (לא רק בדיסק המקומי) - הדיסק
+        # המקומי ב-Railway מתאפס בכל דיפלוי/הפעלה מחדש של הקונטיינר, אז
+        # file_path לבדו לא אמין לאורך זמן. ראו models.ManuscriptPage.file_data.
+        with open(filepath, 'rb') as f:
+            file_bytes = f.read()
+
         page = ManuscriptPage(
             customer_id=customer.id,
             original_filename=original_filename,
             file_path=dest_path,
+            file_data=file_bytes,
             status='pending',
         )
         db.session.add(page)

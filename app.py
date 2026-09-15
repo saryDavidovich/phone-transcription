@@ -251,6 +251,10 @@ def _migrate_db():
         # ללקוח רק בפועל בעת שליחה סופית (ראה models.ManuscriptPage)
         "ALTER TABLE manuscript_pages ADD COLUMN IF NOT EXISTS char_count INTEGER DEFAULT 0",
         "ALTER TABLE manuscript_pages ADD COLUMN IF NOT EXISTS cost FLOAT DEFAULT 0.0",
+        # קריטי: הדיסק המקומי (manuscripts/) הוא אפמרי ב-Railway - מתאפס בכל
+        # דיפלוי/הפעלה מחדש של הקונטיינר. בלי זה, קבצי כתבי-יד שהועלו לפני
+        # דיפלוי אבדו בפועל בכל עדכון קוד. מעכשיו הקובץ נשמר גם ב-DB עצמו.
+        "ALTER TABLE manuscript_pages ADD COLUMN IF NOT EXISTS file_data BYTEA",
     ]
     logger = logging.getLogger(__name__)
     ok, failed = 0, 0

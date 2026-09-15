@@ -188,7 +188,13 @@ class ManuscriptPage(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     customer_id = db.Column(db.Integer, db.ForeignKey('customers.id'), nullable=False, index=True)
     original_filename = db.Column(db.String(255))
-    file_path = db.Column(db.String(512))  # עותק עצמאי ובר-קיימא לצורך ההקלטה (לא תלוי בקובץ של ה-OCR)
+    file_path = db.Column(db.String(512))  # נתיב מקומי היסטורי - לא אמין לבדו (ראו file_data למטה)
+    # תוכן הקובץ עצמו, שמור ב-DB (לא רק בדיסק המקומי) - קריטי ב-Railway (ובכל
+    # מארח קונטיינרים אפמרי דומה): הדיסק המקומי מתאפס בכל דיפלוי/הפעלה מחדש
+    # של הקונטיינר, אז file_path לבדו לא שורד דיפלוי. file_data הוא מקור
+    # האמת לתצוגת הכתב-יד בסטודיו (ראה routes/dictate.py._manuscript_data_uri) -
+    # file_path נשאר רק לתאימות לאחור/דיבוג.
+    file_data = db.Column(db.LargeBinary, nullable=True)
     status = db.Column(db.String(20), default='pending', index=True)
     # pending -> ממתין להקלטה
     # recording -> נציג פתח את הדף ומקליט/עורך כרגע (claimed_by נעול)

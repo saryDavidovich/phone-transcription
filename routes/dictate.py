@@ -646,26 +646,38 @@ def queue():
     return render_template('admin/dictate_queue.html', pages=pages, status_filter=status_filter)
 
 
+def _manuscript_file_bytes(page):
+    """מחזיר את בייטי הקובץ - קודם כל מ-file_data ב-DB (מקור האמת, שורד
+    דיפלויים/הפעלה מחדש של הקונטיינר), ורק אם זה ריק (דפים ישנים שנוצרו
+    לפני ההוספה של file_data) מנסה ליפול חזרה לדיסק המקומי - שם, ב-Railway,
+    יכול כבר לא להיות קיים בגלל דיפלוי שקרה בינתיים."""
+    if page.file_data:
+        return page.file_data
+    if page.file_path and os.path.exists(page.file_path):
+        try:
+            with open(page.file_path, 'rb') as f:
+                return f.read()
+        except Exception as e:
+            log.error(f"manuscript file read error from disk (page={page.id}): {e}")
+    return None
+
+
 def _manuscript_data_uri(page):
     """מקודד את קובץ כתב-היד כ-data URI (base64) מוטמע ישירות ב-HTML - לא
     כ-src לכתובת נפרדת. המטרה: אצל חלק מהנציגים תמונות שנטענות מכתובת URL
     נפרדת (גם מאותו דומיין) נחסמות/מתעכבות ע"י מסנני תוכן כמו נטפרי; data
     URI מגיע כחלק מגוף ה-HTML עצמו, בלי שום בקשת רשת נוספת, ולכן לא נחסם."""
-    if not page.file_path or not os.path.exists(page.file_path):
+    raw = _manuscript_file_bytes(page)
+    if not raw:
         return None
-    mime, _ = mimetypes.guess_type(page.original_filename or page.file_path)
+    mime, _ = mimetypes.guess_type(page.original_filename or page.file_path or '')
     if not mime:
-        ext = os.path.splitext(page.file_path)[1].lower()
+        ext = os.path.splitext(page.original_filename or page.file_path or '')[1].lower()
         mime = {
             '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
             '.gif': 'image/gif', '.webp': 'image/webp', '.pdf': 'application/pdf',
         }.get(ext, 'application/octet-stream')
-    try:
-        with open(page.file_path, 'rb') as f:
-            b64 = base64.b64encode(f.read()).decode('ascii')
-    except Exception as e:
-        log.error(f"manuscript data URI build error (page={page.id}): {e}")
-        return None
+    b64 = base64.b64encode(raw).decode('ascii')
     return f'data:{mime};base64,{b64}'
 
 
@@ -690,11 +702,19 @@ def studio(page_id):
 @dictate_bp.route('/<int:page_id>/file')
 @login_required
 def page_file(page_id):
+    """נשאר לתאימות לאחור (לא בשימוש יותר בסטודיו עצמו - ראה
+    manuscript_data_uri/studio() למעלה) - קורא עכשיו גם מ-file_data ב-DB,
+    לא רק מהדיסק המקומי (שיכול להיות ריק אחרי דיפלוי ב-Railway)."""
     from models import ManuscriptPage
     page = ManuscriptPage.query.get_or_404(page_id)
-    if not page.file_path or not os.path.exists(page.file_path):
+    raw = _manuscript_file_bytes(page)
+    if not raw:
         return "הקובץ אינו זמין", 404
-    return send_file(page.file_path, as_attachment=False, download_name=page.original_filename)
+    mime, _ = mimetypes.guess_type(page.original_filename or '')
+    return send_file(
+        io.BytesIO(raw), as_attachment=False, download_name=page.original_filename,
+        mimetype=mime or 'application/octet-stream',
+    )
 
 
 @dictate_bp.route('/<int:page_id>/process', methods=['POST'])
