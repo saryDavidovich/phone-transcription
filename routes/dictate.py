@@ -51,9 +51,11 @@ routes/dictate.py
 import os
 import io
 import json
+import math
 import time
 import uuid
 import base64
+import mimetypes
 import logging
 import threading
 from datetime import datetime
@@ -318,11 +320,18 @@ def _dictation_worker(app, page_id, segment_files, segment_meta, engine=None):
 # בניית ה-Word המעוצב הסופי - אותו סגנון RTL/גופן מוטמע כמו services/transcribe.py
 # --------------------------------------------------------------------------
 def _build_manuscript_docx(customer_name, original_filename, content):
+    """בונה את קובץ ה-Word הסופי - אותו דפוס RTL/גופן מוטמע ומוכח בפועל
+    כמו services/transcribe.py._build_word_doc (המשמש למסלול התמלול המקצועי),
+    כולל התיקון הקריטי ל"סימן הפסקה" עצמו (w:rtl ברמת ה-rPr של pPr, לא רק
+    w:bidi) שבלעדיו וורד לפעמים מותיר סימני פיסוק בסוף שורה במקום הלא נכון,
+    ועיצוב נוסף (כותרות/פרטי לקוח/פוטר עם מספור עמודים/יישור לשני הצדדים
+    בגוף הטקסט) שעושה את המסמך ל"נעים" יותר לקריאה.
+    """
     from docx import Document
     from docx.enum.text import WD_ALIGN_PARAGRAPH
     from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
-    from docx.shared import Pt
+    from docx.shared import Pt, RGBColor
     from services.transcribe import (
         FONT_DISPLAY_NAME, FONT_REGULAR_PATH, FONT_BOLD_PATH,
         _embed_font_in_docx, _BIDI_SUCCESSORS,
@@ -335,9 +344,25 @@ def _build_manuscript_docx(customer_name, original_filename, content):
         pPr = paragraph._p.get_or_add_pPr()
         bidi = OxmlElement('w:bidi')
         pPr.insert_element_before(bidi, *_BIDI_SUCCESSORS)
+        # מסמן גם את "סימן הפסקה" עצמו כ-RTL - קריטי לוורד (בניגוד ל-LibreOffice)
+        # כדי שסימני פיסוק בסוף השורה (נקודה, סימן שאלה) יתמקמו נכון ולא "יברחו" לתחילת השורה
+        mark_rPr = pPr.find(qn('w:rPr'))
+        if mark_rPr is None:
+            mark_rPr = OxmlElement('w:rPr')
+            pPr.insert_element_before(mark_rPr, 'w:sectPr', 'w:pPrChange')
+        mark_rtl = mark_rPr.find(qn('w:rtl'))
+        if mark_rtl is None:
+            mark_rtl = OxmlElement('w:rtl')
+            mark_rPr.insert_element_before(mark_rtl, *_RPR_RTL_SUCCESSORS)
+        mark_lang = mark_rPr.find(qn('w:lang'))
+        if mark_lang is None:
+            mark_lang = OxmlElement('w:lang')
+            mark_rPr.append(mark_lang)
+        mark_lang.set(qn('w:val'), 'he-IL')
+        mark_lang.set(qn('w:bidi'), 'he-IL')
 
-    def set_rtl(paragraph):
-        paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    def set_rtl(paragraph, justify=False):
+        paragraph.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY if justify else WD_ALIGN_PARAGRAPH.RIGHT
         add_bidi(paragraph)
 
     def set_hebrew_font(run, size=None, bold=False, underline=False):
@@ -365,17 +390,106 @@ def _build_manuscript_docx(customer_name, original_filename, content):
         lang.set(qn('w:val'), 'he-IL')
         lang.set(qn('w:bidi'), 'he-IL')
 
+    def add_bottom_border(paragraph):
+        pPr = paragraph._p.get_or_add_pPr()
+        pBdr = OxmlElement('w:pBdr')
+        bottom = OxmlElement('w:bottom')
+        bottom.set(qn('w:val'), 'single')
+        bottom.set(qn('w:sz'), '6')
+        bottom.set(qn('w:space'), '4')
+        bottom.set(qn('w:color'), '999999')
+        pBdr.append(bottom)
+        pPr.insert_element_before(
+            pBdr, 'w:shd', 'w:tabs', 'w:suppressAutoHyphens', 'w:kinsoku', 'w:wordWrap',
+            'w:overflowPunct', 'w:topLinePunct', 'w:autoSpaceDE', 'w:autoSpaceDN', 'w:bidi', *_BIDI_SUCCESSORS
+        )
+
+    def add_page_number_field(paragraph):
+        run = paragraph.add_run()
+        fld_begin = OxmlElement('w:fldChar')
+        fld_begin.set(qn('w:fldCharType'), 'begin')
+        instr = OxmlElement('w:instrText')
+        instr.set(qn('xml:space'), 'preserve')
+        instr.text = 'PAGE'
+        fld_end = OxmlElement('w:fldChar')
+        fld_end.set(qn('w:fldCharType'), 'end')
+        run._r.append(fld_begin)
+        run._r.append(instr)
+        run._r.append(fld_end)
+        set_hebrew_font(run, size=Pt(10))
+        run.font.color.rgb = RGBColor(0x80, 0x80, 0x80)
+
+    def add_footer(doc):
+        section = doc.sections[0]
+        footer = section.footer
+        footer_para = footer.paragraphs[0]
+        footer_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        add_bidi(footer_para)
+        run = footer_para.add_run('הופק באמצעות מערכת תמלול פון 03-3131795   |   עמוד ')
+        set_hebrew_font(run, size=Pt(11))
+        run.font.color.rgb = RGBColor(0x80, 0x80, 0x80)
+        add_page_number_field(footer_para)
+
     doc = Document()
+
+    # --- הגדרת עברית כברירת מחדל של כל המסמך (סגנון Normal + הכותרות) ---
     doc.core_properties.language = 'he-IL'
 
     normal_style = doc.styles['Normal']
     normal_style.font.name = FONT_NAME
     normal_pPr = normal_style.element.get_or_add_pPr()
     normal_pPr.insert_element_before(OxmlElement('w:bidi'), *_BIDI_SUCCESSORS)
+    normal_rPr = normal_style.element.get_or_add_rPr()
+    n_rFonts = normal_rPr.find(qn('w:rFonts'))
+    if n_rFonts is None:
+        n_rFonts = OxmlElement('w:rFonts')
+        normal_rPr.append(n_rFonts)
+    n_rFonts.set(qn('w:cs'), FONT_NAME)
+    n_rFonts.set(qn('w:ascii'), FONT_NAME)
+    n_rFonts.set(qn('w:hAnsi'), FONT_NAME)
+    n_rtl = OxmlElement('w:rtl')
+    normal_rPr.insert_element_before(n_rtl, *_RPR_RTL_SUCCESSORS)
+    n_lang = OxmlElement('w:lang')
+    n_lang.set(qn('w:val'), 'he-IL')
+    n_lang.set(qn('w:eastAsia'), 'he-IL')
+    n_lang.set(qn('w:bidi'), 'he-IL')
+    normal_rPr.append(n_lang)
+
+    # אותו דבר גם ברמת הסגנונות "Title" ו-"Heading 1" עצמם - כדי שכותרות
+    # יהיו RTL כברירת מחדל של הסגנון ולא יסתמכו רק על עקיפה ידנית לכל פסקה
+    for style_name in ('Title', 'Heading 1'):
+        try:
+            style_el = doc.styles[style_name].element
+        except KeyError:
+            continue
+        style_pPr = style_el.get_or_add_pPr()
+        style_bidi = OxmlElement('w:bidi')
+        style_pPr.insert_element_before(style_bidi, *_BIDI_SUCCESSORS)
+
+    # settings.xml - שפת ברירת מחדל לאיות/תיקון אוטומטי של טקסט חדש שיוקלד
+    settings_el = doc.settings.element
+    theme_font_lang = settings_el.find(qn('w:themeFontLang'))
+    if theme_font_lang is None:
+        theme_font_lang = OxmlElement('w:themeFontLang')
+        settings_el.append(theme_font_lang)
+    theme_font_lang.set(qn('w:bidi'), 'he-IL')
+
+    embed_ttf = OxmlElement('w:embedTrueTypeFonts')
+    settings_el.insert_element_before(
+        embed_ttf, 'w:embedSystemFonts', 'w:saveSubsetFonts', 'w:saveFormsData', 'w:mirrorMargins',
+        'w:alignBordersAndEdges', 'w:bordersDoNotSurroundHeader', 'w:bordersDoNotSurroundFooter',
+        'w:gutterAtTop', 'w:hideSpellingErrors', 'w:hideGrammaticalErrors', 'w:activeWritingStyle',
+        'w:proofState', 'w:formsDesign', 'w:attachedTemplate', 'w:linkStyles', 'w:themeFontLang'
+    )
 
     section = doc.sections[0]
-    bidi_doc = OxmlElement('w:bidi')
-    section._sectPr.append(bidi_doc)
+    sectPr = section._sectPr
+    sectPr.append(OxmlElement('w:bidi'))
+    pgNumType = OxmlElement('w:pgNumType')
+    pgNumType.set(qn('w:fmt'), 'decimal')
+    sectPr.append(pgNumType)
+
+    add_footer(doc)
 
     title = doc.add_heading(f'כתב יד - {original_filename}', 0)
     set_rtl(title)
@@ -383,10 +497,26 @@ def _build_manuscript_docx(customer_name, original_filename, content):
         set_hebrew_font(run)
 
     if customer_name:
-        info = doc.add_paragraph(f'לקוח: {customer_name}')
+        h_details = doc.add_heading('פרטי לקוח', level=1)
+        set_rtl(h_details)
+        for run in h_details.runs:
+            set_hebrew_font(run)
+
+        try:
+            from zoneinfo import ZoneInfo
+            now_il = datetime.now(ZoneInfo('Asia/Jerusalem'))
+        except Exception:
+            now_il = datetime.utcnow()
+        info = doc.add_paragraph(f'לקוח: {customer_name}   |   תאריך: {now_il.strftime("%d/%m/%Y %H:%M")}')
         set_rtl(info)
+        add_bottom_border(info)
         for run in info.runs:
             set_hebrew_font(run, size=Pt(11))
+
+    h_content = doc.add_heading('תוכן', level=1)
+    set_rtl(h_content)
+    for run in h_content.runs:
+        set_hebrew_font(run)
 
     if not content:
         empty = doc.add_paragraph('(לא הוקלט תוכן)')
@@ -395,17 +525,19 @@ def _build_manuscript_docx(customer_name, original_filename, content):
             set_hebrew_font(run)
     else:
         for para_data in content:
-            if para_data.get('heading'):
+            is_heading = bool(para_data.get('heading'))
+            if is_heading:
                 p = doc.add_heading('', level=1)
+                set_rtl(p)
             else:
                 p = doc.add_paragraph()
-            set_rtl(p)
+                set_rtl(p, justify=True)
             for run_data in para_data.get('runs', []):
                 run = p.add_run(run_data.get('text', ''))
                 set_hebrew_font(
                     run,
-                    size=None if para_data.get('heading') else Pt(13),
-                    bold=bool(run_data.get('bold')) or para_data.get('heading', False),
+                    size=None if is_heading else Pt(13),
+                    bold=bool(run_data.get('bold')) or is_heading,
                     underline=bool(run_data.get('underline')),
                 )
 
@@ -415,6 +547,36 @@ def _build_manuscript_docx(customer_name, original_filename, content):
     docx_bytes = buf.read()
     docx_bytes = _embed_font_in_docx(docx_bytes, FONT_NAME, FONT_REGULAR_PATH, FONT_BOLD_PATH)
     return docx_bytes
+
+
+def _manuscript_char_count(content):
+    """סופר תווים (כולל רווחים) מתוך כל ריצות הטקסט בתוכן - אותו חישוב
+    בדיוק שמוצג לנציג בסטודיו (updateCharCount ב-dictate_studio.html, שסופר
+    textContent מה-DOM), כדי שהמחיר שיחושב בפועל בעת שליחה יתאים למה שהנציג
+    ראה על המסך."""
+    total = 0
+    for para in (content or []):
+        for run in para.get('runs', []):
+            total += len(run.get('text', '') or '')
+    return total
+
+
+def _manuscript_pricing():
+    """קורא את הגדרות התמחור (routes/admin.py get_setting) - הן גודל יחידת
+    התווים והן המחיר ליחידה ניתנים לקביעה בהגדרות (בניגוד ל-OCR, ששם רק
+    המחיר מוגדר וגודל היחידה קבוע ל-1000)."""
+    from routes.admin import get_setting
+    try:
+        unit_size = int(float(get_setting('manuscript_char_unit_size', '1000') or '1000'))
+    except (TypeError, ValueError):
+        unit_size = 1000
+    if unit_size <= 0:
+        unit_size = 1000
+    try:
+        price_per_unit = float(get_setting('price_per_manuscript_char_unit', '0.10') or '0.10')
+    except (TypeError, ValueError):
+        price_per_unit = 0.10
+    return unit_size, price_per_unit
 
 
 def _content_to_plain_preview(content):
@@ -484,6 +646,29 @@ def queue():
     return render_template('admin/dictate_queue.html', pages=pages, status_filter=status_filter)
 
 
+def _manuscript_data_uri(page):
+    """מקודד את קובץ כתב-היד כ-data URI (base64) מוטמע ישירות ב-HTML - לא
+    כ-src לכתובת נפרדת. המטרה: אצל חלק מהנציגים תמונות שנטענות מכתובת URL
+    נפרדת (גם מאותו דומיין) נחסמות/מתעכבות ע"י מסנני תוכן כמו נטפרי; data
+    URI מגיע כחלק מגוף ה-HTML עצמו, בלי שום בקשת רשת נוספת, ולכן לא נחסם."""
+    if not page.file_path or not os.path.exists(page.file_path):
+        return None
+    mime, _ = mimetypes.guess_type(page.original_filename or page.file_path)
+    if not mime:
+        ext = os.path.splitext(page.file_path)[1].lower()
+        mime = {
+            '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
+            '.gif': 'image/gif', '.webp': 'image/webp', '.pdf': 'application/pdf',
+        }.get(ext, 'application/octet-stream')
+    try:
+        with open(page.file_path, 'rb') as f:
+            b64 = base64.b64encode(f.read()).decode('ascii')
+    except Exception as e:
+        log.error(f"manuscript data URI build error (page={page.id}): {e}")
+        return None
+    return f'data:{mime};base64,{b64}'
+
+
 @dictate_bp.route('/<int:page_id>')
 @login_required
 def studio(page_id):
@@ -498,6 +683,7 @@ def studio(page_id):
         'admin/dictate_studio.html',
         page=page,
         default_engine=DEFAULT_DICTATION_ENGINE,
+        manuscript_data_uri=_manuscript_data_uri(page),
     )
 
 
@@ -609,7 +795,7 @@ def redo(page_id):
 @dictate_bp.route('/<int:page_id>/send', methods=['POST'])
 @login_required
 def send(page_id):
-    from models import ManuscriptPage
+    from models import ManuscriptPage, Transaction
     page = ManuscriptPage.query.get_or_404(page_id)
     if not page.content:
         return jsonify({'error': 'אין תוכן לשליחה'}), 400
@@ -618,13 +804,49 @@ def send(page_id):
     if not to_email:
         return jsonify({'error': 'אין כתובת מייל ליעד - הזינו כתובת'}), 400
 
+    # התשלום יורד מהלקוח רק כאן - באישור הסופי ובשליחה בפועל, ולא בשום שלב
+    # מוקדם יותר (הקלטה/תמלול/עריכה). מחושב מחדש בכל שליחה, כדי לשקף גם
+    # תיקונים ידניים שנעשו בתצוגה המקדימה (saveEdits נקרא תמיד לפני שליחה).
+    customer = page.customer
+    unit_size, price_per_unit = _manuscript_pricing()
+    char_count = _manuscript_char_count(page.content)
+    units = math.ceil(char_count / unit_size) if char_count > 0 else 0
+    cost = round(units * price_per_unit, 2)
+
+    if cost > 0:
+        if not customer:
+            return jsonify({'error': 'לא נמצא לקוח משויך לדף זה - לא ניתן לחייב'}), 400
+        if customer.balance < cost:
+            log.info(
+                f"manuscript send: יתרה לא מספיקה עבור customer {customer.id} "
+                f"(צריך {cost}, יש {customer.balance}), page={page_id}"
+            )
+            return jsonify({
+                'error': f'אין מספיק יתרה ללקוח לשליחה (עלות: ₪{cost:.2f}, יתרה נוכחית: ₪{customer.balance:.2f}) - '
+                         f'יש לטעון יתרה ללקוח ולנסות לשלוח שוב',
+                'insufficient_balance': True,
+                'cost': cost,
+                'balance': customer.balance,
+            }), 402
+
     try:
         _send_manuscript_email(to_email, page.customer.name, page.original_filename, page.content)
+        if cost > 0 and customer:
+            customer.balance -= cost
+            db.session.add(Transaction(
+                customer_id=customer.id,
+                amount=-cost,
+                type='manuscript_dictation',
+                description=f'הקראת כתב יד - {page.original_filename}',
+            ))
+        page.char_count = char_count
+        page.cost = cost
         page.sent_at = datetime.utcnow()
         page.sent_to = to_email
         page.status = 'done'
         db.session.commit()
-        return jsonify({'status': 'sent', 'to': to_email})
+        return jsonify({'status': 'sent', 'to': to_email, 'cost': cost, 'char_count': char_count})
     except Exception as e:
+        db.session.rollback()
         log.error(f"manuscript send error (page={page_id}): {e}", exc_info=True)
         return jsonify({'error': f'שליחה נכשלה: {e}'}), 500

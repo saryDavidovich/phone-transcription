@@ -72,6 +72,21 @@
         <div style="font-size:11px;color:#4a5568;margin-top:4px">זיהוי טקסט מתמונה/PDF — לקוח שולח תמונת כתב יד במייל</div>
       </div>
 
+      <div style="border-top:2px solid #e2e8f0;margin:20px 0 12px;padding-top:16px">
+        <div style="font-size:14px;font-weight:700;margin-bottom:4px">🎙️ הקראת כתבי יד - תמחור</div>
+        <div style="font-size:11px;color:#4a5568">תמחור לפי יחידת תווים - ניתן להגדיר גם את גודל היחידה וגם את המחיר לכל יחידה. התשלום יורד מהלקוח רק בעת אישור סופי ושליחה בפועל של הכתב (לא בשלב ההקלטה/תמלול).</div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">גודל יחידת תווים</label>
+        <input class="form-input" name="manuscript_char_unit_size" type="number" step="1" min="1" value="{{ settings.manuscript_char_unit_size }}">
+        <div style="font-size:11px;color:#4a5568;margin-top:4px">לדוגמה: 1000 - כלומר החיוב מחושב לכל 1,000 תווים</div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">מחיר לכל יחידת תווים (₪)</label>
+        <input class="form-input" name="price_per_manuscript_char_unit" type="number" step="0.01" min="0" value="{{ settings.price_per_manuscript_char_unit }}">
+        <div style="font-size:11px;color:#4a5568;margin-top:4px">לדוגמה: 0.10 - כלומר 0.10 ₪ לכל יחידה כפי שהוגדרה למעלה</div>
+      </div>
+
       <div class="form-group">
         <label class="form-label" style="font-size:14px;font-weight:700">🎁 הגדרות בונוס טעינה (מבצע)</label>
         <div style="font-size:11px;color:#4a5568;margin-bottom:10px">

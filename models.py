@@ -203,6 +203,11 @@ class ManuscriptPage(db.Model):
     error_message = db.Column(db.Text, nullable=True)
     sent_at = db.Column(db.DateTime, nullable=True)
     sent_to = db.Column(db.String(255), nullable=True)
+    # שלב ב' - תמחור: מחושבים ונשמרים רק בפועל בעת שליחה מוצלחת (routes/dictate.py:send),
+    # לפי ההגדרות price_per_manuscript_char_unit / manuscript_char_unit_size (routes/admin.py).
+    # לפני שליחה השדות האלה נשארים 0/ריק - התשלום לא יורד ללקוח לפני אישור סופי ושליחה בפועל.
+    char_count = db.Column(db.Integer, default=0)
+    cost = db.Column(db.Float, default=0.0)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

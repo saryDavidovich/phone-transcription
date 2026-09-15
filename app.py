@@ -247,6 +247,10 @@ def _migrate_db():
         # (max_usage_per_student נשארת בטבלה בלי שימוש, לתאימות לאחור)
         "ALTER TABLE institutions ADD COLUMN IF NOT EXISTS max_minutes_per_period FLOAT",
         "ALTER TABLE institutions ADD COLUMN IF NOT EXISTS limit_period VARCHAR(10)",
+        # שלב ב' של הקראת כתבי-יד (routes/dictate.py) - תמחור לפי תווים, מחויב
+        # ללקוח רק בפועל בעת שליחה סופית (ראה models.ManuscriptPage)
+        "ALTER TABLE manuscript_pages ADD COLUMN IF NOT EXISTS char_count INTEGER DEFAULT 0",
+        "ALTER TABLE manuscript_pages ADD COLUMN IF NOT EXISTS cost FLOAT DEFAULT 0.0",
     ]
     logger = logging.getLogger(__name__)
     ok, failed = 0, 0
