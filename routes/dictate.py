@@ -754,6 +754,15 @@ def page_file(page_id):
 @dictate_bp.route('/<int:page_id>/process', methods=['POST'])
 @login_required
 def process(page_id):
+    # בניגוד לשיחות טלפון ותמונות OCR (שמגיעות אוטומטית ואפשר לדחות אותן
+    # לתור), כאן זו פעולה שהמנהל יוזם ממש עכשיו בסטודיו - הוא מקליט את
+    # עצמו ולוחץ "עבד". אין טעם "לתייק לתור" הקלטה שעוד לא קיימת; במקום זה
+    # פשוט חוסמים את ההתחלה כדי לא להתחיל עבודה שעלולה להיקטע בדפלוי תוך
+    # כדי מצב תחזוקה, ומבקשים מהמנהל להמתין רגע ולנסות שוב.
+    from routes.admin import get_setting
+    if get_setting('maintenance_mode', '0') == '1':
+        return jsonify({'error': 'מצב תחזוקה פעיל כרגע - המתן מספר דקות ונסה שוב'}), 503
+
     from models import ManuscriptPage
     page = ManuscriptPage.query.get_or_404(page_id)
 

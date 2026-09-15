@@ -202,18 +202,32 @@ def recording_done(call_id, phone):
         cost = (duration / 1800) * cost_per_half_hour
         customer.balance = max(0, customer.balance - cost)
 
+    # מצב תחזוקה (/admin/maintenance) - כמו ב-/api/transcribe וב-email_inbound,
+    # אם המצב דלוק דוחים את התמלול במקום להתחיל אותו מיד. rec_url כבר נשמר
+    # על השורה כדי ש-resume_queued_recordings יוכל לשחזר את זה אחר כך.
+    maintenance_on = get_setting('maintenance_mode', '0') == '1'
+
+    # call_id יכול לחזור על עצמו כמה פעמים באותה שיחה טלפונית (בדיוק כמו
+    # ב-/api/transcribe) - אם יש כבר רשומה עם אותו call_id, מייצרים מזהה
+    # פנימי ייחודי במקום להתנגש ב-unique constraint ולאבד את ההקלטה השנייה.
+    if Recording.query.filter_by(call_id=call_id).first():
+        call_id = f"{call_id}-{uuid.uuid4().hex[:8]}"
+
     rec = Recording(
         call_id=call_id,
         customer_id=customer.id,
         duration_seconds=duration,
-        status='processing',
+        status='queued_maintenance' if (maintenance_on and rec_url) else 'processing',
         delivery_method=customer.delivery_method or 'email',
-        delivered_to=customer.email or customer.fax or ''
+        delivered_to=customer.email or customer.fax or '',
+        rec_url=rec_url,
     )
     db.session.add(rec)
     db.session.commit()
 
     if rec_url:
+        if maintenance_on:
+            return r('ההקלטה התקבלה. התמלול ישלח אליך בקרוב. שיחה טובה.')
         if customer.email or customer.fax:
             transcribe_async(
                 call_id, rec_url, customer.id,

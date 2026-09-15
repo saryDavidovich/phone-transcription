@@ -847,10 +847,11 @@ def maintenance():
 @login_required
 def maintenance_status():
     from services.job_tracker import snapshot
-    from models import Recording
+    from models import Recording, OcrResult
     data = snapshot()
     data['maintenance_mode'] = (get_setting('maintenance_mode', '0') == '1')
     data['queued_calls'] = Recording.query.filter_by(status='queued_maintenance').count()
+    data['queued_ocr'] = OcrResult.query.filter_by(status='queued_maintenance').count()
     return jsonify(data)
 
 
@@ -859,12 +860,20 @@ def maintenance_status():
 def maintenance_toggle():
     turn_on = request.form.get('enable') == '1'
     set_setting('maintenance_mode', '1' if turn_on else '0')
-    released = 0
+    released_calls = 0
+    released_ocr = 0
     if not turn_on:
-        # כבים מצב תחזוקה - משחררים שיחות שהצטברו בזמן שהמצב היה דלוק
+        # כבים מצב תחזוקה - משחררים שיחות ותמונות OCR שהצטברו בזמן שהמצב היה דלוק
         from services.transcribe import resume_queued_recordings
-        released = resume_queued_recordings()
-    return jsonify({'ok': True, 'maintenance_mode': turn_on, 'released': released})
+        from routes.email_inbound import resume_queued_ocr
+        released_calls = resume_queued_recordings()
+        released_ocr = resume_queued_ocr()
+    return jsonify({
+        'ok': True, 'maintenance_mode': turn_on,
+        'released': released_calls,  # תאימות לאחור לשם השדה הקיים
+        'released_calls': released_calls,
+        'released_ocr': released_ocr,
+    })
 
 
 @admin_bp.route('/maintenance/clear-stale', methods=['POST'])

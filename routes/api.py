@@ -152,7 +152,17 @@ def transcribe():
 
     existing = Recording.query.filter_by(call_id=call_id).first()
     if existing:
-        return jsonify({'ok': True, 'call_id': call_id})
+        if rec_url and existing.rec_url == rec_url:
+            # אותה בדיוק קריאה חוזרת (retry של ה-webhook) על אותה הקלטה -
+            # מתעלמים, זה מה שהבדיקה הזו נועדה למנוע מלכתחילה.
+            return jsonify({'ok': True, 'call_id': call_id})
+        # ה-call_id (ApiCallId של ימות המשיח) נשאר זהה לאורך כל השיחה
+        # הטלפונית - אם המתקשר מקליט פעמיים באותה שיחה בלי לנתק (למשל חוזר
+        # לתפריט הראשי ומקליט שוב), שתי ההקלטות מגיעות עם אותו call_id אבל
+        # rec_url שונה. בלי הטיפול הזה, ההקלטה השנייה הייתה נבלעת בשקט כאן
+        # ולא מתומללת בכלל - זה בדיוק הבאג שדווח. מייצרים מזהה פנימי ייחודי
+        # כדי לא להתנגש ב-unique constraint על call_id, בלי לאבד את ההקלטה.
+        call_id = f"{call_id}-{uuid.uuid4().hex[:8]}"
 
     # אם "מצב תחזוקה" דלוק (/admin/maintenance) - לא מתחילים לעבד עכשיו, רק
     # שומרים את כל מה שצריך כדי להשלים את העיבוד מאוחר יותר (ראה

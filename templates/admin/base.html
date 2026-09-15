@@ -62,7 +62,9 @@ body { font-family:'Heebo',sans-serif; background:var(--bg); color:var(--text); 
   display:flex; align-items:center; gap:10px;
 }
 .sidebar-logo span { color:var(--accent); }
-.sidebar-nav { padding:16px 0; flex:1; }
+.sidebar-nav { padding:16px 0; flex:1; min-height:0; overflow-y:auto; }
+.sidebar-nav::-webkit-scrollbar { width:6px; }
+.sidebar-nav::-webkit-scrollbar-thumb { background:var(--border); border-radius:3px; }
 .nav-section { padding:8px 24px; font-size:11px; color:var(--text3); text-transform:uppercase; letter-spacing:1px; margin-top:8px; }
 .nav-item {
   display:flex; align-items:center; gap:12px;

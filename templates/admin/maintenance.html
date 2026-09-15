@@ -62,9 +62,11 @@
     <div>
       <div style="font-size:16px;font-weight:700;margin-bottom:6px">🚦 מצב תחזוקה</div>
       <div class="mt-note" style="margin-top:0">
-        כשמופעל - שיחות טלפון חדשות נכנסות לתור המתנה במקום להתחיל תמלול מיידית,
-        ומשתחררות אוטומטית ברגע שהמצב יכבה. עבודות אחרות (OCR, הקראת כתבי-יד, העלאות מוסד)
-        ממשיכות כרגיל - יש לעקוב אחרי המונים למטה ולחכות שיתאפסו לפני דפלוי.
+        כשמופעל - שיחות טלפון חדשות ותמונות OCR חדשות (מייל) נכנסות לתור המתנה
+        במקום להתחיל עיבוד מיידי, ומשתחררות אוטומטית ברגע שהמצב יכבה. הקראת
+        כתבי-יד לא נכנסת לתור (זו פעולה שהמנהל מתחיל ידנית בסטודיו) - במקום זה
+        פשוט חסומה זמנית, כדי לא להתחיל עבודה שעלולה להיקטע בדפלוי. העלאות מוסד
+        ממשיכות כרגיל - יש לעקוב אחרי המונה שלהן למטה ולחכות שיתאפס לפני דפלוי.
       </div>
     </div>
     <div style="display:flex;flex-direction:column;align-items:flex-end;gap:10px">
@@ -92,6 +94,10 @@
     <div class="mt-queuedrow">
       <div class="mt-queuednum" id="queuedNum">-</div>
       <div>שיחות ממתינות בתור (מצב תחזוקה)</div>
+    </div>
+    <div class="mt-queuedrow">
+      <div class="mt-queuednum" id="queuedOcrNum">-</div>
+      <div>תמונות OCR ממתינות בתור (מצב תחזוקה)</div>
     </div>
   </div>
 
@@ -139,6 +145,7 @@ function renderStatus(data) {
 
   document.getElementById('totalNum').textContent = data.total;
   document.getElementById('queuedNum').textContent = data.queued_calls;
+  document.getElementById('queuedOcrNum').textContent = data.queued_ocr;
   document.getElementById('lastUpdated').textContent = 'עודכן: ' + new Date().toLocaleTimeString('he-IL');
 
   const pill = document.getElementById('statusPill');
@@ -185,8 +192,11 @@ async function toggleMaintenance() {
     const res = await fetch('/admin/maintenance/toggle', { method: 'POST', body: fd });
     const data = await res.json();
     maintenanceOn = data.maintenance_mode;
-    if (data.released > 0) {
-      alert(`שוחררו ${data.released} שיחות שהיו ממתינות בתור`);
+    const parts = [];
+    if (data.released_calls > 0) parts.push(`${data.released_calls} שיחות`);
+    if (data.released_ocr > 0) parts.push(`${data.released_ocr} תמונות OCR`);
+    if (parts.length > 0) {
+      alert(`שוחררו: ${parts.join(' + ')}`);
     }
   } catch (e) {
     alert('שגיאה בשינוי המצב');

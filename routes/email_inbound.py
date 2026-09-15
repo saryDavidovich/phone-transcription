@@ -564,9 +564,87 @@ def _process_ocr_email(filepath, original_filename, customer, sender_email, phon
     """
     מעבד קובץ תמונה/PDF ב-OCR דרך Gemini ושולח את הטקסט חזרה במייל + Word.
     נכנס לתור המשותף עם תמלולים (מקסימום 12 במקביל).
+
+    אם "מצב תחזוקה" (/admin/maintenance) דלוק - לא מתחילים OCR עכשיו, רק
+    שומרים placeholder ב-OcrResult (status='queued_maintenance') עם גיבוי
+    בייטים של הקובץ ב-DB, כי הדיסק המקומי (original_file_path) נמחק בכל
+    דפלוי. resume_queued_ocr() למטה משחרר את זה בדיוק כמו שהמייל היה
+    מגיע עכשיו, כשמכבים את המצב.
     """
+    from routes.admin import get_setting
+    if get_setting('maintenance_mode', '0') == '1':
+        from models import OcrResult
+        file_backup = None
+        try:
+            with open(filepath, 'rb') as f:
+                file_backup = f.read()
+        except OSError as e:
+            log.error(f"OCR queue: failed to read {filepath} for maintenance backup: {e}")
+        ocr_rec = OcrResult(
+            customer_id=customer.id,
+            original_filename=original_filename,
+            original_file_path=filepath,
+            status='queued_maintenance',
+            delivered_to=customer.email,
+            file_data=file_backup,
+        )
+        db.session.add(ocr_rec)
+        db.session.commit()
+        log.info(f"OCR queued (maintenance mode): {original_filename}, customer={customer.id}")
+        return
+
     from services.transcribe import ocr_async
     ocr_async(_ocr_worker, filepath, original_filename, customer.id, customer.email, phone)
+
+
+def resume_queued_ocr():
+    """נקרא כשמכבים את "מצב תחזוקה" (/admin/maintenance) - מוצא את כל
+    תמונות ה-OCR שנקלטו בזמן שהמצב היה דלוק (status='queued_maintenance',
+    ראה _process_ocr_email למעלה), משחזר את הקובץ לדיסק אם צריך, ומריץ
+    אותן מחדש בדיוק כאילו המייל הגיע עכשיו - _ocr_worker כבר יודע לטפל
+    בכל המקרים (כולל יתרה לא מספיקה). מחזיר כמה תמונות שוחררו."""
+    from app import app, db
+    from models import OcrResult
+
+    with app.app_context():
+        queued = OcrResult.query.filter_by(status='queued_maintenance').all()
+        if not queued:
+            return 0
+        released = []
+        for rec in queued:
+            released.append({
+                'customer_id': rec.customer_id,
+                'original_filename': rec.original_filename,
+                'original_file_path': rec.original_file_path,
+                'delivered_to': rec.delivered_to,
+                'file_data': rec.file_data,
+            })
+            # ה-placeholder לא נחוץ יותר - _ocr_worker ייצור רשומת OcrResult
+            # אמיתית משלו (completed/error/pending_payment) בדיוק כמו בזרימה הרגילה.
+            db.session.delete(rec)
+        db.session.commit()
+
+    from services.transcribe import ocr_async
+    n = 0
+    for r in released:
+        filepath = r['original_file_path']
+        try:
+            if filepath and r.get('file_data') and not os.path.exists(filepath):
+                os.makedirs(os.path.dirname(filepath) or RECORDINGS_EMAIL_DIR, exist_ok=True)
+                with open(filepath, 'wb') as f:
+                    f.write(r['file_data'])
+        except Exception as e:
+            log.error(f"resume_queued_ocr: failed to restore file for customer={r['customer_id']}: {e}")
+
+        if not filepath or not os.path.exists(filepath):
+            log.error(f"resume_queued_ocr: missing file for customer={r['customer_id']}, skipping ({r['original_filename']})")
+            continue
+
+        ocr_async(_ocr_worker, filepath, r['original_filename'], r['customer_id'], r['delivered_to'], '')
+        n += 1
+
+    log.info(f"resume_queued_ocr: released {n} OCR job(s) queued during maintenance mode")
+    return n
 
 
 def _ocr_worker(filepath, original_filename, customer_id, customer_email, phone):
@@ -1430,15 +1508,39 @@ def email_inbound():
             return jsonify({'status': 'accepted', 'type': 'ocr'}), 200
 
         call_id = f"email-{uuid.uuid4().hex}"
+
+        # מצב תחזוקה (/admin/maintenance) - כמו בשיחות טלפון (/api/transcribe),
+        # אם המצב דלוק דוחים את התמלול במקום להתחיל אותו מיד. כל מה שצריך
+        # לשחזור נשמר על השורה עצמה כדי ש-resume_queued_recordings יוכל
+        # להריץ את זה מאוחר יותר בדיוק כאילו האימייל הגיע עכשיו.
+        from routes.admin import get_setting
+        maintenance_on = get_setting('maintenance_mode', '0') == '1'
+
+        # כשדוחים למצב תחזוקה, מגבים גם את בייטי הקובץ עצמו ב-DB (לא רק
+        # את הנתיב) - כי rec_url של הקלטת אימייל מצביע על קובץ בדיסק המקומי
+        # שנמחק בכל דפלוי, בדיוק כמו שקרה עם כתבי היד לפני התיקון. שיחות
+        # טלפון לא צריכות את זה כי ה-rec_url שלהן מצביע לשרת חיצוני.
+        file_backup = None
+        if maintenance_on:
+            try:
+                with open(filepath, 'rb') as f:
+                    file_backup = f.read()
+            except OSError as e:
+                log.error(f"email-inbound: failed to read {filepath} for maintenance backup: {e}")
+
         rec = Recording(
             customer_id=customer.id,
             call_id=call_id,
             duration_seconds=duration_seconds,
-            status='recording',
+            status='queued_maintenance' if maintenance_on else 'recording',
             delivery_method='email',
             delivered_to=customer.email,
             rec_url=rec_url,
             source_filename=original_filename,
+            transcription_tier=parsed['tier'],
+            language=parsed['language'],
+            output_language=parsed['output_language'],
+            file_data=file_backup,
         )
         db.session.add(rec)
         db.session.commit()
@@ -1447,7 +1549,11 @@ def email_inbound():
             f"email-inbound: call_id={call_id} phone={phone} "
             f"tier={parsed['tier']} lang={parsed['language']}->{parsed['output_language']} "
             f"file={filename} duration~{duration_seconds}s"
+            + (" [queued - maintenance mode]" if maintenance_on else "")
         )
+
+        if maintenance_on:
+            return jsonify({'status': 'queued_maintenance', 'call_id': call_id}), 200
 
         transcribe_async(
             call_id=call_id,

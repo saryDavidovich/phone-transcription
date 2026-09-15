@@ -322,7 +322,10 @@ async function uploadAllSegments() {
   fd.append('engine', document.getElementById('engineSelect').value);
   try {
     const res = await fetch(`/admin/dictate/${PAGE_ID}/process`, { method: 'POST', body: fd });
-    if (!res.ok) throw new Error('שגיאת שרת');
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || 'שגיאת שרת');
+    }
     pollStatus();
   } catch (e) {
     document.getElementById('resultArea').innerHTML = `<div class="ds-state ds-error">⚠ העלאה נכשלה: ${e.message}</div>`;

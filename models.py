@@ -123,6 +123,14 @@ class Recording(db.Model):
     language = db.Column(db.String(10), nullable=True)
     output_language = db.Column(db.String(10), nullable=True)
     expires_at = db.Column(db.DateTime, nullable=True)  # תפוגה אחרי 72 שעות
+    # גיבוי בייטים של קובץ אודיו שהתקבל באימייל, לתקופה שבה הוא ממתין
+    # ב"מצב תחזוקה" (status='queued_maintenance'). rec_url של הקלטת אימייל
+    # מצביע על קובץ בדיסק המקומי של השרת - שנמחק בכל דפלוי/הפעלה מחדש
+    # ב-Railway (בניגוד לשיחות טלפון, שה-rec_url שלהן מצביע לשרת חיצוני
+    # של ימות המשיח). בלי הגיבוי הזה, הקלטת אימייל שממתינה במצב תחזוקה
+    # תאבד את הקובץ בדיוק כמו הבאג שתיקנו בעבר בכתבי היד. נשמר רק כשבאמת
+    # נכנסים לתור (לא לכל הקלטה) כדי לא לנפח את הטבלה סתם.
+    file_data = db.Column(db.LargeBinary, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
 class Transaction(db.Model):
@@ -231,9 +239,14 @@ class OcrResult(db.Model):
     char_count = db.Column(db.Integer, default=0)
     cost = db.Column(db.Float, default=0.0)
     engine = db.Column(db.String(20), default='gemini')
-    status = db.Column(db.String(20), default='completed')  # completed / error / pending_payment
+    status = db.Column(db.String(20), default='completed')  # completed / error / pending_payment / queued_maintenance
     delivered_to = db.Column(db.String(255), nullable=True)  # כתובת מייל לשליחה כשתשלים תשלום
     expires_at = db.Column(db.DateTime, nullable=True)  # לתוצאות pending_payment - 72 שעות
+    # גיבוי בייטים של קובץ התמונה/PDF, לתקופה שבה הוא ממתין ב"מצב תחזוקה"
+    # (status='queued_maintenance') - אותה בעיה בדיוק כמו Recording.file_data:
+    # original_file_path מצביע על דיסק מקומי שנמחק בכל דפלוי. נמחק אוטומטית
+    # כשמשחררים את התור (ראה routes/email_inbound.resume_queued_ocr).
+    file_data = db.Column(db.LargeBinary, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     customer = db.relationship('Customer', backref=db.backref('ocr_results', lazy=True))

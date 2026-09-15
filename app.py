@@ -266,6 +266,13 @@ def _migrate_db():
             )""",
         "CREATE INDEX IF NOT EXISTS ix_active_jobs_kind ON active_jobs (kind)",
         "CREATE INDEX IF NOT EXISTS ix_active_jobs_started_at ON active_jobs (started_at)",
+        # גיבוי קובץ אודיו שנקלט באימייל וממתין במצב תחזוקה (ראה
+        # models.Recording.file_data, services/transcribe.resume_queued_recordings) -
+        # אותה בעיית דיסק זמני כמו כתבי-היד, הפעם עבור הקלטות אימייל.
+        "ALTER TABLE recordings ADD COLUMN IF NOT EXISTS file_data BYTEA",
+        # אותו דבר, הפעם עבור תמונות OCR שממתינות במצב תחזוקה (ראה
+        # models.OcrResult.file_data, routes/email_inbound.resume_queued_ocr).
+        "ALTER TABLE ocr_results ADD COLUMN IF NOT EXISTS file_data BYTEA",
     ]
     logger = logging.getLogger(__name__)
     ok, failed = 0, 0

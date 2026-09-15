@@ -426,9 +426,10 @@ def process_pending_recordings(customer_id):
 def resume_queued_recordings():
     """נקרא כשמכבים את "מצב תחזוקה" (/admin/maintenance) - מוצא את כל
     השיחות שנקלטו בזמן שהמצב היה דלוק (status='queued_maintenance', ראה
-    routes/api.py /api/transcribe) ומעביר אותן לעיבוד רגיל, בדיוק כאילו
-    הן הגיעו עכשיו. כל מה שצריך כבר נשמר על השורה עצמה ב-DB (rec_url וכו') -
-    לא תלוי בשום דבר שנשאר רק בזיכרון. מחזיר כמה שיחות שוחררו."""
+    routes/api.py /api/transcribe וגם routes/email_inbound.py) ומעביר אותן
+    לעיבוד רגיל, בדיוק כאילו הן הגיעו עכשיו. כל מה שצריך כבר נשמר על השורה
+    עצמה ב-DB (rec_url וכו') - לא תלוי בשום דבר שנשאר רק בזיכרון. מחזיר
+    כמה שיחות שוחררו."""
     from app import app, db
     from models import Recording
 
@@ -445,10 +446,32 @@ def resume_queued_recordings():
                 'duration_seconds': rec.duration_seconds or 0,
                 'transcription_tier': rec.transcription_tier or 'basic',
                 'language': rec.language or 'he', 'output_language': rec.output_language or 'he',
+                'file_data': rec.file_data,
             })
+            # ה-DB backup כבר לא נחוץ אחרי ששוחררה - מנקים כדי לא לנפח את
+            # הטבלה סתם (ה-restore בפועל קורה למטה, לפני קריאת transcribe_async)
+            rec.file_data = None
         db.session.commit()
 
     for r in released:
+        # הקלטת אימייל ששוהתה נשמרה בגיבוי ב-DB (file_data) כי הקובץ בדיסק
+        # המקומי עלול היה להימחק בדפלוי בזמן שהמתנה. משחזרים אותו לדיסק
+        # באותו נתיב שה-rec_url הקיים כבר מצביע אליו, לפני שממשיכים כרגיל.
+        if r.get('file_data'):
+            try:
+                import os
+                from routes.email_inbound import RECORDINGS_EMAIL_DIR
+                filename = (r['rec_url'] or '').rsplit('/', 1)[-1]
+                if filename:
+                    filepath = os.path.join(RECORDINGS_EMAIL_DIR, filename)
+                    if not os.path.exists(filepath):
+                        os.makedirs(RECORDINGS_EMAIL_DIR, exist_ok=True)
+                        with open(filepath, 'wb') as f:
+                            f.write(r['file_data'])
+                        log.info(f"resume_queued_recordings: restored file for call_id={r['call_id']} to {filepath}")
+            except Exception as e:
+                log.error(f"resume_queued_recordings: failed to restore file for call_id={r['call_id']}: {e}")
+
         transcribe_async(
             r['call_id'], r['rec_url'], r['customer_id'], r['delivery_method'], r['delivered_to'],
             r['duration_seconds'], r['transcription_tier'], r['language'], r['output_language'],
