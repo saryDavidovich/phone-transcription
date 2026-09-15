@@ -835,6 +835,46 @@ def settings():
     }
     return render_template('admin/settings.html', settings=current_settings)
 
+
+@admin_bp.route('/maintenance')
+@login_required
+def maintenance():
+    return render_template('admin/maintenance.html',
+                            maintenance_mode=(get_setting('maintenance_mode', '0') == '1'))
+
+
+@admin_bp.route('/maintenance/status')
+@login_required
+def maintenance_status():
+    from services.job_tracker import snapshot
+    from models import Recording
+    data = snapshot()
+    data['maintenance_mode'] = (get_setting('maintenance_mode', '0') == '1')
+    data['queued_calls'] = Recording.query.filter_by(status='queued_maintenance').count()
+    return jsonify(data)
+
+
+@admin_bp.route('/maintenance/toggle', methods=['POST'])
+@login_required
+def maintenance_toggle():
+    turn_on = request.form.get('enable') == '1'
+    set_setting('maintenance_mode', '1' if turn_on else '0')
+    released = 0
+    if not turn_on:
+        # כבים מצב תחזוקה - משחררים שיחות שהצטברו בזמן שהמצב היה דלוק
+        from services.transcribe import resume_queued_recordings
+        released = resume_queued_recordings()
+    return jsonify({'ok': True, 'maintenance_mode': turn_on, 'released': released})
+
+
+@admin_bp.route('/maintenance/clear-stale', methods=['POST'])
+@login_required
+def maintenance_clear_stale():
+    from services.job_tracker import clear_stale
+    n = clear_stale()
+    return jsonify({'ok': True, 'cleared': n})
+
+
 @admin_bp.route('/api/stats')
 @login_required
 def api_stats():

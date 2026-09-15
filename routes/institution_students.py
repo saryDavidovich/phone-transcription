@@ -324,7 +324,8 @@ def upload_for_student(student_id):
 
 
 def _process_student_upload(flask_app, recording_id, rec_url):
-    with flask_app.app_context():
+    from services.job_tracker import tracked
+    with flask_app.app_context(), tracked('institution_student', label=f'הקלטה {recording_id}'):
         recording = Recording.query.get(recording_id)
         student = Customer.query.get(recording.customer_id)
         try:

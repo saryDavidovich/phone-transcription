@@ -77,7 +77,8 @@ def upload():
 
 
 def _process_upload(flask_app, upload_id, rec_url, tier, language, output_language):
-    with flask_app.app_context():
+    from services.job_tracker import tracked
+    with flask_app.app_context(), tracked('institution_upload', label=f'העלאה {upload_id}'):
         record = InstitutionUpload.query.get(upload_id)
         try:
             from services.transcribe import _gemini_from_url

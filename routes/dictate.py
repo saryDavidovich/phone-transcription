@@ -232,7 +232,8 @@ def _dictation_worker(app, page_id, segment_files, segment_meta, engine=None):
         'bold','underline','heading','new_paragraph','no_space_before'?,'no_space_after'?}.
        engine: 'gemini' או 'openai' - איזה מנוע תמלול להשתמש בו לסגמנטי האודיו."""
     engine = engine if engine in ENGINES else DEFAULT_DICTATION_ENGINE
-    with app.app_context():
+    from services.job_tracker import tracked
+    with app.app_context(), tracked('dictation', label=f'דף {page_id}'):
         from models import ManuscriptPage
         from concurrent.futures import ThreadPoolExecutor
 

@@ -213,6 +213,9 @@ textarea.form-input { resize:vertical; min-height:80px; }
     <a href="/admin/settings" class="nav-item {% if request.endpoint == 'admin.settings' %}active{% endif %}">
       <span class="nav-icon">⚙️</span> הגדרות
     </a>
+    <a href="/admin/maintenance" class="nav-item {% if request.endpoint == 'admin.maintenance' %}active{% endif %}">
+      <span class="nav-icon">🚦</span> מצב תחזוקה
+    </a>
     <div class="nav-section">תקשורת</div>
     <a href="/admin/ocr" class="nav-item {% if request.endpoint in ['admin.ocr_list','admin.ocr_detail'] %}active{% endif %}">
       <span class="nav-icon">✍️</span> זיהוי כתב יד

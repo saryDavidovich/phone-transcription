@@ -28,7 +28,17 @@ _fax_pdf_semaphore = _threading.Semaphore(2)
 def ocr_async(func, *args, **kwargs):
     waiting = _ocr_executor._work_queue.qsize()
     log.info(f"ocr_async: נכנס לתור (ממתינים בתור: {waiting})")
-    return _ocr_executor.submit(func, *args, **kwargs)
+    # original_filename הוא בד"כ הארגומנט השני (ראה קריאות ל-ocr_async ב-
+    # routes/email_inbound.py) - נלקח בזהירות (עם ברירת מחדל ריקה) כי זו
+    # רק תווית לתצוגה במסך "פעילות מערכת", לא לוגיקה קריטית.
+    label = str(args[1]) if len(args) > 1 else ''
+
+    def _run_tracked():
+        from services.job_tracker import tracked
+        with tracked('ocr', label=label):
+            return func(*args, **kwargs)
+
+    return _ocr_executor.submit(_run_tracked)
 
 def transcribe_async(call_id, rec_url, customer_id, delivery_method, delivered_to, duration_seconds, transcription_tier='basic', language='he', output_language='he'):
     waiting = _ocr_executor._work_queue.qsize()
@@ -67,7 +77,8 @@ def _transcribe_manager_message(msg_id, rec_url):
 def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, duration_seconds, transcription_tier='basic', language='he', output_language='he'):
     from app import app, db
     from models import Recording, Customer, Transaction
-    with app.app_context():
+    from services.job_tracker import tracked
+    with app.app_context(), tracked('call', label=f'שיחה {call_id}'):
         try:
             rec = Recording.query.filter_by(call_id=call_id).first()
             if rec:
@@ -345,8 +356,9 @@ def process_pending_recordings(customer_id):
     from app import app, db
     from models import Recording, Customer
     from datetime import datetime
+    from services.job_tracker import tracked
 
-    with app.app_context():
+    with app.app_context(), tracked('call', label=f'תור ממתין - לקוח {customer_id}'):
         customer = Customer.query.get(customer_id)
         if not customer:
             return
@@ -409,6 +421,40 @@ def process_pending_recordings(customer_id):
                 language=rec.language or 'he',
                 output_language=rec.output_language or 'he',
             )
+
+
+def resume_queued_recordings():
+    """נקרא כשמכבים את "מצב תחזוקה" (/admin/maintenance) - מוצא את כל
+    השיחות שנקלטו בזמן שהמצב היה דלוק (status='queued_maintenance', ראה
+    routes/api.py /api/transcribe) ומעביר אותן לעיבוד רגיל, בדיוק כאילו
+    הן הגיעו עכשיו. כל מה שצריך כבר נשמר על השורה עצמה ב-DB (rec_url וכו') -
+    לא תלוי בשום דבר שנשאר רק בזיכרון. מחזיר כמה שיחות שוחררו."""
+    from app import app, db
+    from models import Recording
+
+    with app.app_context():
+        queued = Recording.query.filter_by(status='queued_maintenance').all()
+        if not queued:
+            return 0
+        released = []
+        for rec in queued:
+            rec.status = 'processing'
+            released.append({
+                'call_id': rec.call_id, 'rec_url': rec.rec_url, 'customer_id': rec.customer_id,
+                'delivery_method': rec.delivery_method, 'delivered_to': rec.delivered_to,
+                'duration_seconds': rec.duration_seconds or 0,
+                'transcription_tier': rec.transcription_tier or 'basic',
+                'language': rec.language or 'he', 'output_language': rec.output_language or 'he',
+            })
+        db.session.commit()
+
+    for r in released:
+        transcribe_async(
+            r['call_id'], r['rec_url'], r['customer_id'], r['delivery_method'], r['delivered_to'],
+            r['duration_seconds'], r['transcription_tier'], r['language'], r['output_language'],
+        )
+    log.info(f"resume_queued_recordings: released {len(released)} calls queued during maintenance mode")
+    return len(released)
 
 
 def _save_pending_payment(rec, customer, duration_seconds, price_per_20min,

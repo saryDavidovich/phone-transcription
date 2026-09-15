@@ -154,16 +154,31 @@ def transcribe():
     if existing:
         return jsonify({'ok': True, 'call_id': call_id})
 
+    # אם "מצב תחזוקה" דלוק (/admin/maintenance) - לא מתחילים לעבד עכשיו, רק
+    # שומרים את כל מה שצריך כדי להשלים את העיבוד מאוחר יותר (ראה
+    # services.transcribe.resume_queued_recordings, שנקרא כשמכבים את המצב).
+    # ה-status הייחודי הזה (במקום 'processing') הוא מה שמבדיל בין "מחכה
+    # בכוונה למצב תחזוקה" לבין "נתקע" סתם.
+    from routes.admin import get_setting
+    maintenance_on = get_setting('maintenance_mode', '0') == '1'
+
     rec = Recording(
         call_id=call_id,
         customer_id=customer.id,
         duration_seconds=duration,
-        status='processing',
+        status='queued_maintenance' if maintenance_on else 'processing',
         delivery_method=delivery_method,
-        delivered_to=delivered_to
+        delivered_to=delivered_to,
+        rec_url=rec_url,
+        transcription_tier=transcription_tier,
+        language=language,
+        output_language=output_language,
     )
     db.session.add(rec)
     db.session.commit()
+
+    if maintenance_on:
+        return jsonify({'ok': True, 'call_id': call_id, 'queued_maintenance': True})
 
     transcribe_async(call_id, rec_url, customer.id, delivery_method, delivered_to, duration, transcription_tier, language, output_language)
     return jsonify({'ok': True, 'call_id': call_id})

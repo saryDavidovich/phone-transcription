@@ -1122,9 +1122,10 @@ def process_pending_ocr(customer_id):
     from models import Customer, OcrResult, Transaction
     from routes.admin import get_setting
     from datetime import datetime
+    from services.job_tracker import tracked
     import math
 
-    with app.app_context():
+    with app.app_context(), tracked('ocr', label=f'תור ממתין - לקוח {customer_id}'):
         customer = Customer.query.get(customer_id)
         if not customer:
             return

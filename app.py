@@ -255,6 +255,17 @@ def _migrate_db():
         # דיפלוי/הפעלה מחדש של הקונטיינר. בלי זה, קבצי כתבי-יד שהועלו לפני
         # דיפלוי אבדו בפועל בכל עדכון קוד. מעכשיו הקובץ נשמר גם ב-DB עצמו.
         "ALTER TABLE manuscript_pages ADD COLUMN IF NOT EXISTS file_data BYTEA",
+        # מסך "פעילות מערכת" (/admin/maintenance) - מעקב עבודות רקע פעילות
+        # (ראה models.ActiveJob, services/job_tracker.py) + מצב תחזוקה שדוחה
+        # שיחות טלפון חדשות עד שמכבים אותו (ראה routes/api.py /api/transcribe)
+        """CREATE TABLE IF NOT EXISTS active_jobs (
+                id SERIAL PRIMARY KEY,
+                kind VARCHAR(30) NOT NULL,
+                label VARCHAR(255),
+                started_at TIMESTAMP DEFAULT NOW()
+            )""",
+        "CREATE INDEX IF NOT EXISTS ix_active_jobs_kind ON active_jobs (kind)",
+        "CREATE INDEX IF NOT EXISTS ix_active_jobs_started_at ON active_jobs (started_at)",
     ]
     logger = logging.getLogger(__name__)
     ok, failed = 0, 0

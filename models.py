@@ -239,6 +239,20 @@ class OcrResult(db.Model):
     customer = db.relationship('Customer', backref=db.backref('ocr_results', lazy=True))
 
 
+class ActiveJob(db.Model):
+    """שורה = עבודת רקע אחת שרצה ממש עכשיו (תמלול שיחה/OCR/הקראת כתב יד/
+    תלמיד מוסד) - לצורך מסך "פעילות מערכת" (/admin/maintenance, ראה
+    services/job_tracker.py). נוצרת כשעבודה מתחילה, נמחקת כשהיא מסתיימת.
+    חייבת להיות ב-DB (לא רק זיכרון של תהליך אחד) כי יש כמה worker processes
+    של gunicorn במקביל - זה המקור היחיד שרואה את כולם ביחד."""
+    __tablename__ = 'active_jobs'
+
+    id = db.Column(db.Integer, primary_key=True)
+    kind = db.Column(db.String(30), nullable=False, index=True)
+    label = db.Column(db.String(255), nullable=True)
+    started_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
+
 class ProcessedWebhook(db.Model):
     """מונע עיבוד כפול כאשר SendGrid שולח את אותו webhook יותר מפעם אחת (retry)"""
     __tablename__ = 'processed_webhooks'
