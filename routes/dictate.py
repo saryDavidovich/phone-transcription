@@ -662,14 +662,36 @@ def _manuscript_file_bytes(page):
     return None
 
 
+def _image_to_pdf_bytes(raw):
+    """ממיר בייטי תמונה (jpg/png/וכו') לקובץ PDF חד-עמודי (Pillow). PDF פשוט
+    לא נשמר עם ערוץ שקיפות (alpha) - אם קיים, ממזגים על רקע לבן קודם."""
+    from PIL import Image
+    img = Image.open(io.BytesIO(raw))
+    if img.mode in ('RGBA', 'LA') or (img.mode == 'P' and 'transparency' in img.info):
+        img = img.convert('RGBA')
+        bg = Image.new('RGB', img.size, (255, 255, 255))
+        bg.paste(img, mask=img.split()[-1])
+        img = bg
+    elif img.mode != 'RGB':
+        img = img.convert('RGB')
+    out = io.BytesIO()
+    img.save(out, format='PDF')
+    return out.getvalue()
+
+
 def _manuscript_data_uri(page):
     """מקודד את קובץ כתב-היד כ-data URI (base64) מוטמע ישירות ב-HTML - לא
-    כ-src לכתובת נפרדת. המטרה: אצל חלק מהנציגים תמונות שנטענות מכתובת URL
-    נפרדת (גם מאותו דומיין) נחסמות/מתעכבות ע"י מסנני תוכן כמו נטפרי; data
-    URI מגיע כחלק מגוף ה-HTML עצמו, בלי שום בקשת רשת נוספת, ולכן לא נחסם."""
+    כ-src לכתובת נפרדת - כדי שלא תהיה בקשת רשת נפרדת שמסנן תוכן כמו נטפרי
+    יכול לעכב. בפועל זה לא הספיק: מתברר שנטפרי חוסם גם תמונות שמגיעות כ-data
+    URI מוטמע (כנראה לפי ניתוח התוכן/mime של האלמנט עצמו, לא רק לפי בקשת
+    הרשת) - אז כל תמונה מומרת כאן ל-PDF חד-עמודי (Pillow) לפני ההטמעה,
+    ומוצגת ב-iframe בדיוק כמו PDF "אמיתי" שהגיע במייל. PDF לא נחסם אצל נטפרי
+    באותה צורה שתמונה נחסמת.
+    מחזיר (data_uri, is_pdf) - is_pdf קובע ב-template אם להציג ב-<iframe>
+    (PDF) או ב-<img> (fallback, רק אם המרה ל-PDF נכשלה מסיבה כלשהי)."""
     raw = _manuscript_file_bytes(page)
     if not raw:
-        return None
+        return None, False
     mime, _ = mimetypes.guess_type(page.original_filename or page.file_path or '')
     if not mime:
         ext = os.path.splitext(page.original_filename or page.file_path or '')[1].lower()
@@ -677,8 +699,17 @@ def _manuscript_data_uri(page):
             '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
             '.gif': 'image/gif', '.webp': 'image/webp', '.pdf': 'application/pdf',
         }.get(ext, 'application/octet-stream')
+
+    if mime != 'application/pdf':
+        try:
+            raw = _image_to_pdf_bytes(raw)
+            mime = 'application/pdf'
+        except Exception as e:
+            log.error(f"manuscript image->PDF conversion error (page={page.id}): {e}")
+            # ממשיכים עם התמונה המקורית - עדיף תצוגה שעלולה להיחסם מאשר כלום
+
     b64 = base64.b64encode(raw).decode('ascii')
-    return f'data:{mime};base64,{b64}'
+    return f'data:{mime};base64,{b64}', (mime == 'application/pdf')
 
 
 @dictate_bp.route('/<int:page_id>')
@@ -691,11 +722,13 @@ def studio(page_id):
         page.claimed_by = getattr(current_user, 'username', 'admin')
         page.claimed_at = datetime.utcnow()
         db.session.commit()
+    manuscript_data_uri, manuscript_is_pdf = _manuscript_data_uri(page)
     return render_template(
         'admin/dictate_studio.html',
         page=page,
         default_engine=DEFAULT_DICTATION_ENGINE,
-        manuscript_data_uri=_manuscript_data_uri(page),
+        manuscript_data_uri=manuscript_data_uri,
+        manuscript_is_pdf=manuscript_is_pdf,
     )
 
 

@@ -65,16 +65,16 @@
 <div class="ds-wrap">
   <div class="card ds-imgcard">
     <div class="card-title">📄 {{ page.original_filename }}</div>
-    {% set ext = page.original_filename.rsplit('.', 1)[-1].lower() if page.original_filename and '.' in page.original_filename else '' %}
     <div class="ds-imgbox" id="imgBox" onclick="this.classList.toggle('zoomed')">
       {% if not manuscript_data_uri %}
         <div class="ds-state ds-error" style="padding:24px">⚠ הקובץ אינו זמין</div>
-      {% elif ext == 'pdf' %}
+      {% elif manuscript_is_pdf %}
         {# מוטמע ישירות כ-data URI בתוך ה-HTML עצמו (לא src לכתובת נפרדת) - #}
-        {# כך שגם מי שיושב מאחורי מסנן תוכן (למשל נטפרי) רואה את הקובץ מיד, #}
-        {# בלי שום בקשת רשת נוספת שהמסנן יכול לעכב או לחסום. #}
-        <iframe src="{{ manuscript_data_uri }}" style="width:100%;height:80vh;border:0;display:block" title="כתב יד (PDF)"></iframe>
+        {# ומומר תמיד ל-PDF (גם אם המקור הוא תמונה) - נטפרי חסם גם תמונות #}
+        {# שהוטמעו כ-data URI, אבל לא חוסם PDF באותה צורה. #}
+        <iframe src="{{ manuscript_data_uri }}" style="width:100%;height:80vh;border:0;display:block" title="כתב יד"></iframe>
       {% else %}
+        {# fallback - רק אם המרה ל-PDF נכשלה מסיבה כלשהי #}
         <img src="{{ manuscript_data_uri }}" alt="כתב יד">
       {% endif %}
     </div>
