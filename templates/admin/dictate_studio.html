@@ -6,13 +6,23 @@
 <style>
   /* פריסה אנכית: התמונה/PDF למעלה על רוחב מלא, כפתורי ההקלטה למטה - כדי
      שאפשר יהיה להגדיל את כתב היד ולקרוא אותו בלי שום מאמץ. */
-  .ds-wrap { display:flex; flex-direction:column; gap:20px; }
+  .ds-wrap { display:flex; flex-direction:column; gap:14px; }
 
-  .ds-imgbox { max-height:85vh; overflow:auto; border-radius:10px; background:var(--surface2); text-align:center; }
-  .ds-imgbox img { max-width:100%; display:block; margin:0 auto; cursor:zoom-in; transition:max-width .15s; }
-  .ds-imgbox.zoomed img { max-width:220%; cursor:zoom-out; }
+  /* שורת הכפתורים העליונה (חזרה לתור / פרופיל לקוח) - צדדית וקבועה בגובה,
+     לא נשברת לכמה שורות גם במסך צר (גוללת אופקית לכל היותר), כדי שלא
+     "תבלע" גובה מסך שדרוש לתמונה ולכפתורי ההקלטה. */
+  .ds-topbar { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:12px; flex-wrap:nowrap; overflow-x:auto; }
+  .ds-topbar-left, .ds-topbar-right { display:flex; align-items:center; gap:6px; flex-wrap:nowrap; white-space:nowrap; }
+  .ds-topbtn { padding:6px 10px !important; font-size:13px !important; }
 
-  .ds-recordbar { display:flex; align-items:center; gap:14px; padding:16px; background:var(--surface2); border-radius:10px; margin-bottom:14px; }
+  /* כברירת מחדל התיבה נמוכה (בערך 5 שורות של כתב היד) - כדי שהכפתורים
+     מתחתיה תמיד יהיו בתוך תצוגה אחת גם במחשב נייד עם מסך קטן. אפשר
+     להגדיל בלחיצה על הכפתור (ראו toggleImgExpand בסקריפט). */
+  .ds-imgbox { height:160px; overflow:auto; border-radius:10px; background:var(--surface2); text-align:center; transition:height .2s ease; }
+  .ds-imgbox.expanded { height:85vh; }
+  .ds-imgbox img { max-width:100%; display:block; margin:0 auto; }
+
+  .ds-recordbar { display:flex; align-items:center; gap:12px; padding:12px; background:var(--surface2); border-radius:10px; margin-bottom:12px; flex-wrap:wrap; }
   .ds-recbtn {
     display:flex; align-items:center; gap:8px; padding:12px 22px; border-radius:999px; border:none;
     font-family:'Heebo',sans-serif; font-size:15px; font-weight:700; cursor:pointer; color:#fff; background:var(--red);
@@ -63,31 +73,38 @@
   .ds-enginerow select { padding:6px 10px; border-radius:8px; border:1px solid var(--border); background:var(--surface); color:var(--text); font-family:'Heebo',sans-serif; font-size:13px; }
 </style>
 
-<div style="display:flex;gap:8px;margin-bottom:16px;align-items:center;flex-wrap:wrap">
-  <a href="/admin/dictate" class="btn btn-ghost">← חזרה לתור</a>
-  <a href="/admin/customers/{{ page.customer_id }}" class="btn btn-ghost">👤 {{ page.customer.phone }}</a>
-  <span id="statusBadge" class="badge badge-gray">{{ page.status }}</span>
-  <span id="engineBadge" style="color:var(--text3);font-size:12px">{% if page.engine %}מנוע: {{ 'ג׳מיני' if page.engine == 'gemini' else 'OpenAI' }}{% endif %}</span>
-  {% if page.claimed_by %}<span style="color:var(--text3);font-size:12px">נפתח ע"י {{ page.claimed_by }}</span>{% endif %}
+<div class="ds-topbar">
+  <div class="ds-topbar-left">
+    <a href="/admin/dictate" class="btn btn-ghost ds-topbtn">← חזרה לתור</a>
+    <a href="/admin/customers/{{ page.customer_id }}" class="btn btn-ghost ds-topbtn">👤 {{ page.customer.phone }}</a>
+  </div>
+  <div class="ds-topbar-right">
+    <span id="statusBadge" class="badge badge-gray">{{ page.status }}</span>
+    <span id="engineBadge" style="color:var(--text3);font-size:12px">{% if page.engine %}מנוע: {{ 'ג׳מיני' if page.engine == 'gemini' else 'OpenAI' }}{% endif %}</span>
+    {% if page.claimed_by %}<span style="color:var(--text3);font-size:12px">נפתח ע"י {{ page.claimed_by }}</span>{% endif %}
+  </div>
 </div>
 
 <div class="ds-wrap">
   <div class="card">
-    <div class="card-title">📄 {{ page.original_filename }}</div>
-    <div class="ds-imgbox" id="imgBox" onclick="this.classList.toggle('zoomed')">
+    <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+      <span>📄 {{ page.original_filename }}</span>
+      <button type="button" class="btn btn-ghost" id="imgExpandBtn" style="font-size:12px;padding:5px 10px" onclick="toggleImgExpand()">⤢ הגדלת תצוגה</button>
+    </div>
+    <div class="ds-imgbox" id="imgBox">
       {% if not manuscript_data_uri %}
         <div class="ds-state ds-error" style="padding:24px">⚠ הקובץ אינו זמין</div>
       {% elif manuscript_is_pdf %}
         {# מוטמע ישירות כ-data URI בתוך ה-HTML עצמו (לא src לכתובת נפרדת) - #}
         {# ומומר תמיד ל-PDF (גם אם המקור הוא תמונה) - נטפרי חסם גם תמונות #}
         {# שהוטמעו כ-data URI, אבל לא חוסם PDF באותה צורה. #}
-        <iframe src="{{ manuscript_data_uri }}" style="width:100%;height:85vh;border:0;display:block" title="כתב יד"></iframe>
+        <iframe src="{{ manuscript_data_uri }}" style="width:100%;height:100%;border:0;display:block" title="כתב יד"></iframe>
       {% else %}
         {# fallback - רק אם המרה ל-PDF נכשלה מסיבה כלשהי #}
         <img src="{{ manuscript_data_uri }}" alt="כתב יד">
       {% endif %}
     </div>
-    <p class="ds-hint">לחיצה על התמונה מגדילה/מקטינה</p>
+    <p class="ds-hint">התצוגה מוצגת בקטן כברירת מחדל - אפשר להגדיל אותה בכל רגע בלחיצה על הכפתור למעלה, כדי לקרוא בנוחות</p>
   </div>
 
   <div class="card">
@@ -107,6 +124,7 @@
         <span class="ds-dot"></span>
         <span id="recBtnLabel">התחל הקלטה</span>
       </button>
+      <button id="cancelBtn" class="btn btn-ghost" style="display:none" onclick="cancelRecording()">✖ ביטול הקלטה</button>
       <span class="ds-timer" id="timer">00:00</span>
     </div>
 
@@ -176,6 +194,16 @@ const PUNCT_BUTTONS = [
   { id: 'btnColon',        char: ':', key: ':', noSpaceBefore: true },
 ];
 
+// מגדיל/מקטין את תיבת התמונה/PDF בלחיצת כפתור מפורשת (עובד זהה גם ל-<img>
+// וגם ל-<iframe> של PDF, בניגוד לזום-בלחיצה-על-התמונה הישן שלא עבד על iframe).
+function toggleImgExpand() {
+  const box = document.getElementById('imgBox');
+  const btn = document.getElementById('imgExpandBtn');
+  if (!box || !btn) return;
+  const expanded = box.classList.toggle('expanded');
+  btn.textContent = expanded ? '⤡ הקטנת תצוגה' : '⤢ הגדלת תצוגה';
+}
+
 function fmtTime(sec) {
   const m = Math.floor(sec / 60).toString().padStart(2, '0');
   const s = Math.floor(sec % 60).toString().padStart(2, '0');
@@ -218,6 +246,7 @@ async function startRecording() {
   btn.classList.remove('idle');
   btn.classList.add('rec');
   document.getElementById('recBtnLabel').textContent = 'עצור הקלטה';
+  document.getElementById('cancelBtn').style.display = 'inline-flex';
   setFormatButtonsEnabled(true);
   document.getElementById('engineSelect').disabled = true;
 
@@ -321,10 +350,32 @@ function stopRecording() {
   btn.classList.add('idle');
   btn.disabled = true;
   document.getElementById('recBtnLabel').textContent = 'ממתין...';
+  document.getElementById('cancelBtn').style.display = 'none';
   setFormatButtonsEnabled(false);
 
   mediaStream.getTracks().forEach(t => t.stop());
   endSegmentThen(() => uploadAllSegments());
+}
+
+// מבטל את ההקלטה הנוכחית לגמרי - בלי לשלוח שום דבר לעיבוד/תמלול. מנתק את
+// segRecorder.onstop לפני העצירה כדי שלא "יתגנב" סגמנט אחרון לרשימה, עוצר
+// את המיקרופון, ומאפס הכל בחזרה למצב מנוחה.
+function cancelRecording() {
+  if (!recording || !segRecorder) return;
+  if (!confirm('לבטל את ההקלטה הנוכחית? כל מה שהוקלט עד כה יימחק ולא יישלח.')) return;
+  recording = false;
+  clearInterval(timerInterval);
+  if (segRecorder) {
+    segRecorder.onstop = null;
+    try { segRecorder.stop(); } catch (e) {}
+  }
+  if (mediaStream) mediaStream.getTracks().forEach(t => t.stop());
+  segments = [];
+  segChunks = [];
+  document.getElementById('cancelBtn').style.display = 'none';
+  document.getElementById('timer').textContent = '00:00';
+  setFormatButtonsEnabled(false);
+  resetRecordButton();
 }
 
 async function uploadAllSegments() {

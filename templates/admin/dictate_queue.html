@@ -40,7 +40,12 @@
         <td onclick="location='/admin/dictate/{{p.id}}'" style="cursor:pointer;color:#8892b0;font-size:12px">{% if p.engine == 'gemini' %}ג׳מיני{% elif p.engine == 'openai' %}OpenAI{% else %}—{% endif %}</td>
         <td onclick="location='/admin/dictate/{{p.id}}'" style="cursor:pointer;color:#8892b0">{{ p.claimed_by or '—' }}</td>
         <td onclick="location='/admin/dictate/{{p.id}}'" style="cursor:pointer;color:#8892b0">{{ p.created_at | il_time }}</td>
-        <td><a href="/admin/dictate/{{p.id}}" class="btn btn-ghost" style="font-size:12px;padding:4px 10px">{% if p.status=='done' %}צפייה{% else %}פתח{% endif %}</a></td>
+        <td style="display:flex;gap:6px">
+          <a href="/admin/dictate/{{p.id}}" class="btn btn-ghost" style="font-size:12px;padding:4px 10px">{% if p.status=='done' %}צפייה{% else %}פתח{% endif %}</a>
+          <form method="POST" action="/admin/dictate/{{p.id}}/delete" onsubmit="return confirm('למחוק לצמיתות את הדף {{ p.original_filename }}? פעולה זו אינה הפיכה!')">
+            <button type="submit" class="btn btn-danger" style="font-size:12px;padding:4px 10px">🗑 מחק</button>
+          </form>
+        </td>
       </tr>
       {% else %}
       <tr><td colspan="7" style="text-align:center;color:#8892b0;padding:24px">אין דפים כרגע</td></tr>

@@ -335,11 +335,12 @@ def export_customers_excel():
 @admin_bp.route('/customers/<int:id>')
 @login_required
 def customer_detail(id):
-    from models import OcrResult, ConversationThread
+    from models import OcrResult, ConversationThread, ManuscriptPage
     customer = Customer.query.get_or_404(id)
     recordings = Recording.query.filter_by(customer_id=id).order_by(Recording.created_at.desc()).all()
     transactions = Transaction.query.filter_by(customer_id=id).order_by(Transaction.created_at.desc()).all()
     ocr_results = OcrResult.query.filter_by(customer_id=id).order_by(OcrResult.created_at.desc()).all()
+    manuscript_pages = ManuscriptPage.query.filter_by(customer_id=id).order_by(ManuscriptPage.created_at.desc()).all()
     threads = ConversationThread.query.filter_by(customer_id=id).order_by(ConversationThread.created_at.desc()).all()
     # צפייה בעמוד מסמנת הודעות נכנסות כ"נקראו" בכל השיחות - כדי שהתראה בעמוד הודעות למנהל תיעלם
     unread = [m for t in threads for m in t.messages if m.direction == 'in' and not m.is_read]
@@ -349,7 +350,7 @@ def customer_detail(id):
         db.session.commit()
     return render_template('admin/customer_detail.html',
         customer=customer, recordings=recordings, transactions=transactions,
-        ocr_results=ocr_results, threads=threads, timedelta=timedelta)
+        ocr_results=ocr_results, manuscript_pages=manuscript_pages, threads=threads, timedelta=timedelta)
 
 @admin_bp.route('/customers/<int:id>/block', methods=['POST'])
 @login_required

@@ -208,6 +208,36 @@ function confirmOcrDelete() {
 </script>
 
 <div style="margin-top:20px" class="table-card">
+  <div class="table-header"><span class="table-title">🗣️ הקראת טקסט (כתבי יד)</span></div>
+  <table>
+    <thead><tr>
+      <th>תאריך</th><th>קובץ</th><th>תווים</th><th>עלות</th><th>סטטוס</th><th></th>
+    </tr></thead>
+    <tbody>
+      {% for m in manuscript_pages %}
+      <tr>
+        <td onclick="location='/admin/dictate/{{m.id}}'" style="cursor:pointer">{{ m.created_at | il_time }}</td>
+        <td onclick="location='/admin/dictate/{{m.id}}'" style="cursor:pointer;color:#8892b0;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ m.original_filename }}</td>
+        <td onclick="location='/admin/dictate/{{m.id}}'" style="cursor:pointer">{{ m.char_count or '—' }}</td>
+        <td onclick="location='/admin/dictate/{{m.id}}'" style="cursor:pointer">{% if m.cost %}₪{{ "%.2f"|format(m.cost) }}{% else %}—{% endif %}</td>
+        <td onclick="location='/admin/dictate/{{m.id}}'" style="cursor:pointer">
+          {% if m.status == 'done' %}<span class="badge badge-green">נשלח</span>
+          {% elif m.status == 'error' %}<span class="badge badge-red">שגיאה</span>
+          {% elif m.status == 'processing' %}<span class="badge badge-amber">מתמלל...</span>
+          {% elif m.status == 'review' %}<span class="badge badge-amber">ממתין לאישור</span>
+          {% elif m.status == 'recording' %}<span class="badge badge-blue">בהקלטה</span>
+          {% else %}<span class="badge badge-gray">ממתין</span>{% endif %}
+        </td>
+        <td><a href="/admin/dictate/{{m.id}}" class="btn btn-ghost" style="font-size:12px;padding:4px 10px">{% if m.status=='done' %}צפייה{% else %}פתח{% endif %}</a></td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" style="text-align:center;color:#8892b0;padding:24px">אין עדיין הקראות כתב יד ללקוח זה</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div style="margin-top:20px" class="table-card">
   <div class="table-header"><span class="table-title">💳 עסקאות</span></div>
   <table>
     <thead><tr><th>תאריך</th><th>סכום</th><th>סוג</th><th>תיאור</th></tr></thead>

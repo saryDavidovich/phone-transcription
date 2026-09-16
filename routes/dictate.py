@@ -871,6 +871,26 @@ def save_content(page_id):
     return jsonify({'status': 'saved'})
 
 
+@dictate_bp.route('/<int:page_id>/delete', methods=['POST'])
+@login_required
+def delete(page_id):
+    """מחיקה לצמיתות של דף כתב-יד מהתור/מהרשימה - כולל ניקוי הקובץ מהדיסק
+    אם קיים שם (file_data ב-DB נמחק אוטומטית עם השורה עצמה)."""
+    from flask import flash, redirect, url_for
+    from models import ManuscriptPage
+    page = ManuscriptPage.query.get_or_404(page_id)
+    filename = page.original_filename
+    try:
+        if page.file_path and os.path.exists(page.file_path):
+            os.remove(page.file_path)
+    except Exception as e:
+        log.warning(f"manuscript delete: file cleanup failed (page={page_id}): {e}")
+    db.session.delete(page)
+    db.session.commit()
+    flash(f'הדף "{filename}" נמחק בהצלחה')
+    return redirect(url_for('dictate.queue'))
+
+
 @dictate_bp.route('/<int:page_id>/redo', methods=['POST'])
 @login_required
 def redo(page_id):
