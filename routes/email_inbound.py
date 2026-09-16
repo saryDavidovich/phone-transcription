@@ -191,6 +191,37 @@ def _is_conversation_reply(subject):
     return cleaned.startswith(CONVERSATION_MARKER)
 
 
+PROOFING_MARKER = 'הגהה'  # תחילת נושא המייל שהלקוח שולח בחזרה עם קובץ Word
+# מתוקן, ע"י לחיצה על הכפתור שמופיע במייל ההקראה עצמו (routes/dictate.py
+# ._proofing_mailto_link) - פורמט: "הגהה {טלפון} {page_id}"
+
+
+def _is_proofing_reply(subject):
+    """בודק אם המייל הזה הוא תגובת הגהה (קובץ Word מתוקן בחזרה) - נושא
+    מהצורה 'הגהה {טלפון} {page_id}' (גם עם קידומת Re:/Fwd: לפניו)."""
+    cleaned = _clean_text(_strip_reply_prefixes(subject))
+    return cleaned.startswith(PROOFING_MARKER + ' ')
+
+
+def _parse_proofing_subject(subject):
+    """מחלץ (phone, page_id) מנושא מהצורה 'הגהה {טלפון} {page_id}'. מחזיר
+    None אם הפורמט לא תקין - ייקרא רק אחרי ש-_is_proofing_reply כבר אישר
+    שהתחילית קיימת."""
+    cleaned = _clean_text(_strip_reply_prefixes(subject))
+    remainder = cleaned[len(PROOFING_MARKER):].strip()
+    tokens = remainder.split()
+    if len(tokens) < 2:
+        return None
+    phone = _normalize_israeli_phone(tokens[0])
+    if not phone or not phone.isdigit():
+        return None
+    try:
+        page_id = int(tokens[1])
+    except ValueError:
+        return None
+    return phone, page_id
+
+
 def _parse_conversation_subject(subject):
     """מחלץ את מספר הטלפון מנושא מהצורה 'שירות לקוחות {טלפון}'. מחזיר None אם
     הפורמט לא תקין - ייקרא רק אחרי ש-_is_conversation_reply כבר אישר שהתחילית קיימת."""
@@ -516,6 +547,25 @@ def _pick_file():
             return f, 'audio'  # ברירת מחדל - תמלול
 
     return None, None
+
+
+DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+
+
+def _pick_docx_file():
+    """מאתר קובץ Word (.docx) מצורף - משמש רק לתגובות הגהה (ראה
+    _is_proofing_reply למעלה), בנפרד לגמרי מ-_pick_file (אודיו/תמונה)."""
+    if not request.files:
+        return None
+    for key in request.files:
+        f = request.files[key]
+        if not f or not f.filename:
+            continue
+        mime = (f.mimetype or '').lower()
+        ext = os.path.splitext(f.filename or '')[1].lstrip('.').lower()
+        if mime == DOCX_MIME or ext == 'docx':
+            return f
+    return None
 
 
 def _capture_manuscript_page(filepath, original_filename, customer, db):
@@ -1313,6 +1363,45 @@ def email_inbound():
 
     sender_email = _extract_sender_email(request.form.get('from', ''))
     subject = request.form.get('subject', '')
+
+    # תגובת הגהה - הלקוח שלח בחזרה קובץ Word עם תיקונים משלו, בעקבות הכפתור
+    # שמופיע במייל ההקראה (routes/dictate.py._proofing_mailto_link). נושא
+    # "הגהה {טלפון} {page_id}" - נבדק לפני _parse_subject הרגיל כי הפורמט שונה
+    # (מילת מפתח בתחילת הנושא, לא הטלפון עצמו), ולפני תגובת שיחה סתמית.
+    if _is_proofing_reply(subject):
+        parsed_proof = _parse_proofing_subject(subject)
+        if not parsed_proof:
+            log.warning(f"email-inbound: תגובת הגהה עם נושא לא תקין '{subject}' מאת {sender_email}")
+            return jsonify({'status': 'ignored', 'reason': 'invalid_proofing_subject'}), 200
+        phone, page_id = parsed_proof
+
+        with app.app_context():
+            from models import ManuscriptPage
+            customer = Customer.query.filter_by(phone=phone).first()
+            if not customer:
+                return jsonify({'status': 'rejected', 'reason': 'customer_not_found'}), 200
+            registered_email = (customer.email or '').strip().lower()
+            if not registered_email or registered_email != sender_email:
+                return jsonify({'status': 'rejected', 'reason': 'email_mismatch'}), 200
+
+            page = ManuscriptPage.query.filter_by(id=page_id, customer_id=customer.id).first()
+            if not page:
+                log.warning(f"email-inbound: תגובת הגהה לדף {page_id} שלא שייך ללקוח {phone} (או לא קיים)")
+                return jsonify({'status': 'rejected', 'reason': 'page_not_found'}), 200
+
+            docx_file = _pick_docx_file()
+            if not docx_file:
+                log.warning(f"email-inbound: תגובת הגהה בלי קובץ Word מצורף (page={page_id}, phone={phone})")
+                return jsonify({'status': 'rejected', 'reason': 'no_docx_attachment'}), 200
+
+            from datetime import datetime
+            page.proof_file_data = docx_file.read()
+            page.proof_original_filename = docx_file.filename or f'הגהה_{page_id}.docx'
+            page.proof_status = 'pending'
+            page.proof_requested_at = datetime.utcnow()
+            db.session.commit()
+            log.info(f"email-inbound: התקבלה הגהה חדשה לדף כתב-יד {page_id} מלקוח {phone}")
+            return jsonify({'status': 'ok', 'reason': 'proofing_received'}), 200
 
     # תגובת לקוח בהתכתבות עם המנהל - נושא שונה לגמרי ("שירות לקוחות {טלפון}"),
     # לא תלויה ביתרה, לא דורשת קובץ מצורף, ולא עוברת בתמלול/OCR בכלל.

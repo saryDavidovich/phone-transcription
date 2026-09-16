@@ -51,6 +51,7 @@ routes/dictate.py
 import os
 import io
 import json
+from html import escape as _html_escape
 import math
 import time
 import uuid
@@ -60,7 +61,7 @@ import logging
 import threading
 from datetime import datetime
 
-from flask import Blueprint, render_template, request, jsonify, send_file, current_app
+from flask import Blueprint, render_template, request, jsonify, send_file, current_app, abort, url_for
 from flask_login import login_required, current_user
 
 from app import db
@@ -611,6 +612,16 @@ def _manuscript_pricing():
     return unit_size, price_per_unit
 
 
+def _manuscript_proofing_price():
+    """מחיר קבוע לסבב הגהה אחד (לא לפי תווים, בניגוד לתמחור ההקראה עצמה) -
+    ראה ההגדרה 'price_manuscript_proofing' בעמוד ההגדרות."""
+    from routes.admin import get_setting
+    try:
+        return float(get_setting('price_manuscript_proofing', '5.00') or '5.00')
+    except (TypeError, ValueError):
+        return 5.00
+
+
 def _content_to_plain_preview(content):
     """טקסט פשוט (בלי עיצוב) לתצוגה מקדימה בגוף המייל."""
     lines = []
@@ -622,19 +633,40 @@ def _content_to_plain_preview(content):
     return '\n\n'.join(lines)
 
 
-def _send_manuscript_email(to_email, customer_name, original_filename, content):
+PROOFING_SUBJECT_MARKER = 'הגהה'  # ראה גם routes/email_inbound.py._is_proofing_reply - אותו קידומת בדיוק
+
+
+def _proofing_mailto_link(phone, page_id):
+    """קישור mailto מוכן שפותח טיוטת מייל חדשה עם נושא בפורמט שההוק ב-
+    routes/email_inbound.py יודע לזהות ולשייך בדיוק לדף הזה - ראה
+    _is_proofing_reply/_parse_proofing_subject שם. mailto לא יכול לצרף קובץ
+    אוטומטית - הלקוח מצרף בעצמו את קובץ ה-Word המתוקן."""
+    from urllib.parse import quote
+    from routes.email_inbound import TRANSCRIBE_INBOUND_EMAIL
+    subject = f'{PROOFING_SUBJECT_MARKER} {phone} {page_id}'
+    body = 'שלום, מצורף קובץ ה-Word עם תיקוני ההגהה שביצעתי - נא לעדכן בהתאם. תודה.'
+    return f"mailto:{TRANSCRIBE_INBOUND_EMAIL}?subject={quote(subject)}&body={quote(body)}"
+
+
+def _send_manuscript_email(to_email, customer_name, customer_phone, page_id, original_filename, content):
     import sendgrid
     from sendgrid.helpers.mail import Mail, Attachment, FileContent, FileName, FileType, Disposition, Email
 
     docx_bytes = _build_manuscript_docx(customer_name, original_filename, content)
     docx_b64 = base64.b64encode(docx_bytes).decode('utf-8')
     preview = _content_to_plain_preview(content)
+    proofing_link = _proofing_mailto_link(customer_phone, page_id)
 
     html = f'''<div dir="rtl" style="font-family:Arial,sans-serif;max-width:600px;margin:auto">
 <h2 style="color:#1d4ed8">כתב יד - {original_filename}</h2>
 <div style="background:#f0fdf4;border-right:4px solid #10b981;padding:16px;margin:16px 0;border-radius:8px">
 <h3 style="margin:0 0 12px;color:#065f46">✍️ טקסט</h3>
 <div style="line-height:1.8;white-space:pre-wrap;text-align:right;direction:rtl">{preview}</div>
+</div>
+<div style="background:#eff6ff;border-right:4px solid #2563eb;padding:16px;margin:16px 0;border-radius:8px;text-align:center">
+<p style="margin:0 0 12px;line-height:1.7">מצאת טעות או רוצה לתקן משהו בקובץ המצורף? אפשר לתקן ישירות בקובץ ה-Word ולשלוח אותו בחזרה - התיקון ייכנס לטיפול ויעודכן בהתאם.</p>
+<a href="{proofing_link}" style="background:#2563eb;color:#fff;text-decoration:none;padding:10px 20px;border-radius:6px;font-weight:700;display:inline-block">✏️ שליחת תיקוני הגהה</a>
+<p style="margin:12px 0 0;font-size:12px;color:#6b7280">הכפתור פותח טיוטת מייל מוכנה - רק צריך לצרף את קובץ ה-Word המתוקן ולשלוח</p>
 </div>
 </div>'''
 
@@ -655,6 +687,73 @@ def _send_manuscript_email(to_email, customer_name, original_filename, content):
     sg.send(message)
 
 
+def _send_proofed_manuscript_email(to_email, customer_name, original_filename, final_docx_bytes):
+    """שולח ללקוח בחזרה את קובץ ה-Word הסופי אחרי שהנציג סיים לעבד את ההגהה -
+    נקרא (אופציונלית) מתוך proof_complete."""
+    import sendgrid
+    from sendgrid.helpers.mail import Mail, Attachment, FileContent, FileName, FileType, Disposition, Email
+
+    docx_b64 = base64.b64encode(final_docx_bytes).decode('utf-8')
+    html = f'''<div dir="rtl" style="font-family:Arial,sans-serif;max-width:600px;margin:auto">
+<h2 style="color:#1d4ed8">כתב יד מתוקן - {original_filename}</h2>
+<p style="line-height:1.8">מצורף קובץ ה-Word המעודכן, לאחר עדכון תיקוני ההגהה שנשלחו. תודה!</p>
+</div>'''
+
+    sg = sendgrid.SendGridAPIClient(api_key=os.environ.get('SENDGRID_API_KEY'))
+    safe_name = os.path.splitext(original_filename)[0][:40] if original_filename else 'כתב_יד'
+    message = Mail(
+        from_email=Email(os.environ.get('SENDGRID_FROM_EMAIL', ''), 'תמלול פון'),
+        to_emails=to_email,
+        subject=f'כתב יד מתוקן - {original_filename}',
+        html_content=html,
+    )
+    message.attachment = Attachment(
+        FileContent(docx_b64),
+        FileName(f'כתב_יד_מתוקן_{safe_name}.docx'),
+        FileType('application/vnd.openxmlformats-officedocument.wordprocessingml.document'),
+        Disposition('attachment'),
+    )
+    sg.send(message)
+
+
+def _docx_paragraphs_html(docx_bytes):
+    """ממיר bytes של קובץ Word לרשימת HTML של פסקאות (טקסט + מודגש/קו תחתון
+    בסיסי בכל run) לתצוגה מקדימה בלבד במסך ההגהה - באותו סגנון עיצוב בדיוק
+    (ds-para/ds-run) כמו תצוגת הסקירה הרגילה ב-dictate_studio.html, כדי
+    שהמסכים ייראו עקביים. זו תצוגה בלבד - המקור האמיתי לעריכה תמיד הוא
+    קובץ ה-Word עצמו (נפתח/מורד בנפרד), לא ה-HTML הזה."""
+    from docx import Document
+    try:
+        doc = Document(io.BytesIO(docx_bytes))
+    except Exception as e:
+        log.error(f"docx preview parse error: {e}")
+        return '<div class="ds-state ds-error">⚠ לא ניתן להציג תצוגה מקדימה של הקובץ - יש להוריד ולפתוח בוורד</div>'
+
+    parts = []
+    for para in doc.paragraphs:
+        text = ''.join(run.text for run in para.runs) or para.text
+        if not text.strip():
+            continue
+        style_name = (para.style.name if para.style else '') or ''
+        is_heading = 'Heading' in style_name or 'Title' in style_name
+        runs_html = []
+        for run in para.runs:
+            if not run.text:
+                continue
+            classes = ['ds-run']
+            if run.bold:
+                classes.append('bold')
+            if run.underline:
+                classes.append('underline')
+            runs_html.append(f'<span class="{" ".join(classes)}">{_html_escape(run.text)}</span>')
+        inner = ''.join(runs_html) or _html_escape(text)
+        parts.append(f'<div class="ds-para{" heading" if is_heading else ""}">{inner}</div>')
+
+    if not parts:
+        return '<div class="ds-state" style="color:var(--text3)">(הקובץ ריק)</div>'
+    return ''.join(parts)
+
+
 # ==========================================================================
 # Routes
 # ==========================================================================
@@ -671,11 +770,17 @@ def queue():
     elif status_filter == 'done':
         q = q.filter(ManuscriptPage.status == 'done')
         q = q.order_by(ManuscriptPage.created_at.desc())
+    elif status_filter == 'proof':
+        # דפים שהלקוח שלח עבורם קובץ Word מתוקן בחזרה (הגהה) - ממתינים לסקירת נציג
+        q = q.filter(ManuscriptPage.proof_status == 'pending')
+        q = q.order_by(ManuscriptPage.proof_requested_at.asc())
     else:
         q = q.order_by(ManuscriptPage.created_at.desc())
 
     pages = q.limit(200).all()
-    return render_template('admin/dictate_queue.html', pages=pages, status_filter=status_filter)
+    proof_pending_count = ManuscriptPage.query.filter_by(proof_status='pending').count()
+    return render_template('admin/dictate_queue.html', pages=pages, status_filter=status_filter,
+                            proof_pending_count=proof_pending_count)
 
 
 def _manuscript_file_bytes(page):
@@ -944,7 +1049,7 @@ def send(page_id):
             }), 402
 
     try:
-        _send_manuscript_email(to_email, page.customer.name, page.original_filename, page.content)
+        _send_manuscript_email(to_email, page.customer.name, page.customer.phone, page.id, page.original_filename, page.content)
         if cost > 0 and customer:
             customer.balance -= cost
             db.session.add(Transaction(
@@ -964,3 +1069,178 @@ def send(page_id):
         db.session.rollback()
         log.error(f"manuscript send error (page={page_id}): {e}", exc_info=True)
         return jsonify({'error': f'שליחה נכשלה: {e}'}), 500
+
+
+# ==========================================================================
+# הגהה חוזרת - הלקוח שלח בחזרה קובץ Word עם תיקונים משלו (ראה
+# routes/email_inbound.py._is_proofing_reply), והנציג סוקר/מעדכן ומסיים כאן.
+# ==========================================================================
+
+@dictate_bp.route('/<int:page_id>/proof')
+@login_required
+def studio_proof(page_id):
+    from flask import flash, redirect
+    from models import ManuscriptPage
+    page = ManuscriptPage.query.get_or_404(page_id)
+    if not page.proof_file_data:
+        flash('אין הגהה ממתינה לדף הזה')
+        return redirect(url_for('dictate.queue', status='proof'))
+
+    returned_preview_html = _docx_paragraphs_html(page.proof_file_data)
+    original_docx_bytes = _build_manuscript_docx(page.customer.name, page.original_filename, page.content)
+    original_preview_html = _docx_paragraphs_html(original_docx_bytes)
+
+    base_url = os.environ.get('APP_BASE_URL', '').rstrip('/')
+    original_docx_url = f"{base_url}{url_for('dictate.proof_original_docx', page_id=page.id)}"
+    ms_word_link = f"ms-word:ofe|u|{original_docx_url}"
+
+    return render_template(
+        'admin/proof_studio.html',
+        page=page,
+        returned_preview_html=returned_preview_html,
+        original_preview_html=original_preview_html,
+        proofing_price=_manuscript_proofing_price(),
+        ms_word_link=ms_word_link,
+    )
+
+
+@dictate_bp.route('/<int:page_id>/proof/original.docx')
+@login_required
+def proof_original_docx(page_id):
+    """הקובץ שנשלח במקור ללקוח - נבנה תמיד מחדש מ-page.content (מקור האמת),
+    לא נשמר בנפרד - כך גם אם מבקשים אותו שוב ושוב זה תמיד עקבי לתוכן הנוכחי."""
+    from models import ManuscriptPage
+    page = ManuscriptPage.query.get_or_404(page_id)
+    docx_bytes = _build_manuscript_docx(page.customer.name, page.original_filename, page.content)
+    safe_name = os.path.splitext(page.original_filename or 'כתב_יד')[0][:40]
+    return send_file(
+        io.BytesIO(docx_bytes),
+        mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        as_attachment=True,
+        download_name=f'מקור_{safe_name}.docx',
+    )
+
+
+@dictate_bp.route('/<int:page_id>/proof/returned.docx')
+@login_required
+def proof_returned_docx(page_id):
+    """הקובץ שהלקוח שלח בחזרה עם התיקונים שלו."""
+    from models import ManuscriptPage
+    page = ManuscriptPage.query.get_or_404(page_id)
+    if not page.proof_file_data:
+        abort(404)
+    return send_file(
+        io.BytesIO(page.proof_file_data),
+        mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        as_attachment=True,
+        download_name=page.proof_original_filename or f'הגהה_{page_id}.docx',
+    )
+
+
+@dictate_bp.route('/<int:page_id>/proof/upload-final', methods=['POST'])
+@login_required
+def proof_upload_final(page_id):
+    """הנציג פתח את הקובץ המקורי בוורד האמיתי, החיל את התיקונים שראה בקובץ
+    שהלקוח שלח, ושומר/מעלה כאן את הקובץ הסופי - זה מה שיישלח בסוף ללקוח
+    (אם התבקש) ויישמר כעותק הרשמי המתוקן."""
+    from models import ManuscriptPage
+    page = ManuscriptPage.query.get_or_404(page_id)
+    f = request.files.get('final_file')
+    if not f or not f.filename:
+        return jsonify({'error': 'לא נבחר קובץ'}), 400
+    ext = os.path.splitext(f.filename)[1].lower()
+    if ext != '.docx':
+        return jsonify({'error': 'יש להעלות קובץ Word (.docx) בלבד'}), 400
+    page.proof_final_file_data = f.read()
+    page.proof_final_filename = f.filename
+    db.session.commit()
+    return jsonify({'status': 'ok', 'filename': f.filename})
+
+
+@dictate_bp.route('/<int:page_id>/proof/final.docx')
+@login_required
+def proof_final_docx(page_id):
+    from models import ManuscriptPage
+    page = ManuscriptPage.query.get_or_404(page_id)
+    if not page.proof_final_file_data:
+        abort(404)
+    return send_file(
+        io.BytesIO(page.proof_final_file_data),
+        mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        as_attachment=True,
+        download_name=page.proof_final_filename or f'מתוקן_{page_id}.docx',
+    )
+
+
+@dictate_bp.route('/<int:page_id>/proof/complete', methods=['POST'])
+@login_required
+def proof_complete(page_id):
+    """מסיים את סבב ההגהה: מחייב את הלקוח במחיר הגהה קבוע (מוגדר בהגדרות),
+    ואופציונלית שולח את הקובץ הסופי בחזרה ללקוח במייל. התשלום יורד רק כאן -
+    לא בעת קבלת ההגהה מהלקוח - אותה פילוסופיה בדיוק כמו send() הרגיל."""
+    from models import ManuscriptPage, Transaction
+    page = ManuscriptPage.query.get_or_404(page_id)
+    if page.proof_status != 'pending':
+        return jsonify({'error': 'אין הגהה ממתינה לדף הזה'}), 400
+    if not page.proof_final_file_data:
+        return jsonify({'error': 'יש להעלות קודם את קובץ ה-Word הסופי המתוקן'}), 400
+
+    customer = page.customer
+    price = _manuscript_proofing_price()
+    if price > 0:
+        if not customer:
+            return jsonify({'error': 'לא נמצא לקוח משויך לדף זה - לא ניתן לחייב'}), 400
+        if customer.balance < price:
+            return jsonify({
+                'error': f'אין מספיק יתרה ללקוח לחיוב ההגהה (עלות: ₪{price:.2f}, יתרה נוכחית: ₪{customer.balance:.2f}) - '
+                         f'יש לטעון יתרה ללקוח ולנסות שוב',
+                'insufficient_balance': True,
+                'cost': price,
+                'balance': customer.balance,
+            }), 402
+
+    send_back = request.form.get('send_back') == '1'
+    to_email = (request.form.get('to_email') or '').strip() or ((customer.email or '').strip() if customer else '')
+
+    try:
+        if send_back:
+            if not to_email:
+                return jsonify({'error': 'אין כתובת מייל ליעד לשליחה חזרה - הזינו כתובת'}), 400
+            _send_proofed_manuscript_email(to_email, customer.name if customer else '', page.original_filename, page.proof_final_file_data)
+
+        if price > 0 and customer:
+            customer.balance -= price
+            db.session.add(Transaction(
+                customer_id=customer.id,
+                amount=-price,
+                type='manuscript_proofing',
+                description=f'הגהת כתב יד - {page.original_filename}',
+            ))
+        page.proof_cost = price
+        page.proof_status = 'done'
+        page.proof_completed_at = datetime.utcnow()
+        db.session.commit()
+        return jsonify({'status': 'done', 'cost': price, 'sent': send_back, 'to': to_email if send_back else None})
+    except Exception as e:
+        db.session.rollback()
+        log.error(f"manuscript proof complete error (page={page_id}): {e}", exc_info=True)
+        return jsonify({'error': f'שגיאה בסיום ההגהה: {e}'}), 500
+
+
+@dictate_bp.route('/<int:page_id>/delete-proof', methods=['POST'])
+@login_required
+def delete_proof_request(page_id):
+    """מבטל בקשת הגהה ממתינה (למשל אם הגיעה בטעות / קובץ פגום) בלי לחייב את
+    הלקוח - מנקה את השדות ומחזיר את הדף למצב הרגיל (בלי הגהה ממתינה)."""
+    from flask import flash, redirect
+    from models import ManuscriptPage
+    page = ManuscriptPage.query.get_or_404(page_id)
+    page.proof_status = None
+    page.proof_file_data = None
+    page.proof_original_filename = None
+    page.proof_requested_at = None
+    page.proof_final_file_data = None
+    page.proof_final_filename = None
+    db.session.commit()
+    flash('בקשת ההגהה בוטלה')
+    return redirect(url_for('dictate.queue', status='proof'))

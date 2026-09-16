@@ -1,0 +1,162 @@
+{% extends 'admin/base.html' %}
+{% block title %}הגהה - {{ page.original_filename }}{% endblock %}
+{% block page_title %}הגהת כתב יד{% endblock %}
+{% block content %}
+
+<style>
+  .ds-topbar { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:12px; flex-wrap:nowrap; overflow-x:auto; }
+  .ds-topbar-left, .ds-topbar-right { display:flex; align-items:center; gap:6px; flex-wrap:nowrap; white-space:nowrap; }
+  .ds-topbtn { padding:6px 10px !important; font-size:13px !important; }
+
+  .ps-wrap { display:flex; flex-direction:column; gap:14px; }
+
+  .ps-box { height:220px; overflow:auto; border-radius:10px; background:var(--surface2); padding:14px; }
+  .ps-box.expanded { height:70vh; }
+
+  .ps-preview { line-height:1.9; }
+  .ps-para { margin:0 0 10px; direction:rtl; text-align:right; }
+  .ps-para.heading { font-weight:800; font-size:19px; border-bottom:1px solid var(--border); padding-bottom:6px; }
+  .ds-run.bold { font-weight:800; }
+  .ds-run.underline { text-decoration:underline; }
+
+  .ps-actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; }
+  .ps-hint { color:var(--text3); font-size:12px; margin-top:8px; }
+  .ps-uploaded { background:rgba(16,185,129,.12); border:1px solid var(--green); border-radius:8px; padding:10px 12px; font-size:13px; margin-top:10px; }
+
+  .ps-finalrow { display:flex; gap:8px; margin-top:16px; flex-wrap:wrap; align-items:center; }
+  .ps-finalrow input[type=email] { flex:1; min-width:220px; padding:9px 12px; border-radius:8px; border:1px solid var(--border); background:var(--surface); color:var(--text); font-family:'Heebo',sans-serif; }
+</style>
+
+<div class="ds-topbar">
+  <div class="ds-topbar-left">
+    <a href="/admin/dictate?status=proof" class="btn btn-ghost ds-topbtn">← חזרה לרשימת ההגהות</a>
+    <a href="/admin/customers/{{ page.customer_id }}" class="btn btn-ghost ds-topbtn">👤 {{ page.customer.phone }}</a>
+  </div>
+  <div class="ds-topbar-right">
+    <span class="badge badge-blue">✏️ הגהה ממתינה</span>
+    <span style="color:var(--text3);font-size:12px">התקבלה {{ page.proof_requested_at | il_time }}</span>
+  </div>
+</div>
+
+<div class="ps-wrap">
+  <div class="card">
+    <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+      <span>📩 מה שהלקוח שלח ({{ page.proof_original_filename }})</span>
+      <div style="display:flex;gap:8px">
+        <button type="button" class="btn btn-ghost" style="font-size:12px;padding:5px 10px" onclick="toggleExpand('returnedBox', this)">⤢ הגדלת תצוגה</button>
+        <a href="/admin/dictate/{{ page.id }}/proof/returned.docx" class="btn btn-ghost" style="font-size:12px;padding:5px 10px">⬇ הורדת הקובץ שהתקבל</a>
+      </div>
+    </div>
+    <div class="ps-box ps-preview" id="returnedBox">
+      {{ returned_preview_html | safe }}
+    </div>
+    <p class="ps-hint">תצוגה מקדימה בלבד (טקסט בלבד, בלי עקיבת שינויים/הערות של וורד) - להצגה מלאה יש להוריד את הקובץ עצמו.</p>
+  </div>
+
+  <div class="card">
+    <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+      <span>📝 הקובץ המקורי שנשלח ללקוח</span>
+      <button type="button" class="btn btn-ghost" style="font-size:12px;padding:5px 10px" onclick="toggleExpand('originalBox', this)">⤢ הגדלת תצוגה</button>
+    </div>
+    <div class="ps-box ps-preview" id="originalBox">
+      {{ original_preview_html | safe }}
+    </div>
+
+    <div class="ps-actions">
+      <a href="/admin/dictate/{{ page.id }}/proof/original.docx" class="btn btn-ghost">⬇ הורדת הקובץ המקורי</a>
+      <a href="{{ ms_word_link }}" class="btn btn-primary">🖊 פתיחה ישירות בוורד</a>
+    </div>
+    <p class="ps-hint">
+      פותחים את הקובץ בוורד האמיתי (בכפתור "פתיחה ישירות בוורד" - אם זה לא עובד, אפשר להוריד את הקובץ ולפתוח ידנית), מחילים את התיקונים שרואים למעלה בקובץ שהלקוח שלח (כולל חיפוש/החלפה, בדיקת איות ופקודות מאקרו - כל מה שוורד מאפשר), שומרים, ומעלים כאן את הקובץ הסופי.
+    </p>
+
+    <div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border)">
+      <div style="font-size:14px;font-weight:700;margin-bottom:10px">📤 העלאת הקובץ הסופי המתוקן</div>
+      <input type="file" id="finalFileInput" accept=".docx">
+      <button class="btn btn-primary" onclick="uploadFinal()">העלאה</button>
+      <div id="uploadMsg" style="margin-top:8px;font-size:13px"></div>
+      {% if page.proof_final_filename %}
+      <div class="ps-uploaded" id="uploadedInfo">
+        ✔ הועלה קובץ סופי: <strong>{{ page.proof_final_filename }}</strong>
+        - <a href="/admin/dictate/{{ page.id }}/proof/final.docx">הורדה לבדיקה</a>
+      </div>
+      {% else %}
+      <div class="ps-uploaded" id="uploadedInfo" style="display:none"></div>
+      {% endif %}
+    </div>
+
+    <div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border)">
+      <div style="font-size:14px;font-weight:700;margin-bottom:6px">✅ סיום הגהה</div>
+      <p class="ps-hint" style="margin-top:0">
+        סיום ההגהה יחייב את הלקוח ב-₪{{ "%.2f"|format(proofing_price) }} (לפי ההגדרה בעמוד ההגדרות).
+      </p>
+      <label style="display:flex;align-items:center;gap:8px;font-size:13px;margin-bottom:8px">
+        <input type="checkbox" id="sendBackCheck" checked>
+        לשלוח את הקובץ הסופי בחזרה ללקוח במייל
+      </label>
+      <div class="ps-finalrow">
+        <input type="email" id="toEmail" placeholder="כתובת מייל ליעד" value="{{ page.customer.email or '' }}">
+        <button class="btn btn-danger" onclick="completeProof()">✅ סיום הגהה וחיוב</button>
+      </div>
+      <div id="completeMsg" style="margin-top:8px;font-size:13px"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const PAGE_ID = {{ page.id }};
+
+function toggleExpand(boxId, btn) {
+  const box = document.getElementById(boxId);
+  const expanded = box.classList.toggle('expanded');
+  btn.textContent = expanded ? '⤡ הקטנת תצוגה' : '⤢ הגדלת תצוגה';
+}
+
+async function uploadFinal() {
+  const input = document.getElementById('finalFileInput');
+  const msg = document.getElementById('uploadMsg');
+  if (!input.files.length) { msg.textContent = 'יש לבחור קובץ קודם'; msg.style.color = 'var(--red)'; return; }
+  const fd = new FormData();
+  fd.append('final_file', input.files[0]);
+  msg.textContent = 'מעלה...';
+  msg.style.color = 'var(--text2)';
+  try {
+    const res = await fetch(`/admin/dictate/${PAGE_ID}/proof/upload-final`, { method: 'POST', body: fd });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'העלאה נכשלה');
+    msg.textContent = '✔ הועלה בהצלחה';
+    msg.style.color = 'var(--green)';
+    const info = document.getElementById('uploadedInfo');
+    info.style.display = 'block';
+    info.innerHTML = `✔ הועלה קובץ סופי: <strong>${data.filename}</strong> - <a href="/admin/dictate/${PAGE_ID}/proof/final.docx">הורדה לבדיקה</a>`;
+  } catch (e) {
+    msg.textContent = '⚠ ' + e.message;
+    msg.style.color = 'var(--red)';
+  }
+}
+
+async function completeProof() {
+  const msg = document.getElementById('completeMsg');
+  const sendBack = document.getElementById('sendBackCheck').checked;
+  const toEmail = document.getElementById('toEmail').value.trim();
+  if (!confirm('לסיים את ההגהה ולחייב את הלקוח?')) return;
+  const fd = new FormData();
+  fd.append('send_back', sendBack ? '1' : '0');
+  if (toEmail) fd.append('to_email', toEmail);
+  msg.textContent = 'מעבד...';
+  msg.style.color = 'var(--text2)';
+  try {
+    const res = await fetch(`/admin/dictate/${PAGE_ID}/proof/complete`, { method: 'POST', body: fd });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'שגיאה בסיום ההגהה');
+    msg.textContent = `✔ ההגהה הושלמה (חויב ₪${data.cost.toFixed(2)})${data.sent ? ' ונשלח ללקוח' : ''}`;
+    msg.style.color = 'var(--green)';
+    setTimeout(() => { location.href = '/admin/dictate?status=proof'; }, 1500);
+  } catch (e) {
+    msg.textContent = '⚠ ' + e.message;
+    msg.style.color = 'var(--red)';
+  }
+}
+</script>
+
+{% endblock %}

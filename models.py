@@ -225,6 +225,23 @@ class ManuscriptPage(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+    # שלב ג' - "הגהה חוזרת": אחרי שהדף נשלח ללקוח (status='done'), הלקוח יכול
+    # לפתוח את קובץ ה-Word שקיבל, לתקן בעצמו בוורד האמיתי, ולשלוח את הקובץ
+    # המתוקן בחזרה במייל (ראה כפתור ב-_send_manuscript_email וההוק ב-
+    # routes/email_inbound.email_inbound - נושא מהצורה "הגהה {טלפון} {page_id}").
+    # proof_status: None - לא בוצעה הגהה מעולם | 'pending' - הלקוח שלח תיקונים,
+    # ממתין לסקירת נציג | 'done' - הנציג סיים לעבד את ההגהה וחויב הלקוח.
+    proof_status = db.Column(db.String(20), nullable=True, index=True)
+    proof_file_data = db.Column(db.LargeBinary, nullable=True)  # קובץ ה-Word שהלקוח שלח בחזרה עם התיקונים שלו
+    proof_original_filename = db.Column(db.String(255), nullable=True)
+    proof_requested_at = db.Column(db.DateTime, nullable=True)  # מתי התקבלה ההגהה מהלקוח
+    proof_completed_at = db.Column(db.DateTime, nullable=True)  # מתי הנציג סיים לעבד אותה
+    proof_cost = db.Column(db.Float, default=0.0)
+    # קובץ ה-Word הסופי שהנציג העלה בחזרה אחרי שערך אותו בוורד האמיתי (עם
+    # השינויים/התיקונים שהלקוח ביקש) - זה מה שנשלח בסוף ללקוח, אם בכלל.
+    proof_final_file_data = db.Column(db.LargeBinary, nullable=True)
+    proof_final_filename = db.Column(db.String(255), nullable=True)
+
     customer = db.relationship('Customer', backref='manuscript_pages')
 
 

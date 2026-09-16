@@ -255,6 +255,18 @@ def _migrate_db():
         # דיפלוי/הפעלה מחדש של הקונטיינר. בלי זה, קבצי כתבי-יד שהועלו לפני
         # דיפלוי אבדו בפועל בכל עדכון קוד. מעכשיו הקובץ נשמר גם ב-DB עצמו.
         "ALTER TABLE manuscript_pages ADD COLUMN IF NOT EXISTS file_data BYTEA",
+        # שלב ג' - "הגהה חוזרת": הלקוח מקבל את קובץ ה-Word במייל, מתקן בעצמו
+        # בוורד האמיתי, ושולח את הקובץ המתוקן בחזרה במייל (routes/email_inbound.py,
+        # נושא "הגהה {טלפון} {page_id}") - ראה models.ManuscriptPage.
+        "ALTER TABLE manuscript_pages ADD COLUMN IF NOT EXISTS proof_status VARCHAR(20)",
+        "ALTER TABLE manuscript_pages ADD COLUMN IF NOT EXISTS proof_file_data BYTEA",
+        "ALTER TABLE manuscript_pages ADD COLUMN IF NOT EXISTS proof_original_filename VARCHAR(255)",
+        "ALTER TABLE manuscript_pages ADD COLUMN IF NOT EXISTS proof_requested_at TIMESTAMP",
+        "ALTER TABLE manuscript_pages ADD COLUMN IF NOT EXISTS proof_completed_at TIMESTAMP",
+        "ALTER TABLE manuscript_pages ADD COLUMN IF NOT EXISTS proof_cost FLOAT DEFAULT 0.0",
+        "ALTER TABLE manuscript_pages ADD COLUMN IF NOT EXISTS proof_final_file_data BYTEA",
+        "ALTER TABLE manuscript_pages ADD COLUMN IF NOT EXISTS proof_final_filename VARCHAR(255)",
+        "CREATE INDEX IF NOT EXISTS ix_manuscript_pages_proof_status ON manuscript_pages (proof_status)",
         # מסך "פעילות מערכת" (/admin/maintenance) - מעקב עבודות רקע פעילות
         # (ראה models.ActiveJob, services/job_tracker.py) + מצב תחזוקה שדוחה
         # שיחות טלפון חדשות עד שמכבים אותו (ראה routes/api.py /api/transcribe)

@@ -3,11 +3,51 @@
 {% block page_title %}תור הקראת כתבי-יד{% endblock %}
 {% block content %}
 
-<div style="display:flex;gap:8px;margin-bottom:16px">
+<div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
   <a href="/admin/dictate?status=open" class="btn {% if status_filter=='open' %}btn-primary{% else %}btn-ghost{% endif %}" style="font-size:13px">🕓 בתור</a>
   <a href="/admin/dictate?status=done" class="btn {% if status_filter=='done' %}btn-primary{% else %}btn-ghost{% endif %}" style="font-size:13px">✅ הושלמו</a>
+  <a href="/admin/dictate?status=proof" class="btn {% if status_filter=='proof' %}btn-primary{% else %}btn-ghost{% endif %}" style="font-size:13px">
+    ✏️ ממתין להגהה{% if proof_pending_count %} <span class="badge badge-red" style="margin-right:4px">{{ proof_pending_count }}</span>{% endif %}
+  </a>
 </div>
 
+{% if status_filter == 'proof' %}
+<div class="table-card">
+  <div class="table-header">
+    <span class="table-title">✏️ הגהות ממתינות ({{ pages|length }})</span>
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th>לקוח</th>
+        <th>קובץ מקורי</th>
+        <th>קובץ הגהה שהתקבל</th>
+        <th>התקבל</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for p in pages %}
+      <tr>
+        <td onclick="location='/admin/dictate/{{p.id}}/proof'" style="cursor:pointer"><strong>{{ p.customer.phone }}</strong></td>
+        <td onclick="location='/admin/dictate/{{p.id}}/proof'" style="cursor:pointer;color:#8892b0;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ p.original_filename }}</td>
+        <td onclick="location='/admin/dictate/{{p.id}}/proof'" style="cursor:pointer;color:#8892b0;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ p.proof_original_filename or '—' }}</td>
+        <td onclick="location='/admin/dictate/{{p.id}}/proof'" style="cursor:pointer;color:#8892b0">{{ p.proof_requested_at | il_time }}</td>
+        <td style="display:flex;gap:6px">
+          <a href="/admin/dictate/{{p.id}}/proof" class="btn btn-ghost" style="font-size:12px;padding:4px 10px">פתח הגהה</a>
+          <form method="POST" action="/admin/dictate/{{p.id}}/delete-proof" onsubmit="return confirm('לבטל את בקשת ההגהה הזו בלי לחייב את הלקוח?')">
+            <button type="submit" class="btn btn-danger" style="font-size:12px;padding:4px 10px">🗑 בטל</button>
+          </form>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="5" style="text-align:center;color:#8892b0;padding:24px">אין הגהות ממתינות כרגע</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% else %}
 <div class="table-card">
   <div class="table-header">
     <span class="table-title">🎤 דפים ({{ pages|length }})</span>
@@ -36,6 +76,7 @@
           {% elif p.status == 'review' %}<span class="badge badge-amber">ממתין לאישור</span>
           {% elif p.status == 'done' %}<span class="badge badge-green">נשלח</span>
           {% else %}<span class="badge badge-red">שגיאה</span>{% endif %}
+          {% if p.proof_status == 'pending' %}<span class="badge badge-blue" style="margin-right:4px">✏️ הגהה ממתינה</span>{% endif %}
         </td>
         <td onclick="location='/admin/dictate/{{p.id}}'" style="cursor:pointer;color:#8892b0;font-size:12px">{% if p.engine == 'gemini' %}ג׳מיני{% elif p.engine == 'openai' %}OpenAI{% else %}—{% endif %}</td>
         <td onclick="location='/admin/dictate/{{p.id}}'" style="cursor:pointer;color:#8892b0">{{ p.claimed_by or '—' }}</td>
@@ -53,5 +94,6 @@
     </tbody>
   </table>
 </div>
+{% endif %}
 
 {% endblock %}
