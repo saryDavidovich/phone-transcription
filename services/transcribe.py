@@ -1428,7 +1428,28 @@ def _build_word_doc(name, duration_str, transcript_fixed, transcript_raw=None, t
 
     def set_rtl(paragraph, justify=False):
         paragraph.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY if justify else WD_ALIGN_PARAGRAPH.RIGHT
+        if not justify:
+            # זה התיקון האמיתי לכותרות (ולכל פסקה RIGHT לא-מיושרת) שנראו זזות
+            # שמאלה בוורד: בתוך פסקת bidi, וורד קורא jc="right" כ"ימין הלוגי"
+            # (לפי כיוון קריאה), שבפועל נופל על שמאל הפיזי של העמוד - זה קורה
+            # רק ל-right/left הפיזיים, ולכן פסקאות מיושרות לשני הצדדים
+            # (jc="both", justify=True) לא נפגעות מזה בכלל. "start" הוא הערך
+            # שוורד בפועל ממפה נכון לימין הפיזי בפסקת RTL.
+            pPr = paragraph._p.get_or_add_pPr()
+            jc = pPr.find(qn('w:jc'))
+            if jc is not None:
+                jc.set(qn('w:val'), 'start')
         add_bidi(paragraph)
+
+    def clear_indent(paragraph):
+        """מאפס הזחה (w:ind) שמגיעה בירושה מסגנונות ה-Title/Heading המובנים
+        של וורד. בלעדי זה, למרות ש-jc מוגדר right, תיבת הטקסט של הכותרת
+        עצמה יכולה להיות מוזחת מהשוליים האמיתיים של העמוד - מה שגורם לכותרת
+        להיראות "זזה" שמאלה בפועל כשפותחים את הקובץ בוורד."""
+        pf = paragraph.paragraph_format
+        pf.left_indent = 0
+        pf.right_indent = 0
+        pf.first_line_indent = 0
 
     def set_hebrew_font(run, size=None):
         run.font.name = FONT_NAME
@@ -1527,15 +1548,21 @@ def _build_word_doc(name, duration_str, transcript_fixed, transcript_raw=None, t
     normal_rPr.append(n_lang)
 
     # אותו דבר גם ברמת הסגנונות "Title" ו-"Heading 1" עצמם (לא רק בפסקאות שמשתמשות בהם) -
-    # כדי שכותרות יהיו RTL כברירת מחדל של הסגנון ולא יסתמכו רק על עקיפה ידנית לכל פסקה
+    # כדי שכותרות יהיו RTL כברירת מחדל של הסגנון ולא יסתמכו רק על עקיפה ידנית לכל פסקה.
+    # מאפסים גם הזחה בסגנון עצמו (w:ind) - התבנית המובנית של וורד לפעמים
+    # מגדירה שם הזחה שגורמת לכותרת להיראות זזה שמאלה, גם כשה-jc בפועל right.
     for style_name in ('Title', 'Heading 1'):
         try:
-            style_el = doc.styles[style_name].element
+            style = doc.styles[style_name]
+            style_el = style.element
         except KeyError:
             continue
         style_pPr = style_el.get_or_add_pPr()
         style_bidi = OxmlElement('w:bidi')
         style_pPr.insert_element_before(style_bidi, *_BIDI_SUCCESSORS)
+        style.paragraph_format.left_indent = 0
+        style.paragraph_format.right_indent = 0
+        style.paragraph_format.first_line_indent = 0
 
     # settings.xml - קובע את שפת ברירת המחדל לתיקון אוטומטי/איות עבור טקסט חדש שיוקלד
     settings_el = doc.settings.element
@@ -1568,11 +1595,13 @@ def _build_word_doc(name, duration_str, transcript_fixed, transcript_raw=None, t
 
     title_heading = doc.add_heading(title, 0)
     set_rtl(title_heading)
+    clear_indent(title_heading)
     for run in title_heading.runs:
         set_hebrew_font(run)
 
     h_details = doc.add_heading('פרטי לקוח', level=1)
     set_rtl(h_details)
+    clear_indent(h_details)
     for run in h_details.runs:
         set_hebrew_font(run)
 
@@ -1584,6 +1613,7 @@ def _build_word_doc(name, duration_str, transcript_fixed, transcript_raw=None, t
 
     h1 = doc.add_heading('תמלול', level=1)
     set_rtl(h1)
+    clear_indent(h1)
     for run in h1.runs:
         set_hebrew_font(run)
 
