@@ -1023,14 +1023,18 @@ def send(page_id):
     if not to_email:
         return jsonify({'error': 'אין כתובת מייל ליעד - הזינו כתובת'}), 400
 
-    # התשלום יורד מהלקוח רק כאן - באישור הסופי ובשליחה בפועל, ולא בשום שלב
-    # מוקדם יותר (הקלטה/תמלול/עריכה). מחושב מחדש בכל שליחה, כדי לשקף גם
-    # תיקונים ידניים שנעשו בתצוגה המקדימה (saveEdits נקרא תמיד לפני שליחה).
+    # התשלום יורד מהלקוח רק פעם אחת - בפעם הראשונה שהדף באמת מסתיים ונשלח
+    # בהצלחה (status עובר מ-'done'). אם לוחצים "שלח" שוב על דף שכבר נשלח
+    # (למשל כדי לשגר שוב לאותה כתובת/לכתובת אחרת) - זו שליחה חוזרת של אותו
+    # תוכן, לא חיוב נוסף. "הקלט מחדש" (redo) מאפס את status ל-'pending' -
+    # ואז שליחה הבאה היא שוב "שליחה ראשונה" לגיטימית שכן מחויבת.
+    already_sent = (page.status == 'done')
+
     customer = page.customer
     unit_size, price_per_unit = _manuscript_pricing()
     char_count = _manuscript_char_count(page.content)
     units = math.ceil(char_count / unit_size) if char_count > 0 else 0
-    cost = round(units * price_per_unit, 2)
+    cost = 0.0 if already_sent else round(units * price_per_unit, 2)
 
     if cost > 0:
         if not customer:
@@ -1058,13 +1062,14 @@ def send(page_id):
                 type='manuscript_dictation',
                 description=f'הקראת כתב יד - {page.original_filename}',
             ))
-        page.char_count = char_count
-        page.cost = cost
+        if not already_sent:
+            page.char_count = char_count
+            page.cost = cost
         page.sent_at = datetime.utcnow()
         page.sent_to = to_email
         page.status = 'done'
         db.session.commit()
-        return jsonify({'status': 'sent', 'to': to_email, 'cost': cost, 'char_count': char_count})
+        return jsonify({'status': 'sent', 'to': to_email, 'cost': cost, 'char_count': char_count, 'resend': already_sent})
     except Exception as e:
         db.session.rollback()
         log.error(f"manuscript send error (page={page_id}): {e}", exc_info=True)

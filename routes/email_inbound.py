@@ -1363,6 +1363,8 @@ def email_inbound():
 
     sender_email = _extract_sender_email(request.form.get('from', ''))
     subject = request.form.get('subject', '')
+    attachment_names = [request.files[k].filename for k in request.files if request.files[k] and request.files[k].filename]
+    log.info(f"email-inbound: webhook התקבל - from={sender_email!r} subject={subject!r} attachments={attachment_names}")
 
     # תגובת הגהה - הלקוח שלח בחזרה קובץ Word עם תיקונים משלו, בעקבות הכפתור
     # שמופיע במייל ההקראה (routes/dictate.py._proofing_mailto_link). נושא

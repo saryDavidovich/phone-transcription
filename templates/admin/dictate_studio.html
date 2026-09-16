@@ -526,7 +526,7 @@ async function sendResult() {
     const res = await fetch(`/admin/dictate/${PAGE_ID}/send`, { method: 'POST', body: fd });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'שליחה נכשלה');
-    const costPart = (data.cost > 0) ? ` (חויב ₪${data.cost.toFixed(2)})` : '';
+    const costPart = (data.cost > 0) ? ` (חויב ₪${data.cost.toFixed(2)})` : (data.resend ? ' (שליחה חוזרת - לא חויב שוב)' : '');
     msg.textContent = `✔ נשלח אל ${data.to}${costPart}`;
     msg.style.color = 'var(--green)';
     document.getElementById('statusBadge').textContent = 'done';
