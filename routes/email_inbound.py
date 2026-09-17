@@ -80,11 +80,43 @@ def _is_system_inbound_address(email):
 # מלקוח" לבין "פקס גולמי מימות" בלי להסתמך על נושא/שולח לא ידועים מראש (ראה
 # _handle_incoming_fax למטה, ו-models.IncomingFax). ברירת המחדל היא אותו דומיין
 # כמו TRANSCRIBE_INBOUND_EMAIL - יש להגדיר את הכתובת הזו בדיוק ב-Yemot.
+#
+# הערה חשובה (התגלתה בפועל): הדומיין sheasystem.com מנוהל דרך Zoho Mail
+# (רשומות MX מצביעות ל-mx.zoho.com), לא ישירות דרך SendGrid Inbound Parse -
+# כלומר קליטה אוטומטית לכל כתובת חדשה בדומיין (כמו fax@) לא עובדת "מהקופסה"
+# אלא אם מוגדרת עבורה באופן מפורש כתובת/alias בצד Zoho עם forwarding
+# מתאים, בדיוק כמו ש-TRANSCRIBE_INBOUND_EMAIL כבר מוגדר. לכן, בנוסף לבדיקה
+# לפי כתובת יעד ייעודית (אם/כשתוגדר כראוי בצד Zoho), יש גם נתיב זיהוי נוסף
+# למטה (_is_fax_from_yemot) שמזהה פקס גולמי מימות גם כשהוא מגיע לכתובת
+# הקיימת שכבר עובדת (TRANSCRIBE_INBOUND_EMAIL) - לפי כתובת השולח האוטומטית
+# הקבועה של ימות (ivr@yml.li, כפי שנצפה בפועל בהודעת פקס אמיתית שהתקבלה).
 FAX_INBOUND_EMAIL = os.environ.get('FAX_INBOUND_EMAIL', f"fax@{TRANSCRIBE_INBOUND_EMAIL.split('@')[-1]}")
+
+# כתובת השולח הקבועה שממנה ימות המשיח שולחים את הודעת "פקס נכנס" האוטומטית
+# (נצפתה בפועל: "ימוֹת המשיח - פתרונות תקשורת <ivr@yml.li>"). ניתנת לשינוי
+# ע"י משתנה סביבה אם ייצפה בעתיד ערך אחר.
+YEMOT_FAX_SENDER_EMAIL = os.environ.get('YEMOT_FAX_SENDER_EMAIL', 'ivr@yml.li')
 
 
 def _is_fax_inbound_address(email):
     return (email or '').strip().lower() == FAX_INBOUND_EMAIL.strip().lower()
+
+
+def _is_fax_from_yemot(to_email, sender_email):
+    """
+    נתיב זיהוי חלופי לפקס נכנס גולמי מימות: המייל הגיע לכתובת הקיימת
+    שכבר עובדת (TRANSCRIBE_INBOUND_EMAIL) ולא לכתובת הייעודית
+    (FAX_INBOUND_EMAIL) - קורה כאשר לא ניתן/עדיין לא הוגדר alias/forwarding
+    נפרד בצד Zoho עבור כתובת ייעודית חדשה. במקרה כזה מזהים לפי כתובת
+    השולח הקבועה של ימות (YEMOT_FAX_SENDER_EMAIL) - כתובת מערכתית אוטומטית
+    שלקוח רגיל לעולם לא ישלח ממנה מייל תמלול.
+    """
+    to_email = (to_email or '').strip().lower()
+    sender_email = (sender_email or '').strip().lower()
+    return (
+        to_email == TRANSCRIBE_INBOUND_EMAIL.strip().lower()
+        and sender_email == YEMOT_FAX_SENDER_EMAIL.strip().lower()
+    )
 
 # תיקייה לשמירת קבצי אודיו שהתקבלו במייל (משם הם מוגשים חזרה כ-rec_url)
 RECORDINGS_EMAIL_DIR = os.environ.get('RECORDINGS_EMAIL_DIR', 'recordings_email')
@@ -1432,8 +1464,10 @@ def email_inbound():
     # לכתובת ייעודית - ראה FAX_INBOUND_EMAIL למעלה) - נבדק לפי כתובת היעד
     # (to), לא לפי נושא/שולח שאין עליהם שום שליטה/פורמט ידוע מראש כמו בתגובת
     # הגהה רגילה. חייב להיבדק לפני כל שאר הבדיקות (הן מסתמכות על נושא בפורמט
-    # מסוים, שלא רלוונטי כאן בכלל).
-    if _is_fax_inbound_address(to_email):
+    # מסוים, שלא רלוונטי כאן בכלל). נבדק גם נתיב הזיהוי החלופי
+    # (_is_fax_from_yemot) - פקס שהגיע לכתובת הקיימת אך מהשולח האוטומטי הקבוע
+    # של ימות - ראה הסבר מפורט ליד ההגדרה של YEMOT_FAX_SENDER_EMAIL למעלה.
+    if _is_fax_inbound_address(to_email) or _is_fax_from_yemot(to_email, sender_email):
         with app.app_context():
             return _handle_incoming_fax(sender_email, subject, db)
 
