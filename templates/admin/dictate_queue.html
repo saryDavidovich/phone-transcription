@@ -9,12 +9,15 @@
   <a href="/admin/dictate?status=proof" class="btn {% if status_filter=='proof' %}btn-primary{% else %}btn-ghost{% endif %}" style="font-size:13px">
     ✏️ ממתין להגהה{% if proof_pending_count %} <span class="badge badge-red" style="margin-right:4px">{{ proof_pending_count }}</span>{% endif %}
   </a>
+  <a href="/admin/dictate?status=proof_done" class="btn {% if status_filter=='proof_done' %}btn-primary{% else %}btn-ghost{% endif %}" style="font-size:13px">
+    📗 הגהות שהושלמו{% if proof_done_count %} <span class="badge badge-gray" style="margin-right:4px">{{ proof_done_count }}</span>{% endif %}
+  </a>
 </div>
 
 {% if status_filter == 'proof' %}
 <div class="table-card">
   <div class="table-header">
-    <span class="table-title">✏️ הגהות ממתינות ({{ pages|length }})</span>
+    <span class="table-title">✏️ הגהות ממתינות ({{ proof_rounds|length }})</span>
   </div>
   <table>
     <thead>
@@ -27,21 +30,56 @@
       </tr>
     </thead>
     <tbody>
-      {% for p in pages %}
+      {% for r in proof_rounds %}
       <tr>
-        <td onclick="location='/admin/dictate/{{p.id}}/proof'" style="cursor:pointer"><strong>{{ p.customer.phone }}</strong></td>
-        <td onclick="location='/admin/dictate/{{p.id}}/proof'" style="cursor:pointer;color:#8892b0;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ p.original_filename }}</td>
-        <td onclick="location='/admin/dictate/{{p.id}}/proof'" style="cursor:pointer;color:#8892b0;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ p.proof_original_filename or '—' }}</td>
-        <td onclick="location='/admin/dictate/{{p.id}}/proof'" style="cursor:pointer;color:#8892b0">{{ p.proof_requested_at | il_time }}</td>
+        <td onclick="location='/admin/dictate/proof/{{r.id}}'" style="cursor:pointer"><strong>{{ r.manuscript_page.customer.phone }}</strong></td>
+        <td onclick="location='/admin/dictate/proof/{{r.id}}'" style="cursor:pointer;color:#8892b0;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.manuscript_page.original_filename }}</td>
+        <td onclick="location='/admin/dictate/proof/{{r.id}}'" style="cursor:pointer;color:#8892b0;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.customer_file_filename or '—' }}</td>
+        <td onclick="location='/admin/dictate/proof/{{r.id}}'" style="cursor:pointer;color:#8892b0">{{ r.requested_at | il_time }}</td>
         <td style="display:flex;gap:6px">
-          <a href="/admin/dictate/{{p.id}}/proof" class="btn btn-ghost" style="font-size:12px;padding:4px 10px">פתח הגהה</a>
-          <form method="POST" action="/admin/dictate/{{p.id}}/delete-proof" onsubmit="return confirm('לבטל את בקשת ההגהה הזו בלי לחייב את הלקוח?')">
+          <a href="/admin/dictate/proof/{{r.id}}" class="btn btn-ghost" style="font-size:12px;padding:4px 10px">פתח הגהה</a>
+          <form method="POST" action="/admin/dictate/proof/{{r.id}}/delete" onsubmit="return confirm('לבטל את סבב ההגהה הזה בלי לחייב את הלקוח?')">
             <button type="submit" class="btn btn-danger" style="font-size:12px;padding:4px 10px">🗑 בטל</button>
           </form>
         </td>
       </tr>
       {% else %}
       <tr><td colspan="5" style="text-align:center;color:#8892b0;padding:24px">אין הגהות ממתינות כרגע</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% elif status_filter == 'proof_done' %}
+<div class="table-card">
+  <div class="table-header">
+    <span class="table-title">📗 הגהות שהושלמו ({{ proof_rounds|length }})</span>
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th>לקוח</th>
+        <th>קובץ מקורי</th>
+        <th>משך עבודה</th>
+        <th>עלות</th>
+        <th>הושלם</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in proof_rounds %}
+      <tr>
+        <td onclick="location='/admin/dictate/proof/{{r.id}}'" style="cursor:pointer"><strong>{{ r.manuscript_page.customer.phone }}</strong></td>
+        <td onclick="location='/admin/dictate/proof/{{r.id}}'" style="cursor:pointer;color:#8892b0;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.manuscript_page.original_filename }}</td>
+        <td onclick="location='/admin/dictate/proof/{{r.id}}'" style="cursor:pointer;color:#8892b0">{{ r.timer_accumulated_seconds | minutes_billed }} דק׳</td>
+        <td onclick="location='/admin/dictate/proof/{{r.id}}'" style="cursor:pointer">{% if r.cost %}₪{{ "%.2f"|format(r.cost) }}{% else %}—{% endif %}</td>
+        <td onclick="location='/admin/dictate/proof/{{r.id}}'" style="cursor:pointer;color:#8892b0">{{ r.completed_at | il_time }}</td>
+        <td>
+          <a href="/admin/dictate/proof/{{r.id}}" class="btn btn-ghost" style="font-size:12px;padding:4px 10px">צפייה</a>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" style="text-align:center;color:#8892b0;padding:24px">אין עדיין הגהות שהושלמו</td></tr>
       {% endfor %}
     </tbody>
   </table>
@@ -76,7 +114,7 @@
           {% elif p.status == 'review' %}<span class="badge badge-amber">ממתין לאישור</span>
           {% elif p.status == 'done' %}<span class="badge badge-green">נשלח</span>
           {% else %}<span class="badge badge-red">שגיאה</span>{% endif %}
-          {% if p.proof_status == 'pending' %}<span class="badge badge-blue" style="margin-right:4px">✏️ הגהה ממתינה</span>{% endif %}
+          {% if p.proofing_rounds | selectattr('status', 'equalto', 'pending') | list %}<span class="badge badge-blue" style="margin-right:4px">✏️ הגהה ממתינה</span>{% endif %}
         </td>
         <td onclick="location='/admin/dictate/{{p.id}}'" style="cursor:pointer;color:#8892b0;font-size:12px">{% if p.engine == 'gemini' %}ג׳מיני{% elif p.engine == 'openai' %}OpenAI{% else %}—{% endif %}</td>
         <td onclick="location='/admin/dictate/{{p.id}}'" style="cursor:pointer;color:#8892b0">{{ p.claimed_by or '—' }}</td>

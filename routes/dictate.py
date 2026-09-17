@@ -615,13 +615,48 @@ def _manuscript_pricing():
 
 
 def _manuscript_proofing_price():
-    """מחיר קבוע לסבב הגהה אחד (לא לפי תווים, בניגוד לתמחור ההקראה עצמה) -
-    ראה ההגדרה 'price_manuscript_proofing' בעמוד ההגדרות."""
+    """מחיר הגהה לדקת עבודה (לא מחיר קבוע לסבב, ולא לפי תווים כמו תמחור
+    ההקראה עצמה) - ראה ההגדרה 'price_manuscript_proofing' בעמוד ההגדרות,
+    ו-ProofingRound.timer_accumulated_seconds/_proofing_minutes_billed למטה
+    לחישוב בפועל."""
     from routes.admin import get_setting
     try:
         return float(get_setting('price_manuscript_proofing', '5.00') or '5.00')
     except (TypeError, ValueError):
         return 5.00
+
+
+def _proofing_minutes_billed(total_seconds):
+    """מעגל כלפי מעלה לדקה שלמה - כל חלק של דקה (אפילו שנייה אחת) מחויב
+    כדקה מלאה, בדיוק כמו חיוב טלפון סטנדרטי. 0 שניות = 0 דקות (לא מחויב)."""
+    if not total_seconds or total_seconds <= 0:
+        return 0
+    return math.ceil(total_seconds / 60.0)
+
+
+def _proofing_timer_total_seconds(round_):
+    """סך זמן העבודה שנצבר על הסבב עד כה, כולל המקטע הרץ הנוכחי אם השעון
+    פעיל ברגע זה (לא רק המקטעים שכבר נעצרו ונצברו ל-timer_accumulated_seconds)."""
+    total = round_.timer_accumulated_seconds or 0.0
+    if round_.timer_started_at is not None:
+        total += (datetime.utcnow() - round_.timer_started_at).total_seconds()
+    return total
+
+
+def _proofing_timer_state(round_):
+    """מצב השעון + האומדן הכספי הנוכחי, לשימוש גם ב-JSON (routes) וגם
+    בטעינה הראשונית של proof_studio.html."""
+    total = _proofing_timer_total_seconds(round_)
+    minutes = _proofing_minutes_billed(total)
+    price_per_minute = _manuscript_proofing_price()
+    return {
+        'running': round_.timer_started_at is not None,
+        'accumulated_seconds': round_.timer_accumulated_seconds or 0.0,
+        'total_seconds': total,
+        'billed_minutes': minutes,
+        'price_per_minute': price_per_minute,
+        'estimated_cost': round(minutes * price_per_minute, 2),
+    }
 
 
 def _content_to_plain_preview(content):
@@ -768,26 +803,37 @@ def _docx_paragraphs_html(docx_bytes):
 @dictate_bp.route('')
 @login_required
 def queue():
-    from models import ManuscriptPage
+    from models import ManuscriptPage, ProofingRound
     status_filter = request.args.get('status', 'open')
     q = ManuscriptPage.query
+    pages = []
+    proof_rounds = []
     if status_filter == 'open':
         q = q.filter(ManuscriptPage.status.in_(OPEN_STATUSES))
         q = q.order_by(ManuscriptPage.created_at.asc())  # תור - הישן קודם
+        pages = q.limit(200).all()
     elif status_filter == 'done':
         q = q.filter(ManuscriptPage.status == 'done')
         q = q.order_by(ManuscriptPage.created_at.desc())
+        pages = q.limit(200).all()
     elif status_filter == 'proof':
-        # דפים שהלקוח שלח עבורם קובץ Word מתוקן בחזרה (הגהה) - ממתינים לסקירת נציג
-        q = q.filter(ManuscriptPage.proof_status == 'pending')
-        q = q.order_by(ManuscriptPage.proof_requested_at.asc())
+        # סבבי הגהה (יכול להיות כמה על אותו כתב-יד) שהלקוח שלח עבורם תיקונים
+        # בחזרה - ממתינים לסקירת נציג. ראה models.ProofingRound.
+        proof_rounds = (ProofingRound.query.filter_by(status='pending')
+                         .order_by(ProofingRound.requested_at.asc()).limit(200).all())
+    elif status_filter == 'proof_done':
+        # סבבי הגהה שכבר הושלמו וחויבו.
+        proof_rounds = (ProofingRound.query.filter_by(status='done')
+                         .order_by(ProofingRound.completed_at.desc()).limit(200).all())
     else:
         q = q.order_by(ManuscriptPage.created_at.desc())
+        pages = q.limit(200).all()
 
-    pages = q.limit(200).all()
-    proof_pending_count = ManuscriptPage.query.filter_by(proof_status='pending').count()
-    return render_template('admin/dictate_queue.html', pages=pages, status_filter=status_filter,
-                            proof_pending_count=proof_pending_count)
+    proof_pending_count = ProofingRound.query.filter_by(status='pending').count()
+    proof_done_count = ProofingRound.query.filter_by(status='done').count()
+    return render_template('admin/dictate_queue.html', pages=pages, proof_rounds=proof_rounds,
+                            status_filter=status_filter, proof_pending_count=proof_pending_count,
+                            proof_done_count=proof_done_count)
 
 
 def _manuscript_file_bytes(page):
@@ -1108,55 +1154,67 @@ def send(page_id):
 # routes/email_inbound.py._is_proofing_reply), והנציג סוקר/מעדכן ומסיים כאן.
 # ==========================================================================
 
-@dictate_bp.route('/<int:page_id>/proof')
+@dictate_bp.route('/proof/<int:round_id>')
 @login_required
-def studio_proof(page_id):
+def studio_proof(round_id):
     from flask import flash, redirect
-    from models import ManuscriptPage
-    page = ManuscriptPage.query.get_or_404(page_id)
-    if not page.proof_file_data:
-        flash('אין הגהה ממתינה לדף הזה')
+    from models import ProofingRound
+    round_ = ProofingRound.query.get_or_404(round_id)
+    page = round_.manuscript_page
+    if not round_.customer_file_data:
+        flash('אין קובץ מצורף לסבב ההגהה הזה')
         return redirect(url_for('dictate.queue', status='proof'))
 
-    returned_kind = _proof_returned_kind(page.proof_original_filename)
+    returned_kind = _proof_returned_kind(round_.customer_file_filename)
     if returned_kind == 'docx':
-        returned_preview_html = _docx_paragraphs_html(page.proof_file_data)
+        returned_preview_html = _docx_paragraphs_html(round_.customer_file_data)
         returned_data_uri, returned_is_pdf = None, False
     else:
         returned_preview_html = None
         returned_data_uri, returned_is_pdf = _file_to_pdf_data_uri(
-            page.proof_file_data, page.proof_original_filename, log_context=f'proof page={page.id}'
+            round_.customer_file_data, round_.customer_file_filename, log_context=f'proof round={round_.id}'
         )
 
     # תוכן ההתחלה לעורך המובנה בדפדפן: אם הנציג כבר התחיל לערוך קודם (יש
-    # proof_edited_content שמור) ממשיכים משם - אחרת מתחילים מהתוכן המקורי
+    # edited_content שמור על הסבב) ממשיכים משם - אחרת מתחילים מהתוכן המקורי
     # הנקי שנשלח ללקוח (page.content), בדיוק כמו שהוא נראה בקובץ המקורי.
-    editor_initial_content = page.proof_edited_content if page.proof_edited_content else (page.content or [])
+    editor_initial_content = round_.edited_content if round_.edited_content else (page.content or [])
 
     base_url = os.environ.get('APP_BASE_URL', '').rstrip('/')
-    original_docx_url = f"{base_url}{url_for('dictate.proof_original_docx', page_id=page.id)}"
+    original_docx_url = f"{base_url}{url_for('dictate.proof_original_docx', round_id=round_.id)}"
     ms_word_link = f"ms-word:ofe|u|{original_docx_url}"
+
+    # סבבי הגהה אחרים על אותו כתב-יד (אם יש) - לניווט/הקשר, ראה
+    # models.ProofingRound - עכשיו אפשר כמה סבבים נפרדים על אותו דף.
+    sibling_rounds = sorted(page.proofing_rounds, key=lambda r: r.created_at)
+    round_index = next((i for i, r in enumerate(sibling_rounds) if r.id == round_.id), 0) + 1
 
     return render_template(
         'admin/proof_studio.html',
         page=page,
+        round=round_,
+        readonly=(round_.status != 'pending'),
         returned_kind=returned_kind,
         returned_preview_html=returned_preview_html,
         returned_data_uri=returned_data_uri,
         returned_is_pdf=returned_is_pdf,
         editor_initial_content=editor_initial_content,
-        proofing_price=_manuscript_proofing_price(),
+        proofing_price_per_minute=_manuscript_proofing_price(),
+        timer_state=_proofing_timer_state(round_),
+        sibling_rounds=sibling_rounds,
+        round_index=round_index,
         ms_word_link=ms_word_link,
     )
 
 
-@dictate_bp.route('/<int:page_id>/proof/original.docx')
+@dictate_bp.route('/proof/<int:round_id>/original.docx')
 @login_required
-def proof_original_docx(page_id):
+def proof_original_docx(round_id):
     """הקובץ שנשלח במקור ללקוח - נבנה תמיד מחדש מ-page.content (מקור האמת),
     לא נשמר בנפרד - כך גם אם מבקשים אותו שוב ושוב זה תמיד עקבי לתוכן הנוכחי."""
-    from models import ManuscriptPage
-    page = ManuscriptPage.query.get_or_404(page_id)
+    from models import ProofingRound
+    round_ = ProofingRound.query.get_or_404(round_id)
+    page = round_.manuscript_page
     docx_bytes = _build_manuscript_docx(page.customer.name, page.original_filename, page.content)
     safe_name = os.path.splitext(page.original_filename or 'כתב_יד')[0][:40]
     return send_file(
@@ -1167,64 +1225,69 @@ def proof_original_docx(page_id):
     )
 
 
-@dictate_bp.route('/<int:page_id>/proof/returned.docx')
+@dictate_bp.route('/proof/<int:round_id>/returned.docx')
 @login_required
-def proof_returned_docx(page_id):
-    """הקובץ שהלקוח שלח בחזרה עם התיקונים שלו - יכול להיות קובץ Word (אם
-    תיקן במחשב) או תמונה/PDF (אם תיקן בכתב יד על דף מודפס וצילם/סרק - ראה
-    _proof_returned_kind). שם ה-route עצמו נשאר עם סיומת .docx מטעמי תאימות
-    לאחור בלבד (קישורים קיימים) - שם ההורדה בפועל תמיד תואם לקובץ האמיתי."""
-    from models import ManuscriptPage
-    page = ManuscriptPage.query.get_or_404(page_id)
-    if not page.proof_file_data:
+def proof_returned_docx(round_id):
+    """הקובץ שהלקוח שלח בחזרה עם התיקונים שלו בסבב הזה - יכול להיות קובץ
+    Word (אם תיקן במחשב) או תמונה/PDF (אם תיקן בכתב יד על דף מודפס
+    וצילם/סרק - ראה _proof_returned_kind). שם ה-route עצמו נשאר עם סיומת
+    .docx מטעמי תאימות לאחור בלבד - שם ההורדה בפועל תמיד תואם לקובץ האמיתי."""
+    from models import ProofingRound
+    round_ = ProofingRound.query.get_or_404(round_id)
+    if not round_.customer_file_data:
         abort(404)
-    kind = _proof_returned_kind(page.proof_original_filename)
+    kind = _proof_returned_kind(round_.customer_file_filename)
     if kind == 'docx':
         mimetype = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
     else:
-        mimetype = mimetypes.guess_type(page.proof_original_filename or '')[0] or 'application/octet-stream'
+        mimetype = mimetypes.guess_type(round_.customer_file_filename or '')[0] or 'application/octet-stream'
     return send_file(
-        io.BytesIO(page.proof_file_data),
+        io.BytesIO(round_.customer_file_data),
         mimetype=mimetype,
         as_attachment=True,
-        download_name=page.proof_original_filename or f'הגהה_{page_id}',
+        download_name=round_.customer_file_filename or f'הגהה_{round_id}',
     )
 
 
-@dictate_bp.route('/<int:page_id>/proof/upload-final', methods=['POST'])
+@dictate_bp.route('/proof/<int:round_id>/upload-final', methods=['POST'])
 @login_required
-def proof_upload_final(page_id):
+def proof_upload_final(round_id):
     """הנציג פתח את הקובץ המקורי בוורד האמיתי, החיל את התיקונים שראה בקובץ
     שהלקוח שלח, ושומר/מעלה כאן את הקובץ הסופי - זה מה שיישלח בסוף ללקוח
     (אם התבקש) ויישמר כעותק הרשמי המתוקן."""
-    from models import ManuscriptPage
-    page = ManuscriptPage.query.get_or_404(page_id)
+    from models import ProofingRound
+    round_ = ProofingRound.query.get_or_404(round_id)
+    if round_.status != 'pending':
+        return jsonify({'error': 'סבב הגהה זה כבר הושלם'}), 400
     f = request.files.get('final_file')
     if not f or not f.filename:
         return jsonify({'error': 'לא נבחר קובץ'}), 400
     ext = os.path.splitext(f.filename)[1].lower()
     if ext != '.docx':
         return jsonify({'error': 'יש להעלות קובץ Word (.docx) בלבד'}), 400
-    page.proof_final_file_data = f.read()
-    page.proof_final_filename = f.filename
+    round_.final_file_data = f.read()
+    round_.final_filename = f.filename
     db.session.commit()
     return jsonify({'status': 'ok', 'filename': f.filename})
 
 
-@dictate_bp.route('/<int:page_id>/proof/save-edited', methods=['POST'])
+@dictate_bp.route('/proof/<int:round_id>/save-edited', methods=['POST'])
 @login_required
-def proof_save_edited(page_id):
+def proof_save_edited(round_id):
     """שומר את התוכן שנערך בעורך המובנה בדפדפן במסך ההגהה (עיצוב מלא -
     מודגש/נטוי/קו תחתון/כותרת, חיפוש-והחלפה, בדיקת איות - ראה
     templates/admin/proof_studio.html). בכל שמירה: (1) שומר את מבנה ה-JSON
-    עצמו ב-proof_edited_content, כדי שאם הנציג יחזור למסך מאוחר יותר הוא
-    ימשיך מאיפה שהפסיק ולא יתחיל מאפס, וגם (2) בונה קובץ Word אמיתי (docx)
-    מחדש מאותו תוכן דרך _build_manuscript_docx - אותו בילדר OOXML/RTL בדיוק
-    שמשמש בכל שאר המערכת - ושומר אותו כ-proof_final_file_data. זה מה
-    שיישלח בפועל אם/כש-proof_complete יופעל, וגם מה שאפשר להוריד לבדיקה.
+    עצמו ב-edited_content, כדי שאם הנציג יחזור למסך מאוחר יותר הוא ימשיך
+    מאיפה שהפסיק ולא יתחיל מאפס, וגם (2) בונה קובץ Word אמיתי (docx) מחדש
+    מאותו תוכן דרך _build_manuscript_docx - אותו בילדר OOXML/RTL בדיוק
+    שמשמש בכל שאר המערכת - ושומר אותו כ-final_file_data. זה מה שיישלח
+    בפועל אם/כש-proof_complete יופעל, וגם מה שאפשר להוריד לבדיקה.
     לא נוגע ב-page.content המקורי - זה תמיד נשאר נגיש/משוחזר בנפרד."""
-    from models import ManuscriptPage
-    page = ManuscriptPage.query.get_or_404(page_id)
+    from models import ProofingRound
+    round_ = ProofingRound.query.get_or_404(round_id)
+    if round_.status != 'pending':
+        return jsonify({'error': 'סבב הגהה זה כבר הושלם - לא ניתן לערוך אותו יותר'}), 400
+    page = round_.manuscript_page
     data = request.get_json(silent=True) or {}
     content = data.get('content')
     if not isinstance(content, list):
@@ -1255,17 +1318,73 @@ def proof_save_edited(page_id):
             page.customer.name if page.customer else '', page.original_filename, clean_content
         )
     except Exception as e:
-        log.error(f"proof save-edited docx build error (page={page_id}): {e}", exc_info=True)
+        log.error(f"proof save-edited docx build error (round={round_id}): {e}", exc_info=True)
         return jsonify({'error': f'שגיאה ביצירת קובץ ה-Word: {e}'}), 500
 
     safe_name = os.path.splitext(page.original_filename or 'כתב_יד')[0][:40]
     filename = f'מתוקן_{safe_name}.docx'
 
-    page.proof_edited_content = clean_content
-    page.proof_final_file_data = docx_bytes
-    page.proof_final_filename = filename
+    round_.edited_content = clean_content
+    round_.final_file_data = docx_bytes
+    round_.final_filename = filename
     db.session.commit()
     return jsonify({'status': 'ok', 'filename': filename})
+
+
+@dictate_bp.route('/proof/<int:round_id>/timer/start', methods=['POST'])
+@login_required
+def proof_timer_start(round_id):
+    """מפעיל את שעון ההגהה (חיוב לפי דקות עבודה בפועל) - ראה
+    models.ProofingRound.timer_started_at/timer_accumulated_seconds."""
+    from models import ProofingRound
+    round_ = ProofingRound.query.get_or_404(round_id)
+    if round_.status != 'pending':
+        return jsonify({'error': 'סבב הגהה זה כבר הושלם'}), 400
+    if round_.timer_started_at is None:
+        round_.timer_started_at = datetime.utcnow()
+        db.session.commit()
+    return jsonify({'status': 'ok', **_proofing_timer_state(round_)})
+
+
+@dictate_bp.route('/proof/<int:round_id>/timer/stop', methods=['POST'])
+@login_required
+def proof_timer_stop(round_id):
+    """עוצר את שעון ההגהה ומוסיף את הזמן שנצבר במקטע הזה ל-timer_accumulated_seconds.
+    אפשר להפעיל ולעצור כמה פעמים (הפסקות) - הזמן מצטבר על פני כל המקטעים."""
+    from models import ProofingRound
+    round_ = ProofingRound.query.get_or_404(round_id)
+    if round_.timer_started_at is not None:
+        elapsed = (datetime.utcnow() - round_.timer_started_at).total_seconds()
+        round_.timer_accumulated_seconds = (round_.timer_accumulated_seconds or 0.0) + elapsed
+        round_.timer_started_at = None
+        db.session.commit()
+    return jsonify({'status': 'ok', **_proofing_timer_state(round_)})
+
+
+@dictate_bp.route('/proof/<int:round_id>/timer/reset', methods=['POST'])
+@login_required
+def proof_timer_reset(round_id):
+    """מאפס את שעון ההגהה לגמרי (לתיקון טעות - למשל שכחו לעצור אתמול) -
+    לא זמין אחרי שהסבב כבר הושלם וחויב."""
+    from models import ProofingRound
+    round_ = ProofingRound.query.get_or_404(round_id)
+    if round_.status != 'pending':
+        return jsonify({'error': 'סבב הגהה זה כבר הושלם'}), 400
+    round_.timer_started_at = None
+    round_.timer_accumulated_seconds = 0.0
+    db.session.commit()
+    return jsonify({'status': 'ok', **_proofing_timer_state(round_)})
+
+
+@dictate_bp.route('/proof/<int:round_id>/timer/status')
+@login_required
+def proof_timer_status(round_id):
+    """מצב השעון הנוכחי - נקרא בטעינת הדף מחדש (למשל אחרי רענון דפדפן)
+    כדי לחשב מחדש את הזמן שחלף לפי מה שבאמת שמור בשרת, לא לפי מה שהיה
+    בזיכרון הדפדפן שאבד ברענון."""
+    from models import ProofingRound
+    round_ = ProofingRound.query.get_or_404(round_id)
+    return jsonify(_proofing_timer_state(round_))
 
 
 def _hebrew_spellcheck_paragraphs(paragraphs):
@@ -1341,13 +1460,13 @@ def _hebrew_spellcheck_paragraphs(paragraphs):
     return clean_issues
 
 
-@dictate_bp.route('/<int:page_id>/proof/spellcheck', methods=['POST'])
+@dictate_bp.route('/proof/<int:round_id>/spellcheck', methods=['POST'])
 @login_required
-def proof_spellcheck(page_id):
+def proof_spellcheck(round_id):
     """בדיקת איות/דקדוק בעברית ברמה גבוהה על התוכן הנוכחי בעורך (AI, לא
     Hunspell/מילון סטטי - הרבה יותר טוב על עברית) - ראה _hebrew_spellcheck_paragraphs."""
-    from models import ManuscriptPage
-    ManuscriptPage.query.get_or_404(page_id)  # מוודא page_id תקין, אותה הרשאה כמו שאר המסך
+    from models import ProofingRound
+    ProofingRound.query.get_or_404(round_id)  # מוודא round_id תקין, אותה הרשאה כמו שאר המסך
     data = request.get_json(silent=True) or {}
     paragraphs = data.get('paragraphs')
     if not isinstance(paragraphs, list):
@@ -1356,50 +1475,64 @@ def proof_spellcheck(page_id):
     try:
         issues = _hebrew_spellcheck_paragraphs(paragraphs)
     except Exception as e:
-        log.error(f"spellcheck error (page={page_id}): {e}", exc_info=True)
+        log.error(f"spellcheck error (round={round_id}): {e}", exc_info=True)
         return jsonify({'error': f'שגיאה בבדיקת האיות: {e}'}), 500
     return jsonify({'issues': issues})
 
 
-@dictate_bp.route('/<int:page_id>/proof/final.docx')
+@dictate_bp.route('/proof/<int:round_id>/final.docx')
 @login_required
-def proof_final_docx(page_id):
-    from models import ManuscriptPage
-    page = ManuscriptPage.query.get_or_404(page_id)
-    if not page.proof_final_file_data:
+def proof_final_docx(round_id):
+    from models import ProofingRound
+    round_ = ProofingRound.query.get_or_404(round_id)
+    if not round_.final_file_data:
         abort(404)
     return send_file(
-        io.BytesIO(page.proof_final_file_data),
+        io.BytesIO(round_.final_file_data),
         mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document',
         as_attachment=True,
-        download_name=page.proof_final_filename or f'מתוקן_{page_id}.docx',
+        download_name=round_.final_filename or f'מתוקן_{round_id}.docx',
     )
 
 
-@dictate_bp.route('/<int:page_id>/proof/complete', methods=['POST'])
+@dictate_bp.route('/proof/<int:round_id>/complete', methods=['POST'])
 @login_required
-def proof_complete(page_id):
-    """מסיים את סבב ההגהה: מחייב את הלקוח במחיר הגהה קבוע (מוגדר בהגדרות),
-    ואופציונלית שולח את הקובץ הסופי בחזרה ללקוח במייל. התשלום יורד רק כאן -
-    לא בעת קבלת ההגהה מהלקוח - אותה פילוסופיה בדיוק כמו send() הרגיל."""
-    from models import ManuscriptPage, Transaction
-    page = ManuscriptPage.query.get_or_404(page_id)
-    if page.proof_status != 'pending':
-        return jsonify({'error': 'אין הגהה ממתינה לדף הזה'}), 400
-    if not page.proof_final_file_data:
-        return jsonify({'error': 'יש להעלות קודם את קובץ ה-Word הסופי המתוקן'}), 400
+def proof_complete(round_id):
+    """מסיים את סבב ההגהה: עוצר את השעון אוטומטית אם עדיין רץ, מחשב את
+    המחיר לפי דקות העבודה שנצברו (מעוגל כלפי מעלה לדקה שלמה) כפול המחיר-
+    לדקה בהגדרות, מחייב את הלקוח, ואופציונלית שולח את הקובץ הסופי בחזרה
+    ללקוח במייל. התשלום יורד רק כאן - לא בעת קבלת ההגהה מהלקוח - אותה
+    פילוסופיה בדיוק כמו send() הרגיל."""
+    from models import ProofingRound, Transaction
+    round_ = ProofingRound.query.get_or_404(round_id)
+    if round_.status != 'pending':
+        return jsonify({'error': 'אין הגהה ממתינה לסבב הזה'}), 400
+    if not round_.final_file_data:
+        return jsonify({'error': 'יש להעלות/לשמור קודם את קובץ ה-Word הסופי המתוקן'}), 400
 
-    customer = page.customer
-    price = _manuscript_proofing_price()
+    # אם השעון עדיין רץ בעת הסיום - עוצרים אותו אוטומטית לפני החישוב, כדי
+    # שלא "יאבד" את הזמן האחרון שעדיין לא נצבר.
+    if round_.timer_started_at is not None:
+        elapsed = (datetime.utcnow() - round_.timer_started_at).total_seconds()
+        round_.timer_accumulated_seconds = (round_.timer_accumulated_seconds or 0.0) + elapsed
+        round_.timer_started_at = None
+
+    minutes = _proofing_minutes_billed(round_.timer_accumulated_seconds or 0)
+    price_per_minute = _manuscript_proofing_price()
+    price = round(minutes * price_per_minute, 2)
+
+    page = round_.manuscript_page
+    customer = page.customer if page else None
     if price > 0:
         if not customer:
-            return jsonify({'error': 'לא נמצא לקוח משויך לדף זה - לא ניתן לחייב'}), 400
+            return jsonify({'error': 'לא נמצא לקוח משויך - לא ניתן לחייב'}), 400
         if customer.balance < price:
             return jsonify({
-                'error': f'אין מספיק יתרה ללקוח לחיוב ההגהה (עלות: ₪{price:.2f}, יתרה נוכחית: ₪{customer.balance:.2f}) - '
+                'error': f'אין מספיק יתרה ללקוח לחיוב ההגהה (עלות: ₪{price:.2f} עבור {minutes} דק׳, יתרה נוכחית: ₪{customer.balance:.2f}) - '
                          f'יש לטעון יתרה ללקוח ולנסות שוב',
                 'insufficient_balance': True,
                 'cost': price,
+                'minutes': minutes,
                 'balance': customer.balance,
             }), 402
 
@@ -1410,7 +1543,7 @@ def proof_complete(page_id):
         if send_back:
             if not to_email:
                 return jsonify({'error': 'אין כתובת מייל ליעד לשליחה חזרה - הזינו כתובת'}), 400
-            _send_proofed_manuscript_email(to_email, customer.name if customer else '', page.original_filename, page.proof_final_file_data)
+            _send_proofed_manuscript_email(to_email, customer.name if customer else '', page.original_filename, round_.final_file_data)
 
         if price > 0 and customer:
             customer.balance -= price
@@ -1418,33 +1551,34 @@ def proof_complete(page_id):
                 customer_id=customer.id,
                 amount=-price,
                 type='manuscript_proofing',
-                description=f'הגהת כתב יד - {page.original_filename}',
+                description=f'הגהת כתב יד - {page.original_filename} ({minutes} דק׳)',
             ))
-        page.proof_cost = price
-        page.proof_status = 'done'
-        page.proof_completed_at = datetime.utcnow()
+        round_.cost = price
+        round_.status = 'done'
+        round_.completed_at = datetime.utcnow()
         db.session.commit()
-        return jsonify({'status': 'done', 'cost': price, 'sent': send_back, 'to': to_email if send_back else None})
+        return jsonify({'status': 'done', 'cost': price, 'minutes': minutes, 'sent': send_back, 'to': to_email if send_back else None})
     except Exception as e:
         db.session.rollback()
-        log.error(f"manuscript proof complete error (page={page_id}): {e}", exc_info=True)
+        log.error(f"proofing round complete error (round={round_id}): {e}", exc_info=True)
         return jsonify({'error': f'שגיאה בסיום ההגהה: {e}'}), 500
 
 
-@dictate_bp.route('/<int:page_id>/delete-proof', methods=['POST'])
+@dictate_bp.route('/proof/<int:round_id>/delete', methods=['POST'])
 @login_required
-def delete_proof_request(page_id):
-    """מבטל בקשת הגהה ממתינה (למשל אם הגיעה בטעות / קובץ פגום) בלי לחייב את
-    הלקוח - מנקה את השדות ומחזיר את הדף למצב הרגיל (בלי הגהה ממתינה)."""
+def delete_proof_request(round_id):
+    """מבטל סבב הגהה ממתין (למשל אם הגיע בטעות / קובץ פגום) בלי לחייב את
+    הלקוח - מוחק את הסבב לגמרי (לא היה מעולם חלק מהיסטוריית חיוב, אז אין
+    צורך לשמר אותו). סבב שכבר הושלם וחויב לא ניתן למחיקה מכאן."""
     from flask import flash, redirect
-    from models import ManuscriptPage
-    page = ManuscriptPage.query.get_or_404(page_id)
-    page.proof_status = None
-    page.proof_file_data = None
-    page.proof_original_filename = None
-    page.proof_requested_at = None
-    page.proof_final_file_data = None
-    page.proof_final_filename = None
-    db.session.commit()
-    flash('בקשת ההגהה בוטלה')
+    from models import ProofingRound
+    round_ = ProofingRound.query.get_or_404(round_id)
+    if round_.status == 'pending':
+        db.session.delete(round_)
+        db.session.commit()
+        flash('סבב ההגהה בוטל')
+    else:
+        flash('לא ניתן לבטל סבב הגהה שכבר הושלם')
     return redirect(url_for('dictate.queue', status='proof'))
+
+

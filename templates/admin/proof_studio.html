@@ -39,6 +39,14 @@
   .ps-finalrow { display:flex; gap:8px; margin-top:16px; flex-wrap:wrap; align-items:center; }
   .ps-finalrow input[type=email] { flex:1; min-width:220px; padding:9px 12px; border-radius:8px; border:1px solid var(--border); background:var(--surface); color:var(--text); font-family:'Heebo',sans-serif; }
 
+  /* שעון עצר ההגהה (חיוב לפי דקות) */
+  .ps-timer-display { font-family:'JetBrains Mono', monospace; font-size:28px; font-weight:700; min-width:100px; }
+  .ps-timerrow { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; }
+  .ps-timeractions { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .ps-readonly-banner { background:rgba(16,185,129,.10); border:1px solid var(--green); border-radius:10px; padding:14px 16px; font-size:14px; }
+  .ps-roundnav { color:var(--text3); font-size:12px; }
+  .ps-roundnav a { color:var(--accent); text-decoration:none; }
+
   /* עורך ההגהה המובנה */
   .ps-toolbar { display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin-bottom:4px; }
   .ps-toolbar button { padding:6px 12px !important; font-size:13px !important; }
@@ -52,7 +60,7 @@
      כדי לאשר חזותית שהלחיצה נקלטה - אותו דפוס בדיוק כמו ds-flash
      ב-dictate_studio.html, לעקביות עיצובית בין המסכים. */
   .ps-toolbar button.active { background:var(--accent); color:#fff; border-color:var(--accent); }
-  .ps-toolbar button.ps-flash { animation: ps-flash-glow 1s ease-out; }
+  .ps-toolbar button.ps-flash, #btnTimerStart.ps-flash, #btnTimerStop.ps-flash { animation: ps-flash-glow 1s ease-out; }
   @keyframes ps-flash-glow {
     0%   { box-shadow: 0 0 0 3px rgba(56,189,248,.95), 0 0 16px 3px rgba(56,189,248,.8); border-color:#38bdf8; }
     100% { box-shadow: 0 0 0 3px rgba(56,189,248,0), 0 0 16px 3px rgba(56,189,248,0); }
@@ -80,20 +88,38 @@
   <div class="ds-topbar-left">
     <a href="/admin/dictate?status=proof" class="btn btn-ghost ds-topbtn">← חזרה לרשימת ההגהות</a>
     <a href="/admin/customers/{{ page.customer_id }}" class="btn btn-ghost ds-topbtn">👤 {{ page.customer.phone }}</a>
+    {% if sibling_rounds|length > 1 %}
+    <span class="ps-roundnav">
+      סבב הגהה {{ round_index }} מתוך {{ sibling_rounds|length }} לכתב-יד זה -
+      {% for r in sibling_rounds %}<a href="/admin/dictate/proof/{{ r.id }}" style="{% if r.id == round.id %}font-weight:800;text-decoration:underline{% endif %}">#{{ loop.index }}</a>{% if not loop.last %} · {% endif %}{% endfor %}
+    </span>
+    {% endif %}
   </div>
   <div class="ds-topbar-right">
-    <span class="badge badge-blue">✏️ הגהה ממתינה</span>
-    <span style="color:var(--text3);font-size:12px">התקבלה {{ page.proof_requested_at | il_time }}</span>
+    {% if readonly %}
+      <span class="badge badge-green">✔ הגהה הושלמה</span>
+    {% else %}
+      <span class="badge badge-blue">✏️ הגהה ממתינה</span>
+    {% endif %}
+    <span style="color:var(--text3);font-size:12px">התקבלה {{ round.requested_at | il_time }}</span>
   </div>
 </div>
+
+{% if readonly %}
+<div class="ps-readonly-banner" style="margin-bottom:14px">
+  🔒 סבב ההגהה הזה כבר הושלם וחויב - ₪{{ "%.2f"|format(round.cost) }} עבור {{ round.timer_accumulated_seconds | minutes_billed }} דקות עבודה, בתאריך {{ round.completed_at | il_time }}.
+  אי אפשר לערוך אותו יותר (זה מונע חיוב כפול/שינוי בשקט של מה שכבר נשלח ללקוח).
+  {% if round.final_file_data %}<a href="/admin/dictate/proof/{{ round.id }}/final.docx">⬇ הורדת הקובץ הסופי שנשלח</a>{% endif %}
+</div>
+{% endif %}
 
 <div class="ps-wrap">
   <div class="card">
     <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
-      <span>📩 מה שהלקוח שלח ({{ page.proof_original_filename }})</span>
+      <span>📩 מה שהלקוח שלח ({{ round.customer_file_filename }})</span>
       <div style="display:flex;gap:8px">
         <button type="button" class="btn btn-ghost" style="font-size:12px;padding:5px 10px" onclick="toggleExpand('returnedBox', this)">⤢ הגדלת תצוגה</button>
-        <a href="/admin/dictate/{{ page.id }}/proof/returned.docx" class="btn btn-ghost" style="font-size:12px;padding:5px 10px">⬇ הורדת הקובץ שהתקבל</a>
+        <a href="/admin/dictate/proof/{{ round.id }}/returned.docx" class="btn btn-ghost" style="font-size:12px;padding:5px 10px">⬇ הורדת הקובץ שהתקבל</a>
       </div>
     </div>
     {% if returned_kind == 'docx' %}
@@ -115,15 +141,34 @@
     {% endif %}
   </div>
 
+  {% if not readonly %}
+  <div class="card">
+    <div class="ps-timerrow">
+      <div style="display:flex;align-items:center;gap:12px">
+        <span class="ps-timer-display" id="timerDisplay">00:00</span>
+        <span id="timerRunningBadge" class="badge badge-blue" style="display:{{ 'inline-flex' if timer_state.running else 'none' }}">⏺ פועל</span>
+      </div>
+      <div class="ps-timeractions">
+        <button type="button" id="btnTimerStart" class="btn btn-success" onclick="timerStart()" style="display:{{ 'none' if timer_state.running else '' }}">▶ התחלת תיקון</button>
+        <button type="button" id="btnTimerStop" class="btn btn-danger" onclick="timerStop()" style="display:{{ '' if timer_state.running else 'none' }}">⏸ עצירה</button>
+        <button type="button" class="btn btn-ghost" style="font-size:12px" onclick="timerReset()">↺ איפוס</button>
+        <span id="timerCost" style="color:var(--text3);font-size:13px"></span>
+      </div>
+    </div>
+    <p class="ps-hint">מפעילים את השעון כשמתחילים לתקן בפועל ועוצרים כשמפסיקים (אפשר כמה פעמים - הזמן מצטבר) - החיוב הסופי הוא לפי סך הדקות שנצברו עד "סיום הגהה" (מעוגל כלפי מעלה לדקה שלמה), במחיר ₪{{ "%.2f"|format(proofing_price_per_minute) }} לדקה.</p>
+  </div>
+  {% endif %}
+
   <div class="card">
     <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
       <span>📝 עריכת הקובץ המקורי - החלת התיקונים</span>
       <div style="display:flex;gap:8px;align-items:center">
-        <span id="saveMsg"></span>
+        {% if not readonly %}<span id="saveMsg"></span>{% endif %}
         <button type="button" class="btn btn-ghost" style="font-size:12px;padding:5px 10px" onclick="toggleExpand('originalBox', this)">⤢ הגדלת תצוגה</button>
       </div>
     </div>
 
+    {% if not readonly %}
     <div class="ps-toolbar">
       <button type="button" id="btnBold" class="btn btn-ghost" onmousedown="event.preventDefault()" onclick="applyFormat('bold')" title="מודגש (Ctrl+B)"><b>B</b></button>
       <button type="button" id="btnItalic" class="btn btn-ghost" onmousedown="event.preventDefault()" onclick="applyFormat('italic')" title="נטוי (Ctrl+I)"><i>I</i></button>
@@ -151,13 +196,15 @@
       <span id="findCount"></span>
       <button type="button" class="btn btn-ghost" onclick="toggleFindPanel()">✕ סגירה</button>
     </div>
+    {% endif %}
 
-    <div class="ps-box ps-preview" id="originalBox" contenteditable="true" spellcheck="true" lang="he" dir="rtl"></div>
+    <div class="ps-box ps-preview" id="originalBox" {% if not readonly %}contenteditable="true"{% endif %} spellcheck="true" lang="he" dir="rtl"></div>
     <script type="application/json" id="editorInitialContent">{{ editor_initial_content | tojson }}</script>
 
+    {% if not readonly %}
     <div class="ps-actions">
       <button type="button" class="btn btn-primary" onclick="saveEdited(false)">💾 שמירת השינויים</button>
-      <a href="/admin/dictate/{{ page.id }}/proof/original.docx" class="btn btn-ghost">⬇ הורדת הקובץ המקורי (לפני עריכה)</a>
+      <a href="/admin/dictate/proof/{{ round.id }}/original.docx" class="btn btn-ghost">⬇ הורדת הקובץ המקורי (לפני עריכה)</a>
       <a href="{{ ms_word_link }}" class="btn btn-ghost">🖊 פתיחה ישירות בוורד (חיצוני)</a>
     </div>
     <p class="ps-hint">
@@ -170,10 +217,10 @@
       <button class="btn btn-primary" onclick="uploadFinal()">העלאה</button>
       <div id="uploadMsg" style="margin-top:8px;font-size:13px"></div>
       <p class="ps-hint" style="margin-top:6px">שימו לב: העלאת קובץ כאן תחליף את הקובץ הסופי שנוצר מהעריכה למעלה.</p>
-      {% if page.proof_final_filename %}
+      {% if round.final_filename %}
       <div class="ps-uploaded" id="uploadedInfo">
-        ✔ קובץ סופי נוכחי: <strong>{{ page.proof_final_filename }}</strong>
-        - <a href="/admin/dictate/{{ page.id }}/proof/final.docx">הורדה לבדיקה</a>
+        ✔ קובץ סופי נוכחי: <strong>{{ round.final_filename }}</strong>
+        - <a href="/admin/dictate/proof/{{ round.id }}/final.docx">הורדה לבדיקה</a>
       </div>
       {% else %}
       <div class="ps-uploaded" id="uploadedInfo" style="display:none"></div>
@@ -183,7 +230,7 @@
     <div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border)">
       <div style="font-size:14px;font-weight:700;margin-bottom:6px">✅ סיום הגהה</div>
       <p class="ps-hint" style="margin-top:0">
-        סיום ההגהה יחייב את הלקוח ב-₪{{ "%.2f"|format(proofing_price) }} (לפי ההגדרה בעמוד ההגדרות). יש לשמור את השינויים לפחות פעם אחת (למעלה) לפני הסיום.
+        סיום ההגהה עוצר את השעון (אם עדיין פועל) ומחייב את הלקוח לפי סך הדקות שנצברו × ₪{{ "%.2f"|format(proofing_price_per_minute) }}. יש לשמור את השינויים לפחות פעם אחת (למעלה) לפני הסיום.
       </p>
       <label style="display:flex;align-items:center;gap:8px;font-size:13px;margin-bottom:8px">
         <input type="checkbox" id="sendBackCheck" checked>
@@ -195,15 +242,78 @@
       </div>
       <div id="completeMsg" style="margin-top:8px;font-size:13px"></div>
     </div>
+    {% endif %}
   </div>
 </div>
 
 <script>
-const PAGE_ID = {{ page.id }};
+const ROUND_ID = {{ round.id }};
+const READONLY = {{ 'true' if readonly else 'false' }};
+const PRICE_PER_MINUTE = {{ proofing_price_per_minute }};
 let dirty = false;
 let spellIssues = [];
 let findMatches = [];
 let findIndex = -1;
+
+// -------------------- שעון הגהה (חיוב לפי דקות) --------------------
+let timerRunning = {{ 'true' if timer_state.running else 'false' }};
+let timerBaseSeconds = {{ timer_state.accumulated_seconds or 0 }};
+let timerRunningSinceMs = timerRunning ? Date.now() : null;
+
+function currentTimerTotalSeconds() {
+  let total = timerBaseSeconds;
+  if (timerRunning && timerRunningSinceMs) total += (Date.now() - timerRunningSinceMs) / 1000;
+  return total;
+}
+
+function fmtTimer(sec) {
+  sec = Math.max(0, Math.floor(sec));
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+  const mm = String(m).padStart(2, '0'), ss = String(s).padStart(2, '0');
+  return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
+}
+
+function updateTimerDisplay() {
+  const display = document.getElementById('timerDisplay');
+  if (!display) return;
+  const total = currentTimerTotalSeconds();
+  display.textContent = fmtTimer(total);
+  const minutes = total > 0 ? Math.ceil(total / 60) : 0;
+  const cost = (minutes * PRICE_PER_MINUTE).toFixed(2);
+  document.getElementById('timerCost').textContent = minutes > 0 ? `≈ ₪${cost} (${minutes} דק')` : '';
+}
+
+function applyTimerState(data) {
+  if (!data || data.error) { if (data && data.error) alert(data.error); return; }
+  timerRunning = !!data.running;
+  timerBaseSeconds = data.accumulated_seconds || 0;
+  timerRunningSinceMs = timerRunning ? Date.now() : null;
+  const startBtn = document.getElementById('btnTimerStart');
+  const stopBtn = document.getElementById('btnTimerStop');
+  const badge = document.getElementById('timerRunningBadge');
+  if (startBtn) startBtn.style.display = timerRunning ? 'none' : '';
+  if (stopBtn) stopBtn.style.display = timerRunning ? '' : 'none';
+  if (badge) badge.style.display = timerRunning ? 'inline-flex' : 'none';
+  updateTimerDisplay();
+}
+
+async function timerStart() {
+  flashAndGuard(document.getElementById('btnTimerStart'));
+  const res = await fetch(`/admin/dictate/proof/${ROUND_ID}/timer/start`, {method: 'POST'});
+  applyTimerState(await res.json());
+}
+
+async function timerStop() {
+  flashAndGuard(document.getElementById('btnTimerStop'));
+  const res = await fetch(`/admin/dictate/proof/${ROUND_ID}/timer/stop`, {method: 'POST'});
+  applyTimerState(await res.json());
+}
+
+async function timerReset() {
+  if (!confirm('לאפס את שעון ההגהה לגמרי (לחזור ל-00:00)?')) return;
+  const res = await fetch(`/admin/dictate/proof/${ROUND_ID}/timer/reset`, {method: 'POST'});
+  applyTimerState(await res.json());
+}
 
 // -------------------- תצוגה/הגדלה --------------------
 function toggleExpand(boxId, btn) {
@@ -280,13 +390,14 @@ function serializeEditableContent() {
 function markDirty() { dirty = true; }
 
 async function saveEdited(isAuto) {
+  if (READONLY) return;
   if (isAuto && !dirty) return;
   clearFindHighlights();
   const content = serializeEditableContent();
   const msg = document.getElementById('saveMsg');
-  msg.textContent = isAuto ? 'שומר אוטומטית...' : 'שומר...';
+  if (msg) msg.textContent = isAuto ? 'שומר אוטומטית...' : 'שומר...';
   try {
-    const res = await fetch(`/admin/dictate/${PAGE_ID}/proof/save-edited`, {
+    const res = await fetch(`/admin/dictate/proof/${ROUND_ID}/save-edited`, {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({content}),
@@ -295,17 +406,20 @@ async function saveEdited(isAuto) {
     if (!res.ok) throw new Error(data.error || 'שמירה נכשלה');
     dirty = false;
     const now = new Date();
-    msg.textContent = '✔ נשמר ' + now.toLocaleTimeString('he-IL', {hour: '2-digit', minute: '2-digit'});
+    if (msg) msg.textContent = '✔ נשמר ' + now.toLocaleTimeString('he-IL', {hour: '2-digit', minute: '2-digit'});
     const info = document.getElementById('uploadedInfo');
     info.style.display = 'block';
-    info.innerHTML = `✔ קובץ סופי עדכני: <strong>${data.filename}</strong> - <a href="/admin/dictate/${PAGE_ID}/proof/final.docx">הורדה לבדיקה</a>`;
+    info.innerHTML = `✔ קובץ סופי עדכני: <strong>${data.filename}</strong> - <a href="/admin/dictate/proof/${ROUND_ID}/final.docx">הורדה לבדיקה</a>`;
   } catch (e) {
-    msg.textContent = '⚠ ' + e.message;
+    if (msg) msg.textContent = '⚠ ' + e.message;
   }
 }
 
 document.addEventListener('DOMContentLoaded', () => {
   renderEditor();
+  updateTimerDisplay();
+  setInterval(updateTimerDisplay, 1000);
+  if (READONLY) return;
   const box = document.getElementById('originalBox');
   box.addEventListener('input', markDirty);
   box.addEventListener('keyup', updateFormatButtonsActiveState);
@@ -578,7 +692,7 @@ async function runSpellcheck() {
   const msg = document.getElementById('spellMsg');
   msg.textContent = 'בודק איות...';
   try {
-    const res = await fetch(`/admin/dictate/${PAGE_ID}/proof/spellcheck`, {
+    const res = await fetch(`/admin/dictate/proof/${ROUND_ID}/spellcheck`, {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({paragraphs}),
@@ -659,7 +773,7 @@ function dismissSpellIssue(mark) {
   closeSpellPopup();
 }
 
-// -------------------- העלאת קובץ חיצוני / סיום הגהה (ללא שינוי בהתנהגות) --------------------
+// -------------------- העלאת קובץ חיצוני / סיום הגהה --------------------
 async function uploadFinal() {
   const input = document.getElementById('finalFileInput');
   const msg = document.getElementById('uploadMsg');
@@ -669,14 +783,14 @@ async function uploadFinal() {
   msg.textContent = 'מעלה...';
   msg.style.color = 'var(--text2)';
   try {
-    const res = await fetch(`/admin/dictate/${PAGE_ID}/proof/upload-final`, { method: 'POST', body: fd });
+    const res = await fetch(`/admin/dictate/proof/${ROUND_ID}/upload-final`, { method: 'POST', body: fd });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'העלאה נכשלה');
     msg.textContent = '✔ הועלה בהצלחה';
     msg.style.color = 'var(--green)';
     const info = document.getElementById('uploadedInfo');
     info.style.display = 'block';
-    info.innerHTML = `✔ קובץ סופי נוכחי: <strong>${data.filename}</strong> - <a href="/admin/dictate/${PAGE_ID}/proof/final.docx">הורדה לבדיקה</a>`;
+    info.innerHTML = `✔ קובץ סופי נוכחי: <strong>${data.filename}</strong> - <a href="/admin/dictate/proof/${ROUND_ID}/final.docx">הורדה לבדיקה</a>`;
   } catch (e) {
     msg.textContent = '⚠ ' + e.message;
     msg.style.color = 'var(--red)';
@@ -687,17 +801,17 @@ async function completeProof() {
   const msg = document.getElementById('completeMsg');
   const sendBack = document.getElementById('sendBackCheck').checked;
   const toEmail = document.getElementById('toEmail').value.trim();
-  if (!confirm('לסיים את ההגהה ולחייב את הלקוח?')) return;
+  if (!confirm('לעצור את השעון (אם פועל) ולסיים את ההגהה - לחייב את הלקוח בהתאם לזמן שנצבר?')) return;
   const fd = new FormData();
   fd.append('send_back', sendBack ? '1' : '0');
   if (toEmail) fd.append('to_email', toEmail);
   msg.textContent = 'מעבד...';
   msg.style.color = 'var(--text2)';
   try {
-    const res = await fetch(`/admin/dictate/${PAGE_ID}/proof/complete`, { method: 'POST', body: fd });
+    const res = await fetch(`/admin/dictate/proof/${ROUND_ID}/complete`, { method: 'POST', body: fd });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'שגיאה בסיום ההגהה');
-    msg.textContent = `✔ ההגהה הושלמה (חויב ₪${data.cost.toFixed(2)})${data.sent ? ' ונשלח ללקוח' : ''}`;
+    msg.textContent = `✔ ההגהה הושלמה (${data.minutes} דק׳, חויב ₪${data.cost.toFixed(2)})${data.sent ? ' ונשלח ללקוח' : ''}`;
     msg.style.color = 'var(--green)';
     setTimeout(() => { location.href = '/admin/dictate?status=proof'; }, 1500);
   } catch (e) {

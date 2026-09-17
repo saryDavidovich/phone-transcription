@@ -225,30 +225,63 @@ class ManuscriptPage(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    # שלב ג' - "הגהה חוזרת": אחרי שהדף נשלח ללקוח (status='done'), הלקוח יכול
-    # לפתוח את קובץ ה-Word שקיבל, לתקן בעצמו בוורד האמיתי, ולשלוח את הקובץ
-    # המתוקן בחזרה במייל (ראה כפתור ב-_send_manuscript_email וההוק ב-
-    # routes/email_inbound.email_inbound - נושא מהצורה "הגהה {טלפון} {page_id}").
-    # proof_status: None - לא בוצעה הגהה מעולם | 'pending' - הלקוח שלח תיקונים,
-    # ממתין לסקירת נציג | 'done' - הנציג סיים לעבד את ההגהה וחויב הלקוח.
+    # שלב ג' - "הגהה חוזרת" (גרסה ישנה, לא בשימוש יותר לכתיבה): אחרי שהדף
+    # נשלח ללקוח, הלקוח יכול לתקן ולשלוח את הקובץ המתוקן בחזרה במייל (ראה
+    # כפתור ב-_send_manuscript_email וההוק ב-routes/email_inbound.email_inbound).
+    # השדות האלה הוחלפו במודל ProofingRound למטה (שתומך בכמה סבבי הגהה
+    # נפרדים על אותו כתב-יד, כל אחד עם שעון/חיוב משלו) - נשארים כאן רק
+    # מטעמי תאימות לאחור/היסטוריה (מיגרציה חד-פעמית מעבירה נתונים ישנים
+    # מכאן ל-proofing_rounds, ראה app.py._migrate_db). קוד חדש לא צריך
+    # לקרוא/לכתוב לשדות האלה - להשתמש ב-page.proofing_rounds במקום.
     proof_status = db.Column(db.String(20), nullable=True, index=True)
-    proof_file_data = db.Column(db.LargeBinary, nullable=True)  # קובץ ה-Word שהלקוח שלח בחזרה עם התיקונים שלו
+    proof_file_data = db.Column(db.LargeBinary, nullable=True)
     proof_original_filename = db.Column(db.String(255), nullable=True)
-    proof_requested_at = db.Column(db.DateTime, nullable=True)  # מתי התקבלה ההגהה מהלקוח
-    proof_completed_at = db.Column(db.DateTime, nullable=True)  # מתי הנציג סיים לעבד אותה
+    proof_requested_at = db.Column(db.DateTime, nullable=True)
+    proof_completed_at = db.Column(db.DateTime, nullable=True)
     proof_cost = db.Column(db.Float, default=0.0)
-    # קובץ ה-Word הסופי שהנציג העלה בחזרה אחרי שערך אותו בוורד האמיתי (עם
-    # השינויים/התיקונים שהלקוח ביקש) - זה מה שנשלח בסוף ללקוח, אם בכלל.
     proof_final_file_data = db.Column(db.LargeBinary, nullable=True)
     proof_final_filename = db.Column(db.String(255), nullable=True)
-    # תוכן ההגהה כפי שנערך בעורך המובנה בדפדפן (עיצוב מלא + חיפוש/החלפה +
-    # בדיקת איות - ראה templates/admin/proof_studio.html ו-routes/dictate.py
-    # proof_save_edited) - אותו מבנה JSON בדיוק כמו content למעלה, כדי
-    # שאפשר להריץ אותו ישירות דרך _build_manuscript_docx. נשמר בנפרד מ-
-    # content (התוכן המקורי שנשלח ללקוח) כדי שהמקור תמיד יישאר נגיש/משוחזר.
     proof_edited_content = db.Column(db.JSON, nullable=True)
 
     customer = db.relationship('Customer', backref='manuscript_pages')
+
+
+class ProofingRound(db.Model):
+    """סבב הגהה בודד על כתב-יד (ManuscriptPage) - אפשר כמה סבבים נפרדים על
+    אותו כתב-יד לאורך זמן (למשל אם הלקוח שולח עוד תיקונים בהמשך אחרי סבב
+    קודם שכבר הושלם), כל אחד עם שעון וחיוב נפרדים לגמרי - ראה
+    routes/dictate.py (studio_proof וכל שאר ה-routes תחת /proof/<round_id>/...).
+    נוצר אוטומטית מתוך routes/email_inbound.py כשמתקבלת תגובת הגהה
+    (_is_proofing_reply). התיקון עצמו יכול להגיע כקובץ Word (אם ללקוח יש
+    מחשב) או כתמונה/PDF (אם תיקן בעט על דף מודפס וצילם/סרק).
+    חיוב: לפי דקות עבודה בפועל (שעון עצר שהנציג מפעיל/עוצר ב-proof_studio.html,
+    ראה timer_started_at/timer_accumulated_seconds) כפול המחיר-לדקה בהגדרות
+    (price_manuscript_proofing) - לא מחיר קבוע לסבב."""
+    __tablename__ = 'proofing_rounds'
+
+    id = db.Column(db.Integer, primary_key=True)
+    manuscript_page_id = db.Column(db.Integer, db.ForeignKey('manuscript_pages.id'), nullable=False, index=True)
+    status = db.Column(db.String(20), default='pending', index=True)  # pending -> done
+
+    customer_file_data = db.Column(db.LargeBinary, nullable=True)  # מה שהלקוח שלח בחזרה (Word/תמונה/PDF)
+    customer_file_filename = db.Column(db.String(255), nullable=True)
+    requested_at = db.Column(db.DateTime, default=datetime.utcnow)  # מתי התקבל הסבב מהלקוח
+    completed_at = db.Column(db.DateTime, nullable=True)  # מתי הנציג סיים וחויב הלקוח
+
+    # שעון עצר החיוב-לפי-דקה (ראה routes/dictate.py proof_timer_start/stop):
+    # timer_started_at != None כשהשעון רץ כרגע; timer_accumulated_seconds
+    # צובר את סך הזמן מכל מקטעי הפעלה/עצירה קודמים (לא כולל מקטע רץ נוכחי).
+    timer_started_at = db.Column(db.DateTime, nullable=True)
+    timer_accumulated_seconds = db.Column(db.Float, default=0.0)
+
+    edited_content = db.Column(db.JSON, nullable=True)  # תוכן ההגהה כפי שנערך בעורך המובנה בדפדפן
+    final_file_data = db.Column(db.LargeBinary, nullable=True)  # קובץ ה-Word הסופי (נשלח ללקוח אם התבקש)
+    final_filename = db.Column(db.String(255), nullable=True)
+    cost = db.Column(db.Float, default=0.0)  # מחושב ונשמר רק בעת סיום מוצלח (proof_complete)
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
+    manuscript_page = db.relationship('ManuscriptPage', backref=db.backref('proofing_rounds', order_by='ProofingRound.created_at'))
 
 
 class OcrResult(db.Model):

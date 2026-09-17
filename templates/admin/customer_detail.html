@@ -207,14 +207,19 @@ function confirmOcrDelete() {
 }
 </script>
 
+{# "🗣️ הקראה ראשונית" - כתבי-היד המקוריים עצמם (מה שנוצר/נשלח ללקוח לראשונה,
+   לפני כל תיקון). עלות ה"הגהה" (התיקונים) מוצגת בנפרד בטבלה למטה, עם סימון
+   ברור לאיזו הקראה כל תיקון שייך - כי אפשר כמה סבבי הגהה נפרדים על אותה
+   הקראה (ראה models.ProofingRound). #}
 <div style="margin-top:20px" class="table-card">
-  <div class="table-header"><span class="table-title">🗣️ הקראת טקסט (כתבי יד)</span></div>
+  <div class="table-header"><span class="table-title">🗣️ הקראה ראשונית (כתבי יד)</span></div>
   <table>
     <thead><tr>
-      <th>תאריך</th><th>קובץ</th><th>תווים</th><th>עלות הקראה</th><th>סטטוס</th><th>הגהה</th><th></th>
+      <th>תאריך</th><th>קובץ</th><th>תווים</th><th>עלות הקראה</th><th>סטטוס</th><th>סבבי הגהה</th><th></th>
     </tr></thead>
     <tbody>
       {% for m in manuscript_pages %}
+      {% set pending_rounds = m.proofing_rounds | selectattr('status', 'equalto', 'pending') | list %}
       <tr>
         <td onclick="location='/admin/dictate/{{m.id}}'" style="cursor:pointer">{{ m.created_at | il_time }}</td>
         <td onclick="location='/admin/dictate/{{m.id}}'" style="cursor:pointer;color:#8892b0;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ m.original_filename }}</td>
@@ -229,14 +234,42 @@ function confirmOcrDelete() {
           {% else %}<span class="badge badge-gray">ממתין</span>{% endif %}
         </td>
         <td>
-          {% if m.proof_status == 'pending' %}<span class="badge badge-blue">✏️ ממתין</span>
-          {% elif m.proof_status == 'done' %}<span class="badge badge-green">בוצע{% if m.proof_cost %} (₪{{ "%.2f"|format(m.proof_cost) }}){% endif %}</span>
+          {% if pending_rounds %}<span class="badge badge-blue">✏️ {{ pending_rounds|length }} ממתין{{ 'ים' if pending_rounds|length > 1 else '' }}</span>
+          {% elif m.proofing_rounds %}<span class="badge badge-green">{{ m.proofing_rounds|length }} הושלמ{{ 'ו' if m.proofing_rounds|length > 1 else '' }}</span>
           {% else %}<span style="color:#8892b0">—</span>{% endif %}
         </td>
-        <td><a href="/admin/dictate/{{m.id}}{% if m.proof_status == 'pending' %}/proof{% endif %}" class="btn btn-ghost" style="font-size:12px;padding:4px 10px">{% if m.proof_status == 'pending' %}פתח הגהה{% elif m.status=='done' %}צפייה{% else %}פתח{% endif %}</a></td>
+        <td><a href="/admin/dictate/{{m.id}}" class="btn btn-ghost" style="font-size:12px;padding:4px 10px">{% if m.status=='done' %}צפייה{% else %}פתח{% endif %}</a></td>
       </tr>
       {% else %}
       <tr><td colspan="7" style="text-align:center;color:#8892b0;padding:24px">אין עדיין הקראות כתב יד ללקוח זה</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{# "✏️ הגהות" - כל סבב תיקונים בנפרד, עם עמודת "שייך להקראה" שמראה בבירור
+   לאיזו הקראה מקורית (מהטבלה למעלה) כל סבב שייך - ראה models.ProofingRound. #}
+<div style="margin-top:20px" class="table-card">
+  <div class="table-header"><span class="table-title">✏️ הגהות (תיקונים)</span></div>
+  <table>
+    <thead><tr>
+      <th>תאריך קבלה</th><th>שייך להקראה</th><th>משך עבודה</th><th>עלות הגהה</th><th>סטטוס</th><th></th>
+    </tr></thead>
+    <tbody>
+      {% for r in proofing_rounds %}
+      <tr>
+        <td onclick="location='/admin/dictate/proof/{{r.id}}'" style="cursor:pointer">{{ r.requested_at | il_time }}</td>
+        <td onclick="location='/admin/dictate/{{r.manuscript_page_id}}'" style="cursor:pointer;color:#8892b0;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.manuscript_page.original_filename }} ({{ r.manuscript_page.created_at | il_time('%d/%m/%y') }})</td>
+        <td onclick="location='/admin/dictate/proof/{{r.id}}'" style="cursor:pointer">{% if r.status == 'done' %}{{ r.timer_accumulated_seconds | minutes_billed }} דק׳{% else %}—{% endif %}</td>
+        <td onclick="location='/admin/dictate/proof/{{r.id}}'" style="cursor:pointer">{% if r.cost %}₪{{ "%.2f"|format(r.cost) }}{% else %}—{% endif %}</td>
+        <td onclick="location='/admin/dictate/proof/{{r.id}}'" style="cursor:pointer">
+          {% if r.status == 'pending' %}<span class="badge badge-blue">✏️ ממתין</span>
+          {% else %}<span class="badge badge-green">בוצע</span>{% endif %}
+        </td>
+        <td><a href="/admin/dictate/proof/{{r.id}}" class="btn btn-ghost" style="font-size:12px;padding:4px 10px">{% if r.status == 'pending' %}פתח הגהה{% else %}צפייה{% endif %}</a></td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" style="text-align:center;color:#8892b0;padding:24px">אין עדיין הגהות ללקוח זה</td></tr>
       {% endfor %}
     </tbody>
   </table>

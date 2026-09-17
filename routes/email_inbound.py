@@ -1410,13 +1410,21 @@ def email_inbound():
                 return jsonify({'status': 'rejected', 'reason': 'no_valid_attachment'}), 200
 
             from datetime import datetime
-            page.proof_file_data = proof_file.read()
-            page.proof_original_filename = proof_file.filename or f'הגהה_{page_id}'
-            page.proof_status = 'pending'
-            page.proof_requested_at = datetime.utcnow()
+            from models import ProofingRound
+            # סבב הגהה חדש ונפרד - אפשר כמה סבבים על אותו כתב-יד לאורך זמן
+            # (למשל אם הלקוח שולח עוד תיקונים אחרי שסבב קודם כבר הושלם),
+            # כל אחד עם שעון וחיוב נפרדים משלו - ראה models.ProofingRound.
+            round_ = ProofingRound(
+                manuscript_page_id=page.id,
+                status='pending',
+                customer_file_data=proof_file.read(),
+                customer_file_filename=proof_file.filename or f'הגהה_{page_id}',
+                requested_at=datetime.utcnow(),
+            )
+            db.session.add(round_)
             db.session.commit()
-            log.info(f"email-inbound: התקבלה הגהה חדשה לדף כתב-יד {page_id} מלקוח {phone}")
-            return jsonify({'status': 'ok', 'reason': 'proofing_received'}), 200
+            log.info(f"email-inbound: התקבל סבב הגהה חדש (round={round_.id}) לדף כתב-יד {page_id} מלקוח {phone}")
+            return jsonify({'status': 'ok', 'reason': 'proofing_received', 'round_id': round_.id}), 200
 
     # תגובת לקוח בהתכתבות עם המנהל - נושא שונה לגמרי ("שירות לקוחות {טלפון}"),
     # לא תלויה ביתרה, לא דורשת קובץ מצורף, ולא עוברת בתמלול/OCR בכלל.

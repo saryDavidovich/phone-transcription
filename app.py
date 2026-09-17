@@ -107,6 +107,18 @@ def create_app():
 
     app.jinja_env.filters['yemot_rec_number'] = yemot_rec_number
 
+    # מספר הדקות שיחויבו עבור סבב הגהה (מעגל כלפי מעלה לדקה שלמה - ראה
+    # routes/dictate.py._proofing_minutes_billed, אותו חישוב בדיוק, כאן
+    # כפילטר לשימוש בתבניות כמו customer_detail.html).
+    import math as _math
+
+    def minutes_billed(seconds):
+        if not seconds or seconds <= 0:
+            return 0
+        return int(_math.ceil(seconds / 60.0))
+
+    app.jinja_env.filters['minutes_billed'] = minutes_billed
+
     logging.basicConfig(level=logging.INFO)
     return app
 
@@ -270,6 +282,41 @@ def _migrate_db():
         # עורך הגהה מובנה בדפדפן (עיצוב מלא/חיפוש-החלפה/בדיקת איות) - ראה
         # models.ManuscriptPage.proof_edited_content ו-routes/dictate.py.proof_save_edited
         "ALTER TABLE manuscript_pages ADD COLUMN IF NOT EXISTS proof_edited_content JSONB",
+        # סבבי הגהה נפרדים עם חיוב לפי דקות (ראה models.ProofingRound) -
+        # מחליף את שדות ה-proof_* הבודדים שהיו ישירות על manuscript_pages
+        # (תמיכה בכמה סבבי הגהה נפרדים על אותו כתב-יד, כל אחד עם שעון משלו).
+        """CREATE TABLE IF NOT EXISTS proofing_rounds (
+                id SERIAL PRIMARY KEY,
+                manuscript_page_id INTEGER NOT NULL REFERENCES manuscript_pages(id),
+                status VARCHAR(20) DEFAULT 'pending',
+                customer_file_data BYTEA,
+                customer_file_filename VARCHAR(255),
+                requested_at TIMESTAMP DEFAULT NOW(),
+                completed_at TIMESTAMP,
+                timer_started_at TIMESTAMP,
+                timer_accumulated_seconds FLOAT DEFAULT 0.0,
+                edited_content JSONB,
+                final_file_data BYTEA,
+                final_filename VARCHAR(255),
+                cost FLOAT DEFAULT 0.0,
+                created_at TIMESTAMP DEFAULT NOW()
+            )""",
+        "CREATE INDEX IF NOT EXISTS ix_proofing_rounds_manuscript_page_id ON proofing_rounds (manuscript_page_id)",
+        "CREATE INDEX IF NOT EXISTS ix_proofing_rounds_status ON proofing_rounds (status)",
+        # מיגרציה חד-פעמית ואידמפוטנטית (ראה WHERE NOT EXISTS) - מעבירה כל
+        # סבב הגהה "ישן" שהיה שמור ישירות על manuscript_pages (מהגרסה שלפני
+        # ProofingRound) לשורה מתאימה בטבלה החדשה, כדי שלא ייעלם מידע היסטורי.
+        # timer_accumulated_seconds נשאר 0 עבור נתונים ישנים אלה - הם חויבו
+        # במחיר קבוע לסבב (הגרסה הקודמת), לא לפי זמן.
+        """INSERT INTO proofing_rounds
+                (manuscript_page_id, status, customer_file_data, customer_file_filename,
+                 requested_at, completed_at, edited_content, final_file_data, final_filename, cost, created_at)
+           SELECT id, proof_status, proof_file_data, proof_original_filename,
+                  COALESCE(proof_requested_at, created_at), proof_completed_at, proof_edited_content,
+                  proof_final_file_data, proof_final_filename, COALESCE(proof_cost, 0), COALESCE(proof_requested_at, created_at)
+           FROM manuscript_pages
+           WHERE proof_status IS NOT NULL
+             AND NOT EXISTS (SELECT 1 FROM proofing_rounds WHERE manuscript_page_id = manuscript_pages.id)""",
         # מסך "פעילות מערכת" (/admin/maintenance) - מעקב עבודות רקע פעילות
         # (ראה models.ActiveJob, services/job_tracker.py) + מצב תחזוקה שדוחה
         # שיחות טלפון חדשות עד שמכבים אותו (ראה routes/api.py /api/transcribe)
