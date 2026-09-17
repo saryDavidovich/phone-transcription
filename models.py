@@ -9,6 +9,12 @@ class Customer(db.Model):
     name = db.Column(db.String(100))
     email = db.Column(db.String(200))
     fax = db.Column(db.String(20))
+    # קוד אישי (5 ספרות, ייחודי) שהלקוח כותב יחד עם הטלפון שלו בעמוד הראשון
+    # כשהוא שולח פקס נכנס למערכת - עוזר לנציג לזהות בוודאות למי הפקס שייך
+    # (בנוסף לטלפון שכתוב), במיוחד אם הכתב יד לא ברור. נוצר עצלנית (lazy) -
+    # ראה routes/dictate.py._ensure_customer_fax_code - ולא בהכרח קיים לכל
+    # לקוח ישן. ראה גם models.IncomingFax לשיוך פקסים נכנסים שהתקבלו.
+    fax_code = db.Column(db.String(10), unique=True, nullable=True, index=True)
     balance = db.Column(db.Float, default=0.0)
     is_blocked = db.Column(db.Boolean, default=False)
     delivery_method = db.Column(db.String(10), default='email')
@@ -282,6 +288,38 @@ class ProofingRound(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
 
     manuscript_page = db.relationship('ManuscriptPage', backref=db.backref('proofing_rounds', order_by='ProofingRound.created_at'))
+
+
+class IncomingFax(db.Model):
+    """פקס נכנס גולמי שהתקבל דרך מודול 'קבלת פקסים' של ימות המשיח (מוגדר
+    לשלוח את הפקס במייל לכתובת ייעודית - ראה routes/email_inbound.py.
+    FAX_INBOUND_EMAIL/_handle_incoming_fax). בניגוד לתגובת הגהה במייל, אין
+    כאן שום נושא/כתובת-שולח מזהה - לכן הפקס נשמר "לא משויך" (status=pending)
+    ונציג משייך אותו ידנית (שיוך אנושי לגמרי, ללא OCR אוטומטי - ראה
+    routes/dictate.py fax_inbox/fax_assign_*) לפי מה שכתוב בעמוד הראשון של
+    הפקס עצמו (טלפון + קוד אישי - ראה Customer.fax_code): או ככתב יד חדש
+    להקראה, או כסבב הגהה חדש על כתב יד קיים. שימושי רק בעולם הקראת כתבי היד
+    - לא קשור לתמלול/OCR הרגיל."""
+    __tablename__ = 'incoming_faxes'
+
+    id = db.Column(db.Integer, primary_key=True)
+    received_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+    from_email = db.Column(db.String(255), nullable=True)  # כתובת ה"שולח" בפועל של המייל שימות שלחה - לרוב לא שימושי לזיהוי לקוח, רק לדיבוג
+    raw_subject = db.Column(db.String(500), nullable=True)
+    filename = db.Column(db.String(255), nullable=True)
+    file_data = db.Column(db.LargeBinary, nullable=True)
+
+    status = db.Column(db.String(20), default='pending', index=True)  # pending -> assigned / ignored
+    assigned_customer_id = db.Column(db.Integer, db.ForeignKey('customers.id'), nullable=True, index=True)
+    assigned_manuscript_page_id = db.Column(db.Integer, db.ForeignKey('manuscript_pages.id'), nullable=True)
+    assigned_proofing_round_id = db.Column(db.Integer, db.ForeignKey('proofing_rounds.id'), nullable=True)
+    assigned_at = db.Column(db.DateTime, nullable=True)
+    assigned_by = db.Column(db.String(100), nullable=True)  # username הנציג ששייך/התעלם
+    note = db.Column(db.String(500), nullable=True)  # לדוגמה "עמוד ריק" / "לא קריא" בעת התעלמות
+
+    customer = db.relationship('Customer', foreign_keys=[assigned_customer_id])
+    manuscript_page = db.relationship('ManuscriptPage', foreign_keys=[assigned_manuscript_page_id])
+    proofing_round = db.relationship('ProofingRound', foreign_keys=[assigned_proofing_round_id])
 
 
 class OcrResult(db.Model):

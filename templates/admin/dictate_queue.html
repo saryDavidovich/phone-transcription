@@ -12,7 +12,45 @@
   <a href="/admin/dictate?status=proof_done" class="btn {% if status_filter=='proof_done' %}btn-primary{% else %}btn-ghost{% endif %}" style="font-size:13px">
     📗 הגהות שהושלמו{% if proof_done_count %} <span class="badge badge-gray" style="margin-right:4px">{{ proof_done_count }}</span>{% endif %}
   </a>
+  <a href="/admin/dictate?status=fax" class="btn {% if status_filter=='fax' %}btn-primary{% else %}btn-ghost{% endif %}" style="font-size:13px">
+    📠 פקסים ממתינים לשיוך{% if fax_pending_count %} <span class="badge badge-red" style="margin-right:4px">{{ fax_pending_count }}</span>{% endif %}
+  </a>
 </div>
+
+{% if status_filter == 'fax' %}
+<div class="table-card">
+  <div class="table-header">
+    <span class="table-title">📠 פקסים ממתינים לשיוך ({{ incoming_faxes|length }})</span>
+  </div>
+  <div style="padding:10px 16px;background:#eff6ff;color:#1e3a8a;font-size:12.5px;border-bottom:1px solid #dbeafe">
+    כל פקס כאן התקבל דרך מספר הפקס של המערכת ועדיין לא שויך לאף לקוח. יש לפתוח כל פקס, לבדוק את הטלפון והקוד האישי שכתובים בעמוד הראשון, ולשייך אותו ידנית.
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th>התקבל</th>
+        <th>קובץ</th>
+        <th>מאת (טכני)</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for f in incoming_faxes %}
+      <tr>
+        <td onclick="location='/admin/dictate/fax/{{f.id}}'" style="cursor:pointer;color:#8892b0">{{ f.received_at | il_time }}</td>
+        <td onclick="location='/admin/dictate/fax/{{f.id}}'" style="cursor:pointer;color:#8892b0;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ f.filename or '—' }}</td>
+        <td onclick="location='/admin/dictate/fax/{{f.id}}'" style="cursor:pointer;color:#8892b0;font-size:12px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ f.from_email or '—' }}</td>
+        <td>
+          <a href="/admin/dictate/fax/{{f.id}}" class="btn btn-primary" style="font-size:12px;padding:4px 10px">🔎 שיוך</a>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4" style="text-align:center;color:#8892b0;padding:24px">אין פקסים ממתינים לשיוך כרגע</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
 
 {% if status_filter == 'proof' %}
 <div class="table-card">
@@ -85,6 +123,8 @@
   </table>
 </div>
 
+{% elif status_filter == 'fax' %}
+{# הטבלה כבר הוצגה למעלה (לפני הבלוק הזה), לא צריך כפילות כאן #}
 {% else %}
 <div class="table-card">
   <div class="table-header">

@@ -91,6 +91,13 @@
         <input class="form-input" name="price_manuscript_proofing" type="number" step="0.01" min="0" value="{{ settings.price_manuscript_proofing }}">
         <div style="font-size:11px;color:#4a5568;margin-top:4px">כשהלקוח שולח בחזרה תיקוני הגהה (קובץ Word, או תמונה/PDF של דף מודפס עם תיקונים בכתב יד) - הנציג מפעיל שעון עצר בזמן שהוא מתקן, וזה המחיר לכל דקת עבודה בפועל (מעוגל כלפי מעלה לדקה שלמה). מחויב רק כשהנציג מסמן את ההגהה כהושלמה.</div>
       </div>
+      <div class="form-group">
+        <label class="form-label">מספר הפקס לקבלת כתבי יד/הגהות (כולל קידומת 153)</label>
+        <input class="form-input" name="fax_inbound_number" type="text" value="{{ settings.fax_inbound_number }}" placeholder="לדוגמה: 153-021234567">
+        <div style="font-size:11px;color:#4a5568;margin-top:4px">
+          מוצג ללקוח במייל ככתובת חלופית לשליחת כתב יד חדש או תיקוני הגהה למי שאין לו מייל/מחשב בכלל. דורש הגדרה מקדימה אצל ימות המשיח: שלוחת "קבלת פקסים" (type=recv_fax) עם העברה אוטומטית במייל (set_ok_send_mail=yes) לכתובת FAX_INBOUND_EMAIL (משתנה סביבה - ברירת מחדל: fax@ + אותו דומיין כמו כתובת המייל לתמלולים). כל פקס נכנס לא משויך אוטומטית ללקוח - נציג משייך אותו ידנית בלשונית "📠 פקסים ממתינים לשיוך" בתור ההקראה, לפי הטלפון והקוד האישי (5 ספרות) שהלקוח כותב בעמוד הראשון.
+        </div>
+      </div>
 
       <div class="form-group">
         <label class="form-label" style="font-size:14px;font-weight:700">🎁 הגדרות בונוס טעינה (מבצע)</label>

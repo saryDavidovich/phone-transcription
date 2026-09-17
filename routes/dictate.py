@@ -55,13 +55,14 @@ from html import escape as _html_escape
 import math
 import time
 import uuid
+import random
 import base64
 import mimetypes
 import logging
 import threading
 from datetime import datetime
 
-from flask import Blueprint, render_template, request, jsonify, send_file, current_app, abort, url_for
+from flask import Blueprint, render_template, request, jsonify, send_file, current_app, abort, url_for, flash, redirect
 from flask_login import login_required, current_user
 
 from app import db
@@ -691,11 +692,30 @@ def _proofing_mailto_link(phone, page_id):
 def _send_manuscript_email(to_email, customer_name, customer_phone, page_id, original_filename, content):
     import sendgrid
     from sendgrid.helpers.mail import Mail, Attachment, FileContent, FileName, FileType, Disposition, Email
+    from models import Customer
 
     docx_bytes = _build_manuscript_docx(customer_name, original_filename, content)
     docx_b64 = base64.b64encode(docx_bytes).decode('utf-8')
     preview = _content_to_plain_preview(content)
     proofing_link = _proofing_mailto_link(customer_phone, page_id)
+
+    # אופציית פקס - למי שאין לו בכלל גישה למייל/מחשב (לא רק "אין מחשב לתקן
+    # בו", אלא גם לא יודע לשלוח מייל בעצמו). מוצג רק אם הוגדר מספר פקס
+    # נכנס בהגדרות (fax_inbound_number) - ראה routes/admin.py/settings.html.
+    fax_section = ''
+    fax_number = None
+    try:
+        from routes.admin import get_setting
+        fax_number = (get_setting('fax_inbound_number', '') or '').strip()
+    except Exception:
+        fax_number = None
+    if fax_number:
+        customer = Customer.query.filter_by(phone=customer_phone).first()
+        fax_code = _ensure_customer_fax_code(customer) if customer else ''
+        fax_section = f'''
+<div style="background:#fef3c7;border-right:4px solid #d97706;padding:16px;margin:16px 0;border-radius:8px;text-align:center">
+<p style="margin:0 0 10px;line-height:1.7">אין לך גם מייל וגם לא גישה נוחה לצילום/סריקה? אפשר גם לשלוח פקס למספר <strong>{fax_number}</strong>. חשוב: יש לכתוב בעמוד הראשון של הפקס בבירור את הטלפון שלך ({customer_phone}) ואת הקוד האישי שלך: <strong>{fax_code}</strong> - כדי שנוכל לשייך את הפקס אליך.</p>
+</div>'''
 
     html = f'''<div dir="rtl" style="font-family:Arial,sans-serif;max-width:600px;margin:auto">
 <h2 style="color:#1d4ed8">כתב יד - {original_filename}</h2>
@@ -707,7 +727,7 @@ def _send_manuscript_email(to_email, customer_name, customer_phone, page_id, ori
 <p style="margin:0 0 12px;line-height:1.7">מצאת טעות או רוצה לתקן משהו בקובץ המצורף? יש לך מחשב? אפשר לתקן ישירות בקובץ ה-Word המצורף ולשלוח אותו בחזרה. אין לך גישה נוחה למחשב? אפשר להדפיס את הקובץ, לתקן בעט על הדף, ולצלם או לסרוק את הדף המתוקן ולשלוח בחזרה כתמונה - שתי הדרכים עובדות.</p>
 <a href="{proofing_link}" style="background:#2563eb;color:#fff;text-decoration:none;padding:10px 20px;border-radius:6px;font-weight:700;display:inline-block">✏️ שליחת תיקוני הגהה</a>
 <p style="margin:12px 0 0;font-size:12px;color:#6b7280">הכפתור פותח טיוטת מייל מוכנה - רק צריך לצרף את קובץ ה-Word המתוקן, או צילום/סריקה של הדף המתוקן בכתב יד, ולשלוח</p>
-</div>
+</div>{fax_section}
 </div>'''
 
     sg = sendgrid.SendGridAPIClient(api_key=os.environ.get('SENDGRID_API_KEY'))
@@ -803,11 +823,12 @@ def _docx_paragraphs_html(docx_bytes):
 @dictate_bp.route('')
 @login_required
 def queue():
-    from models import ManuscriptPage, ProofingRound
+    from models import ManuscriptPage, ProofingRound, IncomingFax
     status_filter = request.args.get('status', 'open')
     q = ManuscriptPage.query
     pages = []
     proof_rounds = []
+    incoming_faxes = []
     if status_filter == 'open':
         q = q.filter(ManuscriptPage.status.in_(OPEN_STATUSES))
         q = q.order_by(ManuscriptPage.created_at.asc())  # תור - הישן קודם
@@ -825,15 +846,21 @@ def queue():
         # סבבי הגהה שכבר הושלמו וחויבו.
         proof_rounds = (ProofingRound.query.filter_by(status='done')
                          .order_by(ProofingRound.completed_at.desc()).limit(200).all())
+    elif status_filter == 'fax':
+        # פקסים נכנסים גולמיים שממתינים לשיוך ידני של נציג - ראה models.IncomingFax
+        incoming_faxes = (IncomingFax.query.filter_by(status='pending')
+                           .order_by(IncomingFax.received_at.asc()).limit(200).all())
     else:
         q = q.order_by(ManuscriptPage.created_at.desc())
         pages = q.limit(200).all()
 
     proof_pending_count = ProofingRound.query.filter_by(status='pending').count()
     proof_done_count = ProofingRound.query.filter_by(status='done').count()
+    fax_pending_count = IncomingFax.query.filter_by(status='pending').count()
     return render_template('admin/dictate_queue.html', pages=pages, proof_rounds=proof_rounds,
+                            incoming_faxes=incoming_faxes,
                             status_filter=status_filter, proof_pending_count=proof_pending_count,
-                            proof_done_count=proof_done_count)
+                            proof_done_count=proof_done_count, fax_pending_count=fax_pending_count)
 
 
 def _manuscript_file_bytes(page):
@@ -1580,5 +1607,194 @@ def delete_proof_request(round_id):
     else:
         flash('לא ניתן לבטל סבב הגהה שכבר הושלם')
     return redirect(url_for('dictate.queue', status='proof'))
+
+
+# ==========================================================================
+# פקס נכנס - הלקוח שולח פקס (במקום/בנוסף למייל) למספר המערכת, עם 153
+# כקידומת (ראה מודול "קבלת פקסים" של ימות המשיח). ימות מעבירה כל פקס נכנס
+# במייל לכתובת ייעודית (routes/email_inbound.py.FAX_INBOUND_EMAIL), ומשם
+# הוא נשמר כ-IncomingFax "לא משויך" - כאן הנציג משייך אותו ידנית (בלי OCR
+# אוטומטי, לפי החלטה מפורשת) לפי מה שכתוב בעמוד הראשון של הפקס עצמו (טלפון
+# + קוד אישי - ראה _ensure_customer_fax_code למטה), או ככתב יד חדש להקראה,
+# או כסבב הגהה חדש על כתב יד קיים של אותו לקוח.
+# ==========================================================================
+
+def _generate_fax_code():
+    """קוד אישי בן 5 ספרות (מספרי בלבד - קל לכתוב ולקרוא על דף), ייחודי בין
+    הלקוחות. נוצר עצלנית - לא לכל הלקוחות יש כזה, רק מי שבאמת קיבל הנחיה
+    לשלוח פקס (ראה _ensure_customer_fax_code)."""
+    from models import Customer
+    for _ in range(30):
+        candidate = ''.join(random.choices('0123456789', k=5))
+        if not Customer.query.filter_by(fax_code=candidate).first():
+            return candidate
+    raise RuntimeError('לא ניתן היה ליצור קוד פקס פנוי')
+
+
+def _ensure_customer_fax_code(customer):
+    """מחזיר את קוד הפקס האישי של הלקוח - יוצר ושומר אחד חדש אם עדיין אין
+    לו (למשל לקוח ותיק, או שליחת מייל ראשונה שלו)."""
+    if not customer.fax_code:
+        customer.fax_code = _generate_fax_code()
+        db.session.commit()
+    return customer.fax_code
+
+
+@dictate_bp.route('/fax/<int:fax_id>')
+@login_required
+def fax_assign(fax_id):
+    """מסך שיוך פקס נכנס - הנציג רואה את הפקס עצמו (מוצג כ-PDF, בדיוק כמו
+    כתב-היד/הקובץ שהתקבל בהגהה - ראה _file_to_pdf_data_uri), מחפש את הלקוח
+    לפי הטלפון/קוד שכתובים על הדף, ובוחר האם זה כתב יד חדש להקראה או סבב
+    הגהה על כתב יד קיים שלו."""
+    from models import IncomingFax
+    fax = IncomingFax.query.get_or_404(fax_id)
+    data_uri, is_pdf = _file_to_pdf_data_uri(fax.file_data, fax.filename or 'fax.pdf', log_context=f'incoming fax={fax.id}')
+
+    selected_customer = None
+    customer_pages = []
+    customer_id = request.args.get('customer_id', type=int)
+    if customer_id:
+        from models import Customer, ManuscriptPage
+        selected_customer = Customer.query.get(customer_id)
+        if selected_customer:
+            customer_pages = (ManuscriptPage.query.filter_by(customer_id=selected_customer.id)
+                               .order_by(ManuscriptPage.created_at.desc()).all())
+
+    return render_template(
+        'admin/fax_assign.html',
+        fax=fax,
+        data_uri=data_uri,
+        is_pdf=is_pdf,
+        selected_customer=selected_customer,
+        customer_pages=customer_pages,
+    )
+
+
+@dictate_bp.route('/fax/customer-search')
+@login_required
+def fax_customer_search():
+    """חיפוש לקוח לפי טלפון או קוד פקס אישי - לשימוש במסך שיוך הפקס
+    (fax_assign.html, JS). התאמה חלקית על טלפון, מדויקת על קוד (5 ספרות)."""
+    from models import Customer
+    q = (request.args.get('q') or '').strip()
+    if not q:
+        return jsonify({'results': []})
+    matches = (Customer.query.filter(
+        db.or_(Customer.phone.ilike(f'%{q}%'), Customer.fax_code == q)
+    ).order_by(Customer.created_at.desc()).limit(15).all())
+    return jsonify({'results': [
+        {'id': c.id, 'phone': c.phone, 'name': c.name or '', 'fax_code': c.fax_code or ''}
+        for c in matches
+    ]})
+
+
+@dictate_bp.route('/fax/<int:fax_id>/assign-new', methods=['POST'])
+@login_required
+def fax_assign_new(fax_id):
+    """משייך את הפקס ככתב יד חדש להקראה עבור הלקוח שנבחר - נכנס לתור הרגיל
+    ('בתור') בדיוק כמו כתב יד שמתקבל במייל (ראה email_inbound._capture_manuscript_page)."""
+    from models import IncomingFax, Customer, ManuscriptPage
+    fax = IncomingFax.query.get_or_404(fax_id)
+    if fax.status != 'pending':
+        return jsonify({'error': 'הפקס הזה כבר שויך/טופל'}), 400
+    customer_id = request.form.get('customer_id', type=int)
+    customer = Customer.query.get(customer_id) if customer_id else None
+    if not customer:
+        return jsonify({'error': 'יש לבחור לקוח'}), 400
+
+    page = ManuscriptPage(
+        customer_id=customer.id,
+        original_filename=f"פקס נכנס - {fax.received_at.strftime('%d-%m-%Y') if fax.received_at else ''}".strip(' -'),
+        file_data=fax.file_data,
+        status='pending',
+    )
+    db.session.add(page)
+    db.session.flush()
+
+    fax.status = 'assigned'
+    fax.assigned_customer_id = customer.id
+    fax.assigned_manuscript_page_id = page.id
+    fax.assigned_at = datetime.utcnow()
+    fax.assigned_by = getattr(current_user, 'username', None)
+    db.session.commit()
+    log.info(f"fax_assign_new: פקס {fax.id} שויך ככתב יד חדש (page={page.id}) ללקוח {customer.id}")
+    flash('הפקס שויך ככתב יד חדש - נכנס לתור ההקראה')
+    return redirect(url_for('dictate.queue', status='fax'))
+
+
+@dictate_bp.route('/fax/<int:fax_id>/assign-proof', methods=['POST'])
+@login_required
+def fax_assign_proof(fax_id):
+    """משייך את הפקס כסבב הגהה חדש על כתב יד קיים שנבחר - בדיוק כמו תגובת
+    הגהה שמגיעה במייל (ראה email_inbound._handle_proofing_reply /
+    ProofingRound)."""
+    from models import IncomingFax, Customer, ManuscriptPage, ProofingRound
+    fax = IncomingFax.query.get_or_404(fax_id)
+    if fax.status != 'pending':
+        return jsonify({'error': 'הפקס הזה כבר שויך/טופל'}), 400
+    customer_id = request.form.get('customer_id', type=int)
+    page_id = request.form.get('page_id', type=int)
+    customer = Customer.query.get(customer_id) if customer_id else None
+    if not customer:
+        return jsonify({'error': 'יש לבחור לקוח'}), 400
+    page = ManuscriptPage.query.filter_by(id=page_id, customer_id=customer.id).first() if page_id else None
+    if not page:
+        return jsonify({'error': 'יש לבחור כתב יד קיים של הלקוח הזה'}), 400
+
+    round_ = ProofingRound(
+        manuscript_page_id=page.id,
+        status='pending',
+        customer_file_data=fax.file_data,
+        customer_file_filename=fax.filename or f'פקס_{fax.id}.pdf',
+        requested_at=datetime.utcnow(),
+    )
+    db.session.add(round_)
+    db.session.flush()
+
+    fax.status = 'assigned'
+    fax.assigned_customer_id = customer.id
+    fax.assigned_proofing_round_id = round_.id
+    fax.assigned_at = datetime.utcnow()
+    fax.assigned_by = getattr(current_user, 'username', None)
+    db.session.commit()
+    log.info(f"fax_assign_proof: פקס {fax.id} שויך כסבב הגהה חדש (round={round_.id}) על כתב יד {page.id}")
+    flash('הפקס שויך כסבב הגהה חדש')
+    return redirect(url_for('dictate.queue', status='fax'))
+
+
+@dictate_bp.route('/fax/<int:fax_id>/ignore', methods=['POST'])
+@login_required
+def fax_ignore(fax_id):
+    """מסמן פקס כלא-רלוונטי (למשל עמוד ריק/לא קריא/פקס שגוי) בלי לשייך אותו
+    לאף לקוח - נשאר בתיעוד ההיסטורי (IncomingFax) עם הערה, לא נמחק."""
+    from models import IncomingFax
+    fax = IncomingFax.query.get_or_404(fax_id)
+    if fax.status == 'pending':
+        fax.status = 'ignored'
+        fax.note = (request.form.get('note') or '').strip()[:500] or None
+        fax.assigned_at = datetime.utcnow()
+        fax.assigned_by = getattr(current_user, 'username', None)
+        db.session.commit()
+        flash('הפקס סומן כלא-רלוונטי')
+    return redirect(url_for('dictate.queue', status='fax'))
+
+
+@dictate_bp.route('/fax/<int:fax_id>/download')
+@login_required
+def fax_download(fax_id):
+    """הורדת קובץ הפקס הגולמי כפי שהתקבל מימות - לפתיחה חיצונית אם התצוגה
+    המוטמעת לא ברורה מספיק."""
+    from models import IncomingFax
+    fax = IncomingFax.query.get_or_404(fax_id)
+    if not fax.file_data:
+        abort(404)
+    mimetype = mimetypes.guess_type(fax.filename or '')[0] or 'application/pdf'
+    return send_file(
+        io.BytesIO(fax.file_data),
+        mimetype=mimetype,
+        as_attachment=True,
+        download_name=fax.filename or f'פקס_{fax_id}.pdf',
+    )
 
 

@@ -73,6 +73,19 @@ def _is_system_inbound_address(email):
     """
     return (email or '').strip().lower() == TRANSCRIBE_INBOUND_EMAIL.strip().lower()
 
+
+# כתובת מייל ייעודית שאליה מודול "קבלת פקסים" של ימות המשיח (type=recv_fax,
+# set_ok_send_mail=yes, email_address=<הכתובת הזו>) שולח כל פקס נכנס - נפרדת
+# לגמרי מ-TRANSCRIBE_INBOUND_EMAIL, כדי שנוכל להבחין בוודאות בין "מייל רגיל
+# מלקוח" לבין "פקס גולמי מימות" בלי להסתמך על נושא/שולח לא ידועים מראש (ראה
+# _handle_incoming_fax למטה, ו-models.IncomingFax). ברירת המחדל היא אותו דומיין
+# כמו TRANSCRIBE_INBOUND_EMAIL - יש להגדיר את הכתובת הזו בדיוק ב-Yemot.
+FAX_INBOUND_EMAIL = os.environ.get('FAX_INBOUND_EMAIL', f"fax@{TRANSCRIBE_INBOUND_EMAIL.split('@')[-1]}")
+
+
+def _is_fax_inbound_address(email):
+    return (email or '').strip().lower() == FAX_INBOUND_EMAIL.strip().lower()
+
 # תיקייה לשמירת קבצי אודיו שהתקבלו במייל (משם הם מוגשים חזרה כ-rec_url)
 RECORDINGS_EMAIL_DIR = os.environ.get('RECORDINGS_EMAIL_DIR', 'recordings_email')
 os.makedirs(RECORDINGS_EMAIL_DIR, exist_ok=True)
@@ -573,6 +586,47 @@ def _pick_proof_file():
         if mime == DOCX_MIME or ext in PROOF_FILE_EXTS or mime.startswith('image/') or mime == 'application/pdf':
             return f
     return None
+
+
+def _pick_fax_file():
+    """מאתר את קובץ הפקס המצורף - ימות שולחת אותו בד"כ כ-PDF, אבל לא סומכים
+    על סיומת/mime ספציפיים (בניגוד ל-_pick_proof_file): כל קובץ מצורף
+    בפקס הנכנס הוא בהגדרה תוכן הפקס עצמו, לא צריך לסנן."""
+    if not request.files:
+        return None
+    for key in request.files:
+        f = request.files[key]
+        if f and f.filename:
+            return f
+    return None
+
+
+def _handle_incoming_fax(sender_email, subject, db):
+    """מטפל בפקס נכנס גולמי שהתקבל דרך מודול 'קבלת פקסים' של ימות המשיח,
+    שהוגדר להעביר במייל לכתובת FAX_INBOUND_EMAIL (ראה שם). אין כאן שום
+    נושא/שולח מזהה שאפשר לסמוך עליו - בשונה מתגובת הגהה רגילה במייל - לכן
+    שומרים כ-IncomingFax "לא משויך" (status=pending), ונציג משייך ידנית
+    בהמשך (ראה routes/dictate.py fax_inbox/fax_assign_*) לפי מה שכתוב
+    בעמוד הראשון של הפקס עצמו (טלפון + קוד אישי)."""
+    from datetime import datetime
+    from models import IncomingFax
+    fax_file = _pick_fax_file()
+    if not fax_file:
+        log.warning(f"email-inbound: פקס נכנס בלי קובץ מצורף (from={sender_email}, subject={subject!r})")
+        return jsonify({'status': 'rejected', 'reason': 'no_attachment'}), 200
+
+    fax = IncomingFax(
+        received_at=datetime.utcnow(),
+        from_email=sender_email,
+        raw_subject=(subject or '')[:500],
+        filename=fax_file.filename,
+        file_data=fax_file.read(),
+        status='pending',
+    )
+    db.session.add(fax)
+    db.session.commit()
+    log.info(f"email-inbound: התקבל פקס נכנס חדש (fax_id={fax.id}, from={sender_email}, filename={fax_file.filename!r}) - ממתין לשיוך ידני")
+    return jsonify({'status': 'ok', 'reason': 'fax_received', 'fax_id': fax.id}), 200
 
 
 def _capture_manuscript_page(filepath, original_filename, customer, db):
@@ -1369,9 +1423,19 @@ def email_inbound():
         log.warning("email-inbound: לא נמצא Message-ID בכותרות - לא ניתן להגן מפני כפילות עבור בקשה זו")
 
     sender_email = _extract_sender_email(request.form.get('from', ''))
+    to_email = _extract_sender_email(request.form.get('to', ''))
     subject = request.form.get('subject', '')
     attachment_names = [request.files[k].filename for k in request.files if request.files[k] and request.files[k].filename]
-    log.info(f"email-inbound: webhook התקבל - from={sender_email!r} subject={subject!r} attachments={attachment_names}")
+    log.info(f"email-inbound: webhook התקבל - from={sender_email!r} to={to_email!r} subject={subject!r} attachments={attachment_names}")
+
+    # פקס נכנס גולמי מימות המשיח (מודול "קבלת פקסים", מוגדר להעביר במייל
+    # לכתובת ייעודית - ראה FAX_INBOUND_EMAIL למעלה) - נבדק לפי כתובת היעד
+    # (to), לא לפי נושא/שולח שאין עליהם שום שליטה/פורמט ידוע מראש כמו בתגובת
+    # הגהה רגילה. חייב להיבדק לפני כל שאר הבדיקות (הן מסתמכות על נושא בפורמט
+    # מסוים, שלא רלוונטי כאן בכלל).
+    if _is_fax_inbound_address(to_email):
+        with app.app_context():
+            return _handle_incoming_fax(sender_email, subject, db)
 
     # תגובת הגהה - הלקוח שלח בחזרה קובץ Word עם תיקונים משלו, בעקבות הכפתור
     # שמופיע במייל ההקראה (routes/dictate.py._proofing_mailto_link). נושא

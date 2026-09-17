@@ -801,6 +801,7 @@ def settings():
         set_setting('manuscript_char_unit_size', request.form.get('manuscript_char_unit_size', '1000'))
         set_setting('price_per_manuscript_char_unit', request.form.get('price_per_manuscript_char_unit', '0.10'))
         set_setting('price_manuscript_proofing', request.form.get('price_manuscript_proofing', '5.00'))
+        set_setting('fax_inbound_number', request.form.get('fax_inbound_number', ''))
         set_setting('yemot_token', request.form.get('yemot_token', ''))
         set_setting('yemot_log_path', request.form.get('yemot_log_path', 'ivr2:/199/LogCreditCardOK.ymgr'))
         set_setting('payment_callback_secret', request.form.get('payment_callback_secret', ''))
@@ -828,6 +829,7 @@ def settings():
         'manuscript_char_unit_size': get_setting('manuscript_char_unit_size', '1000'),
         'price_per_manuscript_char_unit': get_setting('price_per_manuscript_char_unit', '0.10'),
         'price_manuscript_proofing': get_setting('price_manuscript_proofing', '5.00'),
+        'fax_inbound_number': get_setting('fax_inbound_number', ''),
         'yemot_token': get_setting('yemot_token', ''),
         'yemot_log_path': get_setting('yemot_log_path', 'ivr2:/199/LogCreditCardOK.ymgr'),
         'payment_callback_secret': get_setting('payment_callback_secret', ''),

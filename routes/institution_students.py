@@ -247,10 +247,17 @@ def export_excel():
 @institution_students_bp.route('/institution/students/<int:student_id>')
 @institution_login_required
 def student_detail(student_id):
+    from models import ManuscriptPage
     student = Customer.query.filter_by(id=student_id, institution_id=current_user.id).first_or_404()
     recordings = Recording.query.filter_by(customer_id=student.id).order_by(Recording.created_at.desc()).all()
     transactions = Transaction.query.filter_by(customer_id=student.id).order_by(Transaction.created_at.desc()).limit(30).all()
-    return render_template('institution/student_detail.html', student=student, recordings=recordings, transactions=transactions)
+    # כתבי יד להקראה (ראה routes/dictate.py) שהמוסד העלה/שהתקבלו עבור התלמיד -
+    # אותה טבלה בדיוק שכל לקוח רגיל משתמש בה (ManuscriptPage.customer_id),
+    # כולל סבבי ההגהה שלהם (page.proofing_rounds - ראה models.ProofingRound).
+    manuscript_pages = (ManuscriptPage.query.filter_by(customer_id=student.id)
+                         .order_by(ManuscriptPage.created_at.desc()).all())
+    return render_template('institution/student_detail.html', student=student, recordings=recordings,
+                            transactions=transactions, manuscript_pages=manuscript_pages)
 
 
 @institution_students_bp.route('/institution/students/<int:student_id>/recording/<int:recording_id>/download')
@@ -279,6 +286,113 @@ def download_student_recording(student_id, recording_id):
     hebrew_name = f"תמלול - {student.name or 'תלמיד'} - {recording.created_at.strftime('%d-%m-%Y') if recording.created_at else recording.id}.docx"
     return render_data_uri_download_page(
         output.getvalue(), hebrew_name,
+        mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    )
+
+
+# ==========================================================================
+# כתבי יד להקראה + הגהה - בתוך פרופיל תלמיד אצל מוסד. אותה תשתית בדיוק
+# שלקוח רגיל משתמש בה (models.ManuscriptPage/ProofingRound, routes/dictate.py) -
+# רק שהמוסד מעלה/מוריד ישירות דרך הפורטל שלו במקום דרך מייל/פקס. ברגע
+# שכתב-היד/סבב ההגהה נוצר הוא נכנס בדיוק לאותו תור שצוות ההקראה כבר עובד
+# מולו ("בתור"/"ממתין להגהה" ב-/admin/dictate) - שום שינוי בצד הצוות. גם
+# התמחור/החיוב זהה לחלוטין ללקוח רגיל (student.balance הוא Customer.balance
+# רגיל - ראה models.Customer, ההערה "לקוח רגיל...תלמיד...אותה טבלה בדיוק").
+# ==========================================================================
+
+MANUSCRIPT_UPLOAD_EXTS = {'jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'tiff', 'tif', 'pdf'}
+
+
+@institution_students_bp.route('/institution/students/<int:student_id>/manuscript/upload', methods=['POST'])
+@institution_login_required
+def upload_student_manuscript(student_id):
+    """המוסד מעלה תמונה/PDF של דף כתב יד עבור התלמיד - נכנס לתור ההקראה
+    הרגיל בדיוק כמו כתב יד שמתקבל במייל (ראה email_inbound._capture_manuscript_page)."""
+    from models import ManuscriptPage
+    student = Customer.query.filter_by(id=student_id, institution_id=current_user.id).first_or_404()
+    file = request.files.get('manuscript_file')
+    if not file or not file.filename:
+        return jsonify({'error': 'יש לבחור קובץ'}), 400
+    ext = os.path.splitext(file.filename)[1].lstrip('.').lower()
+    if ext not in MANUSCRIPT_UPLOAD_EXTS:
+        return jsonify({'error': 'יש להעלות תמונה (jpg/png/וכו׳) או PDF בלבד'}), 400
+
+    page = ManuscriptPage(
+        customer_id=student.id,
+        original_filename=file.filename,
+        file_data=file.read(),
+        status='pending',
+    )
+    db.session.add(page)
+    db.session.commit()
+    log.info(f"institution upload_student_manuscript: כתב יד חדש (page={page.id}) הועלה ע\"י מוסד {current_user.id} עבור תלמיד {student.id}")
+    return jsonify({'status': 'ok', 'pageId': page.id})
+
+
+@institution_students_bp.route('/institution/students/<int:student_id>/manuscript/<int:page_id>/download')
+@institution_login_required
+def download_student_manuscript(student_id, page_id):
+    """הורדת קובץ ה-Word המוכן של כתב יד שהושלם - זהה לחלוטין למה שנשלח
+    ללקוח רגיל במייל (ראה routes/dictate.py._build_manuscript_docx)."""
+    from models import ManuscriptPage
+    from routes.dictate import _build_manuscript_docx
+    student = Customer.query.filter_by(id=student_id, institution_id=current_user.id).first_or_404()
+    page = ManuscriptPage.query.filter_by(id=page_id, customer_id=student.id).first_or_404()
+    if not page.content:
+        return 'כתב היד הזה עדיין לא הוקרא - אין תוכן מוכן להורדה', 404
+
+    docx_bytes = _build_manuscript_docx(student.name or '', page.original_filename, page.content)
+    from routes.download_utils import render_data_uri_download_page
+    safe_name = os.path.splitext(page.original_filename or 'כתב_יד')[0][:40]
+    return render_data_uri_download_page(
+        docx_bytes, f'כתב_יד_{safe_name}.docx',
+        mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    )
+
+
+@institution_students_bp.route('/institution/students/<int:student_id>/manuscript/<int:page_id>/proof-upload', methods=['POST'])
+@institution_login_required
+def upload_student_proof(student_id, page_id):
+    """המוסד מעלה קובץ תיקוני הגהה (Word מוקלד, או תמונה/PDF של דף מודפס
+    שתוקן בעט) עבור כתב יד שכבר הושלם - יוצר סבב הגהה חדש (ProofingRound),
+    בדיוק כמו תגובת הגהה שמגיעה במייל/פקס מלקוח רגיל. נכנס לתור "ממתין
+    להגהה" הרגיל - הצוות ממשיך משם כרגיל (כולל חיוב לפי דקת עבודה)."""
+    from models import ManuscriptPage, ProofingRound
+    student = Customer.query.filter_by(id=student_id, institution_id=current_user.id).first_or_404()
+    page = ManuscriptPage.query.filter_by(id=page_id, customer_id=student.id).first_or_404()
+    if page.status != 'done':
+        return jsonify({'error': 'אפשר להעלות תיקוני הגהה רק על כתב יד שכבר הושלם'}), 400
+    file = request.files.get('correction_file')
+    if not file or not file.filename:
+        return jsonify({'error': 'יש לבחור קובץ'}), 400
+
+    round_ = ProofingRound(
+        manuscript_page_id=page.id,
+        status='pending',
+        customer_file_data=file.read(),
+        customer_file_filename=file.filename,
+        requested_at=datetime.utcnow(),
+    )
+    db.session.add(round_)
+    db.session.commit()
+    log.info(f"institution upload_student_proof: סבב הגהה חדש (round={round_.id}) הועלה ע\"י מוסד {current_user.id} על כתב יד {page.id}")
+    return jsonify({'status': 'ok', 'roundId': round_.id})
+
+
+@institution_students_bp.route('/institution/students/<int:student_id>/manuscript/<int:page_id>/proof/<int:round_id>/download')
+@institution_login_required
+def download_student_proof(student_id, page_id, round_id):
+    """הורדת קובץ ה-Word הסופי של סבב הגהה שהושלם וחויב."""
+    from models import ManuscriptPage, ProofingRound
+    student = Customer.query.filter_by(id=student_id, institution_id=current_user.id).first_or_404()
+    page = ManuscriptPage.query.filter_by(id=page_id, customer_id=student.id).first_or_404()
+    round_ = ProofingRound.query.filter_by(id=round_id, manuscript_page_id=page.id).first_or_404()
+    if not round_.final_file_data:
+        return 'ההגהה הזו עדיין לא הושלמה - אין קובץ סופי מוכן להורדה', 404
+
+    from routes.download_utils import render_data_uri_download_page
+    return render_data_uri_download_page(
+        round_.final_file_data, round_.final_filename or f'מתוקן_{round_id}.docx',
         mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     )
 

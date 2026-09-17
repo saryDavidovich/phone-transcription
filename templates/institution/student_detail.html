@@ -56,6 +56,76 @@
   </table>
 </div>
 
+<div class="card" style="max-width:520px; margin-bottom:24px;">
+  <h3 style="font-size:15px; margin-bottom:6px;">✍️ כתב יד חדש להקראה</h3>
+  <p style="font-size:12px; color:var(--text2); margin:0 0 12px;">העלאת תמונה/PDF של דף כתב יד - הצוות שלנו יקריא אותו בטלפון ויהפוך אותו לקובץ Word מוקלד. אותו תמחור בדיוק כמו כל לקוח.</p>
+  <form id="manuscriptUploadForm">
+    <div class="dropzone" id="manuscriptDz">
+      <div class="dz-icon">✍️</div>
+      <div class="dz-title">גררו תמונה/PDF של כתב היד לכאן או לחצו לבחירה</div>
+      <div class="dz-sub">JPG, PNG או PDF</div>
+      <div class="dz-filename" id="manuscriptDzFilename"></div>
+      <input type="file" name="manuscript_file" id="manuscriptFile" accept="image/*,.pdf" required>
+    </div>
+    <button type="submit" class="btn btn-block" style="margin-top:14px;" id="manuscriptUploadBtn">העלאה</button>
+  </form>
+  <div id="manuscriptUploadMsg" style="font-size:13px; margin-top:10px;"></div>
+</div>
+
+<div class="card" style="margin-bottom:20px;">
+  <h3 style="font-size:15px; margin-bottom:10px;">כתבי יד ({{ manuscript_pages|length }})</h3>
+  {% for page in manuscript_pages %}
+  <div style="border:1px solid var(--border); border-radius:10px; padding:12px 14px; margin-bottom:10px;">
+    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+      <div>
+        <strong>{{ page.original_filename }}</strong>
+        <span style="color:var(--text2); font-size:12px; margin-right:8px;">{{ page.created_at.strftime('%d/%m/%Y') if page.created_at else '' }}</span>
+      </div>
+      <div style="display:flex; align-items:center; gap:8px;">
+        {% if page.status == 'done' %}<span class="badge badge-green">מוכן</span>
+        {% elif page.status in ('pending', 'recording', 'processing', 'review') %}<span class="badge badge-amber"><span class="spinner-ring"></span> בתהליך הקראה</span>
+        {% else %}<span class="badge badge-gray">{{ page.status }}</span>{% endif %}
+        {% if page.status == 'done' %}
+        <a href="{{ url_for('institution_students.download_student_manuscript', student_id=student.id, page_id=page.id) }}"
+           class="btn btn-sm btn-secondary" style="text-decoration:none;display:inline-flex;align-items:center;gap:6px;" target="_blank">
+          🖨 הדפסה/הורדה
+        </a>
+        {% endif %}
+      </div>
+    </div>
+
+    {% if page.status == 'done' %}
+    <div style="margin-top:12px; padding-top:12px; border-top:1px solid var(--border);">
+      <div style="font-size:12.5px; font-weight:700; color:var(--text2); margin-bottom:6px;">הגהות על כתב היד הזה:</div>
+      {% for r in page.proofing_rounds %}
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px; font-size:13px; padding:6px 0;">
+        <span style="color:var(--text2);">{{ r.requested_at.strftime('%d/%m/%Y') if r.requested_at else '' }}</span>
+        {% if r.status == 'done' %}
+          <span class="badge badge-green">הושלם</span>
+          <span style="color:var(--text2); font-size:12px;">{{ "%.2f"|format(r.cost or 0) }} ₪</span>
+          <a href="{{ url_for('institution_students.download_student_proof', student_id=student.id, page_id=page.id, round_id=r.id) }}"
+             class="btn btn-sm btn-secondary" style="text-decoration:none;" target="_blank">⬇ הורדת הגהה סופית</a>
+        {% else %}
+          <span class="badge badge-amber"><span class="spinner-ring"></span> ממתין לטיפול</span>
+        {% endif %}
+      </div>
+      {% else %}
+      <div style="color:var(--text2); font-size:12.5px;">אין עדיין הגהות על כתב היד הזה.</div>
+      {% endfor %}
+
+      <form class="proofUploadForm" data-page-id="{{ page.id }}" style="margin-top:10px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+        <input type="file" name="correction_file" accept=".docx,.pdf,image/*" required style="font-size:12px;">
+        <button type="submit" class="btn btn-sm">📤 העלאת תיקוני הגהה</button>
+        <span class="proofUploadMsg" style="font-size:12px;"></span>
+      </form>
+    </div>
+    {% endif %}
+  </div>
+  {% else %}
+  <p style="color:var(--text2); font-size:13px;">עדיין לא הועלו כתבי יד עבור התלמיד.</p>
+  {% endfor %}
+</div>
+
 <div class="card">
   <h3 style="font-size:15px; margin-bottom:10px;">תנועות יתרה</h3>
   <table style="width:100%; font-size:13px;">
@@ -138,6 +208,97 @@ document.getElementById('studentUploadForm').addEventListener('submit', async fu
       window.location.reload();
     }
   }, 3000);
+});
+
+// --- העלאת כתב יד חדש להקראה ---
+var manuscriptDz = document.getElementById('manuscriptDz');
+var manuscriptFileInput = document.getElementById('manuscriptFile');
+var manuscriptDzFilename = document.getElementById('manuscriptDzFilename');
+
+function showManuscriptFilename() {
+  manuscriptDzFilename.textContent = manuscriptFileInput.files.length ? '📄 ' + manuscriptFileInput.files[0].name : '';
+}
+manuscriptFileInput.addEventListener('change', showManuscriptFilename);
+
+['dragover', 'dragenter'].forEach(function (ev) {
+  manuscriptDz.addEventListener(ev, function (e) { e.preventDefault(); manuscriptDz.classList.add('dragover'); });
+});
+['dragleave', 'dragend'].forEach(function (ev) {
+  manuscriptDz.addEventListener(ev, function () { manuscriptDz.classList.remove('dragover'); });
+});
+manuscriptDz.addEventListener('drop', function (e) {
+  e.preventDefault();
+  manuscriptDz.classList.remove('dragover');
+  if (e.dataTransfer.files.length) {
+    manuscriptFileInput.files = e.dataTransfer.files;
+    showManuscriptFilename();
+  }
+});
+
+document.getElementById('manuscriptUploadForm').addEventListener('submit', async function (e) {
+  e.preventDefault();
+  var msgEl = document.getElementById('manuscriptUploadMsg');
+  var btn = document.getElementById('manuscriptUploadBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-ring"></span> מעלה...';
+  msgEl.style.color = 'var(--text2)';
+  msgEl.textContent = '';
+  var fd = new FormData(this);
+  var res, data;
+  try {
+    res = await fetch('{{ url_for("institution_students.upload_student_manuscript", student_id=student.id) }}', { method: 'POST', body: fd });
+    data = await res.json();
+  } catch (err) {
+    btn.disabled = false;
+    btn.textContent = 'העלאה';
+    msgEl.style.color = 'var(--red)';
+    msgEl.textContent = 'שגיאת תקשורת, נסה שוב';
+    return;
+  }
+  if (!res.ok) {
+    btn.disabled = false;
+    btn.textContent = 'העלאה';
+    msgEl.style.color = 'var(--red)';
+    msgEl.textContent = data.error || 'שגיאה';
+    return;
+  }
+  msgEl.style.color = 'var(--accent)';
+  msgEl.textContent = 'הועלה בהצלחה - נכנס לתור ההקראה';
+  window.location.reload();
+});
+
+// --- העלאת תיקוני הגהה על כתב יד קיים (טופס נפרד לכל כתב יד שהושלם) ---
+document.querySelectorAll('.proofUploadForm').forEach(function (form) {
+  form.addEventListener('submit', async function (e) {
+    e.preventDefault();
+    var pageId = form.getAttribute('data-page-id');
+    var msgEl = form.querySelector('.proofUploadMsg');
+    var btn = form.querySelector('button[type=submit]');
+    btn.disabled = true;
+    msgEl.style.color = 'var(--text2)';
+    msgEl.textContent = 'מעלה...';
+    var fd = new FormData(form);
+    var url = '{{ url_for("institution_students.upload_student_proof", student_id=student.id, page_id=0) }}'.replace('0', pageId);
+    var res, data;
+    try {
+      res = await fetch(url, { method: 'POST', body: fd });
+      data = await res.json();
+    } catch (err) {
+      btn.disabled = false;
+      msgEl.style.color = 'var(--red)';
+      msgEl.textContent = 'שגיאת תקשורת, נסה שוב';
+      return;
+    }
+    if (!res.ok) {
+      btn.disabled = false;
+      msgEl.style.color = 'var(--red)';
+      msgEl.textContent = data.error || 'שגיאה';
+      return;
+    }
+    msgEl.style.color = 'var(--accent)';
+    msgEl.textContent = 'הועלה בהצלחה - נכנס לתור ההגהה';
+    window.location.reload();
+  });
 });
 </script>
 {% endblock %}

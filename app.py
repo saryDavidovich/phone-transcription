@@ -335,6 +335,29 @@ def _migrate_db():
         # אותו דבר, הפעם עבור תמונות OCR שממתינות במצב תחזוקה (ראה
         # models.OcrResult.file_data, routes/email_inbound.resume_queued_ocr).
         "ALTER TABLE ocr_results ADD COLUMN IF NOT EXISTS file_data BYTEA",
+        # פקס נכנס למערכת (הגהה/כתב יד חדש) - ראה models.Customer.fax_code,
+        # models.IncomingFax, routes/email_inbound.py._handle_incoming_fax,
+        # routes/dictate.py fax_inbox/fax_assign_*.
+        "ALTER TABLE customers ADD COLUMN IF NOT EXISTS fax_code VARCHAR(10)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS ix_customers_fax_code ON customers (fax_code) WHERE fax_code IS NOT NULL",
+        """CREATE TABLE IF NOT EXISTS incoming_faxes (
+                id SERIAL PRIMARY KEY,
+                received_at TIMESTAMP DEFAULT NOW(),
+                from_email VARCHAR(255),
+                raw_subject VARCHAR(500),
+                filename VARCHAR(255),
+                file_data BYTEA,
+                status VARCHAR(20) DEFAULT 'pending',
+                assigned_customer_id INTEGER REFERENCES customers(id),
+                assigned_manuscript_page_id INTEGER REFERENCES manuscript_pages(id),
+                assigned_proofing_round_id INTEGER REFERENCES proofing_rounds(id),
+                assigned_at TIMESTAMP,
+                assigned_by VARCHAR(100),
+                note VARCHAR(500)
+            )""",
+        "CREATE INDEX IF NOT EXISTS ix_incoming_faxes_received_at ON incoming_faxes (received_at)",
+        "CREATE INDEX IF NOT EXISTS ix_incoming_faxes_status ON incoming_faxes (status)",
+        "CREATE INDEX IF NOT EXISTS ix_incoming_faxes_assigned_customer_id ON incoming_faxes (assigned_customer_id)",
     ]
     logger = logging.getLogger(__name__)
     ok, failed = 0, 0
