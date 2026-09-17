@@ -14,6 +14,17 @@
   .ps-box.expanded { height:70vh; }
   .ps-box:focus { outline:2px solid var(--accent); outline-offset:-2px; }
 
+  /* תצוגת תמונה/PDF של הקובץ שהלקוח שלח בחזרה (כשתיקן בכתב יד על דף מודפס
+     וצילם/סרק, בניגוד לקובץ Word אמיתי) - מוצג מוקטן ל-50% זום (ראה
+     #zoom=50 בתבנית) כדי שהעמוד השלם ייראה בבת אחת בלי גלילה גם בגובה
+     ברירת המחדל הקטן יחסית, באותו אופן בדיוק שכתב-היד המקורי מוצג
+     ב-dictate_studio.html (.ds-imgbox) - רק גדול קצת יותר כברירת מחדל כי
+     כאן צריך לקרוא תיקוני הגהה בפועל, לא רק לזהות את הדף." */
+  .ps-imgbox { height:300px; overflow:hidden; border-radius:10px; background:var(--surface2); text-align:center; transition:height .2s ease; }
+  .ps-imgbox.expanded { height:85vh; }
+  .ps-imgbox img { max-width:100%; display:block; margin:0 auto; }
+  .ps-imgbox iframe { width:100%; height:100%; border:0; display:block; }
+
   .ps-preview { line-height:1.9; }
   .ps-para { margin:0 0 10px; direction:rtl; text-align:right; }
   .ps-para.heading { font-weight:800; font-size:19px; border-bottom:1px solid var(--border); padding-bottom:6px; }
@@ -29,10 +40,24 @@
   .ps-finalrow input[type=email] { flex:1; min-width:220px; padding:9px 12px; border-radius:8px; border:1px solid var(--border); background:var(--surface); color:var(--text); font-family:'Heebo',sans-serif; }
 
   /* עורך ההגהה המובנה */
-  .ps-toolbar { display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin-bottom:10px; }
+  .ps-toolbar { display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin-bottom:4px; }
   .ps-toolbar button { padding:6px 12px !important; font-size:13px !important; }
   .ps-toolbar .ps-sep { width:1px; align-self:stretch; background:var(--border); margin:0 2px; }
   #saveMsg, #spellMsg { font-size:12px; color:var(--text3); }
+
+  /* משוב לחיצה: כפתורי עיצוב (מודגש/נטוי/קו תחתון/כותרת) מציגים מצב "פעיל"
+     קבוע כל עוד הסמן נמצא בתוך טקסט עם אותו עיצוב - נשאר "לחוץ" עד שהמצב
+     משתנה (לא רק שנייה) - בדיוק כמו בוורד עצמו. כפתורי פעולה חד-פעמית
+     (בטל/בצע שוב/חיפוש/בדיקת איות) מהבהבים כחול לשנייה בכל לחיצה, רק
+     כדי לאשר חזותית שהלחיצה נקלטה - אותו דפוס בדיוק כמו ds-flash
+     ב-dictate_studio.html, לעקביות עיצובית בין המסכים. */
+  .ps-toolbar button.active { background:var(--accent); color:#fff; border-color:var(--accent); }
+  .ps-toolbar button.ps-flash { animation: ps-flash-glow 1s ease-out; }
+  @keyframes ps-flash-glow {
+    0%   { box-shadow: 0 0 0 3px rgba(56,189,248,.95), 0 0 16px 3px rgba(56,189,248,.8); border-color:#38bdf8; }
+    100% { box-shadow: 0 0 0 3px rgba(56,189,248,0), 0 0 16px 3px rgba(56,189,248,0); }
+  }
+  .ps-shortcuts-hint { color:var(--text3); font-size:11px; margin:0 0 10px; }
 
   .ps-findbar { display:none; gap:6px; flex-wrap:wrap; align-items:center; margin-bottom:10px; background:var(--surface2); padding:10px; border-radius:8px; }
   .ps-findbar.open { display:flex; }
@@ -71,10 +96,23 @@
         <a href="/admin/dictate/{{ page.id }}/proof/returned.docx" class="btn btn-ghost" style="font-size:12px;padding:5px 10px">⬇ הורדת הקובץ שהתקבל</a>
       </div>
     </div>
+    {% if returned_kind == 'docx' %}
     <div class="ps-box ps-preview" id="returnedBox">
       {{ returned_preview_html | safe }}
     </div>
     <p class="ps-hint">תצוגה מקדימה בלבד (טקסט בלבד, בלי עקיבת שינויים/הערות של וורד) - להצגה מלאה יש להוריד את הקובץ עצמו.</p>
+    {% else %}
+    <div class="ps-imgbox" id="returnedBox">
+      {% if not returned_data_uri %}
+        <div class="ds-state ds-error" style="padding:24px;color:var(--red)">⚠ הקובץ אינו זמין</div>
+      {% elif returned_is_pdf %}
+        <iframe src="{{ returned_data_uri }}#zoom=50" title="תיקוני הלקוח"></iframe>
+      {% else %}
+        <img src="{{ returned_data_uri }}" alt="תיקוני הלקוח">
+      {% endif %}
+    </div>
+    <p class="ps-hint">הלקוח תיקן בכתב יד על הדף המודפס ושלח בחזרה תמונה/סריקה (לא קובץ Word) - התצוגה מוקטנת כברירת מחדל כדי שהעמוד כולו ייראה בבת אחת בלי גלילה; אפשר להגדיל בלחיצה על הכפתור למעלה.</p>
+    {% endif %}
   </div>
 
   <div class="card">
@@ -87,18 +125,19 @@
     </div>
 
     <div class="ps-toolbar">
-      <button type="button" class="btn btn-ghost" onmousedown="event.preventDefault()" onclick="document.execCommand('bold')" title="מודגש"><b>B</b></button>
-      <button type="button" class="btn btn-ghost" onmousedown="event.preventDefault()" onclick="document.execCommand('italic')" title="נטוי"><i>I</i></button>
-      <button type="button" class="btn btn-ghost" onmousedown="event.preventDefault()" onclick="document.execCommand('underline')" title="קו תחתון"><u>U</u></button>
-      <button type="button" class="btn btn-ghost" onmousedown="event.preventDefault()" onclick="toggleHeading()" title="הפוך פסקה לכותרת / בטל כותרת">כותרת</button>
+      <button type="button" id="btnBold" class="btn btn-ghost" onmousedown="event.preventDefault()" onclick="applyFormat('bold')" title="מודגש (Ctrl+B)"><b>B</b></button>
+      <button type="button" id="btnItalic" class="btn btn-ghost" onmousedown="event.preventDefault()" onclick="applyFormat('italic')" title="נטוי (Ctrl+I)"><i>I</i></button>
+      <button type="button" id="btnUnderline" class="btn btn-ghost" onmousedown="event.preventDefault()" onclick="applyFormat('underline')" title="קו תחתון (Ctrl+U)"><u>U</u></button>
+      <button type="button" id="btnHeading" class="btn btn-ghost" onmousedown="event.preventDefault()" onclick="toggleHeading()" title="הפוך פסקה לכותרת / בטל כותרת (Ctrl+Alt+1)">כותרת</button>
       <div class="ps-sep"></div>
-      <button type="button" class="btn btn-ghost" onmousedown="event.preventDefault()" onclick="document.execCommand('undo')" title="בטל פעולה">↶ בטל</button>
-      <button type="button" class="btn btn-ghost" onmousedown="event.preventDefault()" onclick="document.execCommand('redo')" title="בצע שוב">↷ בצע שוב</button>
+      <button type="button" id="btnUndo" class="btn btn-ghost" onmousedown="event.preventDefault()" onclick="doUndo()" title="בטל פעולה (Ctrl+Z)">↶ בטל</button>
+      <button type="button" id="btnRedo" class="btn btn-ghost" onmousedown="event.preventDefault()" onclick="doRedo()" title="בצע שוב (Ctrl+Y)">↷ בצע שוב</button>
       <div class="ps-sep"></div>
-      <button type="button" class="btn btn-ghost" onclick="toggleFindPanel()">🔍 חיפוש והחלפה</button>
-      <button type="button" class="btn btn-primary" onclick="runSpellcheck()">🔤 בדיקת איות (AI)</button>
+      <button type="button" id="btnFindToggle" class="btn btn-ghost" onclick="toggleFindPanel(true)" title="חיפוש והחלפה (Ctrl+F / Ctrl+H)">🔍 חיפוש והחלפה</button>
+      <button type="button" id="btnSpellcheck" class="btn btn-primary" onclick="runSpellcheck()" title="בדיקת איות בעברית באמצעות AI">🔤 בדיקת איות (AI)</button>
       <span id="spellMsg"></span>
     </div>
+    <p class="ps-shortcuts-hint">קיצורי מקלדת (כמו בוורד, כשהסמן בתוך תיבת העריכה): Ctrl+B מודגש · Ctrl+I נטוי · Ctrl+U קו תחתון · Ctrl+Alt+1 כותרת · Ctrl+Z בטל · Ctrl+Y בצע שוב · Ctrl+F חיפוש · Ctrl+H חיפוש והחלפה</p>
 
     <div class="ps-findbar" id="findPanel">
       <input type="text" id="findInput" placeholder="חיפוש...">
@@ -269,6 +308,13 @@ document.addEventListener('DOMContentLoaded', () => {
   renderEditor();
   const box = document.getElementById('originalBox');
   box.addEventListener('input', markDirty);
+  box.addEventListener('keyup', updateFormatButtonsActiveState);
+  box.addEventListener('mouseup', updateFormatButtonsActiveState);
+  box.addEventListener('keydown', handleEditorKeydown);
+  document.addEventListener('keydown', handleGlobalFindShortcuts);
+  document.addEventListener('selectionchange', () => {
+    if (box.contains(document.getSelection().anchorNode)) updateFormatButtonsActiveState();
+  });
   try { document.execCommand('defaultParagraphSeparator', false, 'div'); } catch (e) {}
   setInterval(() => saveEdited(true), 30000);
 });
@@ -277,8 +323,65 @@ window.addEventListener('beforeunload', (e) => {
   if (dirty) { e.preventDefault(); e.returnValue = ''; }
 });
 
+// -------------------- משוב לחיצה: "הדלקה" כחולה לשנייה --------------------
+// אותו דפוס בדיוק כמו flashAndGuard ב-dictate_studio.html (עקביות עיצובית
+// בין המסכים) - מחזיר false אם הכפתור כבר "דולק" (מונע לחיצה כפולה בטעות).
+const FLASH_MS = 1000;
+function flashAndGuard(el) {
+  if (!el) return true;
+  if (el.classList.contains('ps-flash')) return false;
+  el.classList.add('ps-flash');
+  setTimeout(() => el.classList.remove('ps-flash'), FLASH_MS);
+  return true;
+}
+
+// -------------------- עיצוב טקסט: מצב "פעיל" חי לפי מיקום הסמן --------------------
+// בניגוד לכפתורי פעולה חד-פעמית (בטל/בצע שוב/חיפוש) שרק מהבהבים, כפתורי
+// העיצוב האלה נשארים מודגשים (accent) כל עוד הסמן/הבחירה נמצאים בתוך טקסט
+// עם אותו עיצוב - בדיוק כמו בוורד עצמו - עד שהמצב משתנה (לא רק לשנייה).
+function applyFormat(type) {
+  document.execCommand(type);
+  updateFormatButtonsActiveState();
+  markDirty();
+}
+
+function doUndo() {
+  flashAndGuard(document.getElementById('btnUndo'));
+  document.execCommand('undo');
+  updateFormatButtonsActiveState();
+}
+
+function doRedo() {
+  flashAndGuard(document.getElementById('btnRedo'));
+  document.execCommand('redo');
+  updateFormatButtonsActiveState();
+}
+
+function updateFormatButtonsActiveState() {
+  const box = document.getElementById('originalBox');
+  let bold = false, italic = false, underline = false;
+  try {
+    bold = document.queryCommandState('bold');
+    italic = document.queryCommandState('italic');
+    underline = document.queryCommandState('underline');
+  } catch (e) {}
+  document.getElementById('btnBold').classList.toggle('active', bold);
+  document.getElementById('btnItalic').classList.toggle('active', italic);
+  document.getElementById('btnUnderline').classList.toggle('active', underline);
+
+  let heading = false;
+  const sel = window.getSelection();
+  if (sel && sel.rangeCount) {
+    let node = sel.anchorNode;
+    while (node && node.parentElement !== box && node !== box) node = node.parentElement;
+    if (node && node !== box && node.classList) heading = node.classList.contains('heading');
+  }
+  document.getElementById('btnHeading').classList.toggle('active', heading);
+}
+
 // -------------------- כותרת --------------------
 function toggleHeading() {
+  flashAndGuard(document.getElementById('btnHeading'));
   const sel = window.getSelection();
   if (!sel.rangeCount) return;
   let node = sel.anchorNode;
@@ -286,12 +389,52 @@ function toggleHeading() {
   while (node && node.parentElement !== box && node !== box) node = node.parentElement;
   if (!node || node === box) return;
   node.classList.toggle('heading');
+  updateFormatButtonsActiveState();
   markDirty();
 }
 
+// -------------------- קיצורי מקלדת (כמו בוורד) --------------------
+function handleEditorKeydown(e) {
+  const ctrl = e.ctrlKey || e.metaKey;
+  if (!ctrl) return;
+  if (e.altKey && e.key === '1') { e.preventDefault(); toggleHeading(); return; }
+  if (e.altKey) return;
+  switch ((e.key || '').toLowerCase()) {
+    case 'b': e.preventDefault(); applyFormat('bold'); break;
+    case 'i': e.preventDefault(); applyFormat('italic'); break;
+    case 'u': e.preventDefault(); applyFormat('underline'); break;
+    case 'z': e.preventDefault(); doUndo(); break;
+    case 'y': e.preventDefault(); doRedo(); break;
+    case 'f': e.preventDefault(); toggleFindPanel(true, false); break;
+    case 'h': e.preventDefault(); toggleFindPanel(true, true); break;
+  }
+}
+
+// Ctrl+F/Ctrl+H גם מחוץ לפוקוס של תיבת העריכה עצמה (למשל כשה-focus כבר
+// בתוך פאנל החיפוש) - כדי למנוע מהדפדפן לפתוח את חיפוש-הדף המובנה שלו.
+function handleGlobalFindShortcuts(e) {
+  const ctrl = e.ctrlKey || e.metaKey;
+  if (!ctrl || e.altKey) return;
+  const box = document.getElementById('originalBox');
+  const findPanel = document.getElementById('findPanel');
+  const active = document.activeElement;
+  if (box.contains(active)) return;  // כבר מטופל ע"י handleEditorKeydown
+  if (!findPanel.contains(active)) return;  // המשתמש לא בתוך אזור העריכה כלל - לא מתערבים בקיצור הדפדפן
+  const key = (e.key || '').toLowerCase();
+  if (key === 'f') { e.preventDefault(); toggleFindPanel(true, false); }
+  else if (key === 'h') { e.preventDefault(); toggleFindPanel(true, true); }
+}
+
 // -------------------- חיפוש והחלפה --------------------
-function toggleFindPanel() {
-  document.getElementById('findPanel').classList.toggle('open');
+function toggleFindPanel(forceOpen, focusReplace) {
+  flashAndGuard(document.getElementById('btnFindToggle'));
+  const panel = document.getElementById('findPanel');
+  if (forceOpen === true) panel.classList.add('open');
+  else panel.classList.toggle('open');
+  if (panel.classList.contains('open')) {
+    const target = document.getElementById(focusReplace ? 'replaceInput' : 'findInput');
+    if (target) setTimeout(() => target.focus(), 0);
+  }
 }
 
 function clearFindHighlights() {
@@ -426,6 +569,7 @@ function clearSpellHighlights() {
 }
 
 async function runSpellcheck() {
+  flashAndGuard(document.getElementById('btnSpellcheck'));
   const box = document.getElementById('originalBox');
   clearFindHighlights();
   clearSpellHighlights();

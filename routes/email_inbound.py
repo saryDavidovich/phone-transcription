@@ -551,10 +551,17 @@ def _pick_file():
 
 DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
 
+# תגובת הגהה יכולה להגיע בשתי צורות בפועל: קובץ Word אמיתי (אם ללקוח יש
+# מחשב ותיקן ישירות בקובץ), או תמונה/PDF של דף מודפס שתוקן בעט בכתב יד
+# וצולם/נסרק (המקרה הנפוץ יותר ללקוח בלי גישה נוחה למחשב) - ראה
+# routes/dictate.py._proof_returned_kind, שמציג את שתי הצורות בהתאם.
+PROOF_FILE_EXTS = {'docx', 'pdf', 'jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'tiff', 'tif'}
 
-def _pick_docx_file():
-    """מאתר קובץ Word (.docx) מצורף - משמש רק לתגובות הגהה (ראה
-    _is_proofing_reply למעלה), בנפרד לגמרי מ-_pick_file (אודיו/תמונה)."""
+
+def _pick_proof_file():
+    """מאתר קובץ מצורף שמתאים לתגובת הגהה (ראה _is_proofing_reply למעלה) -
+    קובץ Word (.docx) או תמונה/PDF - בנפרד לגמרי מ-_pick_file (אודיו/תמונה
+    של כתב-היד המקורי)."""
     if not request.files:
         return None
     for key in request.files:
@@ -563,7 +570,7 @@ def _pick_docx_file():
             continue
         mime = (f.mimetype or '').lower()
         ext = os.path.splitext(f.filename or '')[1].lstrip('.').lower()
-        if mime == DOCX_MIME or ext == 'docx':
+        if mime == DOCX_MIME or ext in PROOF_FILE_EXTS or mime.startswith('image/') or mime == 'application/pdf':
             return f
     return None
 
@@ -1381,9 +1388,15 @@ def email_inbound():
             from models import ManuscriptPage
             customer = Customer.query.filter_by(phone=phone).first()
             if not customer:
+                log.warning(f"email-inbound: תגובת הגהה מטלפון {phone} שלא קיים כלקוח (page_id={page_id}, from={sender_email})")
                 return jsonify({'status': 'rejected', 'reason': 'customer_not_found'}), 200
             registered_email = (customer.email or '').strip().lower()
             if not registered_email or registered_email != sender_email:
+                log.warning(
+                    f"email-inbound: תגובת הגהה נדחתה עקב אי-התאמת מייל - "
+                    f"customer_id={customer.id} phone={phone} page_id={page_id} "
+                    f"registered_email={registered_email!r} sender_email={sender_email!r}"
+                )
                 return jsonify({'status': 'rejected', 'reason': 'email_mismatch'}), 200
 
             page = ManuscriptPage.query.filter_by(id=page_id, customer_id=customer.id).first()
@@ -1391,14 +1404,14 @@ def email_inbound():
                 log.warning(f"email-inbound: תגובת הגהה לדף {page_id} שלא שייך ללקוח {phone} (או לא קיים)")
                 return jsonify({'status': 'rejected', 'reason': 'page_not_found'}), 200
 
-            docx_file = _pick_docx_file()
-            if not docx_file:
-                log.warning(f"email-inbound: תגובת הגהה בלי קובץ Word מצורף (page={page_id}, phone={phone})")
-                return jsonify({'status': 'rejected', 'reason': 'no_docx_attachment'}), 200
+            proof_file = _pick_proof_file()
+            if not proof_file:
+                log.warning(f"email-inbound: תגובת הגהה בלי קובץ מצורף מתאים (page={page_id}, phone={phone})")
+                return jsonify({'status': 'rejected', 'reason': 'no_valid_attachment'}), 200
 
             from datetime import datetime
-            page.proof_file_data = docx_file.read()
-            page.proof_original_filename = docx_file.filename or f'הגהה_{page_id}.docx'
+            page.proof_file_data = proof_file.read()
+            page.proof_original_filename = proof_file.filename or f'הגהה_{page_id}'
             page.proof_status = 'pending'
             page.proof_requested_at = datetime.utcnow()
             db.session.commit()

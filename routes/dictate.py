@@ -646,7 +646,10 @@ def _proofing_mailto_link(phone, page_id):
     from urllib.parse import quote
     from routes.email_inbound import TRANSCRIBE_INBOUND_EMAIL
     subject = f'{PROOFING_SUBJECT_MARKER} {phone} {page_id}'
-    body = 'שלום, מצורף קובץ ה-Word עם תיקוני ההגהה שביצעתי - נא לעדכן בהתאם. תודה.'
+    body = (
+        'שלום, מצורף קובץ עם תיקוני ההגהה שביצעתי - קובץ ה-Word המתוקן, '
+        'או צילום/סריקה של הדף המודפס עם התיקונים בכתב יד - נא לעדכן בהתאם. תודה.'
+    )
     return f"mailto:{TRANSCRIBE_INBOUND_EMAIL}?subject={quote(subject)}&body={quote(body)}"
 
 
@@ -666,9 +669,9 @@ def _send_manuscript_email(to_email, customer_name, customer_phone, page_id, ori
 <div style="line-height:1.8;white-space:pre-wrap;text-align:right;direction:rtl">{preview}</div>
 </div>
 <div style="background:#eff6ff;border-right:4px solid #2563eb;padding:16px;margin:16px 0;border-radius:8px;text-align:center">
-<p style="margin:0 0 12px;line-height:1.7">מצאת טעות או רוצה לתקן משהו בקובץ המצורף? אפשר לתקן ישירות בקובץ ה-Word ולשלוח אותו בחזרה - התיקון ייכנס לטיפול ויעודכן בהתאם.</p>
+<p style="margin:0 0 12px;line-height:1.7">מצאת טעות או רוצה לתקן משהו בקובץ המצורף? יש לך מחשב? אפשר לתקן ישירות בקובץ ה-Word המצורף ולשלוח אותו בחזרה. אין לך גישה נוחה למחשב? אפשר להדפיס את הקובץ, לתקן בעט על הדף, ולצלם או לסרוק את הדף המתוקן ולשלוח בחזרה כתמונה - שתי הדרכים עובדות.</p>
 <a href="{proofing_link}" style="background:#2563eb;color:#fff;text-decoration:none;padding:10px 20px;border-radius:6px;font-weight:700;display:inline-block">✏️ שליחת תיקוני הגהה</a>
-<p style="margin:12px 0 0;font-size:12px;color:#6b7280">הכפתור פותח טיוטת מייל מוכנה - רק צריך לצרף את קובץ ה-Word המתוקן ולשלוח</p>
+<p style="margin:12px 0 0;font-size:12px;color:#6b7280">הכפתור פותח טיוטת מייל מוכנה - רק צריך לצרף את קובץ ה-Word המתוקן, או צילום/סריקה של הדף המתוקן בכתב יד, ולשלוח</p>
 </div>
 </div>'''
 
@@ -820,22 +823,17 @@ def _image_to_pdf_bytes(raw):
     return out.getvalue()
 
 
-def _manuscript_data_uri(page):
-    """מקודד את קובץ כתב-היד כ-data URI (base64) מוטמע ישירות ב-HTML - לא
-    כ-src לכתובת נפרדת - כדי שלא תהיה בקשת רשת נפרדת שמסנן תוכן כמו נטפרי
-    יכול לעכב. בפועל זה לא הספיק: מתברר שנטפרי חוסם גם תמונות שמגיעות כ-data
-    URI מוטמע (כנראה לפי ניתוח התוכן/mime של האלמנט עצמו, לא רק לפי בקשת
-    הרשת) - אז כל תמונה מומרת כאן ל-PDF חד-עמודי (Pillow) לפני ההטמעה,
-    ומוצגת ב-iframe בדיוק כמו PDF "אמיתי" שהגיע במייל. PDF לא נחסם אצל נטפרי
-    באותה צורה שתמונה נחסמת.
-    מחזיר (data_uri, is_pdf) - is_pdf קובע ב-template אם להציג ב-<iframe>
-    (PDF) או ב-<img> (fallback, רק אם המרה ל-PDF נכשלה מסיבה כלשהי)."""
-    raw = _manuscript_file_bytes(page)
+def _file_to_pdf_data_uri(raw, filename, log_context=''):
+    """הליבה המשותפת של המרת bytes+filename ל-data URI מוטמע, ממיר תמיד
+    ל-PDF (גם אם המקור תמונה) - ראה _manuscript_data_uri למטה להסבר המלא
+    (חסימת נטפרי). מחזיר (data_uri, is_pdf). מנוצל גם בתצוגת כתב-היד
+    המקורי (studio) וגם בתצוגת הקובץ שהלקוח שלח בחזרה בהגהה, כשזו תמונה/PDF
+    של דף מודפס שתוקן בכתב יד וצולם/נסרק (ראה studio_proof/_proof_returned_kind)."""
     if not raw:
         return None, False
-    mime, _ = mimetypes.guess_type(page.original_filename or page.file_path or '')
+    mime, _ = mimetypes.guess_type(filename or '')
     if not mime:
-        ext = os.path.splitext(page.original_filename or page.file_path or '')[1].lower()
+        ext = os.path.splitext(filename or '')[1].lower()
         mime = {
             '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
             '.gif': 'image/gif', '.webp': 'image/webp', '.pdf': 'application/pdf',
@@ -846,11 +844,36 @@ def _manuscript_data_uri(page):
             raw = _image_to_pdf_bytes(raw)
             mime = 'application/pdf'
         except Exception as e:
-            log.error(f"manuscript image->PDF conversion error (page={page.id}): {e}")
+            log.error(f"image->PDF conversion error ({log_context}): {e}")
             # ממשיכים עם התמונה המקורית - עדיף תצוגה שעלולה להיחסם מאשר כלום
 
     b64 = base64.b64encode(raw).decode('ascii')
     return f'data:{mime};base64,{b64}', (mime == 'application/pdf')
+
+
+def _manuscript_data_uri(page):
+    """מקודד את קובץ כתב-היד כ-data URI (base64) מוטמע ישירות ב-HTML - לא
+    כ-src לכתובת נפרדת - כדי שלא תהיה בקשת רשת נפרדת שמסנן תוכן כמו נטפרי
+    יכול לעכב. בפועל זה לא הספיק: מתברר שנטפרי חוסם גם תמונות שמגיעות כ-data
+    URI מוטמע (כנראה לפי ניתוח התוכן/mime של האלמנט עצמו, לא רק לפי בקשת
+    הרשת) - אז כל תמונה מומרת ל-PDF חד-עמודי (Pillow) לפני ההטמעה, ומוצגת
+    ב-iframe בדיוק כמו PDF "אמיתי" שהגיע במייל. PDF לא נחסם אצל נטפרי באותה
+    צורה שתמונה נחסמת.
+    מחזיר (data_uri, is_pdf) - is_pdf קובע ב-template אם להציג ב-<iframe>
+    (PDF) או ב-<img> (fallback, רק אם המרה ל-PDF נכשלה מסיבה כלשהי)."""
+    raw = _manuscript_file_bytes(page)
+    return _file_to_pdf_data_uri(raw, page.original_filename or page.file_path, log_context=f'page={page.id}')
+
+
+def _proof_returned_kind(filename):
+    """קובע איך להציג את הקובץ שהלקוח שלח בחזרה בסבב הגהה: 'docx' אם יש לו
+    מחשב ותיקן ישירות בקובץ ה-Word (הסיומת docx) - אז מציגים תצוגת טקסט
+    מפורקת (_docx_paragraphs_html). אחרת 'image' - המקרה הנפוץ בפועל של
+    לקוח בלי גישה נוחה למחשב, שהדפיס את הדף, תיקן בעט בכתב יד, וצילם/סרק
+    ושלח בחזרה תמונה/PDF - אז מציגים אותו כמו כתב-היד המקורי (iframe PDF,
+    ראה _file_to_pdf_data_uri)."""
+    ext = os.path.splitext(filename or '')[1].lstrip('.').lower()
+    return 'docx' if ext == 'docx' else 'image'
 
 
 @dictate_bp.route('/<int:page_id>')
@@ -1095,7 +1118,15 @@ def studio_proof(page_id):
         flash('אין הגהה ממתינה לדף הזה')
         return redirect(url_for('dictate.queue', status='proof'))
 
-    returned_preview_html = _docx_paragraphs_html(page.proof_file_data)
+    returned_kind = _proof_returned_kind(page.proof_original_filename)
+    if returned_kind == 'docx':
+        returned_preview_html = _docx_paragraphs_html(page.proof_file_data)
+        returned_data_uri, returned_is_pdf = None, False
+    else:
+        returned_preview_html = None
+        returned_data_uri, returned_is_pdf = _file_to_pdf_data_uri(
+            page.proof_file_data, page.proof_original_filename, log_context=f'proof page={page.id}'
+        )
 
     # תוכן ההתחלה לעורך המובנה בדפדפן: אם הנציג כבר התחיל לערוך קודם (יש
     # proof_edited_content שמור) ממשיכים משם - אחרת מתחילים מהתוכן המקורי
@@ -1109,7 +1140,10 @@ def studio_proof(page_id):
     return render_template(
         'admin/proof_studio.html',
         page=page,
+        returned_kind=returned_kind,
         returned_preview_html=returned_preview_html,
+        returned_data_uri=returned_data_uri,
+        returned_is_pdf=returned_is_pdf,
         editor_initial_content=editor_initial_content,
         proofing_price=_manuscript_proofing_price(),
         ms_word_link=ms_word_link,
@@ -1136,16 +1170,24 @@ def proof_original_docx(page_id):
 @dictate_bp.route('/<int:page_id>/proof/returned.docx')
 @login_required
 def proof_returned_docx(page_id):
-    """הקובץ שהלקוח שלח בחזרה עם התיקונים שלו."""
+    """הקובץ שהלקוח שלח בחזרה עם התיקונים שלו - יכול להיות קובץ Word (אם
+    תיקן במחשב) או תמונה/PDF (אם תיקן בכתב יד על דף מודפס וצילם/סרק - ראה
+    _proof_returned_kind). שם ה-route עצמו נשאר עם סיומת .docx מטעמי תאימות
+    לאחור בלבד (קישורים קיימים) - שם ההורדה בפועל תמיד תואם לקובץ האמיתי."""
     from models import ManuscriptPage
     page = ManuscriptPage.query.get_or_404(page_id)
     if not page.proof_file_data:
         abort(404)
+    kind = _proof_returned_kind(page.proof_original_filename)
+    if kind == 'docx':
+        mimetype = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    else:
+        mimetype = mimetypes.guess_type(page.proof_original_filename or '')[0] or 'application/octet-stream'
     return send_file(
         io.BytesIO(page.proof_file_data),
-        mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        mimetype=mimetype,
         as_attachment=True,
-        download_name=page.proof_original_filename or f'הגהה_{page_id}.docx',
+        download_name=page.proof_original_filename or f'הגהה_{page_id}',
     )
 
 
