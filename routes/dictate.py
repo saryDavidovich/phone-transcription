@@ -573,6 +573,8 @@ def _build_manuscript_docx(customer_name, original_filename, content):
                     bold=bool(run_data.get('bold')) or is_heading,
                     underline=bool(run_data.get('underline')),
                 )
+                if run_data.get('italic'):
+                    run.italic = True
 
     buf = io.BytesIO()
     doc.save(buf)
@@ -745,6 +747,8 @@ def _docx_paragraphs_html(docx_bytes):
                 classes.append('bold')
             if run.underline:
                 classes.append('underline')
+            if run.italic:
+                classes.append('italic')
             runs_html.append(f'<span class="{" ".join(classes)}">{_html_escape(run.text)}</span>')
         inner = ''.join(runs_html) or _html_escape(text)
         parts.append(f'<div class="ds-para{" heading" if is_heading else ""}">{inner}</div>')
@@ -1092,8 +1096,11 @@ def studio_proof(page_id):
         return redirect(url_for('dictate.queue', status='proof'))
 
     returned_preview_html = _docx_paragraphs_html(page.proof_file_data)
-    original_docx_bytes = _build_manuscript_docx(page.customer.name, page.original_filename, page.content)
-    original_preview_html = _docx_paragraphs_html(original_docx_bytes)
+
+    # תוכן ההתחלה לעורך המובנה בדפדפן: אם הנציג כבר התחיל לערוך קודם (יש
+    # proof_edited_content שמור) ממשיכים משם - אחרת מתחילים מהתוכן המקורי
+    # הנקי שנשלח ללקוח (page.content), בדיוק כמו שהוא נראה בקובץ המקורי.
+    editor_initial_content = page.proof_edited_content if page.proof_edited_content else (page.content or [])
 
     base_url = os.environ.get('APP_BASE_URL', '').rstrip('/')
     original_docx_url = f"{base_url}{url_for('dictate.proof_original_docx', page_id=page.id)}"
@@ -1103,7 +1110,7 @@ def studio_proof(page_id):
         'admin/proof_studio.html',
         page=page,
         returned_preview_html=returned_preview_html,
-        original_preview_html=original_preview_html,
+        editor_initial_content=editor_initial_content,
         proofing_price=_manuscript_proofing_price(),
         ms_word_link=ms_word_link,
     )
@@ -1160,6 +1167,156 @@ def proof_upload_final(page_id):
     page.proof_final_filename = f.filename
     db.session.commit()
     return jsonify({'status': 'ok', 'filename': f.filename})
+
+
+@dictate_bp.route('/<int:page_id>/proof/save-edited', methods=['POST'])
+@login_required
+def proof_save_edited(page_id):
+    """שומר את התוכן שנערך בעורך המובנה בדפדפן במסך ההגהה (עיצוב מלא -
+    מודגש/נטוי/קו תחתון/כותרת, חיפוש-והחלפה, בדיקת איות - ראה
+    templates/admin/proof_studio.html). בכל שמירה: (1) שומר את מבנה ה-JSON
+    עצמו ב-proof_edited_content, כדי שאם הנציג יחזור למסך מאוחר יותר הוא
+    ימשיך מאיפה שהפסיק ולא יתחיל מאפס, וגם (2) בונה קובץ Word אמיתי (docx)
+    מחדש מאותו תוכן דרך _build_manuscript_docx - אותו בילדר OOXML/RTL בדיוק
+    שמשמש בכל שאר המערכת - ושומר אותו כ-proof_final_file_data. זה מה
+    שיישלח בפועל אם/כש-proof_complete יופעל, וגם מה שאפשר להוריד לבדיקה.
+    לא נוגע ב-page.content המקורי - זה תמיד נשאר נגיש/משוחזר בנפרד."""
+    from models import ManuscriptPage
+    page = ManuscriptPage.query.get_or_404(page_id)
+    data = request.get_json(silent=True) or {}
+    content = data.get('content')
+    if not isinstance(content, list):
+        return jsonify({'error': 'תוכן לא תקין'}), 400
+
+    # נירמול/הגנה - לא סומכים על מבנה חופשי שמגיע מה-JS בדפדפן
+    clean_content = []
+    for para in content:
+        if not isinstance(para, dict):
+            continue
+        runs = []
+        for run in (para.get('runs') or []):
+            if not isinstance(run, dict):
+                continue
+            text = run.get('text')
+            if not isinstance(text, str):
+                continue
+            runs.append({
+                'text': text,
+                'bold': bool(run.get('bold')),
+                'italic': bool(run.get('italic')),
+                'underline': bool(run.get('underline')),
+            })
+        clean_content.append({'heading': bool(para.get('heading')), 'runs': runs})
+
+    try:
+        docx_bytes = _build_manuscript_docx(
+            page.customer.name if page.customer else '', page.original_filename, clean_content
+        )
+    except Exception as e:
+        log.error(f"proof save-edited docx build error (page={page_id}): {e}", exc_info=True)
+        return jsonify({'error': f'שגיאה ביצירת קובץ ה-Word: {e}'}), 500
+
+    safe_name = os.path.splitext(page.original_filename or 'כתב_יד')[0][:40]
+    filename = f'מתוקן_{safe_name}.docx'
+
+    page.proof_edited_content = clean_content
+    page.proof_final_file_data = docx_bytes
+    page.proof_final_filename = filename
+    db.session.commit()
+    return jsonify({'status': 'ok', 'filename': filename})
+
+
+def _hebrew_spellcheck_paragraphs(paragraphs):
+    """שולח את הפסקאות ל-Claude לבדיקת איות/דקדוק בעברית ברמה גבוהה, ומחזיר
+    רשימת בעיות עם מיקום (אינדקס פסקה) והצעות תיקון. במכוון לא מבקשים
+    מהמודל להחזיר offsets מספריים של תווים - מודלי שפה לא אמינים בספירת
+    תווים על טקסט ארוך, וטעות קטנה שם תגרום לסימון במקום שגוי לגמרי.
+    במקום זה מבקשים רק את המילה/הביטוי השגוי עצמו, וה-JS בצד הדפדפן מאתר
+    בעצמו את המיקום המדויק ב-DOM לפי חיפוש טקסט רגיל בתוך אותה פסקה (ראה
+    wrapFirstOccurrence ב-proof_studio.html) - הרבה יותר אמין."""
+    import anthropic
+    import re
+
+    numbered = '\n'.join(f'[[{i}]] {p}' for i, p in enumerate(paragraphs) if p and p.strip())
+    if not numbered.strip():
+        return []
+
+    prompt = f"""אתה מגיה מקצועי לעברית ברמה גבוהה מאוד. להלן טקסט מחולק לפסקאות ממוספרות (כל פסקה מתחילה בתגית [[מספר]]).
+
+מצא אך ורק שגיאות איות ודקדוק ברורות ומובהקות בעברית. אל תעיר על סגנון, אל תשנה ניסוח, ואל תיגע בשמות פרטיים/מקומות/מונחים זרים אלא אם יש בהם שגיאת כתיב ודאית.
+
+עבור כל שגיאה שמצאת החזר אובייקט עם השדות הבאים:
+- paragraph: מספר הפסקה כפי שמופיע ב-[[מספר]] (מספר שלם)
+- wrong: המילה או הביטוי השגוי בדיוק כפי שהוא מופיע בטקסט המקורי (אותיות, רווחים וניקוד זהים)
+- suggestions: רשימה של 1 עד 3 הצעות תיקון, מהסבירה ביותר לפחות סבירה
+- reason: הסבר קצר מאוד (עד 6 מילים) בעברית לסוג השגיאה
+
+החזר אך ורק מערך JSON תקני - בלי שום טקסט נוסף לפני או אחרי, ובלי ```. אם אין שום שגיאה החזר מערך ריק [].
+
+הטקסט לבדיקה:
+{numbered}"""
+
+    client = anthropic.Anthropic(api_key=os.environ.get('ANTHROPIC_API_KEY'))
+    response = client.messages.create(
+        model='claude-opus-4-5',
+        max_tokens=4096,
+        messages=[{'role': 'user', 'content': prompt}],
+    )
+    raw = response.content[0].text.strip()
+    match = re.search(r'\[.*\]', raw, re.DOTALL)
+    if not match:
+        log.warning(f"spellcheck: לא נמצא JSON בתגובת המודל: {raw[:300]!r}")
+        return []
+    try:
+        issues = json.loads(match.group(0))
+    except Exception as e:
+        log.warning(f"spellcheck: JSON parse נכשל: {e} raw={raw[:300]!r}")
+        return []
+    if not isinstance(issues, list):
+        return []
+
+    clean_issues = []
+    for it in issues:
+        if not isinstance(it, dict):
+            continue
+        try:
+            para_idx = int(it.get('paragraph'))
+        except (TypeError, ValueError):
+            continue
+        wrong = it.get('wrong')
+        if not isinstance(wrong, str) or not wrong.strip():
+            continue
+        suggestions = [s for s in (it.get('suggestions') or []) if isinstance(s, str) and s.strip()][:3]
+        if not suggestions:
+            continue
+        reason = it.get('reason')
+        clean_issues.append({
+            'paragraph': para_idx,
+            'wrong': wrong,
+            'suggestions': suggestions,
+            'reason': reason if isinstance(reason, str) else '',
+        })
+    return clean_issues
+
+
+@dictate_bp.route('/<int:page_id>/proof/spellcheck', methods=['POST'])
+@login_required
+def proof_spellcheck(page_id):
+    """בדיקת איות/דקדוק בעברית ברמה גבוהה על התוכן הנוכחי בעורך (AI, לא
+    Hunspell/מילון סטטי - הרבה יותר טוב על עברית) - ראה _hebrew_spellcheck_paragraphs."""
+    from models import ManuscriptPage
+    ManuscriptPage.query.get_or_404(page_id)  # מוודא page_id תקין, אותה הרשאה כמו שאר המסך
+    data = request.get_json(silent=True) or {}
+    paragraphs = data.get('paragraphs')
+    if not isinstance(paragraphs, list):
+        return jsonify({'error': 'קלט לא תקין'}), 400
+    paragraphs = [p if isinstance(p, str) else '' for p in paragraphs][:400]  # הגנת קצה
+    try:
+        issues = _hebrew_spellcheck_paragraphs(paragraphs)
+    except Exception as e:
+        log.error(f"spellcheck error (page={page_id}): {e}", exc_info=True)
+        return jsonify({'error': f'שגיאה בבדיקת האיות: {e}'}), 500
+    return jsonify({'issues': issues})
 
 
 @dictate_bp.route('/<int:page_id>/proof/final.docx')

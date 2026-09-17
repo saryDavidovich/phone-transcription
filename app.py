@@ -267,6 +267,9 @@ def _migrate_db():
         "ALTER TABLE manuscript_pages ADD COLUMN IF NOT EXISTS proof_final_file_data BYTEA",
         "ALTER TABLE manuscript_pages ADD COLUMN IF NOT EXISTS proof_final_filename VARCHAR(255)",
         "CREATE INDEX IF NOT EXISTS ix_manuscript_pages_proof_status ON manuscript_pages (proof_status)",
+        # עורך הגהה מובנה בדפדפן (עיצוב מלא/חיפוש-החלפה/בדיקת איות) - ראה
+        # models.ManuscriptPage.proof_edited_content ו-routes/dictate.py.proof_save_edited
+        "ALTER TABLE manuscript_pages ADD COLUMN IF NOT EXISTS proof_edited_content JSONB",
         # מסך "פעילות מערכת" (/admin/maintenance) - מעקב עבודות רקע פעילות
         # (ראה models.ActiveJob, services/job_tracker.py) + מצב תחזוקה שדוחה
         # שיחות טלפון חדשות עד שמכבים אותו (ראה routes/api.py /api/transcribe)

@@ -241,6 +241,12 @@ class ManuscriptPage(db.Model):
     # השינויים/התיקונים שהלקוח ביקש) - זה מה שנשלח בסוף ללקוח, אם בכלל.
     proof_final_file_data = db.Column(db.LargeBinary, nullable=True)
     proof_final_filename = db.Column(db.String(255), nullable=True)
+    # תוכן ההגהה כפי שנערך בעורך המובנה בדפדפן (עיצוב מלא + חיפוש/החלפה +
+    # בדיקת איות - ראה templates/admin/proof_studio.html ו-routes/dictate.py
+    # proof_save_edited) - אותו מבנה JSON בדיוק כמו content למעלה, כדי
+    # שאפשר להריץ אותו ישירות דרך _build_manuscript_docx. נשמר בנפרד מ-
+    # content (התוכן המקורי שנשלח ללקוח) כדי שהמקור תמיד יישאר נגיש/משוחזר.
+    proof_edited_content = db.Column(db.JSON, nullable=True)
 
     customer = db.relationship('Customer', backref='manuscript_pages')
 

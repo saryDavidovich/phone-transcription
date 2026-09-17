@@ -12,12 +12,14 @@
 
   .ps-box { height:220px; overflow:auto; border-radius:10px; background:var(--surface2); padding:14px; }
   .ps-box.expanded { height:70vh; }
+  .ps-box:focus { outline:2px solid var(--accent); outline-offset:-2px; }
 
   .ps-preview { line-height:1.9; }
   .ps-para { margin:0 0 10px; direction:rtl; text-align:right; }
   .ps-para.heading { font-weight:800; font-size:19px; border-bottom:1px solid var(--border); padding-bottom:6px; }
-  .ds-run.bold { font-weight:800; }
-  .ds-run.underline { text-decoration:underline; }
+  .ds-run.bold, .ps-box strong, .ps-box b { font-weight:800; }
+  .ds-run.underline, .ps-box u { text-decoration:underline; }
+  .ds-run.italic, .ps-box em, .ps-box i { font-style:italic; }
 
   .ps-actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; }
   .ps-hint { color:var(--text3); font-size:12px; margin-top:8px; }
@@ -25,6 +27,28 @@
 
   .ps-finalrow { display:flex; gap:8px; margin-top:16px; flex-wrap:wrap; align-items:center; }
   .ps-finalrow input[type=email] { flex:1; min-width:220px; padding:9px 12px; border-radius:8px; border:1px solid var(--border); background:var(--surface); color:var(--text); font-family:'Heebo',sans-serif; }
+
+  /* עורך ההגהה המובנה */
+  .ps-toolbar { display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin-bottom:10px; }
+  .ps-toolbar button { padding:6px 12px !important; font-size:13px !important; }
+  .ps-toolbar .ps-sep { width:1px; align-self:stretch; background:var(--border); margin:0 2px; }
+  #saveMsg, #spellMsg { font-size:12px; color:var(--text3); }
+
+  .ps-findbar { display:none; gap:6px; flex-wrap:wrap; align-items:center; margin-bottom:10px; background:var(--surface2); padding:10px; border-radius:8px; }
+  .ps-findbar.open { display:flex; }
+  .ps-findbar input { padding:6px 10px; border-radius:6px; border:1px solid var(--border); background:var(--surface); color:var(--text); font-family:'Heebo',sans-serif; font-size:13px; }
+  .ps-findbar label { font-size:12px; color:var(--text3); display:flex; align-items:center; gap:4px; }
+  #findCount { font-size:12px; color:var(--text3); min-width:60px; }
+
+  mark.ps-find-hit { background:#fde68a; color:#111; border-radius:2px; }
+  mark.ps-find-hit.current { background:#f59e0b; color:#111; }
+  mark.ps-spell-issue { background:transparent; text-decoration:underline wavy #ef4444; text-underline-offset:3px; cursor:pointer; }
+
+  .ps-spell-popup { position:fixed; z-index:2000; background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:8px; box-shadow:0 6px 20px rgba(0,0,0,.3); font-size:13px; min-width:180px; direction:rtl; }
+  .ps-spell-popup .ps-spell-reason { color:var(--text3); font-size:11px; margin-bottom:6px; }
+  .ps-spell-popup button { display:block; width:100%; text-align:right; margin-bottom:4px; padding:6px 8px; border-radius:6px; border:1px solid var(--border); background:var(--surface2); color:var(--text); cursor:pointer; font-family:'Heebo',sans-serif; }
+  .ps-spell-popup button:hover { background:var(--accent); color:#fff; }
+  .ps-spell-popup .ps-spell-dismiss { color:var(--text3); border:none; background:none; text-align:center; margin-top:4px; }
 </style>
 
 <div class="ds-topbar">
@@ -55,29 +79,61 @@
 
   <div class="card">
     <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
-      <span>📝 הקובץ המקורי שנשלח ללקוח</span>
-      <button type="button" class="btn btn-ghost" style="font-size:12px;padding:5px 10px" onclick="toggleExpand('originalBox', this)">⤢ הגדלת תצוגה</button>
-    </div>
-    <div class="ps-box ps-preview" id="originalBox">
-      {{ original_preview_html | safe }}
+      <span>📝 עריכת הקובץ המקורי - החלת התיקונים</span>
+      <div style="display:flex;gap:8px;align-items:center">
+        <span id="saveMsg"></span>
+        <button type="button" class="btn btn-ghost" style="font-size:12px;padding:5px 10px" onclick="toggleExpand('originalBox', this)">⤢ הגדלת תצוגה</button>
+      </div>
     </div>
 
+    <div class="ps-toolbar">
+      <button type="button" class="btn btn-ghost" onmousedown="event.preventDefault()" onclick="document.execCommand('bold')" title="מודגש"><b>B</b></button>
+      <button type="button" class="btn btn-ghost" onmousedown="event.preventDefault()" onclick="document.execCommand('italic')" title="נטוי"><i>I</i></button>
+      <button type="button" class="btn btn-ghost" onmousedown="event.preventDefault()" onclick="document.execCommand('underline')" title="קו תחתון"><u>U</u></button>
+      <button type="button" class="btn btn-ghost" onmousedown="event.preventDefault()" onclick="toggleHeading()" title="הפוך פסקה לכותרת / בטל כותרת">כותרת</button>
+      <div class="ps-sep"></div>
+      <button type="button" class="btn btn-ghost" onmousedown="event.preventDefault()" onclick="document.execCommand('undo')" title="בטל פעולה">↶ בטל</button>
+      <button type="button" class="btn btn-ghost" onmousedown="event.preventDefault()" onclick="document.execCommand('redo')" title="בצע שוב">↷ בצע שוב</button>
+      <div class="ps-sep"></div>
+      <button type="button" class="btn btn-ghost" onclick="toggleFindPanel()">🔍 חיפוש והחלפה</button>
+      <button type="button" class="btn btn-primary" onclick="runSpellcheck()">🔤 בדיקת איות (AI)</button>
+      <span id="spellMsg"></span>
+    </div>
+
+    <div class="ps-findbar" id="findPanel">
+      <input type="text" id="findInput" placeholder="חיפוש...">
+      <input type="text" id="replaceInput" placeholder="החלפה ב...">
+      <label><input type="checkbox" id="findCaseSensitive"> תלוי רישיות</label>
+      <button type="button" class="btn btn-ghost" onclick="findAll()">חיפוש</button>
+      <button type="button" class="btn btn-ghost" onclick="findNav(-1)">‹ קודם</button>
+      <button type="button" class="btn btn-ghost" onclick="findNav(1)">הבא ›</button>
+      <button type="button" class="btn btn-ghost" onclick="replaceCurrent()">החלף</button>
+      <button type="button" class="btn btn-danger" onclick="replaceAllMatches()">החלף הכל</button>
+      <span id="findCount"></span>
+      <button type="button" class="btn btn-ghost" onclick="toggleFindPanel()">✕ סגירה</button>
+    </div>
+
+    <div class="ps-box ps-preview" id="originalBox" contenteditable="true" spellcheck="true" lang="he" dir="rtl"></div>
+    <script type="application/json" id="editorInitialContent">{{ editor_initial_content | tojson }}</script>
+
     <div class="ps-actions">
-      <a href="/admin/dictate/{{ page.id }}/proof/original.docx" class="btn btn-ghost">⬇ הורדת הקובץ המקורי</a>
-      <a href="{{ ms_word_link }}" class="btn btn-primary">🖊 פתיחה ישירות בוורד</a>
+      <button type="button" class="btn btn-primary" onclick="saveEdited(false)">💾 שמירת השינויים</button>
+      <a href="/admin/dictate/{{ page.id }}/proof/original.docx" class="btn btn-ghost">⬇ הורדת הקובץ המקורי (לפני עריכה)</a>
+      <a href="{{ ms_word_link }}" class="btn btn-ghost">🖊 פתיחה ישירות בוורד (חיצוני)</a>
     </div>
     <p class="ps-hint">
-      פותחים את הקובץ בוורד האמיתי (בכפתור "פתיחה ישירות בוורד" - אם זה לא עובד, אפשר להוריד את הקובץ ולפתוח ידנית), מחילים את התיקונים שרואים למעלה בקובץ שהלקוח שלח (כולל חיפוש/החלפה, בדיקת איות ופקודות מאקרו - כל מה שוורד מאפשר), שומרים, ומעלים כאן את הקובץ הסופי.
+      עורכים ישירות כאן: מדגישים טקסט ולוחצים B/I/U לעיצוב, "כותרת" להפיכת שורה לכותרת, ומשתמשים ב"חיפוש והחלפה" ו"בדיקת איות" כדי לתקן מהר. השינויים נשמרים אוטומטית מדי כמה שניות, ואפשר גם ללחוץ "שמירת השינויים" בכל רגע - כל שמירה בונה מיד קובץ Word אמיתי ומעודכן. אם צריך פקודות מאקרו אמיתיות של וורד (לא ניתן לשכפל בדפדפן) - עדיין אפשר לפתוח את הקובץ המקורי בוורד עצמו ולהעלות את הקובץ הסופי ידנית למטה.
     </p>
 
     <div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border)">
-      <div style="font-size:14px;font-weight:700;margin-bottom:10px">📤 העלאת הקובץ הסופי המתוקן</div>
+      <div style="font-size:14px;font-weight:700;margin-bottom:10px">📤 אפשרות מתקדמת: העלאת קובץ Word שנערך חיצונית (למשל לצורך מאקרו)</div>
       <input type="file" id="finalFileInput" accept=".docx">
       <button class="btn btn-primary" onclick="uploadFinal()">העלאה</button>
       <div id="uploadMsg" style="margin-top:8px;font-size:13px"></div>
+      <p class="ps-hint" style="margin-top:6px">שימו לב: העלאת קובץ כאן תחליף את הקובץ הסופי שנוצר מהעריכה למעלה.</p>
       {% if page.proof_final_filename %}
       <div class="ps-uploaded" id="uploadedInfo">
-        ✔ הועלה קובץ סופי: <strong>{{ page.proof_final_filename }}</strong>
+        ✔ קובץ סופי נוכחי: <strong>{{ page.proof_final_filename }}</strong>
         - <a href="/admin/dictate/{{ page.id }}/proof/final.docx">הורדה לבדיקה</a>
       </div>
       {% else %}
@@ -88,7 +144,7 @@
     <div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border)">
       <div style="font-size:14px;font-weight:700;margin-bottom:6px">✅ סיום הגהה</div>
       <p class="ps-hint" style="margin-top:0">
-        סיום ההגהה יחייב את הלקוח ב-₪{{ "%.2f"|format(proofing_price) }} (לפי ההגדרה בעמוד ההגדרות).
+        סיום ההגהה יחייב את הלקוח ב-₪{{ "%.2f"|format(proofing_price) }} (לפי ההגדרה בעמוד ההגדרות). יש לשמור את השינויים לפחות פעם אחת (למעלה) לפני הסיום.
       </p>
       <label style="display:flex;align-items:center;gap:8px;font-size:13px;margin-bottom:8px">
         <input type="checkbox" id="sendBackCheck" checked>
@@ -105,13 +161,361 @@
 
 <script>
 const PAGE_ID = {{ page.id }};
+let dirty = false;
+let spellIssues = [];
+let findMatches = [];
+let findIndex = -1;
 
+// -------------------- תצוגה/הגדלה --------------------
 function toggleExpand(boxId, btn) {
   const box = document.getElementById(boxId);
   const expanded = box.classList.toggle('expanded');
   btn.textContent = expanded ? '⤡ הקטנת תצוגה' : '⤢ הגדלת תצוגה';
 }
 
+// -------------------- בניית העורך מהתוכן ההתחלתי --------------------
+function escapeHtml(s) {
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+function buildParaHtml(para) {
+  const runs = (para.runs && para.runs.length) ? para.runs : [{text: '', bold: false, italic: false, underline: false}];
+  let inner = runs.map(r => {
+    let html = escapeHtml(r.text || '');
+    if (r.bold) html = `<strong>${html}</strong>`;
+    if (r.italic) html = `<em>${html}</em>`;
+    if (r.underline) html = `<u>${html}</u>`;
+    return html;
+  }).join('');
+  if (!inner) inner = '<br>';
+  return `<div class="ps-para${para.heading ? ' heading' : ''}">${inner}</div>`;
+}
+
+function renderEditor() {
+  const raw = document.getElementById('editorInitialContent').textContent || '[]';
+  let content = [];
+  try { content = JSON.parse(raw); } catch (e) { content = []; }
+  const box = document.getElementById('originalBox');
+  box.innerHTML = content.length ? content.map(buildParaHtml).join('') : '<div class="ps-para"><br></div>';
+}
+
+// -------------------- שמירה בפורמט content --------------------
+function serializeEditableContent() {
+  const box = document.getElementById('originalBox');
+  const content = [];
+  Array.from(box.children).forEach(divEl => {
+    if (divEl.tagName !== 'DIV') return;
+    const isHeading = divEl.classList.contains('heading');
+    const runs = [];
+    const walker = document.createTreeWalker(divEl, NodeFilter.SHOW_TEXT, null);
+    let node;
+    while ((node = walker.nextNode())) {
+      const text = node.nodeValue;
+      if (!text) continue;
+      let bold = false, italic = false, underline = false;
+      let cur = node.parentElement;
+      while (cur && cur !== divEl) {
+        const tag = cur.tagName;
+        if (tag === 'STRONG' || tag === 'B') bold = true;
+        if (tag === 'EM' || tag === 'I') italic = true;
+        if (tag === 'U') underline = true;
+        cur = cur.parentElement;
+      }
+      const last = runs[runs.length - 1];
+      if (last && last.bold === bold && last.italic === italic && last.underline === underline) {
+        last.text += text;
+      } else {
+        runs.push({text, bold, italic, underline});
+      }
+    }
+    if (runs.length === 0) {
+      runs.push({text: '', bold: false, italic: false, underline: false});
+    }
+    content.push({heading: isHeading, runs});
+  });
+  return content;
+}
+
+function markDirty() { dirty = true; }
+
+async function saveEdited(isAuto) {
+  if (isAuto && !dirty) return;
+  clearFindHighlights();
+  const content = serializeEditableContent();
+  const msg = document.getElementById('saveMsg');
+  msg.textContent = isAuto ? 'שומר אוטומטית...' : 'שומר...';
+  try {
+    const res = await fetch(`/admin/dictate/${PAGE_ID}/proof/save-edited`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({content}),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'שמירה נכשלה');
+    dirty = false;
+    const now = new Date();
+    msg.textContent = '✔ נשמר ' + now.toLocaleTimeString('he-IL', {hour: '2-digit', minute: '2-digit'});
+    const info = document.getElementById('uploadedInfo');
+    info.style.display = 'block';
+    info.innerHTML = `✔ קובץ סופי עדכני: <strong>${data.filename}</strong> - <a href="/admin/dictate/${PAGE_ID}/proof/final.docx">הורדה לבדיקה</a>`;
+  } catch (e) {
+    msg.textContent = '⚠ ' + e.message;
+  }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  renderEditor();
+  const box = document.getElementById('originalBox');
+  box.addEventListener('input', markDirty);
+  try { document.execCommand('defaultParagraphSeparator', false, 'div'); } catch (e) {}
+  setInterval(() => saveEdited(true), 30000);
+});
+
+window.addEventListener('beforeunload', (e) => {
+  if (dirty) { e.preventDefault(); e.returnValue = ''; }
+});
+
+// -------------------- כותרת --------------------
+function toggleHeading() {
+  const sel = window.getSelection();
+  if (!sel.rangeCount) return;
+  let node = sel.anchorNode;
+  const box = document.getElementById('originalBox');
+  while (node && node.parentElement !== box && node !== box) node = node.parentElement;
+  if (!node || node === box) return;
+  node.classList.toggle('heading');
+  markDirty();
+}
+
+// -------------------- חיפוש והחלפה --------------------
+function toggleFindPanel() {
+  document.getElementById('findPanel').classList.toggle('open');
+}
+
+function clearFindHighlights() {
+  const box = document.getElementById('originalBox');
+  box.querySelectorAll('mark.ps-find-hit').forEach(m => {
+    const parent = m.parentNode;
+    while (m.firstChild) parent.insertBefore(m.firstChild, m);
+    parent.removeChild(m);
+    parent.normalize();
+  });
+  findMatches = [];
+  findIndex = -1;
+  const c = document.getElementById('findCount');
+  if (c) c.textContent = '';
+}
+
+function findAll() {
+  clearFindHighlights();
+  const term = document.getElementById('findInput').value;
+  if (!term) return;
+  const caseSensitive = document.getElementById('findCaseSensitive').checked;
+  const box = document.getElementById('originalBox');
+  const walker = document.createTreeWalker(box, NodeFilter.SHOW_TEXT, null);
+  const textNodes = [];
+  let n;
+  while ((n = walker.nextNode())) textNodes.push(n);
+
+  textNodes.forEach(node => {
+    const text = node.nodeValue;
+    const hay = caseSensitive ? text : text.toLowerCase();
+    const needle = caseSensitive ? term : term.toLowerCase();
+    if (!needle || !hay.includes(needle)) return;
+    const frag = document.createDocumentFragment();
+    let idx = 0;
+    while (true) {
+      const pos = hay.indexOf(needle, idx);
+      if (pos === -1) { frag.appendChild(document.createTextNode(text.slice(idx))); break; }
+      if (pos > idx) frag.appendChild(document.createTextNode(text.slice(idx, pos)));
+      const mark = document.createElement('mark');
+      mark.className = 'ps-find-hit';
+      mark.textContent = text.slice(pos, pos + needle.length);
+      frag.appendChild(mark);
+      findMatches.push(mark);
+      idx = pos + needle.length;
+    }
+    node.parentNode.replaceChild(frag, node);
+  });
+
+  document.getElementById('findCount').textContent = findMatches.length ? `${findMatches.length} תוצאות` : 'אין תוצאות';
+  if (findMatches.length) { findIndex = 0; focusMatch(); }
+}
+
+function focusMatch() {
+  document.querySelectorAll('mark.ps-find-hit.current').forEach(m => m.classList.remove('current'));
+  const m = findMatches[findIndex];
+  if (!m) return;
+  m.classList.add('current');
+  m.scrollIntoView({block: 'center', behavior: 'smooth'});
+}
+
+function findNav(dir) {
+  if (!findMatches.length) return;
+  findIndex = (findIndex + dir + findMatches.length) % findMatches.length;
+  focusMatch();
+}
+
+function replaceCurrent() {
+  if (!findMatches.length || findIndex < 0) return;
+  const mark = findMatches[findIndex];
+  const replacement = document.getElementById('replaceInput').value;
+  const textNode = document.createTextNode(replacement);
+  const parent = mark.parentNode;
+  parent.replaceChild(textNode, mark);
+  parent.normalize();
+  findMatches.splice(findIndex, 1);
+  if (findIndex >= findMatches.length) findIndex = findMatches.length - 1;
+  document.getElementById('findCount').textContent = findMatches.length ? `${findMatches.length} תוצאות` : 'אין תוצאות';
+  if (findIndex >= 0) focusMatch();
+  markDirty();
+}
+
+function replaceAllMatches() {
+  if (!findMatches.length) return;
+  const replacement = document.getElementById('replaceInput').value;
+  [...findMatches].forEach(mark => {
+    const textNode = document.createTextNode(replacement);
+    const parent = mark.parentNode;
+    parent.replaceChild(textNode, mark);
+    parent.normalize();
+  });
+  findMatches = [];
+  findIndex = -1;
+  document.getElementById('findCount').textContent = 'הוחלפו כל המופעים';
+  markDirty();
+}
+
+// -------------------- בדיקת איות (AI) --------------------
+function wrapFirstOccurrence(paraEl, term, className) {
+  if (!term) return null;
+  const walker = document.createTreeWalker(paraEl, NodeFilter.SHOW_TEXT, null);
+  let node;
+  while ((node = walker.nextNode())) {
+    if (node.parentElement.closest('.' + className)) continue;
+    const text = node.nodeValue;
+    const pos = text.indexOf(term);
+    if (pos === -1) continue;
+    const before = text.slice(0, pos);
+    const after = text.slice(pos + term.length);
+    const mark = document.createElement('mark');
+    mark.className = className;
+    mark.textContent = term;
+    const frag = document.createDocumentFragment();
+    if (before) frag.appendChild(document.createTextNode(before));
+    frag.appendChild(mark);
+    if (after) frag.appendChild(document.createTextNode(after));
+    node.parentNode.replaceChild(frag, node);
+    return mark;
+  }
+  return null;
+}
+
+function clearSpellHighlights() {
+  const box = document.getElementById('originalBox');
+  box.querySelectorAll('mark.ps-spell-issue').forEach(m => {
+    const parent = m.parentNode;
+    while (m.firstChild) parent.insertBefore(m.firstChild, m);
+    parent.removeChild(m);
+    parent.normalize();
+  });
+  spellIssues = [];
+  closeSpellPopup();
+}
+
+async function runSpellcheck() {
+  const box = document.getElementById('originalBox');
+  clearFindHighlights();
+  clearSpellHighlights();
+  const paraDivs = Array.from(box.children).filter(el => el.tagName === 'DIV');
+  const paragraphs = paraDivs.map(el => el.textContent);
+  const msg = document.getElementById('spellMsg');
+  msg.textContent = 'בודק איות...';
+  try {
+    const res = await fetch(`/admin/dictate/${PAGE_ID}/proof/spellcheck`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({paragraphs}),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'שגיאה בבדיקת האיות');
+    const issues = data.issues || [];
+    issues.forEach(issue => {
+      const paraEl = paraDivs[issue.paragraph];
+      if (!paraEl) return;
+      const mark = wrapFirstOccurrence(paraEl, issue.wrong, 'ps-spell-issue');
+      if (mark) {
+        mark.addEventListener('click', (ev) => { ev.stopPropagation(); showSpellPopup(mark, issue); });
+        spellIssues.push({mark, issue});
+      }
+    });
+    msg.textContent = spellIssues.length ? `נמצאו ${spellIssues.length} הערות איות - לחצו על מילה מסומנת לתיקון` : '✔ לא נמצאו בעיות איות';
+  } catch (e) {
+    msg.textContent = '⚠ ' + e.message;
+  }
+}
+
+let currentSpellPopup = null;
+
+function closeSpellPopup() {
+  if (currentSpellPopup) { currentSpellPopup.remove(); currentSpellPopup = null; }
+}
+
+function showSpellPopup(mark, issue) {
+  closeSpellPopup();
+  const rect = mark.getBoundingClientRect();
+  const popup = document.createElement('div');
+  popup.className = 'ps-spell-popup';
+  popup.style.top = (rect.bottom + 6) + 'px';
+  popup.style.left = Math.max(8, rect.left - 60) + 'px';
+  if (issue.reason) {
+    const reasonEl = document.createElement('div');
+    reasonEl.className = 'ps-spell-reason';
+    reasonEl.textContent = issue.reason;
+    popup.appendChild(reasonEl);
+  }
+  (issue.suggestions || []).forEach(sugg => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = sugg;
+    btn.onclick = () => applySpellSuggestion(mark, sugg);
+    popup.appendChild(btn);
+  });
+  const dismissBtn = document.createElement('button');
+  dismissBtn.type = 'button';
+  dismissBtn.className = 'ps-spell-dismiss';
+  dismissBtn.textContent = 'התעלם';
+  dismissBtn.onclick = () => dismissSpellIssue(mark);
+  popup.appendChild(dismissBtn);
+  document.body.appendChild(popup);
+  currentSpellPopup = popup;
+  setTimeout(() => document.addEventListener('click', closeSpellPopupOnOutsideClick, {once: true}), 0);
+}
+
+function closeSpellPopupOnOutsideClick() { closeSpellPopup(); }
+
+function applySpellSuggestion(mark, suggestion) {
+  const textNode = document.createTextNode(suggestion);
+  const parent = mark.parentNode;
+  parent.replaceChild(textNode, mark);
+  parent.normalize();
+  spellIssues = spellIssues.filter(i => i.mark !== mark);
+  closeSpellPopup();
+  markDirty();
+}
+
+function dismissSpellIssue(mark) {
+  const parent = mark.parentNode;
+  while (mark.firstChild) parent.insertBefore(mark.firstChild, mark);
+  parent.removeChild(mark);
+  parent.normalize();
+  spellIssues = spellIssues.filter(i => i.mark !== mark);
+  closeSpellPopup();
+}
+
+// -------------------- העלאת קובץ חיצוני / סיום הגהה (ללא שינוי בהתנהגות) --------------------
 async function uploadFinal() {
   const input = document.getElementById('finalFileInput');
   const msg = document.getElementById('uploadMsg');
@@ -128,7 +532,7 @@ async function uploadFinal() {
     msg.style.color = 'var(--green)';
     const info = document.getElementById('uploadedInfo');
     info.style.display = 'block';
-    info.innerHTML = `✔ הועלה קובץ סופי: <strong>${data.filename}</strong> - <a href="/admin/dictate/${PAGE_ID}/proof/final.docx">הורדה לבדיקה</a>`;
+    info.innerHTML = `✔ קובץ סופי נוכחי: <strong>${data.filename}</strong> - <a href="/admin/dictate/${PAGE_ID}/proof/final.docx">הורדה לבדיקה</a>`;
   } catch (e) {
     msg.textContent = '⚠ ' + e.message;
     msg.style.color = 'var(--red)';
