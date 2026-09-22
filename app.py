@@ -358,6 +358,24 @@ def _migrate_db():
         "CREATE INDEX IF NOT EXISTS ix_incoming_faxes_received_at ON incoming_faxes (received_at)",
         "CREATE INDEX IF NOT EXISTS ix_incoming_faxes_status ON incoming_faxes (status)",
         "CREATE INDEX IF NOT EXISTS ix_incoming_faxes_assigned_customer_id ON incoming_faxes (assigned_customer_id)",
+        # "לקוח-דמה" אחד לכל מוסד, להעלאת כתבי-יד כלליים שלא שייכים לתלמיד
+        # ספציפי - ראה models.Customer.is_institution_self,
+        # routes/institution.py.ensure_institution_self_customer.
+        "ALTER TABLE customers ADD COLUMN IF NOT EXISTS is_institution_self BOOLEAN DEFAULT FALSE",
+        # מסירת כתבי-יד/הגהות מוכנים בפקס ללקוחות ללא מייל (ראה
+        # services/transcribe.py.send_pdf_fax, routes/dictate.py._send_manuscript_fax) -
+        # אותם שדות מעקב בדיוק כמו recordings.fax_campaign_id/fax_status.
+        "ALTER TABLE manuscript_pages ADD COLUMN IF NOT EXISTS sent_via VARCHAR(10)",
+        "ALTER TABLE manuscript_pages ADD COLUMN IF NOT EXISTS fax_campaign_id VARCHAR(64)",
+        "ALTER TABLE manuscript_pages ADD COLUMN IF NOT EXISTS fax_status VARCHAR(32)",
+        "ALTER TABLE manuscript_pages ADD COLUMN IF NOT EXISTS fax_status_note TEXT",
+        "CREATE INDEX IF NOT EXISTS ix_manuscript_pages_fax_campaign_id ON manuscript_pages (fax_campaign_id)",
+        "ALTER TABLE proofing_rounds ADD COLUMN IF NOT EXISTS sent_via VARCHAR(10)",
+        "ALTER TABLE proofing_rounds ADD COLUMN IF NOT EXISTS sent_to VARCHAR(255)",
+        "ALTER TABLE proofing_rounds ADD COLUMN IF NOT EXISTS fax_campaign_id VARCHAR(64)",
+        "ALTER TABLE proofing_rounds ADD COLUMN IF NOT EXISTS fax_status VARCHAR(32)",
+        "ALTER TABLE proofing_rounds ADD COLUMN IF NOT EXISTS fax_status_note TEXT",
+        "CREATE INDEX IF NOT EXISTS ix_proofing_rounds_fax_campaign_id ON proofing_rounds (fax_campaign_id)",
     ]
     logger = logging.getLogger(__name__)
     ok, failed = 0, 0

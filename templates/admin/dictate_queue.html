@@ -70,7 +70,7 @@
     <tbody>
       {% for r in proof_rounds %}
       <tr>
-        <td onclick="location='/admin/dictate/proof/{{r.id}}'" style="cursor:pointer"><strong>{{ r.manuscript_page.customer.phone }}</strong></td>
+        <td onclick="location='/admin/dictate/proof/{{r.id}}'" style="cursor:pointer"><strong>{{ r.manuscript_page.customer.display_name }}</strong>{% if r.manuscript_page.customer.institution %}<span style="color:#8892b0;font-size:11.5px"> · 🏫 {{ r.manuscript_page.customer.institution.name }}</span>{% endif %}</td>
         <td onclick="location='/admin/dictate/proof/{{r.id}}'" style="cursor:pointer;color:#8892b0;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.manuscript_page.original_filename }}</td>
         <td onclick="location='/admin/dictate/proof/{{r.id}}'" style="cursor:pointer;color:#8892b0;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.customer_file_filename or '—' }}</td>
         <td onclick="location='/admin/dictate/proof/{{r.id}}'" style="cursor:pointer;color:#8892b0">{{ r.requested_at | il_time }}</td>
@@ -107,7 +107,7 @@
     <tbody>
       {% for r in proof_rounds %}
       <tr>
-        <td onclick="location='/admin/dictate/proof/{{r.id}}'" style="cursor:pointer"><strong>{{ r.manuscript_page.customer.phone }}</strong></td>
+        <td onclick="location='/admin/dictate/proof/{{r.id}}'" style="cursor:pointer"><strong>{{ r.manuscript_page.customer.display_name }}</strong>{% if r.manuscript_page.customer.institution %}<span style="color:#8892b0;font-size:11.5px"> · 🏫 {{ r.manuscript_page.customer.institution.name }}</span>{% endif %}</td>
         <td onclick="location='/admin/dictate/proof/{{r.id}}'" style="cursor:pointer;color:#8892b0;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.manuscript_page.original_filename }}</td>
         <td onclick="location='/admin/dictate/proof/{{r.id}}'" style="cursor:pointer;color:#8892b0">{{ r.timer_accumulated_seconds | minutes_billed }} דק׳</td>
         <td onclick="location='/admin/dictate/proof/{{r.id}}'" style="cursor:pointer">{% if r.cost %}₪{{ "%.2f"|format(r.cost) }}{% else %}—{% endif %}</td>
@@ -145,7 +145,7 @@
     <tbody>
       {% for p in pages %}
       <tr>
-        <td onclick="location='/admin/dictate/{{p.id}}'" style="cursor:pointer"><strong>{{ p.customer.phone }}</strong></td>
+        <td onclick="location='/admin/dictate/{{p.id}}'" style="cursor:pointer"><strong>{{ p.customer.display_name }}</strong>{% if p.customer.institution %}<span style="color:#8892b0;font-size:11.5px"> · 🏫 {{ p.customer.institution.name }}</span>{% endif %}</td>
         <td onclick="location='/admin/dictate/{{p.id}}'" style="cursor:pointer;color:#8892b0;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ p.original_filename }}</td>
         <td onclick="location='/admin/dictate/{{p.id}}'" style="cursor:pointer">
           {% if p.status == 'pending' %}<span class="badge badge-gray">ממתין</span>

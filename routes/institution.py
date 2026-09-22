@@ -268,12 +268,50 @@ def logout():
     return redirect(url_for('institution.login'))
 
 
+def ensure_institution_self_customer(institution):
+    """מחזיר (ויוצר אם צריך, עצלנית - כמו routes/dictate.py._ensure_customer_fax_code)
+    את "לקוח-הדמה" היחיד של המוסד הזה, המייצג את המוסד עצמו ולא תלמיד
+    ספציפי - ראה models.Customer.is_institution_self. נועד להעלאת כתבי-יד
+    כלליים של המוסד (למשל טופס שהמזכירות ממלאת, לא שייך לתלמיד בודד) דרך
+    בדיוק אותם מסכים/routes של תלמיד רגיל (student_detail וכל שאר הפונקציות
+    ב-routes/institution_students.py, ללא צורך בקוד כפול) - פשוט מפנים
+    אליו לפי ה-id שלו כאילו הוא "תלמיד". אין לו טלפון/מספר תלמיד (שניהם
+    None, מותר לפי models.Customer - כמה שורות עם NULL לא מתנגשות ב-unique)."""
+    self_customer = Customer.query.filter_by(institution_id=institution.id, is_institution_self=True).first()
+    if not self_customer:
+        self_customer = Customer(
+            institution_id=institution.id,
+            is_institution_self=True,
+            student_display_name=f'מסמכים כלליים - {institution.name}',
+            name=institution.name,
+            balance=0.0,
+        )
+        db.session.add(self_customer)
+        db.session.commit()
+    return self_customer
+
+
+@institution_bp.route('/manuscripts')
+@institution_login_required
+def self_manuscripts():
+    """נקודת כניסה להעלאת/צפייה בכתבי-יד כלליים של המוסד עצמו (לא שייכים
+    לתלמיד ספציפי) - ראה ensure_institution_self_customer למעלה. פשוט
+    מפנה למסך תיק "תלמיד" הרגיל (student_detail) עם לקוח-הדמה של המוסד,
+    שכבר תומך בדיוק במה שצריך (העלאת כתב-יד, צפייה, הורדה, הגהה נוספת)."""
+    self_customer = ensure_institution_self_customer(current_user)
+    return redirect(url_for('institution_students.student_detail', student_id=self_customer.id))
+
+
 @institution_bp.route('/')
 @institution_bp.route('/dashboard')
 @institution_login_required
 def dashboard():
     inst = current_user
-    students = Customer.query.filter_by(institution_id=inst.id).all()
+    # מוציאים במפורש את לקוח-הדמה של המוסד עצמו (is_institution_self) -
+    # הוא לא תלמיד אמיתי, אסור שיספר במספר התלמידים/סכום היתרות. משתמשים
+    # ב-isnot(True) ולא ב-==False כדי לכלול גם שורות ישנות עם NULL (ברירת
+    # המחדל בפועל לפני שהעמודה הזו נוספה).
+    students = Customer.query.filter_by(institution_id=inst.id).filter(Customer.is_institution_self.isnot(True)).all()
     total_recordings = Recording.query.join(Customer).filter(Customer.institution_id == inst.id).count()
     students_balance_sum = sum(s.balance or 0 for s in students)
 

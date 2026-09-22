@@ -55,17 +55,19 @@
       <td>{{ s.phone or '—' }}</td>
       <td>{{ "%.2f"|format(s.balance or 0) }} ₪</td>
       <td>{{ 'חסום' if s.is_blocked else 'פעיל' }}</td>
-      <td style="display:flex; gap:6px;">
-        <form method="post" action="{{ url_for('institution_students.credit_student', student_id=s.id) }}" style="display:flex; gap:4px;">
-          <input name="amount" type="number" step="0.01" placeholder="+/- ₪" style="width:80px; padding:4px; border-radius:6px; border:1px solid var(--border); background:var(--surface2); color:var(--text); font-size:12px;">
-          <button type="submit" style="font-size:12px; padding:4px 8px; border-radius:6px; border:1px solid var(--border); background:var(--surface2); color:var(--text); cursor:pointer;">עדכון</button>
-        </form>
-        <form method="post" action="{{ url_for('institution_students.toggle_block', student_id=s.id) }}">
-          <button type="submit" style="font-size:12px; padding:4px 8px; border-radius:6px; border:1px solid var(--border); background:var(--surface2); color:var(--text); cursor:pointer;">{{ 'שחרור' if s.is_blocked else 'חסימה' }}</button>
-        </form>
-        <form method="post" action="{{ url_for('institution_students.remove_student', student_id=s.id) }}" onsubmit="return confirm('להסיר תלמיד זה מהמוסד?')">
-          <button type="submit" style="font-size:12px; padding:4px 8px; border-radius:6px; border:1px solid var(--red); background:transparent; color:var(--red); cursor:pointer;">הסרה</button>
-        </form>
+      <td>
+        <div style="display:flex; gap:6px; align-items:center; flex-wrap:nowrap;">
+          <form method="post" action="{{ url_for('institution_students.credit_student', student_id=s.id) }}" style="display:flex; gap:4px;">
+            <input name="amount" type="number" step="0.01" placeholder="+/- ₪" class="input" style="width:80px; padding:5px 8px; font-size:12.5px;">
+            <button type="submit" class="btn btn-secondary btn-sm">עדכון</button>
+          </form>
+          <form method="post" action="{{ url_for('institution_students.toggle_block', student_id=s.id) }}">
+            <button type="submit" class="btn btn-secondary btn-sm">{{ 'שחרור' if s.is_blocked else 'חסימה' }}</button>
+          </form>
+          <form method="post" action="{{ url_for('institution_students.remove_student', student_id=s.id) }}" onsubmit="return confirm('להסיר תלמיד זה מהמוסד?')">
+            <button type="submit" class="btn btn-danger btn-sm">הסרה</button>
+          </form>
+        </div>
       </td>
     </tr>
     {% else %}

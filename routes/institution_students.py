@@ -32,7 +32,11 @@ def _generate_student_number():
 @institution_students_bp.route('/institution/students')
 @institution_login_required
 def students_tab():
-    students = Customer.query.filter_by(institution_id=current_user.id).order_by(Customer.created_at.desc()).all()
+    # לקוח-הדמה של המוסד עצמו (is_institution_self, ראה routes/institution.py
+    # ensure_institution_self_customer) לא תלמיד אמיתי - לא מוצג ברשימה הזו.
+    students = (Customer.query.filter_by(institution_id=current_user.id)
+                .filter(Customer.is_institution_self.isnot(True))
+                .order_by(Customer.created_at.desc()).all())
     return render_template('institution/students.html', students=students)
 
 
@@ -224,7 +228,8 @@ def upload_excel():
 @institution_login_required
 def export_excel():
     import openpyxl
-    students = Customer.query.filter_by(institution_id=current_user.id).all()
+    students = (Customer.query.filter_by(institution_id=current_user.id)
+                .filter(Customer.is_institution_self.isnot(True)).all())
 
     wb = openpyxl.Workbook()
     ws = wb.active

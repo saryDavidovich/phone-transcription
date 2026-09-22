@@ -735,6 +735,32 @@ def _send_manuscript_email(to_email, customer_name, customer_phone, page_id, ori
     sg.send(message)
 
 
+def _send_manuscript_fax(record, to_number, docx_bytes, filename_hint):
+    """שולח כתב-יד/הגהה מוכנים בפקס ללקוח שאין לו כתובת מייל (ראה send()/
+    proof_complete() למטה) - אותה אוכלוסיית "אנשי הפקס" בדיוק (ראה
+    _send_manuscript_email למעלה: "אין להם מייל בכלל"), שעד עכשיו פשוט לא
+    היה אפשר למסור להם את הכתב-יד המוכן כי send() דרש כתובת מייל בכל מקרה.
+    ממיר את אותו docx שהיה נשלח במייל ל-PDF (LibreOffice, ראה
+    services/transcribe.convert_docx_bytes_to_pdf_bytes) ושולח דרך ה-API
+    של ימות המשיח (services/transcribe.send_pdf_fax - אותה תשתית פקס-יוצא
+    שכבר עובדת עבור תמלולי שיחה, ראה services/transcribe._send_fax).
+    record הוא ManuscriptPage או ProofingRound - לשניהם בדיוק אותם שדות
+    מעקב (fax_campaign_id/fax_status/fax_status_note). מעלה חריגה בכישלון
+    (כמו _send_manuscript_email - sg.send שמעלה חריגה על כישלון) כדי
+    שהקוד הקורא (try/except קיים) יעשה rollback ויחזיר שגיאה, בלי לחייב
+    את הלקוח על שליחה שלא הצליחה."""
+    from services.transcribe import convert_docx_bytes_to_pdf_bytes, send_pdf_fax
+    pdf_bytes = convert_docx_bytes_to_pdf_bytes(docx_bytes)
+    if not pdf_bytes:
+        raise RuntimeError('המרת הקובץ ל-PDF לשליחת פקס נכשלה (בדיקת LibreOffice בשרת) - ראה לוגים')
+    result = send_pdf_fax(to_number, pdf_bytes, filename_hint=filename_hint)
+    if not result['ok']:
+        raise RuntimeError(f'שליחת הפקס נכשלה: {result["error"] or "שגיאה לא ידועה"}')
+    record.fax_campaign_id = result['campaign_id']
+    record.fax_status = 'sent'
+    record.fax_status_note = None
+
+
 def _send_proofed_manuscript_email(to_email, customer_name, original_filename, final_docx_bytes):
     """שולח ללקוח בחזרה את קובץ ה-Word הסופי אחרי שהנציג סיים לעבד את ההגהה -
     נקרא (אופציונלית) מתוך proof_complete."""
@@ -1204,14 +1230,33 @@ def redo(page_id):
 @dictate_bp.route('/<int:page_id>/send', methods=['POST'])
 @login_required
 def send(page_id):
+    """מסמן דף כתב-יד כמוכן/משויך, וממסור אותו ללקוח - לפי מי הלקוח, בדרך
+    שונה (ראה גם proof_complete למטה, אותה פילוסופיה בדיוק לסבבי הגהה):
+      1. יש כתובת מייל (הוזנה ידנית בטופס, או קיימת על הלקוח) -> מייל, כמו
+         תמיד.
+      2. אין מייל אבל הלקוח שייך למוסד (institution_id) -> לא דורשים שום
+         דרך מסירה - סימון "מוכן" מספיק, המוסד רואה/מוריד את הקובץ בעצמו
+         בתיק התלמיד באתר (routes/institution_students.py student_detail) -
+         זה הערוץ העיקרי שלהם ותמיד עדכני, בלי תלות בהקלדת מייל של נציג.
+      3. אין מייל ואין מוסד, אבל יש מספר טלפון/פקס ללקוח -> שולחים פקס
+         (_send_manuscript_fax) - אלו "אנשי הפקס" (ראה _send_manuscript_email
+         למעלה) שקודם לכן לא היה אפשר למסור להם את הכתב-יד המוכן בכלל כי
+         הפונקציה דרשה מייל תמיד.
+      4. אף אחד מהנ"ל - שגיאה אמיתית (אין שום דרך להגיע ללקוח)."""
     from models import ManuscriptPage, Transaction
     page = ManuscriptPage.query.get_or_404(page_id)
     if not page.content:
         return jsonify({'error': 'אין תוכן לשליחה'}), 400
 
-    to_email = (request.form.get('to_email') or '').strip() or (page.customer.email or '').strip()
-    if not to_email:
-        return jsonify({'error': 'אין כתובת מייל ליעד - הזינו כתובת'}), 400
+    customer = page.customer
+    to_email = (request.form.get('to_email') or '').strip() or ((customer.email or '').strip() if customer else '')
+    is_institution_student = bool(customer and customer.institution_id)
+    to_fax_number = ''
+    if not to_email and not is_institution_student and customer:
+        to_fax_number = (customer.fax or customer.phone or '').strip()
+
+    if not to_email and not is_institution_student and not to_fax_number:
+        return jsonify({'error': 'אין כתובת מייל, מספר פקס או שיוך למוסד ליעד - אין דרך למסור ללקוח הזה'}), 400
 
     # התשלום יורד מהלקוח רק פעם אחת - בפעם הראשונה שהדף באמת מסתיים ונשלח
     # בהצלחה (status עובר מ-'done'). אם לוחצים "שלח" שוב על דף שכבר נשלח
@@ -1220,46 +1265,69 @@ def send(page_id):
     # ואז שליחה הבאה היא שוב "שליחה ראשונה" לגיטימית שכן מחויבת.
     already_sent = (page.status == 'done')
 
-    customer = page.customer
+    # "מסמכים כלליים" של מוסד (Customer.is_institution_self, ראה
+    # routes/institution.py.ensure_institution_self_customer) לא אמורים
+    # לצבור יתרה משלהם - מחייבים ישירות את יתרת המוסד עצמו (אותה יתרה
+    # בדיוק שמשמשת גם ל-InstitutionUpload/institution_transcribe).
+    billing_account = customer
+    if customer and customer.is_institution_self and customer.institution:
+        billing_account = customer.institution
+
     unit_size, price_per_unit = _manuscript_pricing()
     char_count = _manuscript_char_count(page.content)
     units = math.ceil(char_count / unit_size) if char_count > 0 else 0
     cost = 0.0 if already_sent else round(units * price_per_unit, 2)
 
     if cost > 0:
-        if not customer:
-            return jsonify({'error': 'לא נמצא לקוח משויך לדף זה - לא ניתן לחייב'}), 400
-        if customer.balance < cost:
+        if not billing_account:
+            return jsonify({'error': 'לא נמצא לקוח/מוסד משויך לדף זה - לא ניתן לחייב'}), 400
+        if billing_account.balance < cost:
             log.info(
-                f"manuscript send: יתרה לא מספיקה עבור customer {customer.id} "
-                f"(צריך {cost}, יש {customer.balance}), page={page_id}"
+                f"manuscript send: יתרה לא מספיקה עבור {'institution' if billing_account is not customer else 'customer'} "
+                f"{billing_account.id} (צריך {cost}, יש {billing_account.balance}), page={page_id}"
             )
             return jsonify({
-                'error': f'אין מספיק יתרה ללקוח לשליחה (עלות: ₪{cost:.2f}, יתרה נוכחית: ₪{customer.balance:.2f}) - '
-                         f'יש לטעון יתרה ללקוח ולנסות לשלוח שוב',
+                'error': f'אין מספיק יתרה לשליחה (עלות: ₪{cost:.2f}, יתרה נוכחית: ₪{billing_account.balance:.2f}) - '
+                         f'יש לטעון יתרה ולנסות לשלוח שוב',
                 'insufficient_balance': True,
                 'cost': cost,
-                'balance': customer.balance,
+                'balance': billing_account.balance,
             }), 402
 
     try:
-        _send_manuscript_email(to_email, page.customer.name, page.customer.phone, page.id, page.original_filename, page.content)
-        if cost > 0 and customer:
-            customer.balance -= cost
+        if to_email:
+            _send_manuscript_email(to_email, customer.name if customer else '', customer.phone if customer else '', page.id, page.original_filename, page.content)
+            page.sent_via = 'email'
+            page.sent_to = to_email
+        elif to_fax_number:
+            docx_bytes = _build_manuscript_docx(customer.name if customer else '', page.original_filename, page.content)
+            _send_manuscript_fax(page, to_fax_number, docx_bytes, filename_hint=f'manuscript_{page.id}.pdf')
+            page.sent_via = 'fax'
+            page.sent_to = to_fax_number
+        else:
+            # לקוח מוסד ללא מייל - שום מסירה אקטיבית, רק סימון "מוכן"
+            # (המוסד רואה/מוריד בעצמו - ראה docstring למעלה).
+            page.sent_via = None
+            page.sent_to = None
+
+        if cost > 0 and billing_account:
+            billing_account.balance -= cost
             db.session.add(Transaction(
                 customer_id=customer.id,
                 amount=-cost,
                 type='manuscript_dictation',
-                description=f'הקראת כתב יד - {page.original_filename}',
+                description=f'הקראת כתב יד - {page.original_filename}' + (' (חויב מיתרת המוסד)' if billing_account is not customer else ''),
             ))
         if not already_sent:
             page.char_count = char_count
             page.cost = cost
         page.sent_at = datetime.utcnow()
-        page.sent_to = to_email
         page.status = 'done'
         db.session.commit()
-        return jsonify({'status': 'sent', 'to': to_email, 'cost': cost, 'char_count': char_count, 'resend': already_sent})
+        return jsonify({
+            'status': 'sent', 'to': page.sent_to, 'via': page.sent_via or 'portal',
+            'cost': cost, 'char_count': char_count, 'resend': already_sent,
+        })
     except Exception as e:
         db.session.rollback()
         log.error(f"manuscript send error (page={page_id}): {e}", exc_info=True)
@@ -1640,41 +1708,72 @@ def proof_complete(round_id):
 
     page = round_.manuscript_page
     customer = page.customer if page else None
+    # ראה send() למעלה - "מסמכים כלליים" של מוסד מחויבים ישירות מיתרת
+    # המוסד, לא מיתרת לקוח-הדמה (שתמיד 0).
+    billing_account = customer
+    if customer and customer.is_institution_self and customer.institution:
+        billing_account = customer.institution
     if price > 0:
-        if not customer:
-            return jsonify({'error': 'לא נמצא לקוח משויך - לא ניתן לחייב'}), 400
-        if customer.balance < price:
+        if not billing_account:
+            return jsonify({'error': 'לא נמצא לקוח/מוסד משויך - לא ניתן לחייב'}), 400
+        if billing_account.balance < price:
             return jsonify({
-                'error': f'אין מספיק יתרה ללקוח לחיוב ההגהה (עלות: ₪{price:.2f} עבור {minutes} דק׳, יתרה נוכחית: ₪{customer.balance:.2f}) - '
-                         f'יש לטעון יתרה ללקוח ולנסות שוב',
+                'error': f'אין מספיק יתרה לחיוב ההגהה (עלות: ₪{price:.2f} עבור {minutes} דק׳, יתרה נוכחית: ₪{billing_account.balance:.2f}) - '
+                         f'יש לטעון יתרה ולנסות שוב',
                 'insufficient_balance': True,
                 'cost': price,
                 'minutes': minutes,
-                'balance': customer.balance,
+                'balance': billing_account.balance,
             }), 402
 
+    # שליחה בחזרה היא תמיד אופציונלית (send_back) - ללקוח מוסד ממילא לא
+    # צריך: סימון "done" מספיק, הוא רואה/מוריד את ההגהה הסופית בעצמו בתיק
+    # התלמיד באתר (ראה docstring של send() למעלה, אותה פילוסופיה בדיוק).
+    # כשכן מבקשים לשלוח בחזרה (send_back=1) ואין ללקוח מייל - שולחים בפקס
+    # (אותם "אנשי הפקס" מ-send() למעלה) אם יש טלפון, במקום לחסום.
     send_back = request.form.get('send_back') == '1'
     to_email = (request.form.get('to_email') or '').strip() or ((customer.email or '').strip() if customer else '')
+    is_institution_student = bool(customer and customer.institution_id)
+    to_fax_number = ''
+    if send_back and not to_email and not is_institution_student and customer:
+        to_fax_number = (customer.fax or customer.phone or '').strip()
 
+    if send_back and not to_email and not to_fax_number and not is_institution_student:
+        return jsonify({'error': 'אין כתובת מייל או מספר פקס ליעד לשליחה חזרה - הזינו כתובת'}), 400
+
+    sent_via = None
     try:
         if send_back:
-            if not to_email:
-                return jsonify({'error': 'אין כתובת מייל ליעד לשליחה חזרה - הזינו כתובת'}), 400
-            _send_proofed_manuscript_email(to_email, customer.name if customer else '', page.original_filename, round_.final_file_data)
+            if to_email:
+                _send_proofed_manuscript_email(to_email, customer.name if customer else '', page.original_filename, round_.final_file_data)
+                sent_via = 'email'
+                round_.sent_to = to_email
+            elif to_fax_number:
+                _send_manuscript_fax(round_, to_fax_number, round_.final_file_data, filename_hint=f'proof_{round_.id}.pdf')
+                sent_via = 'fax'
+                round_.sent_to = to_fax_number
+            # אם send_back=1 אבל הלקוח שייך למוסד וגם לא הוזנה כתובת מייל -
+            # לא עושים כלום כאן (הכתובת הייתה ריקה לגיטימית) - עדיין מסמנים
+            # done, המוסד יראה/יוריד בעצמו.
+            round_.sent_via = sent_via
 
-        if price > 0 and customer:
-            customer.balance -= price
+        if price > 0 and billing_account:
+            billing_account.balance -= price
             db.session.add(Transaction(
                 customer_id=customer.id,
                 amount=-price,
                 type='manuscript_proofing',
-                description=f'הגהת כתב יד - {page.original_filename} ({minutes} דק׳)',
+                description=f'הגהת כתב יד - {page.original_filename} ({minutes} דק׳)' + (' (חויב מיתרת המוסד)' if billing_account is not customer else ''),
             ))
         round_.cost = price
         round_.status = 'done'
         round_.completed_at = datetime.utcnow()
         db.session.commit()
-        return jsonify({'status': 'done', 'cost': price, 'minutes': minutes, 'sent': send_back, 'to': to_email if send_back else None})
+        return jsonify({
+            'status': 'done', 'cost': price, 'minutes': minutes,
+            'sent': bool(sent_via), 'via': sent_via,
+            'to': round_.sent_to if sent_via else None,
+        })
     except Exception as e:
         db.session.rollback()
         log.error(f"proofing round complete error (round={round_id}): {e}", exc_info=True)

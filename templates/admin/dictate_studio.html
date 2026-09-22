@@ -76,7 +76,7 @@
 <div class="ds-topbar">
   <div class="ds-topbar-left">
     <a href="/admin/dictate" class="btn btn-ghost ds-topbtn">← חזרה לתור</a>
-    <a href="/admin/customers/{{ page.customer_id }}" class="btn btn-ghost ds-topbtn">👤 {{ page.customer.phone }}</a>
+    <a href="/admin/customers/{{ page.customer_id }}" class="btn btn-ghost ds-topbtn">👤 {{ page.customer.display_name }}{% if page.customer.institution %} · 🏫 {{ page.customer.institution.name }}{% endif %}</a>
   </div>
   <div class="ds-topbar-right">
     <span id="statusBadge" class="badge badge-gray">{{ page.status }}</span>
@@ -527,7 +527,11 @@ async function sendResult() {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'שליחה נכשלה');
     const costPart = (data.cost > 0) ? ` (חויב ₪${data.cost.toFixed(2)})` : (data.resend ? ' (שליחה חוזרת - לא חויב שוב)' : '');
-    msg.textContent = `✔ נשלח אל ${data.to}${costPart}`;
+    let viaPart;
+    if (data.via === 'email') viaPart = `נשלח במייל אל ${data.to}`;
+    else if (data.via === 'fax') viaPart = `נשלח בפקס אל ${data.to}`;
+    else viaPart = 'סומן כמוכן - הלקוח יראה ויוריד בעצמו בתיק שלו באתר המוסד';
+    msg.textContent = `✔ ${viaPart}${costPart}`;
     msg.style.color = 'var(--green)';
     document.getElementById('statusBadge').textContent = 'done';
   } catch (e) {

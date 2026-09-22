@@ -87,7 +87,7 @@
 <div class="ds-topbar">
   <div class="ds-topbar-left">
     <a href="/admin/dictate?status=proof" class="btn btn-ghost ds-topbtn">← חזרה לרשימת ההגהות</a>
-    <a href="/admin/customers/{{ page.customer_id }}" class="btn btn-ghost ds-topbtn">👤 {{ page.customer.phone }}</a>
+    <a href="/admin/customers/{{ page.customer_id }}" class="btn btn-ghost ds-topbtn">👤 {{ page.customer.display_name }}{% if page.customer.institution %} · 🏫 {{ page.customer.institution.name }}{% endif %}</a>
     {% if sibling_rounds|length > 1 %}
     <span class="ps-roundnav">
       סבב הגהה {{ round_index }} מתוך {{ sibling_rounds|length }} לכתב-יד זה -
@@ -811,7 +811,10 @@ async function completeProof() {
     const res = await fetch(`/admin/dictate/proof/${ROUND_ID}/complete`, { method: 'POST', body: fd });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'שגיאה בסיום ההגהה');
-    msg.textContent = `✔ ההגהה הושלמה (${data.minutes} דק׳, חויב ₪${data.cost.toFixed(2)})${data.sent ? ' ונשלח ללקוח' : ''}`;
+    let sentPart = '';
+    if (data.via === 'email') sentPart = ` ונשלח במייל אל ${data.to}`;
+    else if (data.via === 'fax') sentPart = ` ונשלח בפקס אל ${data.to}`;
+    msg.textContent = `✔ ההגהה הושלמה (${data.minutes} דק׳, חויב ₪${data.cost.toFixed(2)})${sentPart}`;
     msg.style.color = 'var(--green)';
     setTimeout(() => { location.href = '/admin/dictate?status=proof'; }, 1500);
   } catch (e) {

@@ -1632,21 +1632,21 @@ def _build_word_doc(name, duration_str, transcript_fixed, transcript_raw=None, t
     return docx_bytes
 
 
-def _build_pdf_for_fax(name, duration_str, transcript_fixed):
-    """
-    בונה PDF עם תמלול בעברית עבור שליחת פקס.
-    משתמש באותו מסמך Word שנבנה למייל (_build_word_doc, RTL תקני דרך w:bidi)
-    וממיר אותו ל-PDF באמצעות LibreOffice headless.
-    גישה זו מטמיעה את הפונטים כ-PDF וקטורי תקני (TrueType subset עם cmap מלא),
-    ונמנעת מבעיות ריבועים שחורים / טשטוש שקרו עם reportlab + רסטריזציה.
-    """
+def convert_docx_bytes_to_pdf_bytes(docx_bytes):
+    """ממיר בייטי DOCX כלשהם (כל doc שנבנה עם python-docx, כולל כתבי-היד
+    שנבנים ב-routes/dictate.py._build_manuscript_docx) ל-PDF, באמצעות
+    LibreOffice headless. הגושפנקא הזו הוצאה החוצה מתוך _build_pdf_for_fax
+    (שהיה בנוי במקור רק סביב מסמך התמלול הספציפי מ-_build_word_doc) כדי
+    שאפשר יהיה להשתמש בה גם לשליחת כתבי-יד/הגהות בפקס (routes/dictate.py) -
+    אותה טכניקה בדיוק, מסמך Word שונה. מטמיעה את הפונטים כ-PDF וקטורי תקני
+    (TrueType subset עם cmap מלא), נמנעת מבעיות ריבועים שחורים/טשטוש שקרו
+    עם reportlab + רסטריזציה. מוגבלת ל-2 המרות בו-זמנית (_fax_pdf_semaphore)
+    כי LibreOffice headless צורך הרבה RAM לכל המרה."""
     import subprocess
     import tempfile
     import uuid
 
     try:
-        docx_bytes = _build_word_doc(name, duration_str, transcript_fixed)
-
         import shutil
         if not shutil.which('soffice'):
             log.error("PDF build error: soffice (LibreOffice) not found on PATH - check nixpacks.toml")
@@ -1688,6 +1688,16 @@ def _build_pdf_for_fax(name, duration_str, transcript_fixed):
         return None
 
 
+def _build_pdf_for_fax(name, duration_str, transcript_fixed):
+    """
+    בונה PDF עם תמלול בעברית עבור שליחת פקס.
+    משתמש באותו מסמך Word שנבנה למייל (_build_word_doc, RTL תקני דרך w:bidi)
+    וממיר אותו ל-PDF (ראה convert_docx_bytes_to_pdf_bytes למעלה).
+    """
+    docx_bytes = _build_word_doc(name, duration_str, transcript_fixed)
+    return convert_docx_bytes_to_pdf_bytes(docx_bytes)
+
+
 def _normalize_israeli_phone(raw):
     """מנקה ומנרמל מספר טלפון ישראלי לפורמט מקומי (05XXXXXXXX / 0XXXXXXXXX)."""
     phone = (raw or '').strip().replace('-', '').replace(' ', '')
@@ -1698,36 +1708,30 @@ def _normalize_israeli_phone(raw):
     return phone
 
 
-def _send_fax(to_number, transcript_fixed, customer, duration_seconds, call_id=None):
-    """
-    שולח את התמלול כפקס באמצעות ה-API של ימות המשיח (SendFax).
-    מעלה את ה-PDF בעצמו (pdfFile=UPLOAD) ומבקש דוח מסירה ל-deliveryUrl,
-    כדי שסטטוס השליחה יתעדכן ויוצג בממשק הניהול.
-    """
+def send_pdf_fax(to_number, pdf_bytes, filename_hint='document.pdf', delivery_url_path='/api/fax-delivery-webhook'):
+    """שולח PDF כלשהו כפקס באמצעות ה-API של ימות המשיח (SendFax) - גרסה
+    כללית שהוצאה החוצה מתוך _send_fax (שהייתה קשורה קשיחות לתמלול שיחה +
+    לטבלת Recording). מעלה את ה-PDF בעצמו (pdfFile=UPLOAD) ומבקש דוח מסירה
+    ל-deliveryUrl. משמשת גם את _send_fax (תמלול שיחה, למטה) וגם את
+    routes/dictate.py לשליחת כתבי-יד/הגהות בפקס ללקוחות ללא מייל (ראה
+    routes/dictate.py._send_manuscript_fax).
+    מחזיר dict: {'ok': bool, 'campaign_id': str|None, 'error': str|None} -
+    הקורא אחראי לעדכן את שדות הסטטוס הרלוונטיים לו (Recording/ManuscriptPage/
+    ProofingRound, כל אחד לפי הטבלה שלו) על סמך זה, ולא התפקיד של הפונקציה
+    הכללית הזו לדעת על טבלאות ספציפיות."""
     try:
-        name = customer.name if hasattr(customer, 'name') and customer.name else customer.phone if customer else ''
-        minutes = duration_seconds // 60
-        seconds = duration_seconds % 60
-        duration_str = f"{minutes}:{seconds:02d}"
-
-        pdf_bytes = _build_pdf_for_fax(name, duration_str, transcript_fixed)
-        if not pdf_bytes:
-            log.error("Failed to build PDF for fax")
-            return
-
         yemot_token = os.environ.get('YEMOT_TOKEN')
         if not yemot_token:
             log.error("YEMOT_TOKEN not configured - cannot send fax")
-            return
+            return {'ok': False, 'campaign_id': None, 'error': 'YEMOT_TOKEN לא מוגדר'}
 
         caller_id = os.environ.get('YEMOT_FAX_CALLER_ID', '')
         base_url = os.environ.get('APP_BASE_URL', '').rstrip('/')
 
-        # מספר היעד הוא מה שהלקוח הזין במערכת הטלפונית (to_number)
         fax_number = _normalize_israeli_phone(to_number)
 
         files = {
-            'fileToUpload': (f'transcript_{call_id or "fax"}.pdf', pdf_bytes, 'application/pdf'),
+            'fileToUpload': (filename_hint, pdf_bytes, 'application/pdf'),
         }
         data = {
             'token': yemot_token,
@@ -1736,8 +1740,8 @@ def _send_fax(to_number, transcript_fixed, customer, duration_seconds, call_id=N
         }
         if caller_id:
             data['callerId'] = caller_id
-        if base_url and call_id:
-            data['deliveryUrl'] = f'{base_url}/api/fax-delivery-webhook'
+        if base_url and delivery_url_path:
+            data['deliveryUrl'] = f'{base_url}{delivery_url_path}'
 
         response = requests.post(
             'https://www.call2all.co.il/ym/api/SendFax',
@@ -1750,12 +1754,43 @@ def _send_fax(to_number, transcript_fixed, customer, duration_seconds, call_id=N
         if result.get('responseStatus') == 'OK':
             campaign_id = result.get('CampaignId')
             log.info(f"Fax queued via Yemot to {fax_number}, CampaignId: {campaign_id}")
-            if call_id and campaign_id:
-                _save_fax_campaign(call_id, campaign_id)
+            return {'ok': True, 'campaign_id': campaign_id, 'error': None}
         else:
             log.error(f"Yemot SendFax failed: {response.text}")
+            return {'ok': False, 'campaign_id': None, 'error': response.text[:500]}
+
+    except Exception as e:
+        log.error(f"Fax error: {e}")
+        return {'ok': False, 'campaign_id': None, 'error': str(e)[:500]}
+
+
+def _send_fax(to_number, transcript_fixed, customer, duration_seconds, call_id=None):
+    """
+    שולח את התמלול כפקס - בונה PDF מהתמלול (_build_pdf_for_fax) ושולח
+    אותו עם send_pdf_fax, ואז מעדכן את סטטוס הפקס על ה-Recording (שדות
+    fax_campaign_id/fax_status, ראה _save_fax_campaign/_update_fax_status
+    למטה) - אותה התנהגות בדיוק כמו לפני הפיצול ל-send_pdf_fax הכללי.
+    """
+    try:
+        name = customer.name if hasattr(customer, 'name') and customer.name else customer.phone if customer else ''
+        minutes = duration_seconds // 60
+        seconds = duration_seconds % 60
+        duration_str = f"{minutes}:{seconds:02d}"
+
+        pdf_bytes = _build_pdf_for_fax(name, duration_str, transcript_fixed)
+        if not pdf_bytes:
+            log.error("Failed to build PDF for fax")
             if call_id:
-                _update_fax_status(call_id, status='error', note=response.text[:500])
+                _update_fax_status(call_id, status='error', note='בניית ה-PDF נכשלה')
+            return
+
+        result = send_pdf_fax(to_number, pdf_bytes, filename_hint=f'transcript_{call_id or "fax"}.pdf')
+        if result['ok']:
+            if call_id and result['campaign_id']:
+                _save_fax_campaign(call_id, result['campaign_id'])
+        else:
+            if call_id:
+                _update_fax_status(call_id, status='error', note=result['error'] or '')
 
     except Exception as e:
         log.error(f"Fax error: {e}")
@@ -1806,7 +1841,7 @@ def handle_fax_delivery_webhook(data):
     - status (אם Delivery=End) - SUCCESS במקרה של מסירה מוצלחת
     """
     from app import app, db
-    from models import Recording
+    from models import Recording, ManuscriptPage, ProofingRound
 
     campaign_id = data.get('CampaignId', '')
     delivery = data.get('Delivery', '')
@@ -1819,9 +1854,17 @@ def handle_fax_delivery_webhook(data):
     with app.app_context():
         try:
             db.session.remove()
+            # CampaignId מ-ימות ייחודי גלובלית (לא תלוי טבלה) - שולחים דרך
+            # אותה send_pdf_fax גם עבור תמלול שיחה רגיל (Recording) וגם
+            # עבור כתבי-יד/הגהות (ManuscriptPage/ProofingRound), אז מחפשים
+            # בשלוש הטבלאות לפי סדר הסבירות.
             rec = Recording.query.filter_by(fax_campaign_id=campaign_id).first()
             if not rec:
-                log.warning(f"Fax delivery webhook: no recording for CampaignId {campaign_id}")
+                rec = ManuscriptPage.query.filter_by(fax_campaign_id=campaign_id).first()
+            if not rec:
+                rec = ProofingRound.query.filter_by(fax_campaign_id=campaign_id).first()
+            if not rec:
+                log.warning(f"Fax delivery webhook: no recording/manuscript/proofing-round for CampaignId {campaign_id}")
                 return
 
             if delivery == 'Answer':

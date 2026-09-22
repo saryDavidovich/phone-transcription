@@ -122,7 +122,8 @@ table tr { border-bottom:1px solid var(--border); }
   <div class="sidebar-logo"><span class="dot"></span> אזור מוסד</div>
   <nav class="sidebar-nav">
     <a href="{{ url_for('institution.dashboard') }}" class="{{ 'active' if request.endpoint == 'institution.dashboard' }}">📊 דשבורד</a>
-    <a href="{{ url_for('institution_students.students_tab') }}" class="{{ 'active' if request.endpoint and request.endpoint.startswith('institution_students.') }}">👥 ניהול תלמידים</a>
+    <a href="{{ url_for('institution_students.students_tab') }}" class="{{ 'active' if request.endpoint and request.endpoint.startswith('institution_students.') and not (student is defined and student.is_institution_self) }}">👥 ניהול תלמידים</a>
+    <a href="{{ url_for('institution.self_manuscripts') }}" class="{{ 'active' if student is defined and student.is_institution_self }}">📎 מסמכים כלליים</a>
     <a href="{{ url_for('institution_transcribe.transcribe_tab') }}" class="{{ 'active' if request.endpoint == 'institution_transcribe.transcribe_tab' }}">🎙 יצירת תמלול</a>
     <a href="{{ url_for('institution.settings') }}" class="{{ 'active' if request.endpoint == 'institution.settings' }}">⚙️ הגדרות מוסד</a>
     <a href="{{ url_for('institution_billing.billing_tab') }}" class="{{ 'active' if request.endpoint == 'institution_billing.billing_tab' }}">💳 הגדרות חיוב</a>

@@ -31,6 +31,20 @@ class Customer(db.Model):
     institution_id = db.Column(db.Integer, db.ForeignKey('institutions.id'), nullable=True, index=True)
     student_number = db.Column(db.String(10), unique=True, nullable=True, index=True)  # 6 ספרות, לזיהוי בשלוחה 7
     student_display_name = db.Column(db.String(100), nullable=True)  # שם שהמוסד נתן לתלמיד (עשוי להיות שונה מ-name)
+    # "לקוח-דמה" אחד לכל מוסד (נוצר עצלנית - ראה routes/institution.py
+    # ensure_institution_self_customer) המייצג את המוסד עצמו ולא תלמיד
+    # ספציפי - משמש להעלאת כתבי-יד כלליים של המוסד (לא קשורים לתלמיד בודד),
+    # דרך אותם מסכים/routes בדיוק של תלמיד רגיל (student_detail וכו').
+    is_institution_self = db.Column(db.Boolean, nullable=True, default=False)
+
+    @property
+    def display_name(self):
+        """שם תצוגה בטוח לתבניות של הצוות (fallback מסודר) - לעולם לא
+        None/מחרוזת ריקה. תלמידי מוסד לרוב לא ממלאים טלפון (אופציונלי -
+        ראה routes/institution_students.py add_student), ולפני שדה זה נוצר
+        תבניות שהציגו רק customer.phone הציגו את המחרוזת "None" ממש
+        (Jinja מדפיס str(None) כשאין finalize) - זה היה הבאג שדווח בפועל."""
+        return self.student_display_name or self.name or self.phone or '—'
 
 
 class Institution(db.Model, UserMixin):
@@ -223,6 +237,18 @@ class ManuscriptPage(db.Model):
     error_message = db.Column(db.Text, nullable=True)
     sent_at = db.Column(db.DateTime, nullable=True)
     sent_to = db.Column(db.String(255), nullable=True)
+    # ערוץ המסירה בפועל של ה-Word המוכן: 'email' (ל-sent_to, כתובת מייל) או
+    # 'fax' (ל-sent_to, מספר טלפון) - נבחר אוטומטית ב-routes/dictate.py.send():
+    # מייל אם קיים ללקוח, אחרת פקס אם יש טלפון (ראה Customer.email/phone),
+    # ותמיד None/ריק ללקוחות מוסד (הם לא צריכים מסירה active כלל - מוצג
+    # ישירות בתיק הלקוח שלהם באתר, ראה routes/institution_students.py).
+    sent_via = db.Column(db.String(10), nullable=True)
+    # מעקב סטטוס שליחת פקס (אותם שדות בדיוק כמו Recording.fax_campaign_id/
+    # fax_status/fax_status_note, ראה services/transcribe.py.send_pdf_fax +
+    # handle_fax_delivery_webhook, שמעודכן דרך CampaignId - לא ספציפי לטבלה).
+    fax_campaign_id = db.Column(db.String(64), nullable=True, index=True)
+    fax_status = db.Column(db.String(32), nullable=True)
+    fax_status_note = db.Column(db.Text, nullable=True)
     # שלב ב' - תמחור: מחושבים ונשמרים רק בפועל בעת שליחה מוצלחת (routes/dictate.py:send),
     # לפי ההגדרות price_per_manuscript_char_unit / manuscript_char_unit_size (routes/admin.py).
     # לפני שליחה השדות האלה נשארים 0/ריק - התשלום לא יורד ללקוח לפני אישור סופי ושליחה בפועל.
@@ -284,6 +310,11 @@ class ProofingRound(db.Model):
     final_file_data = db.Column(db.LargeBinary, nullable=True)  # קובץ ה-Word הסופי (נשלח ללקוח אם התבקש)
     final_filename = db.Column(db.String(255), nullable=True)
     cost = db.Column(db.Float, default=0.0)  # מחושב ונשמר רק בעת סיום מוצלח (proof_complete)
+    sent_via = db.Column(db.String(10), nullable=True)  # 'email' / 'fax' - ראה ManuscriptPage.sent_via
+    sent_to = db.Column(db.String(255), nullable=True)  # כתובת מייל או מספר טלפון בפועל
+    fax_campaign_id = db.Column(db.String(64), nullable=True, index=True)
+    fax_status = db.Column(db.String(32), nullable=True)
+    fax_status_note = db.Column(db.Text, nullable=True)
 
     created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
 

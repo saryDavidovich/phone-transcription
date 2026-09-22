@@ -1,14 +1,26 @@
 {% extends "institution/base.html" %}
-{% block title %}{{ student.name }}{% endblock %}
+{% block title %}{{ 'מסמכים כלליים' if student.is_institution_self else student.name }}{% endblock %}
 {% block content %}
+{% if student.is_institution_self %}
+<a href="{{ url_for('institution.dashboard') }}" style="color:var(--text2); font-size:13px; text-decoration:none;">← חזרה לדף הבית</a>
+<h1 style="margin-top:10px;">📎 מסמכים כלליים של המוסד</h1>
+<p style="color:var(--text2); font-size:13px; margin-bottom:20px;">
+  כתבי-יד ותמלולים שלא שייכים לתלמיד ספציפי (למשל טפסים כלליים של המזכירות) - מועלים ומטופלים כאן.
+</p>
+{% else %}
 <a href="{{ url_for('institution_students.students_tab') }}" style="color:var(--text2); font-size:13px; text-decoration:none;">← חזרה לרשימת תלמידים</a>
 <h1 style="margin-top:10px;">{{ student.name }}</h1>
 <p style="color:var(--text2); font-size:13px; margin-bottom:20px;">
   מספר תלמיד: {{ student.student_number or '—' }} · טלפון: {{ student.phone or '—' }} ·
   יתרה: {{ "%.2f"|format(student.balance or 0) }} ₪
 </p>
+{% endif %}
 
-<div class="card" style="max-width:520px; margin-bottom:24px;">
+{% if not student.is_institution_self %}
+{# העלאת אודיו לתמלול קיימת רק בתיק תלמיד אמיתי - למסמכים הכלליים של
+   המוסד יש כבר כלי ייעודי לזה (לשונית "יצירת תמלול", ראה
+   routes/institution_transcribe.py) שמחייב נכון את יתרת המוסד עצמו. #}
+<div class="card" style="margin-bottom:24px;">
   <h3 style="font-size:15px; margin-bottom:12px;">העלאת קובץ נוסף לתמלול עבור התלמיד</h3>
   <form id="studentUploadForm">
     <div class="dropzone" id="studentDz">
@@ -55,10 +67,17 @@
     {% endfor %}
   </table>
 </div>
+{% endif %}
 
-<div class="card" style="max-width:520px; margin-bottom:24px;">
-  <h3 style="font-size:15px; margin-bottom:6px;">✍️ כתב יד חדש להקראה</h3>
-  <p style="font-size:12px; color:var(--text2); margin:0 0 12px;">העלאת תמונה/PDF של דף כתב יד - הצוות שלנו יקריא אותו בטלפון ויהפוך אותו לקובץ Word מוקלד. אותו תמחור בדיוק כמו כל לקוח.</p>
+<div class="card" style="margin-bottom:24px;">
+  <h3 style="font-size:15px; margin-bottom:6px;">✍️ {{ 'מסמך כללי חדש להקראה' if student.is_institution_self else 'כתב יד חדש להקראה' }}</h3>
+  <p style="font-size:12px; color:var(--text2); margin:0 0 12px;">
+    {% if student.is_institution_self %}
+    העלאת תמונה/PDF של מסמך שלא שייך לתלמיד ספציפי - הצוות שלנו יקריא אותו בטלפון ויהפוך אותו לקובץ Word מוקלד. עלות ההקראה תחויב מיתרת המוסד.
+    {% else %}
+    העלאת תמונה/PDF של דף כתב יד - הצוות שלנו יקריא אותו בטלפון ויהפוך אותו לקובץ Word מוקלד. אותו תמחור בדיוק כמו כל לקוח.
+    {% endif %}
+  </p>
   <form id="manuscriptUploadForm">
     <div class="dropzone" id="manuscriptDz">
       <div class="dz-icon">✍️</div>
@@ -127,7 +146,7 @@
 </div>
 
 <div class="card">
-  <h3 style="font-size:15px; margin-bottom:10px;">תנועות יתרה</h3>
+  <h3 style="font-size:15px; margin-bottom:10px;">{{ 'עלויות (מחויבות מיתרת המוסד)' if student.is_institution_self else 'תנועות יתרה' }}</h3>
   <table style="width:100%; font-size:13px;">
     <tr style="text-align:right; border-bottom:1px solid var(--border); color:var(--text2);">
       <th style="padding:6px 0;">תאריך</th><th>סכום</th><th>תיאור</th>
