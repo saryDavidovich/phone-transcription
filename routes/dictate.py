@@ -867,6 +867,11 @@ def _manuscript_file_bytes(page):
     return None
 
 
+class _PreviewTooLargeError(Exception):
+    """התמונה חורגת ממגבלת הפיקסלים הבטוחה לתצוגה מקדימה - לא ממירים כלל."""
+    pass
+
+
 def _image_to_pdf_bytes(raw):
     """ממיר בייטי תמונה (jpg/png/וכו') לקובץ PDF חד-עמודי (Pillow). PDF פשוט
     לא נשמר עם ערוץ שקיפות (alpha) - אם קיים, ממזגים על רקע לבן קודם."""
@@ -876,11 +881,16 @@ def _image_to_pdf_bytes(raw):
     # הגנה מפני "פצצת דחיסה": קובץ מקור קטן (למשל TIFF של פקס, דחוס מאוד
     # ב-CCITT) יכול להתפרש לרזולוציה ענקית בזיכרון - המרה/שמירה כזו עלולה
     # לצרוך RAM רב מדי ולהפיל את כל התהליך (OOM), שמופיע ללקוח כ-"upstream
-    # error" אחרי המתנה ארוכה. מקטינים לפני ההמרה אם צריך - עדיף תצוגה
-    # מקדימה ברזולוציה נמוכה יותר מאשר קריסת השרת.
+    # error" אחרי המתנה ארוכה. img.width/img.height נקראים מהכותרת בלבד
+    # (Pillow "עצלן" - עוד לא פוענח שום פיקסל בשלב הזה), אז הבדיקה כאן זולה.
+    # בכוונה לא מנסים "להקטין" תמונה כזו (thumbnail דורש קודם לפענח אותה
+    # במלואה לזיכרון בפורמטים כמו TIFF, ואז בדיוק ה-OOM שרוצים למנוע כבר
+    # קרה) - במקום זה מוותרים על התצוגה המקדימה לגמרי ומדלגים בבטחה.
     MAX_PIXELS_FOR_PREVIEW = 20_000_000  # כ-20 מגה-פיקסל, יותר מספיק לתצוגה מקדימה
     if img.width * img.height > MAX_PIXELS_FOR_PREVIEW:
-        img.thumbnail((6000, 6000), Image.LANCZOS)
+        raise _PreviewTooLargeError(
+            f"{img.width}x{img.height} = {img.width * img.height:,} פיקסלים - חורג מהמגבלה"
+        )
 
     if img.mode in ('RGBA', 'LA') or (img.mode == 'P' and 'transparency' in img.info):
         img = img.convert('RGBA')
@@ -892,6 +902,32 @@ def _image_to_pdf_bytes(raw):
     out = io.BytesIO()
     img.save(out, format='PDF')
     return out.getvalue()
+
+
+# תור-חוטים ייעודי להמרות תצוגה מקדימה, עם timeout קשיח בזמן-אמת (wall
+# clock) - שכבת הגנה נוספת מעבר לתקרות הגודל/פיקסלים למעלה. תקרות אלו
+# מכסות את המקרה הידוע (TIFF ענק שנדחס טוב), אבל timeout הוא רשת ביטחון
+# גם למקרים לא-צפויים (קובץ תקול שגורם ל-codec להיתקע בלולאה, קידוד נדיר
+# ואיטי וכו') - בלעדיו, gunicorn (worker מסוג sync) עלול לחכות עד timeout
+# הפנימי שלו (בסביבות 120 שניות, לפי הלוגים) ואז לשלוח SIGKILL לכל
+# ה-worker process - זו קריסה הרבה יותר יקרה מ"אין תצוגה מקדימה".
+import concurrent.futures as _futures
+_preview_executor = _futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix='preview-convert')
+PREVIEW_CONVERT_TIMEOUT_SECONDS = 8
+
+
+def _image_to_pdf_bytes_with_timeout(raw):
+    future = _preview_executor.submit(_image_to_pdf_bytes, raw)
+    try:
+        return future.result(timeout=PREVIEW_CONVERT_TIMEOUT_SECONDS)
+    except _futures.TimeoutError:
+        # לא ניתן "להרוג" תרד ב-Python באמצע עבודה, אז התהליך ברקע ימשיך
+        # לרוץ ויתפוס CPU/RAM עד שיסתיים בעצמו - אבל הבקשה של הלקוח כבר לא
+        # תלויה בו ותחזור מיד עם "אין תצוגה מקדימה" במקום להיתקע עד שה-worker
+        # כולו ייהרג.
+        raise TimeoutError(
+            f"המרת התמונה ל-PDF ארכה יותר מ-{PREVIEW_CONVERT_TIMEOUT_SECONDS} שניות"
+        )
 
 
 def _file_to_pdf_data_uri(raw, filename, log_context=''):
@@ -932,8 +968,14 @@ def _file_to_pdf_data_uri(raw, filename, log_context=''):
 
     if mime != 'application/pdf':
         try:
-            raw = _image_to_pdf_bytes(raw)
+            raw = _image_to_pdf_bytes_with_timeout(raw)
             mime = 'application/pdf'
+        except _PreviewTooLargeError as e:
+            log.warning(f"_file_to_pdf_data_uri ({log_context}): תמונה גדולה מדי לתצוגה מקדימה ({e}) - מדלגים על התצוגה")
+            return None, False
+        except TimeoutError as e:
+            log.error(f"image->PDF conversion timeout ({log_context}): {e}")
+            return None, False
         except Exception as e:
             log.error(f"image->PDF conversion error ({log_context}): {e}")
             # ממשיכים עם התמונה המקורית - עדיף תצוגה שעלולה להיחסם מאשר כלום
