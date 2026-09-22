@@ -60,6 +60,24 @@ def get_customer(phone):
         'name': customer.name or '',
     })
 
+@api_bp.route('/customer/<phone>/fax-code', methods=['GET'])
+def get_customer_fax_code(phone):
+    """קוד אישי (5 ספרות) להזדהות בפקס - נמסר ללקוח **אך ורק בטלפון**
+    (תפריט ראשי → שלוחה 6 → הקש 2, ראה phone-transcription-ivr/ivr.js
+    handleFaxCode), לעולם לא במייל - כי אוכלוסיית משתמשי הפקס היא במפורש
+    מי שאין לו מייל בכלל. נוצר עצלנית (lazy) בפעם הראשונה שמבקשים אותו
+    לטלפון הזה - ראה routes/dictate.py._ensure_customer_fax_code (אותה
+    פונקציה בדיוק, כדי שלא יהיו שני מקורות ליצירת הקוד)."""
+    from routes.dictate import _ensure_customer_fax_code
+    customer = Customer.query.filter_by(phone=phone).first()
+    if not customer:
+        customer = Customer(phone=phone, balance=0.0)
+        db.session.add(customer)
+        db.session.commit()
+    code = _ensure_customer_fax_code(customer)
+    return jsonify({'fax_code': code})
+
+
 @api_bp.route('/customer/pending-recordings', methods=['GET'])
 def get_pending_recordings():
     """

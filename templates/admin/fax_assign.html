@@ -52,10 +52,12 @@
   </div>
 
   <div class="card">
-    <div style="font-size:14px;font-weight:700;margin-bottom:10px">🔎 איתור הלקוח</div>
+    <div style="font-size:14px;font-weight:700;margin-bottom:10px">🔎 איתור הלקוח - אימות דו-שלבי</div>
+    <p class="fx-hint">חובה להקליד <strong>גם</strong> את הטלפון <strong>וגם</strong> את הקוד האישי בדיוק כפי שכתובים בעמוד הראשון - שני הפרטים חייבים להתאים לאותו לקוח. זו הגנה מכוונת: הקוד האישי נמסר ללקוח אך ורק בטלפון (שלוחה 6), כך שרק הוא באמת יודע אותו - חיפוש לפי טלפון בלבד לא מספיק ולא זמין כאן, כדי שאף אחד לא יוכל "לחייב" מישהו אחר רק כי הוא יודע/מנחש את הטלפון שלו.</p>
     <div class="fx-searchrow">
-      <input type="text" id="custSearch" placeholder="חיפוש לפי טלפון או קוד אישי (5 ספרות)" value="{% if selected_customer %}{{ selected_customer.phone }}{% endif %}">
-      <button type="button" class="btn btn-ghost" onclick="doSearch()">חיפוש</button>
+      <input type="text" id="custPhone" placeholder="מספר טלפון" value="{% if selected_customer %}{{ selected_customer.phone }}{% endif %}">
+      <input type="text" id="custCode" placeholder="קוד אישי (5 ספרות)" value="{% if selected_customer %}{{ selected_customer.fax_code or '' }}{% endif %}">
+      <button type="button" class="btn btn-ghost" onclick="doVerify()">אימות</button>
     </div>
     <div class="fx-results" id="custResults"></div>
 
@@ -98,40 +100,35 @@
 <script>
 const FAX_ID = {{ fax.id }};
 
-async function doSearch() {
-  const q = document.getElementById('custSearch').value.trim();
+async function doVerify() {
+  const phone = document.getElementById('custPhone').value.trim();
+  const code = document.getElementById('custCode').value.trim();
   const resultsBox = document.getElementById('custResults');
   resultsBox.innerHTML = '';
-  if (!q) return;
+  if (!phone || !code) {
+    resultsBox.innerHTML = '<div style="color:var(--text3);font-size:13px;padding:6px">יש להקליד גם טלפון וגם קוד אישי</div>';
+    return;
+  }
   try {
-    const res = await fetch('{{ url_for("dictate.fax_customer_search") }}?q=' + encodeURIComponent(q));
+    const res = await fetch('{{ url_for("dictate.fax_customer_verify") }}?phone=' + encodeURIComponent(phone) + '&code=' + encodeURIComponent(code));
     const data = await res.json();
-    if (!data.results || !data.results.length) {
-      resultsBox.innerHTML = '<div style="color:var(--text3);font-size:13px;padding:6px">לא נמצאו לקוחות תואמים</div>';
+    if (!data.customer) {
+      resultsBox.innerHTML = '<div style="color:var(--red)">לא נמצא לקוח שהטלפון והקוד תואמים אצלו יחד - יש לבדוק שוב מה כתוב בעמוד, או לוודא עם הלקוח (הקוד נמסר לו בטלפון בשלוחה 6)</div>';
       return;
     }
-    data.results.forEach(c => {
-      const div = document.createElement('div');
-      div.className = 'fx-result';
-      div.innerHTML = `<span>${c.name || '—'} · ${c.phone || '—'}${c.fax_code ? ' · קוד: ' + c.fax_code : ''}</span><span style="color:var(--accent)">בחר ←</span>`;
-      div.onclick = () => {
-        window.location = '{{ url_for("dictate.fax_assign", fax_id=fax.id) }}?customer_id=' + c.id;
-      };
-      resultsBox.appendChild(div);
-    });
+    const c = data.customer;
+    resultsBox.innerHTML = '<div style="color:var(--accent);font-size:13px;padding:6px">✓ נמצא: ' + (c.name || '—') + ' · ' + c.phone + ' - טוען...</div>';
+    window.location = '{{ url_for("dictate.fax_assign", fax_id=fax.id) }}?customer_id=' + c.id;
   } catch (e) {
-    resultsBox.innerHTML = '<div style="color:var(--red)">שגיאת חיפוש</div>';
+    resultsBox.innerHTML = '<div style="color:var(--red)">שגיאת אימות</div>';
   }
 }
 
-document.getElementById('custSearch').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') { e.preventDefault(); doSearch(); }
+['custPhone', 'custCode'].forEach(id => {
+  document.getElementById(id).addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); doVerify(); }
+  });
 });
-
-{% if selected_customer %}
-// אם כבר יש לקוח נבחר, גם נחפש אוטומטית כדי שאפשר יהיה לבחור לקוח אחר בקלות
-doSearch();
-{% endif %}
 </script>
 
 {% endblock %}

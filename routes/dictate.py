@@ -692,30 +692,18 @@ def _proofing_mailto_link(phone, page_id):
 def _send_manuscript_email(to_email, customer_name, customer_phone, page_id, original_filename, content):
     import sendgrid
     from sendgrid.helpers.mail import Mail, Attachment, FileContent, FileName, FileType, Disposition, Email
-    from models import Customer
 
     docx_bytes = _build_manuscript_docx(customer_name, original_filename, content)
     docx_b64 = base64.b64encode(docx_bytes).decode('utf-8')
     preview = _content_to_plain_preview(content)
     proofing_link = _proofing_mailto_link(customer_phone, page_id)
 
-    # אופציית פקס - למי שאין לו בכלל גישה למייל/מחשב (לא רק "אין מחשב לתקן
-    # בו", אלא גם לא יודע לשלוח מייל בעצמו). מוצג רק אם הוגדר מספר פקס
-    # נכנס בהגדרות (fax_inbound_number) - ראה routes/admin.py/settings.html.
-    fax_section = ''
-    fax_number = None
-    try:
-        from routes.admin import get_setting
-        fax_number = (get_setting('fax_inbound_number', '') or '').strip()
-    except Exception:
-        fax_number = None
-    if fax_number:
-        customer = Customer.query.filter_by(phone=customer_phone).first()
-        fax_code = _ensure_customer_fax_code(customer) if customer else ''
-        fax_section = f'''
-<div style="background:#fef3c7;border-right:4px solid #d97706;padding:16px;margin:16px 0;border-radius:8px;text-align:center">
-<p style="margin:0 0 10px;line-height:1.7">אין לך גם מייל וגם לא גישה נוחה לצילום/סריקה? אפשר גם לשלוח פקס למספר <strong>{fax_number}</strong>. חשוב: יש לכתוב בעמוד הראשון של הפקס בבירור את הטלפון שלך ({customer_phone}) ואת הקוד האישי שלך: <strong>{fax_code}</strong> - כדי שנוכל לשייך את הפקס אליך.</p>
-</div>'''
+    # הערה: בכוונה **אין** כאן יותר אזכור של אפשרות פקס/קוד אישי בגוף המייל.
+    # מי ששולח/מקבל במייל לא אמור לקבל את הקוד האישי שלו במייל בשום מקרה -
+    # הקוד נמסר אך ורק בטלפון (תפריט ראשי → שלוחה 6 → הקש 2, ראה
+    # routes/api.py get_customer_fax_code ו-phone-transcription-ivr/ivr.js
+    # handleFaxCode). אוכלוסיית משתמשי הפקס היא במפורש מי שאין לו מייל בכלל,
+    # ולכן אין טעם/צורך להציע את הערוץ הזה בתוך מייל.
 
     html = f'''<div dir="rtl" style="font-family:Arial,sans-serif;max-width:600px;margin:auto">
 <h2 style="color:#1d4ed8">כתב יד - {original_filename}</h2>
@@ -727,7 +715,7 @@ def _send_manuscript_email(to_email, customer_name, customer_phone, page_id, ori
 <p style="margin:0 0 12px;line-height:1.7">מצאת טעות או רוצה לתקן משהו בקובץ המצורף? יש לך מחשב? אפשר לתקן ישירות בקובץ ה-Word המצורף ולשלוח אותו בחזרה. אין לך גישה נוחה למחשב? אפשר להדפיס את הקובץ, לתקן בעט על הדף, ולצלם או לסרוק את הדף המתוקן ולשלוח בחזרה כתמונה - שתי הדרכים עובדות.</p>
 <a href="{proofing_link}" style="background:#2563eb;color:#fff;text-decoration:none;padding:10px 20px;border-radius:6px;font-weight:700;display:inline-block">✏️ שליחת תיקוני הגהה</a>
 <p style="margin:12px 0 0;font-size:12px;color:#6b7280">הכפתור פותח טיוטת מייל מוכנה - רק צריך לצרף את קובץ ה-Word המתוקן, או צילום/סריקה של הדף המתוקן בכתב יד, ולשלוח</p>
-</div>{fax_section}
+</div>
 </div>'''
 
     sg = sendgrid.SendGridAPIClient(api_key=os.environ.get('SENDGRID_API_KEY'))
@@ -904,13 +892,23 @@ def _file_to_pdf_data_uri(raw, filename, log_context=''):
     של דף מודפס שתוקן בכתב יד וצולם/נסרק (ראה studio_proof/_proof_returned_kind)."""
     if not raw:
         return None, False
-    mime, _ = mimetypes.guess_type(filename or '')
-    if not mime:
-        ext = os.path.splitext(filename or '')[1].lower()
-        mime = {
-            '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
-            '.gif': 'image/gif', '.webp': 'image/webp', '.pdf': 'application/pdf',
-        }.get(ext, 'application/octet-stream')
+
+    # מזהים PDF אמיתי לפי חתימת התוכן עצמו (magic bytes של PDF: "%PDF-"),
+    # לא רק לפי סיומת שם הקובץ - התגלה בפועל שמודול הפקס של ימות המשיח
+    # מצרף את הפקס כקובץ עם סיומת .pdf שבפועל אינו PDF תקין (כנראה תמונת
+    # TIFF גולמית, פורמט נפוץ לפקסים) - אם סומכים רק על הסיומת, קובץ כזה
+    # "עובר" בלי המרה ונשבר בתצוגה בדפדפן ("טעינה של מסמך ה-PDF נכשלה").
+    if raw[:5] == b'%PDF-':
+        mime = 'application/pdf'
+    else:
+        mime, _ = mimetypes.guess_type(filename or '')
+        if not mime or mime == 'application/pdf':
+            ext = os.path.splitext(filename or '')[1].lower()
+            mime = {
+                '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
+                '.gif': 'image/gif', '.webp': 'image/webp',
+                '.tif': 'image/tiff', '.tiff': 'image/tiff',
+            }.get(ext, 'application/octet-stream')
 
     if mime != 'application/pdf':
         try:
@@ -1687,6 +1685,32 @@ def fax_customer_search():
         {'id': c.id, 'phone': c.phone, 'name': c.name or '', 'fax_code': c.fax_code or ''}
         for c in matches
     ]})
+
+
+@dictate_bp.route('/fax/customer-verify')
+@login_required
+def fax_customer_verify():
+    """אימות דו-גורמי (טלפון + קוד אישי) לשיוך פקס - **שני** השדות חייבים
+    להתאים בדיוק לאותו לקוח, בשונה מ-fax_customer_search למעלה (שמספיק בו
+    אחד מהשניים, ומיועד לחיפוש חופשי במקומות אחרים). זו הגנה מכוונת נגד
+    מישהו שכותב על הפקס מספר טלפון שאינו שלו (של אדם אחר) כדי לחייב את
+    האדם ההוא - קוד הפקס האישי נמסר אך ורק בטלפון (שלוחה 6, הקש 2 - ראה
+    routes/api.py get_customer_fax_code), אף פעם לא במייל, כך שרק הלקוח
+    האמיתי (שהתקשר בעצמו וקיבל את הקוד בקולו) יכול לספק את שני הפרטים יחד.
+    מסך שיוך הפקס (fax_assign.html) משתמש אך ורק בנתיב הזה, לא בחיפוש
+    החופשי - שני השדות שם חובה."""
+    from models import Customer
+    phone = (request.args.get('phone') or '').strip()
+    code = (request.args.get('code') or '').strip()
+    if not phone or not code:
+        return jsonify({'customer': None, 'reason': 'missing_fields'})
+    customer = Customer.query.filter_by(phone=phone, fax_code=code).first()
+    if not customer:
+        return jsonify({'customer': None, 'reason': 'no_match'})
+    return jsonify({'customer': {
+        'id': customer.id, 'phone': customer.phone, 'name': customer.name or '',
+        'fax_code': customer.fax_code or '',
+    }})
 
 
 @dictate_bp.route('/fax/<int:fax_id>/assign-new', methods=['POST'])

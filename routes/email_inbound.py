@@ -97,25 +97,46 @@ FAX_INBOUND_EMAIL = os.environ.get('FAX_INBOUND_EMAIL', f"fax@{TRANSCRIBE_INBOUN
 # ע"י משתנה סביבה אם ייצפה בעתיד ערך אחר.
 YEMOT_FAX_SENDER_EMAIL = os.environ.get('YEMOT_FAX_SENDER_EMAIL', 'ivr@yml.li')
 
+# קוד סודי אקראי, שאין לו שום סיכוי ריאלי להופיע במייל רגיל של לקוח (תמלול/
+# הגהה) בטעות - משמש כאישור נוסף, מעבר לכתובת השולח, שהמייל שהגיע הוא
+# באמת פקס גולמי מימות ולא משהו אחר שנשלח (בטעות או בזדון) מכתובת דומה.
+# יש להגדיר אותו בשדה email_name= בקובץ ext.ini של השלוחה בימות (הטקסט הזה
+# חוזר בתוך גוף/נושא הודעת "פקס נכנס" שימות שולחים - ראה תיעוד מודול
+# recv_fax). ניתן לשינוי ע"י משתנה סביבה FAX_SECRET_CODE - אם משנים אותו,
+# חובה לעדכן גם את email_name= בימות לאותו ערך בדיוק, אחרת פקסים חדשים
+# יפסיקו להיקלט.
+FAX_SECRET_CODE = os.environ.get('FAX_SECRET_CODE', 'kNQjTkclhIbA96fNLWzD8dF759MqqGnG')
+
 
 def _is_fax_inbound_address(email):
     return (email or '').strip().lower() == FAX_INBOUND_EMAIL.strip().lower()
 
 
-def _is_fax_from_yemot(to_email, sender_email):
+def _contains_fax_secret_code(subject, body_text):
+    """בודק אם הקוד הסודי (FAX_SECRET_CODE) מופיע בנושא או בגוף ההודעה -
+    השוואה case-sensitive במתכוון (הקוד מכיל גם אותיות גדולות/קטנות, כדי
+    שלא יהיה ניתן לנחש/להיתקל בו בטעות)."""
+    haystack = f"{subject or ''}\n{body_text or ''}"
+    return FAX_SECRET_CODE in haystack
+
+
+def _is_fax_from_yemot(to_email, sender_email, subject, body_text):
     """
     נתיב זיהוי חלופי לפקס נכנס גולמי מימות: המייל הגיע לכתובת הקיימת
     שכבר עובדת (TRANSCRIBE_INBOUND_EMAIL) ולא לכתובת הייעודית
     (FAX_INBOUND_EMAIL) - קורה כאשר לא ניתן/עדיין לא הוגדר alias/forwarding
-    נפרד בצד Zoho עבור כתובת ייעודית חדשה. במקרה כזה מזהים לפי כתובת
-    השולח הקבועה של ימות (YEMOT_FAX_SENDER_EMAIL) - כתובת מערכתית אוטומטית
-    שלקוח רגיל לעולם לא ישלח ממנה מייל תמלול.
+    נפרד בצד Zoho עבור כתובת ייעודית חדשה. במקרה כזה מזהים לפי **שני**
+    סימנים יחד, לוודאות מקסימלית נגד כל התנגשות אפשרית עם מייל רגיל של
+    לקוח: (1) כתובת השולח הקבועה של ימות (YEMOT_FAX_SENDER_EMAIL), וגם
+    (2) הקוד הסודי (FAX_SECRET_CODE) שמופיע בנושא/בגוף ההודעה - טקסט
+    שאין שום סיכוי שלקוח יכתוב במקרה במייל תמלול/הגהה רגיל שלו.
     """
     to_email = (to_email or '').strip().lower()
     sender_email = (sender_email or '').strip().lower()
     return (
         to_email == TRANSCRIBE_INBOUND_EMAIL.strip().lower()
         and sender_email == YEMOT_FAX_SENDER_EMAIL.strip().lower()
+        and _contains_fax_secret_code(subject, body_text)
     )
 
 # תיקייה לשמירת קבצי אודיו שהתקבלו במייל (משם הם מוגשים חזרה כ-rec_url)
@@ -1457,6 +1478,7 @@ def email_inbound():
     sender_email = _extract_sender_email(request.form.get('from', ''))
     to_email = _extract_sender_email(request.form.get('to', ''))
     subject = request.form.get('subject', '')
+    fax_check_body_text = request.form.get('text', '') or _strip_html(request.form.get('html', ''))
     attachment_names = [request.files[k].filename for k in request.files if request.files[k] and request.files[k].filename]
     log.info(f"email-inbound: webhook התקבל - from={sender_email!r} to={to_email!r} subject={subject!r} attachments={attachment_names}")
 
@@ -1466,8 +1488,9 @@ def email_inbound():
     # הגהה רגילה. חייב להיבדק לפני כל שאר הבדיקות (הן מסתמכות על נושא בפורמט
     # מסוים, שלא רלוונטי כאן בכלל). נבדק גם נתיב הזיהוי החלופי
     # (_is_fax_from_yemot) - פקס שהגיע לכתובת הקיימת אך מהשולח האוטומטי הקבוע
-    # של ימות - ראה הסבר מפורט ליד ההגדרה של YEMOT_FAX_SENDER_EMAIL למעלה.
-    if _is_fax_inbound_address(to_email) or _is_fax_from_yemot(to_email, sender_email):
+    # של ימות ועם הקוד הסודי בנושא/בגוף - ראה הסבר מפורט ליד ההגדרה של
+    # YEMOT_FAX_SENDER_EMAIL ו-FAX_SECRET_CODE למעלה.
+    if _is_fax_inbound_address(to_email) or _is_fax_from_yemot(to_email, sender_email, subject, fax_check_body_text):
         with app.app_context():
             return _handle_incoming_fax(sender_email, subject, db)
 
