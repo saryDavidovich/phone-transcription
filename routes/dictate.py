@@ -872,6 +872,16 @@ def _image_to_pdf_bytes(raw):
     לא נשמר עם ערוץ שקיפות (alpha) - אם קיים, ממזגים על רקע לבן קודם."""
     from PIL import Image
     img = Image.open(io.BytesIO(raw))
+
+    # הגנה מפני "פצצת דחיסה": קובץ מקור קטן (למשל TIFF של פקס, דחוס מאוד
+    # ב-CCITT) יכול להתפרש לרזולוציה ענקית בזיכרון - המרה/שמירה כזו עלולה
+    # לצרוך RAM רב מדי ולהפיל את כל התהליך (OOM), שמופיע ללקוח כ-"upstream
+    # error" אחרי המתנה ארוכה. מקטינים לפני ההמרה אם צריך - עדיף תצוגה
+    # מקדימה ברזולוציה נמוכה יותר מאשר קריסת השרת.
+    MAX_PIXELS_FOR_PREVIEW = 20_000_000  # כ-20 מגה-פיקסל, יותר מספיק לתצוגה מקדימה
+    if img.width * img.height > MAX_PIXELS_FOR_PREVIEW:
+        img.thumbnail((6000, 6000), Image.LANCZOS)
+
     if img.mode in ('RGBA', 'LA') or (img.mode == 'P' and 'transparency' in img.info):
         img = img.convert('RGBA')
         bg = Image.new('RGB', img.size, (255, 255, 255))
@@ -891,6 +901,16 @@ def _file_to_pdf_data_uri(raw, filename, log_context=''):
     המקורי (studio) וגם בתצוגת הקובץ שהלקוח שלח בחזרה בהגהה, כשזו תמונה/PDF
     של דף מודפס שתוקן בכתב יד וצולם/נסרק (ראה studio_proof/_proof_returned_kind)."""
     if not raw:
+        return None, False
+
+    # מגבלת גודל להטמעה כ-data URI בדף (base64 בתוך ה-HTML) - קובץ ענק
+    # (PDF רב-עמודים, סריקה ברזולוציה גבוהה מדי) עלול לגרום לעיבוד/לקידוד
+    # לקחת המון זמן ו/או זיכרון ולהפיל את כל הבקשה (OOM/timeout על
+    # Railway - נראה ללקוח כ"upstream error" אחרי המתנה ארוכה). עדיף בהרבה
+    # תצוגה מקדימה חסרה (עם קישור הורדה שתמיד עובד, ללא עיבוד) מאשר קריסה.
+    MAX_PREVIEW_SOURCE_BYTES = 10 * 1024 * 1024  # 10MB
+    if len(raw) > MAX_PREVIEW_SOURCE_BYTES:
+        log.warning(f"_file_to_pdf_data_uri ({log_context}): קובץ גדול מדי להטמעה בתצוגה מקדימה ({len(raw)} bytes) - מדלגים על התצוגה")
         return None, False
 
     # מזהים PDF אמיתי לפי חתימת התוכן עצמו (magic bytes של PDF: "%PDF-"),
