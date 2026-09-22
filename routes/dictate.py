@@ -808,12 +808,31 @@ def _docx_paragraphs_html(docx_bytes):
 # Routes
 # ==========================================================================
 
+def _defer_manuscript_page_blobs(query, ManuscriptPage):
+    """הרשימות (queue/fax_assign) מציגות רק שם קובץ/סטטוס/תאריך - לעולם לא
+    את תוכן הקובץ עצמו - אבל בלי defer() מפורש, SQLAlchemy עושה SELECT * כברירת
+    מחדל ומביא גם את עמודות ה-LargeBinary (file_data/proof_file_data/
+    proof_final_file_data, שיכולות להיות כמה מגה-בייט כל אחת) בשביל כל שורה
+    ברשימה - מיותר לגמרי ברשימה, ובאמת יכול לגרום להאטה קשה/OOM כשיש הרבה
+    דפים/הרבה תוכן. שם הקובץ + סטטוס בלבד מספיקים לתצוגת רשימה."""
+    from sqlalchemy.orm import defer
+    return query.options(
+        defer(ManuscriptPage.file_data),
+        defer(ManuscriptPage.proof_file_data),
+        defer(ManuscriptPage.proof_final_file_data),
+    )
+
+
 @dictate_bp.route('')
 @login_required
 def queue():
     from models import ManuscriptPage, ProofingRound, IncomingFax
+    from sqlalchemy.orm import defer, joinedload
     status_filter = request.args.get('status', 'open')
-    q = ManuscriptPage.query
+    q = _defer_manuscript_page_blobs(ManuscriptPage.query, ManuscriptPage).options(
+        joinedload(ManuscriptPage.customer),
+        joinedload(ManuscriptPage.proofing_rounds),
+    )
     pages = []
     proof_rounds = []
     incoming_faxes = []
@@ -829,14 +848,25 @@ def queue():
         # סבבי הגהה (יכול להיות כמה על אותו כתב-יד) שהלקוח שלח עבורם תיקונים
         # בחזרה - ממתינים לסקירת נציג. ראה models.ProofingRound.
         proof_rounds = (ProofingRound.query.filter_by(status='pending')
+                         .options(
+                             defer(ProofingRound.customer_file_data),
+                             defer(ProofingRound.final_file_data),
+                             joinedload(ProofingRound.manuscript_page).joinedload(ManuscriptPage.customer),
+                         )
                          .order_by(ProofingRound.requested_at.asc()).limit(200).all())
     elif status_filter == 'proof_done':
         # סבבי הגהה שכבר הושלמו וחויבו.
         proof_rounds = (ProofingRound.query.filter_by(status='done')
+                         .options(
+                             defer(ProofingRound.customer_file_data),
+                             defer(ProofingRound.final_file_data),
+                             joinedload(ProofingRound.manuscript_page).joinedload(ManuscriptPage.customer),
+                         )
                          .order_by(ProofingRound.completed_at.desc()).limit(200).all())
     elif status_filter == 'fax':
         # פקסים נכנסים גולמיים שממתינים לשיוך ידני של נציג - ראה models.IncomingFax
         incoming_faxes = (IncomingFax.query.filter_by(status='pending')
+                           .options(defer(IncomingFax.file_data))
                            .order_by(IncomingFax.received_at.asc()).limit(200).all())
     else:
         q = q.order_by(ManuscriptPage.created_at.desc())
@@ -1718,7 +1748,16 @@ def fax_assign(fax_id):
         from models import Customer, ManuscriptPage
         selected_customer = Customer.query.get(customer_id)
         if selected_customer:
-            customer_pages = (ManuscriptPage.query.filter_by(customer_id=selected_customer.id)
+            # ⚠️ זה ככל הנראה הגורם המרכזי לקריסה/לאיטיות אחרי "נמצא לקוח":
+            # התבנית (fax_assign.html) מציגה ברשימת "בחר כתב יד" רק
+            # original_filename/created_at/status - אבל בלי defer() מפורש
+            # השאילתה מביאה בשביל כל דף גם את שלוש עמודות ה-LargeBinary
+            # (file_data/proof_file_data/proof_final_file_data, כל אחת יכולה
+            # להיות כמה מגה-בייט) - ללקוח עם היסטוריה של הרבה דפים זה יכול
+            # להיות עשרות/מאות מגה-בייט בזיכרון בכל טעינה של המסך הזה, בדיוק
+            # ה-timeout/SIGKILL (OOM) שראינו בלוגים.
+            customer_pages = (_defer_manuscript_page_blobs(
+                ManuscriptPage.query.filter_by(customer_id=selected_customer.id), ManuscriptPage)
                                .order_by(ManuscriptPage.created_at.desc()).all())
 
     return render_template(
