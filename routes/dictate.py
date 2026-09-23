@@ -986,6 +986,41 @@ def _image_to_pdf_bytes_with_timeout(raw):
         )
 
 
+def _validate_or_repair_pdf(raw):
+    """בודקת שקובץ PDF ניתן לפתיחה/רינדור בפועל, ולא רק ש-5 הבייטים
+    הראשונים תואמים לחתימת "%PDF-". קובץ יכול להתחיל בחתימה תקינה ועדיין
+    להיות פגום מבחינה מבנית (הועלה חלקי, נוצר ע"י כלי סריקה/פקס לא תקני
+    וכו') - במקרה כזה, אם רק בודקים את החתימה, ה-iframe בדפדפן מציג שגיאת
+    דפדפן גולמית ומבלבלת ("הטעינה של מסמך ה-PDF נכשלה") במקום ההודעה
+    האחידה של המערכת ("הקובץ אינו זמין").
+    PyMuPDF (fitz, כבר תלות קיימת בפרויקט) פותח את הקובץ ומנסה "לנקות"/
+    לבנות מחדש את המבנה הפנימי שלו (garbage collection + דחיסה) - זה גם
+    מתקן הרבה מקרים של PDF פגום-חלקית בדרך, לא רק מזהה אותם. מחזירה bytes
+    מתוקנים בהצלחה, או None אם הקובץ פגום לגמרי ולא ניתן לפתיחה/תיקון."""
+    import fitz
+    doc = None
+    try:
+        doc = fitz.open(stream=raw, filetype='pdf')
+        if doc.page_count < 1:
+            return None
+        return doc.tobytes(garbage=4, deflate=True, clean=True)
+    except Exception:
+        return None
+    finally:
+        if doc is not None:
+            doc.close()
+
+
+def _validate_or_repair_pdf_with_timeout(raw):
+    future = _preview_executor.submit(_validate_or_repair_pdf, raw)
+    try:
+        return future.result(timeout=PREVIEW_CONVERT_TIMEOUT_SECONDS)
+    except _futures.TimeoutError:
+        raise TimeoutError(
+            f"אימות/תיקון ה-PDF ארך יותר מ-{PREVIEW_CONVERT_TIMEOUT_SECONDS} שניות"
+        )
+
+
 def _file_to_pdf_data_uri(raw, filename, log_context=''):
     """הליבה המשותפת של המרת bytes+filename ל-data URI מוטמע, ממיר תמיד
     ל-PDF (גם אם המקור תמונה) - ראה _manuscript_data_uri למטה להסבר המלא
@@ -1035,6 +1070,23 @@ def _file_to_pdf_data_uri(raw, filename, log_context=''):
         except Exception as e:
             log.error(f"image->PDF conversion error ({log_context}): {e}")
             # ממשיכים עם התמונה המקורית - עדיף תצוגה שעלולה להיחסם מאשר כלום
+
+    if mime == 'application/pdf':
+        # לא מסתפקים בחתימת "%PDF-" - מוודאים בפועל שהקובץ ניתן לפתיחה/
+        # רינדור (ראה _validate_or_repair_pdf), כדי שקובץ שמתיימר להיות PDF
+        # אך פגום מבנית לא "יעבור" ויוצג ב-iframe עם שגיאת דפדפן גולמית
+        # ("הטעינה של מסמך ה-PDF נכשלה") - במקום זה מקבלים או קובץ מתוקן
+        # שכן ניתן לרינדור, או נופלים בחזרה בשקט להודעת "הקובץ אינו זמין"
+        # האחידה של המערכת.
+        try:
+            repaired = _validate_or_repair_pdf_with_timeout(raw)
+        except TimeoutError as e:
+            log.error(f"PDF validate/repair timeout ({log_context}): {e}")
+            return None, False
+        if repaired is None:
+            log.warning(f"_file_to_pdf_data_uri ({log_context}): קובץ ה-PDF פגום ולא ניתן לפתיחה/תיקון - מדלגים על התצוגה")
+            return None, False
+        raw = repaired
 
     b64 = base64.b64encode(raw).decode('ascii')
     return f'data:{mime};base64,{b64}', (mime == 'application/pdf')
