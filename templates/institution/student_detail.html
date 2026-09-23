@@ -164,6 +164,7 @@
 </div>
 
 <script>
+var STUDENT_ID = {{ student.id }};
 var studentDz = document.getElementById('studentDz');
 var studentFileInput = document.getElementById('studentAudioFile');
 var studentDzFilename = document.getElementById('studentDzFilename');
@@ -297,7 +298,13 @@ document.querySelectorAll('.proofUploadForm').forEach(function (form) {
     msgEl.style.color = 'var(--text2)';
     msgEl.textContent = 'מעלה...';
     var fd = new FormData(form);
-    var url = '{{ url_for("institution_students.upload_student_proof", student_id=student.id, page_id=0) }}'.replace('0', pageId);
+    // בנייה בטוחה של ה-URL: לא משתמשים ב-.replace('0', ...) על תבנית URL,
+    // כי אם מזהה קודם ב-URL (student_id, כגון 3820) מכיל בעצמו את הספרה '0',
+    // ה-replace הראשון תופס את הספרה השגויה ומקלקל את ה-URL - מה שמוביל
+    // ל-404 (HTML ולא JSON) ולשגיאת "שגיאת תקשורת, נסה שוב" שדווחה.
+    // בונים את ה-URL במפורש עם קבוע STUDENT_ID, בדיוק כמו PAGE_ID/ROUND_ID
+    // בדפי הצוות (dictate_studio.html / proof_studio.html).
+    var url = `/institution/students/${STUDENT_ID}/manuscript/${encodeURIComponent(pageId)}/proof-upload`;
     var res, data;
     try {
       res = await fetch(url, { method: 'POST', body: fd });
