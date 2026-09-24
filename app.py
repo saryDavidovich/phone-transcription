@@ -376,6 +376,10 @@ def _migrate_db():
         "ALTER TABLE proofing_rounds ADD COLUMN IF NOT EXISTS fax_status VARCHAR(32)",
         "ALTER TABLE proofing_rounds ADD COLUMN IF NOT EXISTS fax_status_note TEXT",
         "CREATE INDEX IF NOT EXISTS ix_proofing_rounds_fax_campaign_id ON proofing_rounds (fax_campaign_id)",
+        # שינוי מינוח: "מסמכים כלליים" -> "קלדנות דיגיטלית" (הלקוחות לא
+        # אמורים לדעת שמדובר בהקראה בטלפון) - מתקן גם את לקוחות-הדמה
+        # שכבר נוצרו לפני השינוי (idempotent: בפעם השנייה שום שורה לא תואמת).
+        "UPDATE customers SET student_display_name = REPLACE(student_display_name, 'מסמכים כלליים - ', 'קלדנות דיגיטלית - ') WHERE is_institution_self = TRUE AND student_display_name LIKE 'מסמכים כלליים - %'",
     ]
     logger = logging.getLogger(__name__)
     ok, failed = 0, 0

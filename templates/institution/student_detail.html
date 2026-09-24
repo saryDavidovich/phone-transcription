@@ -1,11 +1,11 @@
 {% extends "institution/base.html" %}
-{% block title %}{{ 'מסמכים כלליים' if student.is_institution_self else student.name }}{% endblock %}
+{% block title %}{{ 'קלדנות דיגיטלית' if student.is_institution_self else student.name }}{% endblock %}
 {% block content %}
 {% if student.is_institution_self %}
 <a href="{{ url_for('institution.dashboard') }}" style="color:var(--text2); font-size:13px; text-decoration:none;">← חזרה לדף הבית</a>
-<h1 style="margin-top:10px;">📎 מסמכים כלליים של המוסד</h1>
+<h1 style="margin-top:10px;">📎 קלדנות דיגיטלית</h1>
 <p style="color:var(--text2); font-size:13px; margin-bottom:20px;">
-  כתבי-יד ותמלולים שלא שייכים לתלמיד ספציפי (למשל טפסים כלליים של המזכירות) - מועלים ומטופלים כאן.
+  מסמכים ותמלולים שלא שייכים לתלמיד ספציפי (למשל טפסים כלליים של המזכירות) - מועלים ומטופלים כאן.
 </p>
 {% else %}
 <a href="{{ url_for('institution_students.students_tab') }}" style="color:var(--text2); font-size:13px; text-decoration:none;">← חזרה לרשימת תלמידים</a>
@@ -70,13 +70,16 @@
 {% endif %}
 
 <div class="card" style="margin-bottom:24px;">
-  <h3 style="font-size:15px; margin-bottom:6px;">✍️ {{ 'מסמך כללי חדש להקראה' if student.is_institution_self else 'כתב יד חדש להקראה' }}</h3>
+  <h3 style="font-size:15px; margin-bottom:6px;">✍️ {{ 'מסמך חדש לקלדנות דיגיטלית' if student.is_institution_self else 'כתב יד חדש לקלדנות דיגיטלית' }}</h3>
   <p style="font-size:12px; color:var(--text2); margin:0 0 12px;">
     {% if student.is_institution_self %}
-    העלאת תמונה/PDF של מסמך שלא שייך לתלמיד ספציפי - הצוות שלנו יקריא אותו בטלפון ויהפוך אותו לקובץ Word מוקלד. עלות ההקראה תחויב מיתרת המוסד.
+    העלאת תמונה/PDF של מסמך שלא שייך לתלמיד ספציפי - הצוות שלנו יקליד אותו במדויק לקובץ Word. עלות הקלדנות הדיגיטלית תחויב מיתרת המוסד.
     {% else %}
-    העלאת תמונה/PDF של דף כתב יד - הצוות שלנו יקריא אותו בטלפון ויהפוך אותו לקובץ Word מוקלד. אותו תמחור בדיוק כמו כל לקוח.
+    העלאת תמונה/PDF של דף כתב יד - הצוות שלנו יקליד אותו במדויק לקובץ Word. אותו תמחור בדיוק כמו כל לקוח.
     {% endif %}
+  </p>
+  <p style="font-size:12px; color:var(--text3); margin:0 0 12px; display:flex; align-items:center; gap:6px;">
+    ⏳ כל קובץ עובר גם אישור של נציג אנושי לפני שהוא מוכן - בדרך כלל אפשר לצפות ולהוריד תוך 24 שעות, אך ייתכנו עיכובים בזמני עומס.
   </p>
   <form id="manuscriptUploadForm">
     <div class="dropzone" id="manuscriptDz">
@@ -92,7 +95,10 @@
 </div>
 
 <div class="card" style="margin-bottom:20px;">
-  <h3 style="font-size:15px; margin-bottom:10px;">כתבי יד ({{ manuscript_pages|length }})</h3>
+  <h3 style="font-size:15px; margin-bottom:2px;">כתבי יד ({{ manuscript_pages|length }})</h3>
+  {% if manuscript_pages %}
+  <p style="font-size:12px; color:var(--text3); margin:0 0 12px;">⏳ קובץ "בתהליך" ממתין לקלדנות דיגיטלית ולאחריה לאישור נציג - בדרך כלל מוכן תוך 24 שעות, ייתכנו עיכובים בזמני עומס.</p>
+  {% endif %}
   {% for page in manuscript_pages %}
   <div style="border:1px solid var(--border); border-radius:10px; padding:12px 14px; margin-bottom:10px;">
     <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
@@ -102,7 +108,7 @@
       </div>
       <div style="display:flex; align-items:center; gap:8px;">
         {% if page.status == 'done' %}<span class="badge badge-green">מוכן</span>
-        {% elif page.status in ('pending', 'recording', 'processing', 'review') %}<span class="badge badge-amber"><span class="spinner-ring"></span> בתהליך הקראה</span>
+        {% elif page.status in ('pending', 'recording', 'processing', 'review') %}<span class="badge badge-amber" title="בדרך כלל מוכן תוך 24 שעות, ייתכנו עיכובים בזמני עומס">⏳ בתהליך</span>
         {% else %}<span class="badge badge-gray">{{ page.status }}</span>{% endif %}
         {% if page.status == 'done' %}
         <a href="{{ url_for('institution_students.download_student_manuscript', student_id=student.id, page_id=page.id) }}"
@@ -125,7 +131,7 @@
           <a href="{{ url_for('institution_students.download_student_proof', student_id=student.id, page_id=page.id, round_id=r.id) }}"
              class="btn btn-sm btn-secondary" style="text-decoration:none;" target="_blank">⬇ הורדת הגהה סופית</a>
         {% else %}
-          <span class="badge badge-amber"><span class="spinner-ring"></span> ממתין לטיפול</span>
+          <span class="badge badge-amber" title="בדרך כלל מוכן תוך 24 שעות, ייתכנו עיכובים בזמני עומס">⏳ ממתין לטיפול</span>
         {% endif %}
       </div>
       {% else %}
@@ -230,7 +236,7 @@ document.getElementById('studentUploadForm').addEventListener('submit', async fu
   }, 3000);
 });
 
-// --- העלאת כתב יד חדש להקראה ---
+// --- העלאת כתב יד חדש לקלדנות דיגיטלית ---
 var manuscriptDz = document.getElementById('manuscriptDz');
 var manuscriptFileInput = document.getElementById('manuscriptFile');
 var manuscriptDzFilename = document.getElementById('manuscriptDzFilename');
@@ -283,7 +289,7 @@ document.getElementById('manuscriptUploadForm').addEventListener('submit', async
     return;
   }
   msgEl.style.color = 'var(--accent)';
-  msgEl.textContent = 'הועלה בהצלחה - נכנס לתור ההקראה';
+  msgEl.textContent = 'הועלה בהצלחה - ממתין לקלדנות דיגיטלית ואישור נציג (עד 24 שעות בד"כ)';
   window.location.reload();
 });
 

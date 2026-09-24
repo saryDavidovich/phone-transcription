@@ -282,7 +282,7 @@ def ensure_institution_self_customer(institution):
         self_customer = Customer(
             institution_id=institution.id,
             is_institution_self=True,
-            student_display_name=f'מסמכים כלליים - {institution.name}',
+            student_display_name=f'קלדנות דיגיטלית - {institution.name}',
             name=institution.name,
             balance=0.0,
         )

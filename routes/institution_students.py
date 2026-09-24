@@ -228,14 +228,23 @@ def upload_excel():
 @institution_login_required
 def export_excel():
     import openpyxl
+    from sqlalchemy import func
     students = (Customer.query.filter_by(institution_id=current_user.id)
                 .filter(Customer.is_institution_self.isnot(True)).all())
+
+    # שאילתת ספירה מרוכזת אחת (GROUP BY) במקום COUNT() נפרד לכל תלמיד
+    # בלולאה - עם הרבה תלמידים זה היה N+1 שאילתות מיותר לגמרי.
+    counts_by_customer = dict(
+        db.session.query(Recording.customer_id, func.count(Recording.id))
+        .filter(Recording.customer_id.in_([s.id for s in students]))
+        .group_by(Recording.customer_id).all()
+    ) if students else {}
 
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.append(['מספר תלמיד', 'שם', 'טלפון', 'מייל', 'יתרה', 'סה"כ הקלטות', 'חסום'])
     for s in students:
-        recording_count = Recording.query.filter_by(customer_id=s.id).count()
+        recording_count = counts_by_customer.get(s.id, 0)
         ws.append([s.student_number or '', s.name or '', s.phone or '', s.email or '',
                    s.balance or 0, recording_count, 'כן' if s.is_blocked else 'לא'])
 
@@ -252,15 +261,34 @@ def export_excel():
 @institution_students_bp.route('/institution/students/<int:student_id>')
 @institution_login_required
 def student_detail(student_id):
-    from models import ManuscriptPage
+    from models import ManuscriptPage, ProofingRound
+    from sqlalchemy.orm import defer, joinedload
+    from routes.dictate import _defer_manuscript_page_blobs
     student = Customer.query.filter_by(id=student_id, institution_id=current_user.id).first_or_404()
-    recordings = Recording.query.filter_by(customer_id=student.id).order_by(Recording.created_at.desc()).all()
+    # defer(Recording.file_data)/_defer_manuscript_page_blobs: הדף הזה מציג
+    # רק שם קובץ/סטטוס/תאריך לכל שורה - בלי defer מפורש, SQLAlchemy עושה
+    # SELECT * כברירת מחדל ומביא גם עמודות LargeBinary (קובץ אודיו/כתב יד
+    # שלם) לכל שורה ברשימה, מה שמאט מאוד דף עם היסטוריה - בדיוק אותו באג
+    # שכבר תוקן בתור הצוות (routes/dictate.py, queue()/fax_assign()).
+    recordings = (Recording.query.filter_by(customer_id=student.id)
+                  .options(defer(Recording.file_data))
+                  .order_by(Recording.created_at.desc()).all())
     transactions = Transaction.query.filter_by(customer_id=student.id).order_by(Transaction.created_at.desc()).limit(30).all()
     # כתבי יד להקראה (ראה routes/dictate.py) שהמוסד העלה/שהתקבלו עבור התלמיד -
     # אותה טבלה בדיוק שכל לקוח רגיל משתמש בה (ManuscriptPage.customer_id),
-    # כולל סבבי ההגהה שלהם (page.proofing_rounds - ראה models.ProofingRound).
-    manuscript_pages = (ManuscriptPage.query.filter_by(customer_id=student.id)
-                         .order_by(ManuscriptPage.created_at.desc()).all())
+    # כולל סבבי ההגהה שלהם (page.proofing_rounds - ראה models.ProofingRound) -
+    # נטענות מראש (joinedload) כדי למנוע שאילתת N+1 נפרדת לכל כתב-יד בלולאת
+    # התבנית, וגם הן מדולגות מעמודות ה-blob הכבדות שלהן.
+    manuscript_pages = (
+        _defer_manuscript_page_blobs(ManuscriptPage.query, ManuscriptPage)
+        .filter_by(customer_id=student.id)
+        .options(
+            joinedload(ManuscriptPage.proofing_rounds)
+            .defer(ProofingRound.customer_file_data)
+            .defer(ProofingRound.final_file_data)
+        )
+        .order_by(ManuscriptPage.created_at.desc()).all()
+    )
     return render_template('institution/student_detail.html', student=student, recordings=recordings,
                             transactions=transactions, manuscript_pages=manuscript_pages)
 
