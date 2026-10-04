@@ -150,9 +150,10 @@
     <div class="ds-formatrow" id="modeRow">
       <button class="ds-fbtn" id="btnSpell" disabled onclick="toggleMode('spell')">🔤 איות <small>(A)</small></button>
       <button class="ds-fbtn" id="btnNumber" disabled onclick="toggleMode('number')">🔢 מספר <small>(N)</small></button>
+      <button class="ds-fbtn" id="btnType" disabled onclick="openTypeBox()">⌨ הקלדה <small>(T)</small></button>
       <span id="modeBadge" style="display:none;font-size:12px;font-weight:700;color:var(--accent,#4f6bff)"></span>
     </div>
-    <p class="ds-hint" id="modeHint">לראשי תיבות ומראי מקומות: לחצו על <b>איות</b> והקריאו את <b>שמות האותיות</b> (שין, וו, עין = שו״ע; &quot;רווח&quot; בין מילים; &quot;גרש&quot; לקיצור כמו סי׳), או על <b>מספר</b> ואמרו את המספר כרגיל (מאתיים חמישים ושלוש = רנ״ג). לחיצה נוספת חוזרת לדיבור רגיל. במקלדת: A / N (גם בעברית).</p>
+    <p class="ds-hint" id="modeHint">לראשי תיבות ומראי מקומות: לחצו על <b>איות</b> והקריאו את <b>שמות האותיות</b> (שין, וו, עין = שו״ע; &quot;רווח&quot; בין מילים; &quot;גרש&quot; לקיצור כמו סי׳), או על <b>מספר</b> ואמרו את המספר כרגיל (מאתיים חמישים ושלוש = רנ״ג). לחיצה נוספת חוזרת לדיבור רגיל. במקלדת: A / N (גם בעברית).<br><b>הקלדה (T)</b>: פותחת תיבה קטנה להקלדה ישירה של ראשי תיבות / מראה מקום (בלי תמלול, 100% מדויק) — Enter מכניס וסוגר, Esc מבטל. גרשיים נוספים אוטומטית; מספר (154) הופך לאותיות (קנ״ד).</p>
 
     <div id="resultArea">
       {% if page.status == 'processing' %}
@@ -174,6 +175,17 @@
         <div class="ds-state">לחצו "התחל הקלטה" והקריאו את הטקסט מהתמונה</div>
       {% endif %}
     </div>
+  </div>
+</div>
+
+<div id="typeBox" style="display:none;position:fixed;top:90px;left:50%;transform:translateX(-50%);z-index:1000;background:var(--surface);border:2px solid var(--accent);border-radius:12px;padding:14px 16px;box-shadow:0 8px 30px rgba(0,0,0,.45);width:min(420px,92vw)">
+  <div style="font-weight:700;margin-bottom:8px">⌨ הקלדת ראשי תיבות / מראה מקום</div>
+  <input id="typeInput" type="text" dir="rtl" autocomplete="off" style="width:100%;padding:9px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:17px;font-family:'Heebo',sans-serif" placeholder="למשל: שוע אוח סי' קנד">
+  <div id="typePreview" style="margin-top:8px;font-size:18px;min-height:26px;color:var(--accent)"></div>
+  <div style="margin-top:6px;font-size:12px;color:var(--text3)">Enter = הכנסה וסגירה · Esc = ביטול · בזמן ההקלדה ההקלטה מושהית</div>
+  <div style="margin-top:10px;display:flex;gap:8px;justify-content:flex-start">
+    <button type="button" class="btn btn-primary" onclick="commitTypeBox()">הכנסה</button>
+    <button type="button" class="btn btn-ghost" onclick="closeTypeBox(false)">ביטול</button>
   </div>
 </div>
 
@@ -231,7 +243,7 @@ function updateToggleUI() {
 }
 
 function setFormatButtonsEnabled(on) {
-  const ids = ['btnBold', 'btnUnderline', 'btnHeading', 'btnEnter', 'btnSpell', 'btnNumber'].concat(PUNCT_BUTTONS.map(p => p.id));
+  const ids = ['btnBold', 'btnUnderline', 'btnHeading', 'btnEnter', 'btnSpell', 'btnNumber', 'btnType'].concat(PUNCT_BUTTONS.map(p => p.id));
   ids.forEach(id => {
     const el = document.getElementById(id);
     if (el) el.disabled = !on;
@@ -310,7 +322,7 @@ function flashAndGuard(el) {
 const FORMAT_BTN_IDS = { bold: 'btnBold', underline: 'btnUnderline', heading: 'btnHeading', enter: 'btnEnter' };
 
 function pushEvent(type) {
-  if (!recording) return;
+  if (!recording || typing) return;
   if (!flashAndGuard(document.getElementById(FORMAT_BTN_IDS[type]))) return;
   let opensNewParagraph = false;
   if (type === 'bold') state.bold = !state.bold;
@@ -321,12 +333,87 @@ function pushEvent(type) {
   endSegmentThen(() => beginSegment(opensNewParagraph));
 }
 
+// ---- הקלדה ישירה של ראשי תיבות / מראי מקומות (תיבה קטנה) ----
+// זהה בלוגיקה ל-services/hebrew_refs.py: גרשיים אוטומטיים לפני האות האחרונה,
+// אות סופית, מספר => גימטריה. הטקסט נכנס כסגמנט literal (בלי תמלול).
+const GERESH = '\u05f3', GERSHAYIM = '\u05f4';
+const FINAL_MAP = { 'כ': 'ך', 'מ': 'ם', 'נ': 'ן', 'פ': 'ף' };
+const NONFINAL_MAP = { 'ך': 'כ', 'ם': 'מ', 'ן': 'נ', 'ף': 'פ', 'ץ': 'צ' };
+function intToGematria(n) {
+  if (!(n >= 1 && n <= 999)) return null;
+  const ones = ['', 'א', 'ב', 'ג', 'ד', 'ה', 'ו', 'ז', 'ח', 'ט'];
+  const tens = ['', 'י', 'כ', 'ל', 'מ', 'נ', 'ס', 'ע', 'פ', 'צ'];
+  const hund = ['', 'ק', 'ר', 'ש', 'ת'];
+  let s = '';
+  while (n >= 400) { s += 'ת'; n -= 400; }
+  s += hund[Math.floor(n / 100)]; n %= 100;
+  if (n === 15) s += 'טו'; else if (n === 16) s += 'טז'; else s += tens[Math.floor(n / 10)] + ones[n % 10];
+  s = s.split('').map(c => NONFINAL_MAP[c] || c).join('');
+  return s.length === 1 ? s + GERESH : s.slice(0, -1) + GERSHAYIM + s.slice(-1);
+}
+function formatTypedToken(tok) {
+  if (/^\d+$/.test(tok)) { return intToGematria(parseInt(tok, 10)) || tok; }
+  // גרש/גרשיים שהוקלדו (ASCII או עבריים) - מכבדים כמו שהם, מנרמלים לתווים העבריים
+  if (/["'\u05f3\u05f4\u201d\u2019]/.test(tok)) {
+    return tok.replace(/["\u05f4\u201d]/g, GERSHAYIM).replace(/['\u2019\u05f3]/g, GERESH);
+  }
+  if (!/^[\u05d0-\u05ea]+$/.test(tok)) return tok;   // לא אותיות עבריות בלבד - לא נוגעים
+  const chars = tok.split('').map(c => NONFINAL_MAP[c] || c);
+  chars[chars.length - 1] = FINAL_MAP[chars[chars.length - 1]] || chars[chars.length - 1];
+  if (chars.length === 1) return chars[0] + GERESH;
+  return chars.slice(0, -1).join('') + GERSHAYIM + chars[chars.length - 1];
+}
+function formatTypedText(text) {
+  return (text || '').trim().split(/\s+/).filter(Boolean).map(formatTypedToken).join(' ');
+}
+
+let typing = false;
+function openTypeBox() {
+  if (!recording || typing) return;
+  if (!flashAndGuard(document.getElementById('btnType'))) return;
+  typing = true;
+  // סוגרים את סגמנט האודיו הנוכחי - בזמן ההקלדה לא מקליטים (לא נשאר אודיו מיותר
+  // ולא עולה כסף על תמלול של שקט). ממשיכים להקליט אחרי הסגירה.
+  endSegmentThen(() => {
+    const box = document.getElementById('typeBox');
+    const inp = document.getElementById('typeInput');
+    inp.value = ''; document.getElementById('typePreview').textContent = '';
+    box.style.display = 'block';
+    inp.focus();
+  });
+}
+function closeTypeBox(commit) {
+  if (!typing) return;
+  const inp = document.getElementById('typeInput');
+  const out = commit ? formatTypedText(inp.value) : '';
+  document.getElementById('typeBox').style.display = 'none';
+  typing = false;
+  if (!recording) return;       // ההקלטה הופסקה בינתיים
+  if (out) {
+    segments.push({
+      literal: out,
+      bold: state.bold, underline: state.underline, heading: state.heading,
+      new_paragraph: false, no_space_before: false, no_space_after: false,
+    });
+  }
+  beginSegment(false);
+}
+function commitTypeBox() { closeTypeBox(true); }
+document.addEventListener('DOMContentLoaded', () => {
+  const inp = document.getElementById('typeInput');
+  inp.addEventListener('input', () => { document.getElementById('typePreview').textContent = formatTypedText(inp.value); });
+  inp.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); commitTypeBox(); }
+    else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeTypeBox(false); }
+  });
+});
+
 // מצב איות / מספר (ראה services/hebrew_refs.py): הסגמנט הבא מוקלט במצב הזה
 // ומומר בשרת באופן קבוע (שמות אותיות -> ראשי תיבות; מספר -> גימטריה).
 // לחיצה על אותו כפתור שוב חוזרת לדיבור רגיל; לחיצה על הכפתור השני מחליפה מצב.
 const MODE_BTN_IDS = { spell: 'btnSpell', number: 'btnNumber' };
 function toggleMode(mode) {
-  if (!recording || !MODE_BTN_IDS[mode]) return;
+  if (!recording || typing || !MODE_BTN_IDS[mode]) return;
   if (!flashAndGuard(document.getElementById(MODE_BTN_IDS[mode]))) return;
   state.mode = (state.mode === mode) ? '' : mode;
   updateToggleUI();
@@ -337,7 +424,7 @@ function toggleMode(mode) {
 // הנוכחי, מוסיף אחריו "סגמנט" טקסטואלי קבוע עם הסימן, ואז ממשיך להקליט
 // סגמנט אודיו חדש (אותו מצב עיצוב, לא פותח פסקה חדשה).
 function insertPunct(btnId) {
-  if (!recording) return;
+  if (!recording || typing) return;
   const def = PUNCT_BUTTONS.find(p => p.id === btnId);
   if (!def) return;
   if (!flashAndGuard(document.getElementById(btnId))) return;
@@ -365,6 +452,7 @@ document.addEventListener('keydown', e => {
   else if (e.key === 'Enter') { pushEvent('enter'); e.preventDefault(); }
   else if (e.code === 'KeyA' && !e.ctrlKey && !e.metaKey && !e.altKey) { toggleMode('spell'); e.preventDefault(); }
   else if (e.code === 'KeyN' && !e.ctrlKey && !e.metaKey && !e.altKey) { toggleMode('number'); e.preventDefault(); }
+  else if (e.code === 'KeyT' && !e.ctrlKey && !e.metaKey && !e.altKey) { openTypeBox(); e.preventDefault(); }
   else {
     const p = PUNCT_BUTTONS.find(p => p.key === e.key);
     if (p) { insertPunct(p.id); e.preventDefault(); }
@@ -373,6 +461,13 @@ document.addEventListener('keydown', e => {
 
 function stopRecording() {
   if (!recording || !segRecorder) return;
+  const wasTyping = typing;
+  if (typing) {   // הקלדה פתוחה בעצירה - מה שהוקלד כבר נשמר (לא הולך לאיבוד)
+    const typed = formatTypedText(document.getElementById('typeInput').value);
+    typing = false; document.getElementById('typeBox').style.display = 'none';
+    if (typed) segments.push({ literal: typed, bold: state.bold, underline: state.underline, heading: state.heading,
+                               new_paragraph: false, no_space_before: false, no_space_after: false });
+  }
   recording = false;
   clearInterval(timerInterval);
   const btn = document.getElementById('recBtn');
@@ -384,7 +479,8 @@ function stopRecording() {
   setFormatButtonsEnabled(false);
 
   mediaStream.getTracks().forEach(t => t.stop());
-  endSegmentThen(() => uploadAllSegments());
+  // אם ההקלדה הייתה פתוחה - סגמנט האודיו כבר נסגר (אין מה לעצור), ממשיכים ישר להעלאה
+  if (wasTyping) uploadAllSegments(); else endSegmentThen(() => uploadAllSegments());
 }
 
 // מבטל את ההקלטה הנוכחית לגמרי - בלי לשלוח שום דבר לעיבוד/תמלול. מנתק את
@@ -394,6 +490,7 @@ function cancelRecording() {
   if (!recording || !segRecorder) return;
   if (!confirm('לבטל את ההקלטה הנוכחית? כל מה שהוקלט עד כה יימחק ולא יישלח.')) return;
   recording = false;
+  if (typing) { typing = false; document.getElementById('typeBox').style.display = 'none'; }
   clearInterval(timerInterval);
   if (segRecorder) {
     segRecorder.onstop = null;

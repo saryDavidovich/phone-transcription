@@ -159,11 +159,9 @@ _SEGMENT_MODES = ('spell', 'number')
 def _apply_segment_mode(text, mode):
     """איות/מספר => המרה דטרמיניסטית (services/hebrew_refs.py). שגיאה לא צפויה
     בהמרה לא מפילה את כל ההקלטה - נשאר הטקסט הגולמי שהמנוע החזיר."""
-    if not mode:
-        return text
     try:
         from services.hebrew_refs import apply_mode
-        return apply_mode(text, mode)
+        return apply_mode(text, mode or '')   # דיבור רגיל: רק החזרת גרשיים לראשי תיבות מוכרים (רשי -> רש״י)
     except Exception as e:
         log.warning(f"segment mode {mode!r} post-process failed: {e}")
         return text
@@ -324,12 +322,17 @@ def _dictation_worker(app, page_id, segment_files, segment_meta, engine=None):
 
                 def _process_one(item):
                     j, path = item
-                    with open(path, 'rb') as f:
-                        raw = f.read()
-                    wav_bytes = _webm_to_wav_16k_mono(raw)
                     mode = file_mode.get(j, '')
-                    p = {'spell': _SPELL_PROMPT_OPENAI, 'number': _NUMBER_PROMPT_OPENAI}.get(mode)
-                    return j, _apply_segment_mode(_transcribe_segment_openai(wav_bytes, client, p), mode)
+                    try:
+                        with open(path, 'rb') as f:
+                            raw = f.read()
+                        wav_bytes = _webm_to_wav_16k_mono(raw)
+                        p = {'spell': _SPELL_PROMPT_OPENAI, 'number': _NUMBER_PROMPT_OPENAI}.get(mode)
+                        return j, _apply_segment_mode(_transcribe_segment_openai(wav_bytes, client, p), mode)
+                    except Exception as e:
+                        # סגמנט בודד פגום/קצר מדי (למשל חיתוך בלחיצה כפולה) לא מפיל את כל ההקלטה
+                        log.warning(f"dictation segment {j} skipped ({e})")
+                        return j, ''
             else:
                 from google import genai
                 from google.genai import types as gtypes
@@ -337,12 +340,16 @@ def _dictation_worker(app, page_id, segment_files, segment_meta, engine=None):
 
                 def _process_one(item):
                     j, path = item
-                    with open(path, 'rb') as f:
-                        raw = f.read()
-                    wav_bytes = _webm_to_wav_16k_mono(raw)
                     mode = file_mode.get(j, '')
-                    p = {'spell': _SPELL_PROMPT, 'number': _NUMBER_PROMPT}.get(mode)
-                    return j, _apply_segment_mode(_transcribe_segment_gemini(wav_bytes, client, gtypes, p), mode)
+                    try:
+                        with open(path, 'rb') as f:
+                            raw = f.read()
+                        wav_bytes = _webm_to_wav_16k_mono(raw)
+                        p = {'spell': _SPELL_PROMPT, 'number': _NUMBER_PROMPT}.get(mode)
+                        return j, _apply_segment_mode(_transcribe_segment_gemini(wav_bytes, client, gtypes, p), mode)
+                    except Exception as e:
+                        log.warning(f"dictation segment {j} skipped ({e})")
+                        return j, ''
 
             texts_by_file_j = {}
             with ThreadPoolExecutor(max_workers=6) as ex:
