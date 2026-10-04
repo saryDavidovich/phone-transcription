@@ -22,6 +22,25 @@ def create_app():
     database_url = os.environ.get('DATABASE_URL', 'sqlite:///transcription.db')
     if database_url.startswith('postgres://'):
         database_url = database_url.replace('postgres://', 'postgresql://', 1)
+    # בוחרים דרייבר PostgreSQL במפורש (psycopg2, שנמצא ב-requirements.txt).
+    # בלי זה כתובת רגילה "postgresql://" נפתרת לדרייבר ברירת המחדל של גרסת
+    # SQLAlchemy שמותקנת - ובגרסה 2.1 ברירת המחדל התחלפה ל-psycopg (גרסה 3),
+    # שאינה מותקנת, והאפליקציה קורסת בעלייה עם "No module named 'psycopg'"
+    # (קרה ב-Railway אחרי בנייה מחדש, כי requirements.txt לא מקבע גרסאות).
+    # כתובת שהוגדרה במפורש עם +psycopg נשארת כמו שהיא רק אם psycopg מותקנת.
+    try:
+        import psycopg2  # noqa: F401
+        have_psycopg2 = True
+    except ImportError:
+        have_psycopg2 = False
+    if have_psycopg2:
+        if database_url.startswith('postgresql://'):
+            database_url = database_url.replace('postgresql://', 'postgresql+psycopg2://', 1)
+        elif database_url.startswith('postgresql+psycopg://'):
+            try:
+                import psycopg  # noqa: F401
+            except ImportError:
+                database_url = database_url.replace('postgresql+psycopg://', 'postgresql+psycopg2://', 1)
     app.config['SQLALCHEMY_DATABASE_URI'] = database_url
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
     app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024
