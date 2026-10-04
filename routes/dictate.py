@@ -141,6 +141,34 @@ _SEGMENT_PROMPT = """תמלל את קובץ השמע הקצר הזה בדיוק,
 אם הקטע שקט או לא מכיל דיבור - החזר מחרוזת ריקה."""
 
 
+# סגמנטים במצב "איות" / "מספר" (ראה services/hebrew_refs.py): הדובר מאיית
+# שמות אותיות או אומר מספר, והקוד הופך את זה לראשי תיבות/גימטריה. המנוע
+# נדרש רק לזהות אוצר מילים סגור - אסור לו "לפרש" או להשלים.
+_SPELL_PROMPT = """הדובר מאיית אותיות עבריות בשמותיהן (אלף, בית, גימל, דלת, הא, וו, זין, חית, טית, יוד, כף, למד, מם, נון, סמך, עין, פא, צדי, קוף, ריש, שין, תו).
+החזר אך ורק את שמות האותיות כפי שנאמרו, מופרדים ברווח, בסדר שנאמרו.
+אם נאמרה המילה "רווח", "גרש" או "גרשיים" - החזר אותה כמו שהיא.
+אל תצרף אותיות למילים, אל תפרש ואל תוסיף שום טקסט אחר."""
+_SPELL_PROMPT_OPENAI = "איות אותיות בשמותיהן: אלף בית גימל דלת הא וו זין חית טית יוד כף למד מם נון סמך עין פא צדי קוף ריש שין תו"
+_NUMBER_PROMPT = """הדובר אומר מספר בעברית (למשל "מאתיים חמישים ושלוש" או "שלושים ושבע").
+החזר אך ורק את המספר בספרות (למשל 253). אם נאמרו כמה מספרים, הפרד ביניהם במילה "רווח".
+אל תוסיף שום טקסט אחר."""
+_NUMBER_PROMPT_OPENAI = "מספרים בעברית: מאה חמישים וארבע, מאתיים חמישים ושלוש, שלושים ושבע"
+_SEGMENT_MODES = ('spell', 'number')
+
+
+def _apply_segment_mode(text, mode):
+    """איות/מספר => המרה דטרמיניסטית (services/hebrew_refs.py). שגיאה לא צפויה
+    בהמרה לא מפילה את כל ההקלטה - נשאר הטקסט הגולמי שהמנוע החזיר."""
+    if not mode:
+        return text
+    try:
+        from services.hebrew_refs import apply_mode
+        return apply_mode(text, mode)
+    except Exception as e:
+        log.warning(f"segment mode {mode!r} post-process failed: {e}")
+        return text
+
+
 def _webm_to_wav_16k_mono(raw_bytes):
     """ממיר בייטים גולמיים מ-MediaRecorder בדפדפן (webm/opus בד"כ) ל-WAV מונו
     16kHz - בדיוק הפורמט ש-Gemini מקבל בפועל בשאר המערכת (services/transcribe.py)."""
@@ -160,7 +188,7 @@ def _webm_to_wav_16k_mono(raw_bytes):
         os.unlink(tmp_in_path)
 
 
-def _transcribe_segment_gemini(wav_bytes, client, gtypes):
+def _transcribe_segment_gemini(wav_bytes, client, gtypes, prompt=None):
     """מתמלל סגמנט קצר בודד עם Gemini. אותו דפוס ניסיונות-חוזרים כמו
     _gemini_from_url ב-services/transcribe.py, רק עם פחות ניסיונות/המתנה
     כי כאן זה סגמנט קצר בודד ולא קריאה שלמה."""
@@ -169,7 +197,7 @@ def _transcribe_segment_gemini(wav_bytes, client, gtypes):
             response = client.models.generate_content(
                 model='gemini-3.5-flash',
                 contents=[
-                    _SEGMENT_PROMPT,
+                    prompt or _SEGMENT_PROMPT,
                     gtypes.Part.from_bytes(data=wav_bytes, mime_type='audio/wav'),
                 ],
             )
@@ -187,7 +215,7 @@ _OPENAI_SEGMENT_PROMPT = ("קטע קצר מהקראה בקול של גיליון
                           "מינוח תורני, ראשי תיבות וציטוטים.")
 
 
-def _transcribe_segment_openai(wav_bytes, client):
+def _transcribe_segment_openai(wav_bytes, client, prompt=None):
     """מתמלל סגמנט קצר בודד עם gpt-transcribe. אותו דפוס ניסיונות-חוזרים
     כמו _transcribe_segment_gemini, כדי ששני המנועים יתנהגו זהה מבחוץ."""
     for attempt in range(3):
@@ -196,7 +224,7 @@ def _transcribe_segment_openai(wav_bytes, client):
                 model='gpt-transcribe',
                 file=('segment.wav', io.BytesIO(wav_bytes), 'audio/wav'),
                 language='he',
-                prompt=_OPENAI_SEGMENT_PROMPT,
+                prompt=prompt or _OPENAI_SEGMENT_PROMPT,
                 response_format='text',
             )
             text = result if isinstance(result, str) else getattr(result, 'text', '')
@@ -284,6 +312,11 @@ def _dictation_worker(app, page_id, segment_files, segment_meta, engine=None):
                     f"!= uploaded files ({len(segment_files)}) for page={page_id}"
                 )
             meta_idx_to_file_j = {i: j for j, i in enumerate(audio_meta_indices)}
+            # מצב לכל קובץ אודיו: '' (דיבור רגיל), 'spell' (איות אותיות) או 'number' (מספר)
+            file_mode = {}
+            for j, i in enumerate(audio_meta_indices):
+                m = segment_meta[i].get('mode')
+                file_mode[j] = m if m in _SEGMENT_MODES else ''
 
             if engine == 'openai':
                 from openai import OpenAI
@@ -294,7 +327,9 @@ def _dictation_worker(app, page_id, segment_files, segment_meta, engine=None):
                     with open(path, 'rb') as f:
                         raw = f.read()
                     wav_bytes = _webm_to_wav_16k_mono(raw)
-                    return j, _transcribe_segment_openai(wav_bytes, client)
+                    mode = file_mode.get(j, '')
+                    p = {'spell': _SPELL_PROMPT_OPENAI, 'number': _NUMBER_PROMPT_OPENAI}.get(mode)
+                    return j, _apply_segment_mode(_transcribe_segment_openai(wav_bytes, client, p), mode)
             else:
                 from google import genai
                 from google.genai import types as gtypes
@@ -305,7 +340,9 @@ def _dictation_worker(app, page_id, segment_files, segment_meta, engine=None):
                     with open(path, 'rb') as f:
                         raw = f.read()
                     wav_bytes = _webm_to_wav_16k_mono(raw)
-                    return j, _transcribe_segment_gemini(wav_bytes, client, gtypes)
+                    mode = file_mode.get(j, '')
+                    p = {'spell': _SPELL_PROMPT, 'number': _NUMBER_PROMPT}.get(mode)
+                    return j, _apply_segment_mode(_transcribe_segment_gemini(wav_bytes, client, gtypes, p), mode)
 
             texts_by_file_j = {}
             with ThreadPoolExecutor(max_workers=6) as ex:
