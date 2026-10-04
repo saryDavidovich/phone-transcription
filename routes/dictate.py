@@ -92,6 +92,38 @@ os.makedirs(DICTATION_AUDIO_DIR, exist_ok=True)
 
 OPEN_STATUSES = ('pending', 'recording', 'processing', 'review', 'error')
 
+
+def dictate_pending_counts():
+    """ספירת העבודות שממתינות לטיפול הצוות, מחולקת לשלושת הסוגים:
+    open = כתבי-יד בתור, proof = סבבי הגהה ממתינים, fax = פקסים ממתינים
+    לשיוך. נספר רק מה שבאמת ממתין (לא "הושלמו"). מחושב פעם אחת לבקשה
+    (flask.g) - גם התפריט הצדדי וגם לשוניות התור משתמשים באותה ספירה."""
+    from flask import g
+    cached = getattr(g, '_dictate_pending_counts', None)
+    if cached is not None:
+        return cached
+    from models import ManuscriptPage, ProofingRound, IncomingFax
+    try:
+        counts = {
+            'open': ManuscriptPage.query.filter(ManuscriptPage.status.in_(OPEN_STATUSES)).count(),
+            'proof': ProofingRound.query.filter_by(status='pending').count(),
+            'fax': IncomingFax.query.filter_by(status='pending').count(),
+        }
+    except Exception:
+        db.session.rollback()
+        counts = {'open': 0, 'proof': 0, 'fax': 0}
+    counts['total'] = counts['open'] + counts['proof'] + counts['fax']
+    g._dictate_pending_counts = counts
+    return counts
+
+
+@dictate_bp.app_context_processor
+def _inject_dictate_pending():
+    # מוזרק כפונקציה (לא כערך מחושב) בכוונה: כך השאילתות רצות רק בתבנית
+    # הצוות שקוראת לה (admin/base.html), ולא בכל תבנית באתר (למשל פורטל
+    # המוסדות) - האתר צריך להישאר מהיר.
+    return {'dictate_pending': dictate_pending_counts}
+
 ENGINES = ('gemini', 'openai')
 DEFAULT_DICTATION_ENGINE = os.environ.get('DEFAULT_DICTATION_ENGINE', 'gemini')
 if DEFAULT_DICTATION_ENGINE not in ENGINES:
@@ -898,13 +930,13 @@ def queue():
         q = q.order_by(ManuscriptPage.created_at.desc())
         pages = q.limit(200).all()
 
-    proof_pending_count = ProofingRound.query.filter_by(status='pending').count()
-    proof_done_count = ProofingRound.query.filter_by(status='done').count()
-    fax_pending_count = IncomingFax.query.filter_by(status='pending').count()
+    # מספרי "ממתין" על הלשוניות - רק מה שבאמת מחכה לטיפול. "הושלמו" ו"הגהות
+    # שהושלמו" בכוונה בלי מספר (אין מה לטפל בהם).
+    pending = dictate_pending_counts()
     return render_template('admin/dictate_queue.html', pages=pages, proof_rounds=proof_rounds,
                             incoming_faxes=incoming_faxes,
-                            status_filter=status_filter, proof_pending_count=proof_pending_count,
-                            proof_done_count=proof_done_count, fax_pending_count=fax_pending_count)
+                            status_filter=status_filter, open_pending_count=pending['open'],
+                            proof_pending_count=pending['proof'], fax_pending_count=pending['fax'])
 
 
 def _manuscript_file_bytes(page):

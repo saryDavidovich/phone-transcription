@@ -75,6 +75,10 @@ body { font-family:'Heebo',sans-serif; background:var(--bg); color:var(--text); 
 .nav-item:hover { color:var(--text); background:var(--surface2); }
 .nav-item.active { color:var(--accent); background:rgba(79,110,247,0.1); border-right-color:var(--accent); }
 .nav-icon { width:18px; text-align:center; font-size:16px; }
+.nav-sub { display:flex; flex-direction:column; gap:2px; padding:0 24px 6px 24px; margin-top:-4px; }
+.nav-sub a { display:flex; justify-content:space-between; align-items:center; font-size:12px; color:var(--text2); text-decoration:none; padding:3px 10px 3px 8px; border-radius:6px; margin-right:30px; }
+.nav-sub a:hover { background:var(--surface2); color:var(--text); }
+.nav-sub b { background:rgba(239,68,68,0.15); color:var(--red); border-radius:10px; padding:0 7px; font-size:11px; }
 .sidebar-bottom { padding:16px 24px; border-top:1px solid var(--border); }
 .logout-btn {
   display:flex; align-items:center; gap:10px; color:var(--text2);
@@ -222,9 +226,20 @@ textarea.form-input { resize:vertical; min-height:80px; }
     <a href="/admin/ocr" class="nav-item {% if request.endpoint in ['admin.ocr_list','admin.ocr_detail'] %}active{% endif %}">
       <span class="nav-icon">✍️</span> זיהוי כתב יד
     </a>
-    <a href="/admin/dictate" class="nav-item {% if request.endpoint in ['dictate.queue','dictate.studio'] %}active{% endif %}">
+    {% set dp = dictate_pending() if dictate_pending is defined else {'total': 0, 'open': 0, 'proof': 0, 'fax': 0} %}
+    <a href="/admin/dictate" class="nav-item {% if request.blueprint == 'dictate' %}active{% endif %}" style="position:relative">
       <span class="nav-icon">🎤</span> הקראת כתבי-יד
+      {% if dp.total > 0 %}
+      <span style="position:absolute;left:14px;top:50%;transform:translateY(-50%);background:#ef4444;color:white;border-radius:50%;min-width:20px;height:20px;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;padding:0 4px" title="עבודות הממתינות לטיפול">{{ dp.total }}</span>
+      {% endif %}
     </a>
+    {% if dp.total > 0 %}
+    <div class="nav-sub">
+      {% if dp.open %}<a href="/admin/dictate?status=open">🕓 בתור <b>{{ dp.open }}</b></a>{% endif %}
+      {% if dp.proof %}<a href="/admin/dictate?status=proof">✏️ ממתין להגהה <b>{{ dp.proof }}</b></a>{% endif %}
+      {% if dp.fax %}<a href="/admin/dictate?status=fax">📠 פקסים לשיוך <b>{{ dp.fax }}</b></a>{% endif %}
+    </div>
+    {% endif %}
     <a href="/admin/messages" class="nav-item {% if request.endpoint == 'admin.manager_messages' %}active{% endif %}" style="position:relative">
       <span class="nav-icon">📬</span> הודעות למנהל
       {% if new_messages_count > 0 %}

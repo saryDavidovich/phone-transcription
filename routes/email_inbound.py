@@ -6,6 +6,13 @@ routes/email_inbound.py
 פורמט שורת הנושא (Subject):
     <מספר טלפון> [רגיל|מקצועי] [שפת קלט] [שפת פלט]
 
+תמונה/PDF (כתב יד): המילה אחרי הטלפון (עם או בלי רווח, "0501234567 רגיל" או
+"0501234567רגיל") קובעת לאן הקובץ הולך - "רגיל" = זיהוי OCR אוטומטי בלבד,
+"מקצועי" = קלדנות דיגיטלית (תור ההקראה) בלבד. אם לא נכתבה אף מילה - הלקוח
+מקבל מייל חוזר עם שני כפתורים (פירוט מחירים וזמני תגובה) ורק אחרי שבחר
+הקובץ מעובד ומחויב (ראה PendingFileChoice, email_choice). לקבצי אודיו
+"רגיל"/"מקצועי" ממשיכים לקבוע רמת תמלול, כמו תמיד.
+
 כל הפרמטרים מעבר למספר הטלפון אופציונליים, בכל סדר.
 שפות אפשריות: עברית / יידיש / אנגלית
 ברירות מחדל: רגיל (Gemini), עברית->עברית
@@ -329,11 +336,17 @@ def _parse_subject(subject):
     if not tokens:
         return None
 
+    # מילה שמודבקת לטלפון בלי רווח ("0501234567רגיל") - מפרידים אותה
+    glued = re.match(r'^(\+?[\d\-]+)([^\d\-].*)$', tokens[0])
+    if glued:
+        tokens = [glued.group(1), glued.group(2)] + tokens[1:]
+
     phone = _normalize_israeli_phone(tokens[0])
     if not phone or not phone.isdigit():
         return None
 
     tier = 'gemini'
+    image_mode = None  # regular (OCR) / pro (קלדנות דיגיטלית) / None = לא נבחר
     lang_tokens = []
     output_is_original = False
 
@@ -341,6 +354,10 @@ def _parse_subject(subject):
         tok_clean = tok.strip()
         if tok_clean in TIER_MAP:
             tier = TIER_MAP[tok_clean]
+            if image_mode is None and tok_clean == 'רגיל':
+                image_mode = 'regular'
+            elif image_mode is None and tok_clean == 'מקצועי':
+                image_mode = 'pro'
         elif tok_clean == 'מקור':
             output_is_original = True
         elif tok_clean in LANG_MAP:
@@ -357,6 +374,7 @@ def _parse_subject(subject):
         'tier': tier,
         'language': language,
         'output_language': output_language,
+        'image_mode': image_mode,
     }
 
 
@@ -712,6 +730,7 @@ def _capture_manuscript_page(filepath, original_filename, customer, db):
         db.session.add(page)
         db.session.commit()
         log.info(f"manuscript page captured for dictation queue: customer={customer.id}, file={original_filename}")
+        return True
     except Exception as e:
         # קריטי: אם ה-commit נכשל (constraint, ניתוק זמני וכו'), ה-session
         # של SQLAlchemy נכנס למצב "פגום" (PendingRollbackError) עד שקוראים
@@ -722,6 +741,7 @@ def _capture_manuscript_page(filepath, original_filename, customer, db):
         # למנוע (ראו docstring למעלה).
         db.session.rollback()
         log.error(f"manuscript capture error (non-blocking, OCR flow continues): {e}", exc_info=True)
+        return False
 
 
 def _process_ocr_email(filepath, original_filename, customer, sender_email, phone, db):
@@ -1729,16 +1749,12 @@ def email_inbound():
 
         # --- ניתוב: OCR או תמלול ---
         if file_type == 'image':
-            _capture_manuscript_page(filepath, original_filename, customer, db)
-            _process_ocr_email(
-                filepath=filepath,
-                original_filename=original_filename,
-                customer=customer,
-                sender_email=sender_email,
-                phone=phone,
-                db=db,
-            )
-            return jsonify({'status': 'accepted', 'type': 'ocr'}), 200
+            image_mode = parsed.get('image_mode')
+            if image_mode is None:
+                # לא נכתב "רגיל"/"מקצועי" - שומרים את הקובץ ושולחים ללקוח מייל
+                # עם שני כפתורים; שום עיבוד/חיוב עד שיבחר.
+                return _hold_image_for_choice(filepath, original_filename, customer, sender_email)
+            return _route_image(image_mode, filepath, original_filename, customer, sender_email, phone, db)
 
         call_id = f"email-{uuid.uuid4().hex}"
 
@@ -2071,10 +2087,13 @@ def _send_handwriting_instructions_email(to_email, phone, name=''):
         return
 
     from routes.admin import get_setting
+    from routes.dictate import _manuscript_pricing
     price_ocr = get_setting('price_per_1000_chars_ocr', '0.10')
+    pro_unit_size, pro_unit_price = _manuscript_pricing()
 
     subject_display = phone
-    link = _mailto_link(phone, '')
+    link_regular = _mailto_link(phone, 'רגיל')
+    link_pro = _mailto_link(phone, 'מקצועי')
 
     html = f'''<div dir="rtl" style="font-family:Arial,sans-serif;max-width:640px;margin:auto;color:#111827">
 <h2 style="color:#1d4ed8">זיהוי כתב יד במייל <span style="font-size:14px;color:#d97706;font-weight:normal">— גרסה נסיונית</span></h2>
@@ -2099,6 +2118,10 @@ def _send_handwriting_instructions_email(to_email, phone, name=''):
 <span dir="ltr" style="font-family:monospace;background:#f3f4f6;padding:4px 10px;border-radius:4px;display:inline-block;margin-top:6px">{phone}</span>
 </p>
 <p style="line-height:1.8">
+אחרי מספר הטלפון (עם רווח או בלי) כותבים את המסלול: <b>רגיל</b> (זיהוי אוטומטי) או <b>מקצועי</b> (קלדנות דיגיטלית).
+אם לא כתבתם — נשלח אליכם מייל עם שני כפתורים לבחירה.
+</p>
+<p style="line-height:1.8">
 התוצאה תישלח בחזרה <b>לאותה כתובת מייל</b> שממנה נשלח הקובץ.
 שימוש זה מתאפשר רק מכתובת המייל הרשומה במערכת
 (<span dir="ltr" style="font-family:monospace">{to_email}</span>), ובתנאי שיש יתרה בארנק.
@@ -2109,7 +2132,8 @@ def _send_handwriting_instructions_email(to_email, phone, name=''):
 לחיצה על הכפתור תפתח טיוטת מייל עם הכתובת ושורת הנושא ממולאות — צריך רק <b>לצרף את הקובץ</b> ולשלוח:
 </p>
 <p style="text-align:center;margin:20px 0">
-<a href="{link}" style="background:#2563eb;color:#fff;text-decoration:none;padding:12px 28px;border-radius:8px;font-weight:700;font-size:16px;display:inline-block">📄 פתח מייל מוכן לזיהוי כתב יד</a>
+<a href="{link_regular}" style="background:#2563eb;color:#fff;text-decoration:none;padding:12px 28px;border-radius:8px;font-weight:700;font-size:16px;display:inline-block;margin:4px">⚡ מייל מוכן — רגיל</a>
+<a href="{link_pro}" style="background:#059669;color:#fff;text-decoration:none;padding:12px 28px;border-radius:8px;font-weight:700;font-size:16px;display:inline-block;margin:4px">✍️ מייל מוכן — מקצועי</a>
 </p>
 
 <div style="background:#f0fdf4;border-right:4px solid #10b981;padding:14px;margin:16px 0;border-radius:8px">
@@ -2124,7 +2148,8 @@ def _send_handwriting_instructions_email(to_email, phone, name=''):
 <div style="background:#fffbeb;border-right:4px solid #f59e0b;padding:14px;margin:16px 0;border-radius:8px">
 <p style="margin:0 0 8px;font-weight:700;color:#92400e">💰 מחירון:</p>
 <p style="margin:0;line-height:2;color:#111827">
-✍️ <b>זיהוי כתב יד:</b> ₪{price_ocr} לכל 1,000 תווים (או חלק מהם)
+⚡ <b>רגיל (זיהוי אוטומטי):</b> ₪{price_ocr} לכל 1,000 תווים — תשובה בדקות ספורות<br>
+✍️ <b>מקצועי (קלדנות דיגיטלית):</b> ₪{pro_unit_price:.2f} לכל {pro_unit_size:,} תווים — בדרך כלל עד 24 שעות, לאחר אישור נציג אנושי (ייתכנו עיכובים בזמני עומס)
 </p>
 </div>
 
@@ -2146,3 +2171,238 @@ def _send_handwriting_instructions_email(to_email, phone, name=''):
         log.info(f"Handwriting instructions email sent to {to_email}")
     except Exception as e:
         log.error(f"Failed to send handwriting instructions email to {to_email}: {e}")
+
+
+
+# ==========================================================================
+# בחירת מסלול לתמונה/PDF: רגיל (OCR) או מקצועי (קלדנות דיגיטלית)
+# ==========================================================================
+
+CHOICE_LINK_VALID_HOURS = 72
+
+
+def _route_image(mode, filepath, original_filename, customer, sender_email, phone, db):
+    """שולח תמונה/PDF למסלול שנבחר - בדיוק אחד מהשניים, לא שניהם:
+    regular = OCR אוטומטי בלבד; pro = תור הקלדנות הדיגיטלית (routes/dictate.py)
+    בלבד. מחזיר (jsonify-response, status) כמו ה-webhook."""
+    if mode == 'pro':
+        if not _capture_manuscript_page(filepath, original_filename, customer, db):
+            return jsonify({'status': 'error', 'reason': 'manuscript_capture_failed'}), 500
+        return jsonify({'status': 'accepted', 'type': 'dictation'}), 200
+    _process_ocr_email(
+        filepath=filepath,
+        original_filename=original_filename,
+        customer=customer,
+        sender_email=sender_email,
+        phone=phone,
+        db=db,
+    )
+    return jsonify({'status': 'accepted', 'type': 'ocr'}), 200
+
+
+def _hold_image_for_choice(filepath, original_filename, customer, sender_email):
+    import secrets
+    from datetime import datetime, timedelta
+    from app import db
+    from models import PendingFileChoice
+    try:
+        with open(filepath, 'rb') as f:
+            data = f.read()
+        row = PendingFileChoice(
+            token=secrets.token_urlsafe(24),
+            customer_id=customer.id,
+            sender_email=sender_email,
+            original_filename=(original_filename or '')[:255],
+            file_data=data,
+            expires_at=datetime.utcnow() + timedelta(hours=CHOICE_LINK_VALID_HOURS),
+        )
+        db.session.add(row)
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        log.error(f"email-inbound: שמירת קובץ ממתין לבחירה נכשלה: {e}", exc_info=True)
+        return jsonify({'status': 'error', 'reason': 'hold_failed'}), 500
+    finally:
+        try:
+            os.remove(filepath)
+        except OSError:
+            pass
+    _send_choice_email(sender_email, row)
+    log.info(f"email-inbound: קובץ {original_filename!r} של לקוח {customer.id} ממתין לבחירה רגיל/מקצועי (token_id={row.id})")
+    return jsonify({'status': 'awaiting_choice'}), 200
+
+
+def _choice_prices():
+    """מחירים וזמני תגובה להצגה ללקוח - נגזרים מהגדרות המנהל (אותם ערכים
+    שלפיהם מחייבים בפועל)."""
+    from routes.admin import get_setting
+    from routes.dictate import _manuscript_pricing
+    try:
+        ocr_price = float(get_setting('price_per_1000_chars_ocr', '0.10'))
+    except (TypeError, ValueError):
+        ocr_price = 0.10
+    unit_size, unit_price = _manuscript_pricing()
+    return ocr_price, unit_size, unit_price
+
+
+def _choice_link(row, mode):
+    base_url = os.environ.get('APP_BASE_URL', '').rstrip('/')
+    return f"{base_url}/api/email-choice/{row.token}?mode={mode}"
+
+
+def _send_choice_email(to_email, row):
+    if not to_email or _is_system_inbound_address(to_email):
+        log.warning(f"email-inbound: לא נשלח מייל בחירה (to={to_email!r})")
+        return
+    from html import escape
+    ocr_price, unit_size, unit_price = _choice_prices()
+    fname = escape(row.original_filename or 'הקובץ')
+    html = f'''<div dir="rtl" style="font-family:Arial,sans-serif;max-width:620px;margin:auto;color:#111827">
+<h2 style="color:#1d4ed8;margin-bottom:6px">קיבלנו את הקובץ שלכם 📄</h2>
+<p style="line-height:1.8;margin-top:0"><b>{fname}</b><br>
+כדי לעבד אותו, בחרו את המסלול המתאים. <b>לא יתבצע שום עיבוד או חיוב עד שתבחרו.</b></p>
+
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:separate;border-spacing:0 12px">
+<tr><td style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:12px;padding:16px">
+<div style="font-size:18px;font-weight:700;color:#1d4ed8">⚡ רגיל — זיהוי אוטומטי</div>
+<div style="line-height:1.9;margin:8px 0 12px;font-size:14px">
+זיהוי אוטומטי של כתב היד, מהיר וזול. ייתכנו שגיאות בכתב לא ברור.<br>
+💰 מחיר: <b>₪{ocr_price:.2f}</b> לכל 1,000 תווים<br>
+⏱ זמן תגובה: בדרך כלל תוך דקות ספורות, ישירות למייל
+</div>
+<a href="{_choice_link(row, 'regular')}" style="background:#2563eb;color:#fff;text-decoration:none;padding:11px 26px;border-radius:8px;font-weight:700;display:inline-block">בחירה ברגיל</a>
+</td></tr>
+<tr><td style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:12px;padding:16px">
+<div style="font-size:18px;font-weight:700;color:#047857">✍️ מקצועי — קלדנות דיגיטלית</div>
+<div style="line-height:1.9;margin:8px 0 12px;font-size:14px">
+תוכן מוקלד ומדויק, שעובר אישור של נציג אנושי לפני שהוא נשלח אליכם כקובץ Word.<br>
+💰 מחיר: <b>₪{unit_price:.2f}</b> לכל {unit_size:,} תווים<br>
+⏱ זמן תגובה: בדרך כלל עד 24 שעות (ייתכנו עיכובים בזמני עומס)
+</div>
+<a href="{_choice_link(row, 'pro')}" style="background:#059669;color:#fff;text-decoration:none;padding:11px 26px;border-radius:8px;font-weight:700;display:inline-block">בחירה במקצועי</a>
+</td></tr>
+</table>
+
+<p style="color:#6b7280;font-size:13px;line-height:1.8">
+הקישורים תקפים ל-{CHOICE_LINK_VALID_HOURS} שעות. בפעם הבאה אפשר לדלג על הבחירה: פשוט כתבו
+<b>רגיל</b> או <b>מקצועי</b> אחרי מספר הטלפון בנושא המייל (למשל: <span dir="ltr">0501234567 מקצועי</span>).
+</p>
+<p style="color:#6b7280;font-size:13px">מערכת תמלול פון 03-3131795</p>
+</div>'''
+    try:
+        import sendgrid
+        from sendgrid.helpers.mail import Mail, Email
+        sg = sendgrid.SendGridAPIClient(api_key=os.environ.get('SENDGRID_API_KEY'))
+        message = Mail(
+            from_email=Email(os.environ.get('SENDGRID_FROM_EMAIL', os.environ.get('GMAIL_USER', '')), 'תמלול פון'),
+            to_emails=to_email,
+            subject='תמלול פון - איך לעבד את הקובץ שלכם? (רגיל או מקצועי)',
+            html_content=html,
+        )
+        sg.send(message)
+        log.info(f"Choice email sent to {to_email} (choice_id={row.id})")
+    except Exception as e:
+        log.error(f"Failed to send choice email to {to_email}: {e}")
+
+
+_CHOICE_PAGE = '''<!DOCTYPE html><html lang="he" dir="rtl"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>תמלול פון</title>
+<style>
+body{font-family:Arial,sans-serif;background:#f3f5fa;margin:0;padding:24px;color:#111827}
+.box{max-width:560px;margin:auto;background:#fff;border-radius:16px;padding:26px;box-shadow:0 8px 24px -12px rgba(20,25,40,.2)}
+h2{margin:0 0 6px;color:#1d4ed8}.opt{border:2px solid #e5e7eb;border-radius:12px;padding:14px;margin:12px 0}
+.opt.sel{border-color:#2563eb;background:#eff6ff}.opt.sel.pro{border-color:#059669;background:#f0fdf4}
+.opt p{margin:6px 0 10px;line-height:1.8;font-size:14px}
+button{border:0;border-radius:8px;padding:11px 24px;font-size:15px;font-weight:700;color:#fff;cursor:pointer;background:#6b7280}
+.sel button{background:#2563eb}.sel.pro button{background:#059669}.msg{font-size:16px;line-height:1.9}
+.ok{color:#047857}.err{color:#b91c1c}
+</style></head><body><div class="box">
+{% if message %}<h2>{{ title }}</h2><p class="msg {{ cls }}">{{ message }}</p>
+{% else %}
+<h2>איך לעבד את הקובץ?</h2>
+<p><b>{{ fname }}</b><br>אישור הבחירה ישלח את הקובץ לעיבוד ויחויב מהיתרה שלכם.</p>
+<form method="post" class="opt {{ 'sel' if mode=='regular' }}"><input type="hidden" name="mode" value="regular">
+<b>⚡ רגיל — זיהוי אוטומטי</b>
+<p>₪{{ '%.2f'|format(ocr_price) }} לכל 1,000 תווים · בדרך כלל תוך דקות ספורות</p>
+<button type="submit">{{ 'אישור ושליחה' if mode=='regular' else 'בחירה ברגיל' }}</button></form>
+<form method="post" class="opt pro {{ 'sel' if mode=='pro' }}"><input type="hidden" name="mode" value="pro">
+<b>✍️ מקצועי — קלדנות דיגיטלית</b>
+<p>₪{{ '%.2f'|format(unit_price) }} לכל {{ '{:,}'.format(unit_size) }} תווים · בדרך כלל עד 24 שעות (ייתכנו עיכובים בזמני עומס), לאחר אישור נציג אנושי</p>
+<button type="submit">{{ 'אישור ושליחה' if mode=='pro' else 'בחירה במקצועי' }}</button></form>
+{% endif %}</div></body></html>'''
+
+
+def _choice_message(title, message, ok=True, status=200):
+    from flask import render_template_string
+    return render_template_string(_CHOICE_PAGE, title=title, message=message, cls='ok' if ok else 'err'), status
+
+
+@email_bp.route('/email-choice/<token>', methods=['GET', 'POST'])
+def email_choice(token):
+    """דף הבחירה שאליו מובילים הכפתורים במייל. GET רק מציג (בכוונה בלי לבצע
+    דבר - סורקי קישורים של תוכנות מייל/סינון פותחים קישורים אוטומטית, ואסור
+    שזה יפעיל עיבוד וחיוב); POST הוא האישור בפועל."""
+    from datetime import datetime
+    from flask import render_template_string
+    from app import db
+    from models import PendingFileChoice
+
+    row = PendingFileChoice.query.filter_by(token=token).first()
+    if not row:
+        return _choice_message('הקישור לא תקין', 'הקישור אינו תקין או שכבר אינו קיים.', ok=False, status=404)
+    if row.status == 'processed':
+        label = 'מקצועי (קלדנות דיגיטלית)' if row.chosen_mode == 'pro' else 'רגיל (זיהוי אוטומטי)'
+        return _choice_message('כבר טופל', f'הקובץ כבר נשלח לעיבוד במסלול {label}.')
+    if row.status == 'expired' or (row.expires_at and row.expires_at < datetime.utcnow()):
+        if row.status != 'expired':
+            row.status, row.file_data = 'expired', None
+            db.session.commit()
+        return _choice_message('הקישור פג תוקף', f'הקישור היה תקף ל-{CHOICE_LINK_VALID_HOURS} שעות. אפשר לשלוח את הקובץ שוב במייל.', ok=False, status=410)
+
+    if request.method == 'GET':
+        mode = request.args.get('mode')
+        ocr_price, unit_size, unit_price = _choice_prices()
+        return render_template_string(
+            _CHOICE_PAGE, message=None, fname=row.original_filename or 'הקובץ',
+            mode=mode if mode in ('regular', 'pro') else None,
+            ocr_price=ocr_price, unit_size=unit_size, unit_price=unit_price)
+
+    mode = request.form.get('mode')
+    if mode not in ('regular', 'pro'):
+        return _choice_message('בחירה לא תקינה', 'נא לבחור אחד מהמסלולים.', ok=False, status=400)
+
+    customer = row.customer
+    if getattr(customer, 'is_blocked', False):
+        return _choice_message('לא ניתן לעבד', 'החשבון חסום. נא לפנות לשירות הלקוחות.', ok=False, status=403)
+    if mode == 'regular' and (customer.balance or 0) <= 0:
+        return _choice_message('היתרה אינה מספיקה', 'אין יתרה בחשבון לזיהוי אוטומטי. נא לטעון יתרה ולנסות שוב.', ok=False, status=402)
+
+    # "תפיסה" אטומית של השורה - לחיצה כפולה/שני מכשירים לא יעבדו פעמיים
+    claimed = PendingFileChoice.query.filter_by(id=row.id, status='pending').update(
+        {'status': 'processed', 'chosen_mode': mode, 'chosen_at': datetime.utcnow()})
+    db.session.commit()
+    if not claimed:
+        return _choice_message('כבר טופל', 'הקובץ כבר נשלח לעיבוד.')
+
+    data = row.file_data
+    ext = os.path.splitext(row.original_filename or '')[1] or '.jpg'
+    filepath = os.path.join(RECORDINGS_EMAIL_DIR, f"{uuid.uuid4().hex}{ext}")
+    try:
+        with open(filepath, 'wb') as f:
+            f.write(data or b'')
+        resp, code = _route_image(mode, filepath, row.original_filename, customer,
+                                  row.sender_email or customer.email, customer.phone, db)
+        if code != 200:
+            raise RuntimeError(f'route failed: {code}')
+    except Exception as e:
+        db.session.rollback()
+        PendingFileChoice.query.filter_by(id=row.id).update({'status': 'pending', 'chosen_mode': None, 'chosen_at': None})
+        db.session.commit()
+        log.error(f"email-choice: עיבוד נכשל (id={row.id}, mode={mode}): {e}", exc_info=True)
+        return _choice_message('אירעה שגיאה', 'לא הצלחנו לשלוח את הקובץ לעיבוד. נסו שוב בעוד רגע.', ok=False, status=500)
+
+    PendingFileChoice.query.filter_by(id=row.id).update({'file_data': None})
+    db.session.commit()
+    if mode == 'pro':
+        return _choice_message('התקבל ✔', 'הקובץ התקבל לקלדנות דיגיטלית. התוצאה תישלח אליכם לאחר אישור נציג אנושי, בדרך כלל תוך 24 שעות (ייתכנו עיכובים בזמני עומס).')
+    return _choice_message('התקבל ✔', 'הקובץ נשלח לזיהוי אוטומטי. התוצאה תגיע למייל בדקות הקרובות.')

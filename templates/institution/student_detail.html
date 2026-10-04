@@ -1,5 +1,25 @@
 {% extends "institution/base.html" %}
 {% block title %}{{ 'קלדנות דיגיטלית' if student.is_institution_self else student.name }}{% endblock %}
+{% block head %}
+<style>
+.price-strip { display:flex; gap:10px; flex-wrap:wrap; margin:0 0 14px; }
+.price-item {
+  flex:1 1 260px; display:flex; align-items:center; gap:10px; padding:10px 14px;
+  background:var(--accent-soft); border:1px solid rgba(16,185,129,.18); border-radius:10px;
+  font-size:13px; color:var(--text);
+}
+.price-item strong { color:var(--accent2); font-weight:800; }
+.price-ico { font-size:18px; }
+.dropzone-compact { padding:14px 16px; text-align:right; }
+.dropzone-compact .dz-row { display:flex; align-items:center; gap:12px; }
+.dropzone-compact .dz-icon-sm {
+  width:38px; height:38px; flex:0 0 38px; border-radius:10px; background:var(--surface);
+  border:1px solid var(--border); display:flex; align-items:center; justify-content:center; font-size:18px;
+}
+.dropzone-compact .dz-filename { margin-top:8px; }
+.dropzone-compact .dz-filename:empty { display:none; }
+</style>
+{% endblock %}
 {% block content %}
 {% if student.is_institution_self %}
 <a href="{{ url_for('institution.dashboard') }}" style="color:var(--text2); font-size:13px; text-decoration:none;">← חזרה לדף הבית</a>
@@ -73,14 +93,18 @@
   <h3 style="font-size:15px; margin-bottom:6px;">✍️ {{ 'מסמך חדש לקלדנות דיגיטלית' if student.is_institution_self else 'כתב יד חדש לקלדנות דיגיטלית' }}</h3>
   <p style="font-size:12px; color:var(--text2); margin:0 0 12px;">
     {% if student.is_institution_self %}
-    העלאת תמונה/PDF של מסמך שלא שייך לתלמיד ספציפי - הצוות שלנו יקליד אותו במדויק לקובץ Word. עלות הקלדנות הדיגיטלית תחויב מיתרת המוסד.
+    העלאת תמונה/PDF של מסמך שלא שייך לתלמיד ספציפי - התוכן המוקלד יימסר לכם כקובץ Word מוכן להדפסה ולהורדה. העלות תחויב מיתרת המוסד.
     {% else %}
-    העלאת תמונה/PDF של דף כתב יד - הצוות שלנו יקליד אותו במדויק לקובץ Word. אותו תמחור בדיוק כמו כל לקוח.
+    העלאת תמונה/PDF של דף כתב יד - התוכן המוקלד יימסר כקובץ Word מוכן להדפסה ולהורדה. אותו תמחור בדיוק כמו כל לקוח.
     {% endif %}
   </p>
   <p style="font-size:12px; color:var(--text3); margin:0 0 12px; display:flex; align-items:center; gap:6px;">
     ⏳ כל קובץ עובר גם אישור של נציג אנושי לפני שהוא מוכן - בדרך כלל אפשר לצפות ולהוריד תוך 24 שעות, אך ייתכנו עיכובים בזמני עומס.
   </p>
+  <div class="price-strip">
+    <div class="price-item"><span class="price-ico">⌨️</span><span>קלדנות דיגיטלית: <strong>₪{{ "%.2f"|format(char_unit_price) }}</strong> לכל <strong>{{ "{:,}".format(char_unit_size) }}</strong> תווים</span></div>
+    <div class="price-item"><span class="price-ico">✏️</span><span>הגהה: <strong>₪{{ "%.2f"|format(proofing_price_per_minute) }}</strong> לכל דקת עבודה</span></div>
+  </div>
   <form id="manuscriptUploadForm">
     <div class="dropzone" id="manuscriptDz">
       <div class="dz-icon">✍️</div>
@@ -138,10 +162,20 @@
       <div style="color:var(--text2); font-size:12.5px;">אין עדיין הגהות על כתב היד הזה.</div>
       {% endfor %}
 
-      <form class="proofUploadForm" data-page-id="{{ page.id }}" style="margin-top:10px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-        <input type="file" name="correction_file" accept=".docx,.pdf,image/*" required style="font-size:12px;">
-        <button type="submit" class="btn btn-sm">📤 העלאת תיקוני הגהה</button>
-        <span class="proofUploadMsg" style="font-size:12px;"></span>
+      <form class="proofUploadForm" data-page-id="{{ page.id }}" style="margin-top:14px;">
+        <div class="dropzone dropzone-compact proofDz">
+          <div class="dz-row">
+            <span class="dz-icon-sm">📝</span>
+            <div class="dz-texts">
+              <div class="dz-title">העלאת הקובץ המוגה לסבב הגהה נוסף</div>
+              <div class="dz-sub">גררו לכאן או לחצו לבחירה · Word, PDF או תמונה · הגהה: ₪{{ "%.2f"|format(proofing_price_per_minute) }} לדקת עבודה</div>
+            </div>
+          </div>
+          <div class="dz-filename proofDzFilename"></div>
+          <input type="file" name="correction_file" accept=".docx,.pdf,image/*" required>
+        </div>
+        <button type="submit" class="btn btn-block" style="margin-top:10px;">📤 שליחה להגהה</button>
+        <div class="proofUploadMsg" style="font-size:12.5px; margin-top:8px;"></div>
       </form>
     </div>
     {% endif %}
@@ -294,6 +328,24 @@ document.getElementById('manuscriptUploadForm').addEventListener('submit', async
 });
 
 // --- העלאת תיקוני הגהה על כתב יד קיים (טופס נפרד לכל כתב יד שהושלם) ---
+document.querySelectorAll('.proofDz').forEach(function (dz) {
+  var input = dz.querySelector('input[type=file]');
+  var nameEl = dz.querySelector('.proofDzFilename');
+  function showName() { nameEl.textContent = input.files.length ? '📄 ' + input.files[0].name : ''; }
+  input.addEventListener('change', showName);
+  ['dragover', 'dragenter'].forEach(function (ev) {
+    dz.addEventListener(ev, function (e) { e.preventDefault(); dz.classList.add('dragover'); });
+  });
+  ['dragleave', 'dragend'].forEach(function (ev) {
+    dz.addEventListener(ev, function () { dz.classList.remove('dragover'); });
+  });
+  dz.addEventListener('drop', function (e) {
+    e.preventDefault();
+    dz.classList.remove('dragover');
+    if (e.dataTransfer.files.length) { input.files = e.dataTransfer.files; showName(); }
+  });
+});
+
 document.querySelectorAll('.proofUploadForm').forEach(function (form) {
   form.addEventListener('submit', async function (e) {
     e.preventDefault();
@@ -328,7 +380,7 @@ document.querySelectorAll('.proofUploadForm').forEach(function (form) {
       return;
     }
     msgEl.style.color = 'var(--accent)';
-    msgEl.textContent = 'הועלה בהצלחה - נכנס לתור ההגהה';
+    msgEl.textContent = 'הועלה בהצלחה - ממתין להגהה ואישור נציג (עד 24 שעות בד"כ)';
     window.location.reload();
   });
 });

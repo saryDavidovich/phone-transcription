@@ -391,6 +391,29 @@ class ActiveJob(db.Model):
     started_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
 
 
+class PendingFileChoice(db.Model):
+    """קובץ תמונה/PDF שהגיע במייל בלי שהלקוח כתב בנושא "רגיל" (זיהוי OCR
+    אוטומטי) או "מקצועי" (קלדנות דיגיטלית). הקובץ נשמר כאן (בייטים ב-DB -
+    הדיסק המקומי מתאפס בכל דיפלוי) והלקוח מקבל מייל עם שני כפתורים; רק
+    אחרי שבחר (token סודי בקישור) הקובץ באמת נשלח לעיבוד ומחויב. ראה
+    routes/email_inbound.py (_hold_image_for_choice / email_choice)."""
+    __tablename__ = 'pending_file_choices'
+
+    id = db.Column(db.Integer, primary_key=True)
+    token = db.Column(db.String(64), unique=True, nullable=False, index=True)
+    customer_id = db.Column(db.Integer, db.ForeignKey('customers.id'), nullable=False, index=True)
+    sender_email = db.Column(db.String(255))
+    original_filename = db.Column(db.String(255))
+    file_data = db.Column(db.LargeBinary, nullable=True)  # מתרוקן אחרי שהטיפול התחיל
+    status = db.Column(db.String(20), default='pending', index=True)  # pending / processed / expired
+    chosen_mode = db.Column(db.String(10), nullable=True)  # regular / pro
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    expires_at = db.Column(db.DateTime, nullable=True)
+    chosen_at = db.Column(db.DateTime, nullable=True)
+
+    customer = db.relationship('Customer')
+
+
 class ProcessedWebhook(db.Model):
     """מונע עיבוד כפול כאשר SendGrid שולח את אותו webhook יותר מפעם אחת (retry)"""
     __tablename__ = 'processed_webhooks'

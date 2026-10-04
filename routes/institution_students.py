@@ -289,8 +289,15 @@ def student_detail(student_id):
         )
         .order_by(ManuscriptPage.created_at.desc()).all()
     )
+    # מחירון להצגה ללקוח - נגזר ישירות מהגדרות המנהל (אותם ערכים בדיוק שלפיהם
+    # מחויבים בפועל ב-routes/dictate.py send()/proof_complete), כך שלעולם לא
+    # יופיע מחיר שונה ממה שבאמת יחויב.
+    from routes.dictate import _manuscript_pricing, _manuscript_proofing_price
+    char_unit_size, char_unit_price = _manuscript_pricing()
     return render_template('institution/student_detail.html', student=student, recordings=recordings,
-                            transactions=transactions, manuscript_pages=manuscript_pages)
+                            transactions=transactions, manuscript_pages=manuscript_pages,
+                            char_unit_size=char_unit_size, char_unit_price=char_unit_price,
+                            proofing_price_per_minute=_manuscript_proofing_price())
 
 
 @institution_students_bp.route('/institution/students/<int:student_id>/recording/<int:recording_id>/download')

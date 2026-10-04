@@ -4,13 +4,15 @@
 {% block content %}
 
 <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
-  <a href="/admin/dictate?status=open" class="btn {% if status_filter=='open' %}btn-primary{% else %}btn-ghost{% endif %}" style="font-size:13px">🕓 בתור</a>
+  <a href="/admin/dictate?status=open" class="btn {% if status_filter=='open' %}btn-primary{% else %}btn-ghost{% endif %}" style="font-size:13px">
+    🕓 בתור{% if open_pending_count %} <span class="badge badge-red" style="margin-right:4px">{{ open_pending_count }}</span>{% endif %}
+  </a>
   <a href="/admin/dictate?status=done" class="btn {% if status_filter=='done' %}btn-primary{% else %}btn-ghost{% endif %}" style="font-size:13px">✅ הושלמו</a>
   <a href="/admin/dictate?status=proof" class="btn {% if status_filter=='proof' %}btn-primary{% else %}btn-ghost{% endif %}" style="font-size:13px">
     ✏️ ממתין להגהה{% if proof_pending_count %} <span class="badge badge-red" style="margin-right:4px">{{ proof_pending_count }}</span>{% endif %}
   </a>
   <a href="/admin/dictate?status=proof_done" class="btn {% if status_filter=='proof_done' %}btn-primary{% else %}btn-ghost{% endif %}" style="font-size:13px">
-    📗 הגהות שהושלמו{% if proof_done_count %} <span class="badge badge-gray" style="margin-right:4px">{{ proof_done_count }}</span>{% endif %}
+    📗 הגהות שהושלמו
   </a>
   <a href="/admin/dictate?status=fax" class="btn {% if status_filter=='fax' %}btn-primary{% else %}btn-ghost{% endif %}" style="font-size:13px">
     📠 פקסים ממתינים לשיוך{% if fax_pending_count %} <span class="badge badge-red" style="margin-right:4px">{{ fax_pending_count }}</span>{% endif %}
