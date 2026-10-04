@@ -21,10 +21,10 @@ routes/dictate.py
 מנוע התמלול - ניתן לבחירה לכל הקלטה בנפרד (ראו הדרופדאון בסטודיו), כדי
 שאפשר יהיה להריץ את שני המנועים זה מול זה על אותם דפים ולהחליט לפי תוצאות
 אמיתיות איזה מהם עדיף - ולא רק לפי תיאוריה:
-  * gemini (ברירת מחדל) - gemini-3.5-flash, אותו מודל ואותו קליינט בדיוק
+  * gemini - gemini-3.5-flash, אותו מודל ואותו קליינט בדיוק
     כמו _gemini_from_url ב-services/transcribe.py, שבו כבר משתמשים בפועל
     לכל התמלולים במסלול המקצועי.
-  * openai - gpt-transcribe (הדור החדש שהחליף את gpt-4o-transcribe, זול
+  * openai (ברירת מחדל) - gpt-transcribe (הדור החדש שהחליף את gpt-4o-transcribe, זול
     יותר ותומך ב-language hint), אותו קליינט openai שכבר בשימוש במקומות
     אחרים במערכת (routes/email_inbound.py, services/transcribe_service.py).
 ניתן לשנות את ברירת המחדל דרך משתנה הסביבה DEFAULT_DICTATION_ENGINE.
@@ -125,9 +125,9 @@ def _inject_dictate_pending():
     return {'dictate_pending': dictate_pending_counts}
 
 ENGINES = ('gemini', 'openai')
-DEFAULT_DICTATION_ENGINE = os.environ.get('DEFAULT_DICTATION_ENGINE', 'gemini')
+DEFAULT_DICTATION_ENGINE = os.environ.get('DEFAULT_DICTATION_ENGINE', 'openai')
 if DEFAULT_DICTATION_ENGINE not in ENGINES:
-    DEFAULT_DICTATION_ENGINE = 'gemini'
+    DEFAULT_DICTATION_ENGINE = 'openai'
 
 
 # --------------------------------------------------------------------------

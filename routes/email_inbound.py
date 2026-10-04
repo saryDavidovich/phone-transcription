@@ -2285,7 +2285,7 @@ def _send_choice_email(to_email, row):
 
 <p style="color:#6b7280;font-size:13px;line-height:1.8">
 הקישורים תקפים ל-{CHOICE_LINK_VALID_HOURS} שעות. בפעם הבאה אפשר לדלג על הבחירה: פשוט כתבו
-<b>רגיל</b> או <b>מקצועי</b> אחרי מספר הטלפון בנושא המייל (למשל: <span dir="ltr">0501234567 מקצועי</span>).
+<b>רגיל</b> או <b>מקצועי</b> אחרי מספר הטלפון בנושא המייל (למשל: <span dir="rtl" style="white-space:nowrap">0501234567 מקצועי</span> — קודם מספר הטלפון ואחריו המילה).
 </p>
 <p style="color:#6b7280;font-size:13px">מערכת תמלול פון 03-3131795</p>
 </div>'''

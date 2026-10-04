@@ -114,8 +114,8 @@
     <div class="ds-enginerow">
       מנוע תמלול:
       <select id="engineSelect">
-        <option value="gemini" {% if (page.engine or default_engine) == 'gemini' %}selected{% endif %}>ג׳מיני (Gemini)</option>
         <option value="openai" {% if (page.engine or default_engine) == 'openai' %}selected{% endif %}>OpenAI (gpt-transcribe)</option>
+        <option value="gemini" {% if (page.engine or default_engine) == 'gemini' %}selected{% endif %}>ג׳מיני (Gemini)</option>
       </select>
       <span style="color:var(--text3)">- אפשר להריץ את אותו דף עם שני המנועים ולהשוות</span>
     </div>
