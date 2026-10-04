@@ -91,6 +91,7 @@
       <span>📄 {{ page.original_filename }}</span>
       <button type="button" class="btn btn-ghost" id="imgExpandBtn" style="font-size:12px;padding:5px 10px" onclick="toggleImgExpand()">⤢ הגדלת תצוגה</button>
     </div>
+    {% set pv_frame = 'pvFrame' %}{% set pv_hash = '' %}{% include 'admin/_preview_nav.html' %}
     <div class="ds-imgbox" id="imgBox">
       {% if not manuscript_data_uri %}
         <div class="ds-state ds-error" style="padding:24px">⚠ הקובץ אינו זמין</div>
@@ -98,7 +99,7 @@
         {# מוטמע ישירות כ-data URI בתוך ה-HTML עצמו (לא src לכתובת נפרדת) - #}
         {# ומומר תמיד ל-PDF (גם אם המקור הוא תמונה) - נטפרי חסם גם תמונות #}
         {# שהוטמעו כ-data URI, אבל לא חוסם PDF באותה צורה. #}
-        <iframe src="{{ manuscript_data_uri }}" style="width:100%;height:100%;border:0;display:block" title="כתב יד"></iframe>
+        <iframe id="pvFrame" src="{{ manuscript_data_uri }}" style="width:100%;height:100%;border:0;display:block" title="כתב יד"></iframe>
       {% else %}
         {# fallback - רק אם המרה ל-PDF נכשלה מסיבה כלשהי #}
         <img src="{{ manuscript_data_uri }}" alt="כתב יד">

@@ -128,11 +128,12 @@
     </div>
     <p class="ps-hint">תצוגה מקדימה בלבד (טקסט בלבד, בלי עקיבת שינויים/הערות של וורד) - להצגה מלאה יש להוריד את הקובץ עצמו.</p>
     {% else %}
+    {% set pv_frame = 'pvFrame' %}{% set pv_hash = '#zoom=50' %}{% include 'admin/_preview_nav.html' %}
     <div class="ps-imgbox" id="returnedBox">
       {% if not returned_data_uri %}
         <div class="ds-state ds-error" style="padding:24px;color:var(--red)">⚠ הקובץ אינו זמין</div>
       {% elif returned_is_pdf %}
-        <iframe src="{{ returned_data_uri }}#zoom=50" title="תיקוני הלקוח"></iframe>
+        <iframe id="pvFrame" src="{{ returned_data_uri }}#zoom=50" title="תיקוני הלקוח"></iframe>
       {% else %}
         <img src="{{ returned_data_uri }}" alt="תיקוני הלקוח">
       {% endif %}

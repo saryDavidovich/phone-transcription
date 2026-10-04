@@ -960,36 +960,141 @@ class _PreviewTooLargeError(Exception):
     pass
 
 
-def _image_to_pdf_bytes(raw):
-    """ממיר בייטי תמונה (jpg/png/וכו') לקובץ PDF חד-עמודי (Pillow). PDF פשוט
-    לא נשמר עם ערוץ שקיפות (alpha) - אם קיים, ממזגים על רקע לבן קודם."""
+# התצוגה המקדימה מוטמעת ב-<iframe src="data:application/pdf;base64,...">.
+# כרום חוסם כתובת data: ארוכה מ-2MB (kMaxURLChars = 2*1024*1024 תווים) -
+# ה-iframe נשאר ריק/מציג "הטעינה של מסמך ה-PDF נכשלה", בלי שום שגיאה בצד
+# השרת. נבדק בפועל: data URI של 1.82MB נטען, של 2.08MB נחסם. תמונות מהטלפון
+# (4000x3000 ומעלה, 3-10MB) נתנו PDF כבד בהרבה מזה ולכן "לפעמים עובד
+# ולפעמים לא". לכן מייצרים תמיד PDF "קל" לתצוגה: base64 מנפח ב-33%, אז
+# 1.2MB של PDF => ~1.6MB של data URI, עם מרווח ביטחון מתחת לתקרה.
+# הקובץ המקורי המלא נשאר זמין להורדה כרגיל.
+PREVIEW_MAX_PDF_BYTES = 1_200_000
+
+# רמות איכות יורדות (צלע ארוכה בפיקסלים, איכות JPEG) - מנסים מהטובה לגרועה
+# עד שה-PDF נכנס בתקציב. 2400px על דף A4 הם כ-200dpi - מספיק לקרוא כתב-יד.
+_PREVIEW_LEVELS = [(2400, 80), (2000, 75), (1700, 70), (1500, 65),
+                   (1300, 60), (1100, 55), (900, 50)]
+MAX_PREVIEW_IMAGE_SOURCE_BYTES = 25 * 1024 * 1024    # תמונה בודדת (טלפון ברזולוציה גבוהה)
+MAX_PREVIEW_PDF_SOURCE_BYTES = 100 * 1024 * 1024     # PDF סרוק רב-עמודים
+PREVIEW_MAX_PAGES = 20          # מקסימום עמודים בתצוגה מקדימה (תמונה רב-עמודית/PDF כבד)
+
+
+def _pages_per_part(src_bytes, total_pages):
+    """כמה עמודים בכל "חלק" של התצוגה. עד 20, אבל לקובץ "כבד" (סריקות/
+    צילומים - הרבה בייטים לעמוד) מקטינים ל-10 או 5: התקציב לחלק קבוע
+    (PREVIEW_MAX_PDF_BYTES), ו-20 עמודים סרוקים בתקציב הזה היו יורדים
+    לרזולוציה נמוכה מדי לקריאת כתב-יד. נקבע לפי הקובץ כולו, ולכן קבוע בין
+    בקשות (אותם גבולות חלקים בכל מעבר בין חלקים)."""
+    avg = src_bytes / float(max(1, total_pages))
+    if avg <= 60_000:
+        return PREVIEW_MAX_PAGES
+    if avg <= 300_000:
+        return PREVIEW_MAX_PAGES // 2
+    return max(1, PREVIEW_MAX_PAGES // 4)
+
+
+PREVIEW_MAX_JPEG_PIXELS = 120_000_000   # JPEG נפתח בדגימה מופחתת (draft) - זול גם ב-48MP+
+PREVIEW_MAX_OTHER_PIXELS = 25_000_000   # PNG/TIFF/וכו' מפוענחים במלואם - תקרה זהירה
+
+
+def _frames_to_light_pdf(frames):
+    """מקבל רשימת תמונות PIL (RGB/L) ומחזיר PDF קל (bytes) שנכנס בתקציב
+    PREVIEW_MAX_PDF_BYTES - כל עמוד כ-JPEG דחוס. מוריד איכות/רזולוציה בהדרגה
+    עד שנכנס. מחזיר None אם גם ברמה הנמוכה ביותר זה לא נכנס."""
+    import fitz
     from PIL import Image
+    out = None
+    for maxside, quality in _PREVIEW_LEVELS:
+        doc = fitz.open()
+        try:
+            for im in frames:
+                w, h = im.size
+                scale = min(1.0, maxside / float(max(w, h)))
+                if scale < 1.0:
+                    im = im.resize((max(1, round(w * scale)), max(1, round(h * scale))), Image.LANCZOS)
+                buf = io.BytesIO()
+                im.save(buf, format='JPEG', quality=quality, optimize=True)
+                page = doc.new_page(width=im.width, height=im.height)
+                page.insert_image(page.rect, stream=buf.getvalue())
+            out = doc.tobytes(garbage=3, deflate=True)
+        finally:
+            doc.close()
+        if len(out) <= PREVIEW_MAX_PDF_BYTES:
+            return out
+    return None
+
+
+def _image_to_pdf_bytes(raw, part=1):
+    """ממיר בייטי תמונה (jpg/png/tiff/heic וכו') ל-PDF "קל" לתצוגה מקדימה
+    (ראה PREVIEW_MAX_PDF_BYTES). מיישם סיבוב לפי EXIF (תמונות מהטלפון נשמרות
+    "שוכבות" עם דגל סיבוב), ממזג שקיפות על רקע לבן, ותומך בתמונה רב-עמודית
+    (TIFF של פקס) - מציג רק את "חלק" מספר part (PREVIEW_MAX_PAGES עמודים
+    בכל חלק). מחזיר (pdf_bytes, total_pages, part_used, per_part), או None אם אי אפשר
+    להקטין מספיק."""
+    from PIL import Image, ImageOps, ImageSequence
+    try:  # HEIC/HEIF מאייפון - אופציונלי, רק אם החבילה מותקנת
+        import pillow_heif
+        pillow_heif.register_heif_opener()
+    except Exception:
+        pass
+
     img = Image.open(io.BytesIO(raw))
 
     # הגנה מפני "פצצת דחיסה": קובץ מקור קטן (למשל TIFF של פקס, דחוס מאוד
-    # ב-CCITT) יכול להתפרש לרזולוציה ענקית בזיכרון - המרה/שמירה כזו עלולה
-    # לצרוך RAM רב מדי ולהפיל את כל התהליך (OOM), שמופיע ללקוח כ-"upstream
-    # error" אחרי המתנה ארוכה. img.width/img.height נקראים מהכותרת בלבד
-    # (Pillow "עצלן" - עוד לא פוענח שום פיקסל בשלב הזה), אז הבדיקה כאן זולה.
-    # בכוונה לא מנסים "להקטין" תמונה כזו (thumbnail דורש קודם לפענח אותה
-    # במלואה לזיכרון בפורמטים כמו TIFF, ואז בדיוק ה-OOM שרוצים למנוע כבר
-    # קרה) - במקום זה מוותרים על התצוגה המקדימה לגמרי ומדלגים בבטחה.
-    MAX_PIXELS_FOR_PREVIEW = 20_000_000  # כ-20 מגה-פיקסל, יותר מספיק לתצוגה מקדימה
-    if img.width * img.height > MAX_PIXELS_FOR_PREVIEW:
+    # ב-CCITT) יכול להתפרש לרזולוציה ענקית בזיכרון ולהפיל את התהליך (OOM).
+    # img.width/height נקראים מהכותרת בלבד (Pillow "עצלן"), אז הבדיקה זולה.
+    # JPEG מקבל תקרה גבוהה בהרבה כי פותחים אותו בדגימה מופחתת (draft) -
+    # צילום טלפון של 48-108 מגה-פיקסל לא מפוענח במלואו בזיכרון.
+    is_jpeg = (img.format == 'JPEG')
+    max_pixels = PREVIEW_MAX_JPEG_PIXELS if is_jpeg else PREVIEW_MAX_OTHER_PIXELS
+    if img.width * img.height > max_pixels:
         raise _PreviewTooLargeError(
             f"{img.width}x{img.height} = {img.width * img.height:,} פיקסלים - חורג מהמגבלה"
         )
+    if is_jpeg:
+        # מבקש מהמפענח לפענח ישר בגודל מוקטן (פי 2/4/8) - מהיר וחסכוני בזיכרון
+        img.draft('RGB', (_PREVIEW_LEVELS[0][0], _PREVIEW_LEVELS[0][0]))
 
-    if img.mode in ('RGBA', 'LA') or (img.mode == 'P' and 'transparency' in img.info):
-        img = img.convert('RGBA')
-        bg = Image.new('RGB', img.size, (255, 255, 255))
-        bg.paste(img, mask=img.split()[-1])
-        img = bg
-    elif img.mode != 'RGB':
-        img = img.convert('RGB')
-    out = io.BytesIO()
-    img.save(out, format='PDF')
-    return out.getvalue()
+    total = max(1, int(getattr(img, 'n_frames', 1) or 1))
+    per = _pages_per_part(len(raw), total)
+    parts = max(1, -(-total // per))
+    part = min(max(int(part or 1), 1), parts)
+    start = (part - 1) * per
+    end = min(total, start + per)
+
+    frames = []
+    for i in range(start, end):
+        try:
+            img.seek(i)
+        except EOFError:
+            break
+        f = img.copy()
+        try:
+            f = ImageOps.exif_transpose(f)
+        except Exception:
+            pass
+        if f.mode in ('RGBA', 'LA') or (f.mode == 'P' and 'transparency' in f.info):
+            f = f.convert('RGBA')
+            bg = Image.new('RGB', f.size, (255, 255, 255))
+            bg.paste(f, mask=f.split()[-1])
+            f = bg
+        elif f.mode in ('L',):
+            pass
+        elif f.mode == '1':
+            f = f.convert('L')
+        elif f.mode != 'RGB':
+            f = f.convert('RGB')
+        # מקטינים כבר כאן לתקרה העליונה כדי לא להחזיק תמונה ענקית בזיכרון
+        top = _PREVIEW_LEVELS[0][0]
+        if max(f.size) > top:
+            f.thumbnail((top, top), Image.LANCZOS)
+        frames.append(f)
+    if not frames:
+        return None
+    light = _frames_to_light_pdf(frames)
+    if light is None:
+        return None
+    return light, total, part, per
 
 
 # תור-חוטים ייעודי להמרות תצוגה מקדימה, עם timeout קשיח בזמן-אמת (wall
@@ -1001,11 +1106,11 @@ def _image_to_pdf_bytes(raw):
 # ה-worker process - זו קריסה הרבה יותר יקרה מ"אין תצוגה מקדימה".
 import concurrent.futures as _futures
 _preview_executor = _futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix='preview-convert')
-PREVIEW_CONVERT_TIMEOUT_SECONDS = 8
+PREVIEW_CONVERT_TIMEOUT_SECONDS = 20
 
 
-def _image_to_pdf_bytes_with_timeout(raw):
-    future = _preview_executor.submit(_image_to_pdf_bytes, raw)
+def _image_to_pdf_bytes_with_timeout(raw, part=1):
+    future = _preview_executor.submit(_image_to_pdf_bytes, raw, part)
     try:
         return future.result(timeout=PREVIEW_CONVERT_TIMEOUT_SECONDS)
     except _futures.TimeoutError:
@@ -1053,24 +1158,79 @@ def _validate_or_repair_pdf_with_timeout(raw):
         )
 
 
-def _file_to_pdf_data_uri(raw, filename, log_context=''):
+def _pdf_part_for_preview(raw, part=1):
+    """PDF אמיתי -> (pdf_bytes, total_pages, part_used, per_part) של "חלק" מספר part
+    (PREVIEW_MAX_PAGES עמודים בכל חלק), או None אם הקובץ פגום/לא ניתן לפתיחה.
+    בונה PDF חדש מהעמודים של החלק בלבד (זה גם מתקן PDF פגום-חלקית, ומבטיח
+    שלא מעבדים מסמך של מאות עמודים בבת אחת). אם התוצאה כבדה מדי להטמעה
+    כ-data URI (ראה PREVIEW_MAX_PDF_BYTES) - מרנדר את העמודים לתמונות
+    דחוסות; הטקסט הנבחר/חיפוש הולכים לאיבוד בגרסת התצוגה בלבד."""
+    import fitz
+    from PIL import Image
+    src = None
+    try:
+        src = fitz.open(stream=raw, filetype='pdf')
+        total = src.page_count
+        if total < 1:
+            return None
+        per = _pages_per_part(len(raw), total)
+        parts = max(1, -(-total // per))
+        part = min(max(int(part or 1), 1), parts)
+        a = (part - 1) * per
+        b = min(total, a + per) - 1
+        out = fitz.open()
+        try:
+            out.insert_pdf(src, from_page=a, to_page=b)
+            data = out.tobytes(garbage=4, deflate=True, clean=True)
+        finally:
+            out.close()
+        if len(data) <= PREVIEW_MAX_PDF_BYTES:
+            return data, total, part, per
+        n = b - a + 1
+        # הרבה עמודים => רזולוציית רינדור נמוכה יותר, כדי לחסוך בזיכרון
+        top = 1800 if n <= 8 else 1400
+        frames = []
+        for i in range(a, b + 1):
+            pg = src[i]
+            r = pg.rect
+            scale = top / float(max(r.width, r.height, 1))
+            pix = pg.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
+            frames.append(Image.frombytes('RGB', (pix.width, pix.height), pix.samples))
+        light = _frames_to_light_pdf(frames)
+        if light is None:
+            return None
+        return light, total, part, per
+    except Exception as e:
+        log.warning(f"pdf preview part error: {e}")
+        return None
+    finally:
+        if src is not None:
+            src.close()
+
+
+def _pdf_part_for_preview_with_timeout(raw, part=1):
+    future = _preview_executor.submit(_pdf_part_for_preview, raw, part)
+    try:
+        return future.result(timeout=PREVIEW_CONVERT_TIMEOUT_SECONDS)
+    except _futures.TimeoutError:
+        raise TimeoutError(
+            f"הכנת ה-PDF לתצוגה ארכה יותר מ-{PREVIEW_CONVERT_TIMEOUT_SECONDS} שניות"
+        )
+
+
+def _file_to_pdf_preview(raw, filename, log_context='', part=1):
     """הליבה המשותפת של המרת bytes+filename ל-data URI מוטמע, ממיר תמיד
     ל-PDF (גם אם המקור תמונה) - ראה _manuscript_data_uri למטה להסבר המלא
-    (חסימת נטפרי). מחזיר (data_uri, is_pdf). מנוצל גם בתצוגת כתב-היד
-    המקורי (studio) וגם בתצוגת הקובץ שהלקוח שלח בחזרה בהגהה, כשזו תמונה/PDF
-    של דף מודפס שתוקן בכתב יד וצולם/נסרק (ראה studio_proof/_proof_returned_kind)."""
+    (חסימת נטפרי). מנוצל גם בתצוגת כתב-היד המקורי (studio) וגם בתצוגת הקובץ
+    שהלקוח שלח בחזרה בהגהה ובפקסים נכנסים.
+    קובץ עם יותר מ-PREVIEW_MAX_PAGES עמודים מוצג ב"חלקים" (part=1,2,3...) -
+    כל חלק הוא PDF קל נפרד (כרום חוסם data URI מעל ~2MB, אז אי אפשר להטמיע
+    מסמך שלם). מחזיר dict: uri, is_pdf, part, parts, page_count, first_page,
+    last_page. uri=None אם אין תצוגה."""
+    info = {'uri': None, 'is_pdf': False, 'part': 1, 'parts': 1, 'per_part': PREVIEW_MAX_PAGES,
+            'page_count': 0, 'first_page': 0, 'last_page': 0}
     if not raw:
-        return None, False
-
-    # מגבלת גודל להטמעה כ-data URI בדף (base64 בתוך ה-HTML) - קובץ ענק
-    # (PDF רב-עמודים, סריקה ברזולוציה גבוהה מדי) עלול לגרום לעיבוד/לקידוד
-    # לקחת המון זמן ו/או זיכרון ולהפיל את כל הבקשה (OOM/timeout על
-    # Railway - נראה ללקוח כ"upstream error" אחרי המתנה ארוכה). עדיף בהרבה
-    # תצוגה מקדימה חסרה (עם קישור הורדה שתמיד עובד, ללא עיבוד) מאשר קריסה.
-    MAX_PREVIEW_SOURCE_BYTES = 10 * 1024 * 1024  # 10MB
-    if len(raw) > MAX_PREVIEW_SOURCE_BYTES:
-        log.warning(f"_file_to_pdf_data_uri ({log_context}): קובץ גדול מדי להטמעה בתצוגה מקדימה ({len(raw)} bytes) - מדלגים על התצוגה")
-        return None, False
+        return info
 
     # מזהים PDF אמיתי לפי חתימת התוכן עצמו (magic bytes של PDF: "%PDF-"),
     # לא רק לפי סיומת שם הקובץ - התגלה בפועל שמודול הפקס של ימות המשיח
@@ -1089,39 +1249,64 @@ def _file_to_pdf_data_uri(raw, filename, log_context=''):
                 '.tif': 'image/tiff', '.tiff': 'image/tiff',
             }.get(ext, 'application/octet-stream')
 
-    if mime != 'application/pdf':
-        try:
-            raw = _image_to_pdf_bytes_with_timeout(raw)
-            mime = 'application/pdf'
-        except _PreviewTooLargeError as e:
-            log.warning(f"_file_to_pdf_data_uri ({log_context}): תמונה גדולה מדי לתצוגה מקדימה ({e}) - מדלגים על התצוגה")
-            return None, False
-        except TimeoutError as e:
-            log.error(f"image->PDF conversion timeout ({log_context}): {e}")
-            return None, False
-        except Exception as e:
-            log.error(f"image->PDF conversion error ({log_context}): {e}")
-            # ממשיכים עם התמונה המקורית - עדיף תצוגה שעלולה להיחסם מאשר כלום
+    # מגבלת גודל קובץ מקור - קובץ ענק עלול לגרום לעיבוד לקחת המון זמן/זיכרון
+    # ולהפיל את הבקשה (OOM/timeout על Railway - נראה כ"upstream error").
+    # PDF רב-עמודים נסרק לפעמים לעשרות מגה-בייט - אבל מעבדים ממנו רק חלק של
+    # 20 עמודים בכל פעם, אז התקרה שלו גבוהה יותר מזו של תמונה בודדת (שמפוענחת
+    # כולה בזיכרון).
+    max_src = MAX_PREVIEW_PDF_SOURCE_BYTES if mime == 'application/pdf' else MAX_PREVIEW_IMAGE_SOURCE_BYTES
+    if len(raw) > max_src:
+        log.warning(f"_file_to_pdf_preview ({log_context}): קובץ גדול מדי לתצוגה מקדימה ({len(raw)} bytes) - מדלגים על התצוגה")
+        return info
 
-    if mime == 'application/pdf':
-        # לא מסתפקים בחתימת "%PDF-" - מוודאים בפועל שהקובץ ניתן לפתיחה/
-        # רינדור (ראה _validate_or_repair_pdf), כדי שקובץ שמתיימר להיות PDF
-        # אך פגום מבנית לא "יעבור" ויוצג ב-iframe עם שגיאת דפדפן גולמית
-        # ("הטעינה של מסמך ה-PDF נכשלה") - במקום זה מקבלים או קובץ מתוקן
-        # שכן ניתן לרינדור, או נופלים בחזרה בשקט להודעת "הקובץ אינו זמין"
-        # האחידה של המערכת.
-        try:
-            repaired = _validate_or_repair_pdf_with_timeout(raw)
-        except TimeoutError as e:
-            log.error(f"PDF validate/repair timeout ({log_context}): {e}")
-            return None, False
-        if repaired is None:
-            log.warning(f"_file_to_pdf_data_uri ({log_context}): קובץ ה-PDF פגום ולא ניתן לפתיחה/תיקון - מדלגים על התצוגה")
-            return None, False
-        raw = repaired
+    try:
+        if mime == 'application/pdf':
+            # לא מסתפקים בחתימת "%PDF-" - פותחים בפועל ובונים מחדש (ראה
+            # _pdf_part_for_preview); קובץ פגום לגמרי => "הקובץ אינו זמין".
+            res = _pdf_part_for_preview_with_timeout(raw, part)
+            if res is None:
+                log.warning(f"_file_to_pdf_preview ({log_context}): קובץ ה-PDF פגום/לא ניתן להקטנה לתצוגה - מדלגים")
+                return info
+        else:
+            try:
+                res = _image_to_pdf_bytes_with_timeout(raw, part)
+            except (TimeoutError, _PreviewTooLargeError):
+                raise
+            except Exception as e:
+                log.error(f"image->PDF conversion error ({log_context}): {e}")
+                # פורמט שלא ניתן לפענוח (למשל HEIC בלי תמיכה) - אפשר להטמיע
+                # את הקובץ המקורי רק אם הוא קטן מספיק; אחרת אין תצוגה.
+                if len(raw) > PREVIEW_MAX_PDF_BYTES:
+                    return info
+                b64 = base64.b64encode(raw).decode('ascii')
+                info['uri'] = f'data:{mime};base64,{b64}'
+                return info
+            if res is None:
+                log.warning(f"_file_to_pdf_preview ({log_context}): לא ניתן להקטין את התמונה מספיק לתצוגה - מדלגים")
+                return info
+    except _PreviewTooLargeError as e:
+        log.warning(f"_file_to_pdf_preview ({log_context}): תמונה גדולה מדי לתצוגה מקדימה ({e}) - מדלגים על התצוגה")
+        return info
+    except TimeoutError as e:
+        log.error(f"preview conversion timeout ({log_context}): {e}")
+        return info
 
-    b64 = base64.b64encode(raw).decode('ascii')
-    return f'data:{mime};base64,{b64}', (mime == 'application/pdf')
+    pdf_bytes, total, part_used, per = res
+    parts = max(1, -(-total // per))
+    info.update({
+        'uri': 'data:application/pdf;base64,' + base64.b64encode(pdf_bytes).decode('ascii'),
+        'is_pdf': True, 'part': part_used, 'parts': parts, 'page_count': total,
+        'per_part': per,
+        'first_page': (part_used - 1) * per + 1,
+        'last_page': min(total, part_used * per),
+    })
+    return info
+
+
+def _file_to_pdf_data_uri(raw, filename, log_context=''):
+    """תאימות לאחור: מחזיר (data_uri, is_pdf) של החלק הראשון."""
+    info = _file_to_pdf_preview(raw, filename, log_context)
+    return info['uri'], info['is_pdf']
 
 
 def _manuscript_data_uri(page):
@@ -1136,6 +1321,22 @@ def _manuscript_data_uri(page):
     (PDF) או ב-<img> (fallback, רק אם המרה ל-PDF נכשלה מסיבה כלשהי)."""
     raw = _manuscript_file_bytes(page)
     return _file_to_pdf_data_uri(raw, page.original_filename or page.file_path, log_context=f'page={page.id}')
+
+
+def _manuscript_preview(page, part=1):
+    """כמו _manuscript_data_uri אבל עם תמיכה ב"חלקים" לקובץ רב-עמודים -
+    מחזיר את ה-dict המלא של _file_to_pdf_preview."""
+    raw = _manuscript_file_bytes(page)
+    return _file_to_pdf_preview(raw, page.original_filename or page.file_path,
+                                log_context=f'page={page.id}', part=part)
+
+
+def _preview_json(info):
+    """תשובת JSON לטעינת חלק אחר של התצוגה המקדימה בלי לרענן את הדף (חשוב
+    בסטודיו - רענון היה מוחק עבודה שלא נשמרה: הקלטה/עריכה)."""
+    from flask import jsonify
+    return jsonify({k: info[k] for k in ('uri', 'is_pdf', 'part', 'parts',
+                                         'page_count', 'first_page', 'last_page', 'per_part')})
 
 
 def _proof_returned_kind(filename):
@@ -1159,14 +1360,25 @@ def studio(page_id):
         page.claimed_by = getattr(current_user, 'username', 'admin')
         page.claimed_at = datetime.utcnow()
         db.session.commit()
-    manuscript_data_uri, manuscript_is_pdf = _manuscript_data_uri(page)
+    pv = _manuscript_preview(page, request.args.get('part', 1, type=int))
     return render_template(
         'admin/dictate_studio.html',
         page=page,
         default_engine=DEFAULT_DICTATION_ENGINE,
-        manuscript_data_uri=manuscript_data_uri,
-        manuscript_is_pdf=manuscript_is_pdf,
+        manuscript_data_uri=pv['uri'],
+        manuscript_is_pdf=pv['is_pdf'],
+        pv=pv,
+        pv_url=url_for('dictate.studio_preview_part', page_id=page.id),
     )
+
+
+@dictate_bp.route('/<int:page_id>/preview-part')
+@login_required
+def studio_preview_part(page_id):
+    """חלק אחר (20 עמודים) של כתב-היד בסטודיו - JSON, נטען ב-JS בלי רענון."""
+    from models import ManuscriptPage
+    page = ManuscriptPage.query.get_or_404(page_id)
+    return _preview_json(_manuscript_preview(page, request.args.get('part', 1, type=int)))
 
 
 @dictate_bp.route('/<int:page_id>/file')
@@ -1423,6 +1635,17 @@ def send(page_id):
 # routes/email_inbound.py._is_proofing_reply), והנציג סוקר/מעדכן ומסיים כאן.
 # ==========================================================================
 
+@dictate_bp.route('/proof/<int:round_id>/preview-part')
+@login_required
+def proof_preview_part(round_id):
+    """חלק אחר (20 עמודים) מהקובץ שהלקוח שלח בהגהה - JSON, בלי רענון דף."""
+    from models import ProofingRound
+    round_ = ProofingRound.query.get_or_404(round_id)
+    return _preview_json(_file_to_pdf_preview(
+        round_.customer_file_data, round_.customer_file_filename,
+        log_context=f'proof round={round_.id}', part=request.args.get('part', 1, type=int)))
+
+
 @dictate_bp.route('/proof/<int:round_id>')
 @login_required
 def studio_proof(round_id):
@@ -1438,11 +1661,14 @@ def studio_proof(round_id):
     if returned_kind == 'docx':
         returned_preview_html = _docx_paragraphs_html(round_.customer_file_data)
         returned_data_uri, returned_is_pdf = None, False
+        pv = None
     else:
         returned_preview_html = None
-        returned_data_uri, returned_is_pdf = _file_to_pdf_data_uri(
-            round_.customer_file_data, round_.customer_file_filename, log_context=f'proof round={round_.id}'
+        pv = _file_to_pdf_preview(
+            round_.customer_file_data, round_.customer_file_filename,
+            log_context=f'proof round={round_.id}', part=request.args.get('part', 1, type=int)
         )
+        returned_data_uri, returned_is_pdf = pv['uri'], pv['is_pdf']
 
     # תוכן ההתחלה לעורך המובנה בדפדפן: אם הנציג כבר התחיל לערוך קודם (יש
     # edited_content שמור על הסבב) ממשיכים משם - אחרת מתחילים מהתוכן המקורי
@@ -1467,6 +1693,8 @@ def studio_proof(round_id):
         returned_preview_html=returned_preview_html,
         returned_data_uri=returned_data_uri,
         returned_is_pdf=returned_is_pdf,
+        pv=pv,
+        pv_url=url_for('dictate.proof_preview_part', round_id=round_.id),
         editor_initial_content=editor_initial_content,
         proofing_price_per_minute=_manuscript_proofing_price(),
         timer_state=_proofing_timer_state(round_),
@@ -1913,6 +2141,17 @@ def _ensure_customer_fax_code(customer):
     return customer.fax_code
 
 
+@dictate_bp.route('/fax/<int:fax_id>/preview-part')
+@login_required
+def fax_preview_part(fax_id):
+    """חלק אחר (20 עמודים) של הפקס - JSON, בלי רענון דף."""
+    from models import IncomingFax
+    fax = IncomingFax.query.get_or_404(fax_id)
+    return _preview_json(_file_to_pdf_preview(
+        fax.file_data, fax.filename or 'fax.pdf',
+        log_context=f'incoming fax={fax.id}', part=request.args.get('part', 1, type=int)))
+
+
 @dictate_bp.route('/fax/<int:fax_id>')
 @login_required
 def fax_assign(fax_id):
@@ -1922,7 +2161,9 @@ def fax_assign(fax_id):
     הגהה על כתב יד קיים שלו."""
     from models import IncomingFax
     fax = IncomingFax.query.get_or_404(fax_id)
-    data_uri, is_pdf = _file_to_pdf_data_uri(fax.file_data, fax.filename or 'fax.pdf', log_context=f'incoming fax={fax.id}')
+    pv = _file_to_pdf_preview(fax.file_data, fax.filename or 'fax.pdf',
+                              log_context=f'incoming fax={fax.id}', part=request.args.get('part', 1, type=int))
+    data_uri, is_pdf = pv['uri'], pv['is_pdf']
 
     selected_customer = None
     customer_pages = []
@@ -1948,6 +2189,8 @@ def fax_assign(fax_id):
         fax=fax,
         data_uri=data_uri,
         is_pdf=is_pdf,
+        pv=pv,
+        pv_url=url_for('dictate.fax_preview_part', fax_id=fax.id),
         selected_customer=selected_customer,
         customer_pages=customer_pages,
     )

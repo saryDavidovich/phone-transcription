@@ -37,11 +37,12 @@
   <div class="card">
     <div style="font-size:14px;font-weight:700;margin-bottom:10px">📄 תצוגת הפקס שהתקבל</div>
     <p class="fx-hint">יש לבדוק בעמוד הראשון את הטלפון ואת הקוד האישי בני 5 הספרות שהלקוח אמור לכתוב, ולפיהם לאתר את הלקוח למטה.</p>
+    {% set pv_frame = 'pvFrame' %}{% set pv_hash = '#zoom=50' %}{% include 'admin/_preview_nav.html' %}
     <div class="fx-imgbox">
       {% if not data_uri %}
         <div style="padding:40px;color:var(--text3)">לא ניתן להציג תצוגה מקדימה לקובץ הזה</div>
       {% elif is_pdf %}
-        <iframe src="{{ data_uri }}#zoom=50" title="הפקס שהתקבל"></iframe>
+        <iframe id="pvFrame" src="{{ data_uri }}#zoom=50" title="הפקס שהתקבל"></iframe>
       {% else %}
         <img src="{{ data_uri }}" alt="הפקס שהתקבל">
       {% endif %}

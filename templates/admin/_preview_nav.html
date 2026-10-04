@@ -1,0 +1,53 @@
+{# ניווט בין "חלקים" של תצוגה מקדימה רב-עמודית (20 עמודים בכל חלק).
+   משתנים: pv (תוצאת _file_to_pdf_preview), pv_url (כתובת ה-JSON לחלקים),
+   pv_frame (id של ה-iframe), pv_hash (לדוגמה '#zoom=50' או ''). #}
+{% if pv and pv.parts and pv.parts > 1 %}
+<div class="pvnav" data-url="{{ pv_url }}" data-frame="{{ pv_frame }}" data-hash="{{ pv_hash|default('') }}" data-parts="{{ pv.parts }}" data-part="{{ pv.part }}" data-pages="{{ pv.page_count }}">
+  <button type="button" class="btn btn-ghost pvnav-btn" data-dir="-1">→ הקודמים</button>
+  <span class="pvnav-label">עמודים <b class="pvnav-range">{{ pv.first_page }}–{{ pv.last_page }}</b> מתוך {{ pv.page_count }}</span>
+  <select class="pvnav-select" dir="ltr" title="מעבר לחלק">
+    {% for i in range(1, pv.parts + 1) %}
+    <option value="{{ i }}" {% if i == pv.part %}selected{% endif %}>{{ (i-1)*pv.per_part + 1 }}–{{ [i*pv.per_part, pv.page_count]|min }}</option>
+    {% endfor %}
+  </select>
+  <button type="button" class="btn btn-ghost pvnav-btn" data-dir="1">הבאים ←</button>
+  <span class="pvnav-msg"></span>
+</div>
+<style>
+  .pvnav { display:flex; align-items:center; justify-content:center; gap:8px; flex-wrap:wrap; margin:0 0 8px; font-size:13px; }
+  .pvnav-btn { font-size:12px; padding:5px 10px; }
+  .pvnav-btn[disabled] { opacity:.4; cursor:default; }
+  .pvnav-select { font-size:12px; padding:4px 6px; border-radius:8px; border:1px solid var(--border, #444); background:var(--surface2); color:inherit; }
+  .pvnav-range { direction:ltr; unicode-bidi:isolate; }
+  .pvnav-msg { color:var(--red, #d33); font-size:12px; }
+</style>
+<script>
+(function(){
+  var nav = document.currentScript.parentNode.querySelector('.pvnav');
+  var parts = +nav.dataset.parts, cur = +nav.dataset.part, busy = false;
+  var btns = nav.querySelectorAll('.pvnav-btn'), sel = nav.querySelector('.pvnav-select');
+  var msg = nav.querySelector('.pvnav-msg'), range = nav.querySelector('.pvnav-range');
+  function refresh(){
+    btns[0].disabled = cur <= 1; btns[1].disabled = cur >= parts; sel.value = String(cur);
+  }
+  function go(n){
+    if (busy || n < 1 || n > parts || n === cur) { sel.value = String(cur); return; }
+    busy = true; msg.textContent = 'טוען...';
+    fetch(nav.dataset.url + '?part=' + n, {credentials: 'same-origin', headers: {'Accept': 'application/json'}})
+      .then(function(r){ if (!r.ok) throw new Error('http ' + r.status); return r.json(); })
+      .then(function(d){
+        if (!d.uri) throw new Error('empty');
+        var f = document.getElementById(nav.dataset.frame);
+        if (f) f.src = d.uri + (nav.dataset.hash || '');
+        cur = d.part; range.textContent = d.first_page + '–' + d.last_page; msg.textContent = '';
+      })
+      .catch(function(){ msg.textContent = 'שגיאה בטעינת החלק'; })
+      .then(function(){ busy = false; refresh(); });
+  }
+  btns[0].addEventListener('click', function(){ go(cur - 1); });
+  btns[1].addEventListener('click', function(){ go(cur + 1); });
+  sel.addEventListener('change', function(){ go(+sel.value); });
+  refresh();
+})();
+</script>
+{% endif %}
