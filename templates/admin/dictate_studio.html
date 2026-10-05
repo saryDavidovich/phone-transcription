@@ -63,6 +63,7 @@
   .ds-run:focus { background:rgba(79,110,247,.15); border-radius:3px; }
   .ds-run.bold { font-weight:800; }
   .ds-run.underline { text-decoration:underline; }
+  .ds-run .sm { font-size:.88em; }   /* טקסט בסוגריים תואמים - מעט קטן יותר */
 
   .ds-charcount { color:var(--text3); font-size:12px; margin-top:10px; }
 
@@ -153,7 +154,7 @@
       <button class="ds-fbtn" id="btnType" disabled onclick="openTypeBox()">⌨ הקלדה <small>(T)</small></button>
       <span id="modeBadge" style="display:none;font-size:12px;font-weight:700;color:var(--accent,#4f6bff)"></span>
     </div>
-    <p class="ds-hint" id="modeHint">לראשי תיבות ומראי מקומות: לחצו על <b>איות</b> והקריאו את <b>שמות האותיות</b> (שין, וו, עין = שו״ע; &quot;רווח&quot; בין מילים; &quot;גרש&quot; לקיצור כמו סי׳), או על <b>מספר</b> ואמרו את המספר כרגיל (מאתיים חמישים ושלוש = רנ״ג). לחיצה נוספת חוזרת לדיבור רגיל. במקלדת: A / N (גם בעברית).<br><b>הקלדה (T)</b>: פותחת תיבה קטנה להקלדה ישירה של ראשי תיבות / מראה מקום (בלי תמלול, 100% מדויק) — Enter מכניס וסוגר, Esc מבטל. גרשיים נוספים אוטומטית; מספר (154) הופך לאותיות (קנ״ד).</p>
+    <p class="ds-hint" id="modeHint">לראשי תיבות ומראי מקומות: לחצו על <b>איות</b> והקריאו את <b>שמות האותיות</b> (שין, וו, עין = שו״ע; &quot;רווח&quot; בין מילים; &quot;גרש&quot; לקיצור כמו סי׳), או על <b>מספר</b> ואמרו את המספר כרגיל (מאתיים חמישים ושלוש = רנ״ג). לחיצה נוספת חוזרת לדיבור רגיל. במקלדת: A / N (גם בעברית).<br><b>הקלדה (T)</b>: פותחת תיבה קטנה להקלדה ישירה של ראשי תיבות / מראה מקום (בלי תמלול, 100% מדויק) — Enter מכניס וסוגר, Esc מבטל. גרשיים נוספים אוטומטית; מספר (154) הופך לאותיות (קנ״ד). <b>מילה רגילה (בלי ראשי תיבות): / בסוף</b> (לעיל/). אפשר לפתוח ולסגור סוגריים סביב המילים — (שוע אוח) — והגרשיים יישארו לפני האות האחרונה.</p>
 
     <div id="resultArea">
       {% if page.status == 'processing' %}
@@ -180,9 +181,9 @@
 
 <div id="typeBox" style="display:none;position:fixed;top:90px;left:50%;transform:translateX(-50%);z-index:1000;background:var(--surface);border:2px solid var(--accent);border-radius:12px;padding:14px 16px;box-shadow:0 8px 30px rgba(0,0,0,.45);width:min(420px,92vw)">
   <div style="font-weight:700;margin-bottom:8px">⌨ הקלדת ראשי תיבות / מראה מקום</div>
-  <input id="typeInput" type="text" dir="rtl" autocomplete="off" style="width:100%;padding:9px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:17px;font-family:'Heebo',sans-serif" placeholder="למשל: שוע אוח סי' קנד">
+  <input id="typeInput" type="text" dir="rtl" autocomplete="off" style="width:100%;padding:9px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:17px;font-family:'Heebo',sans-serif" placeholder="למשל: (שוע אוח סי' קנד) לעיל/">
   <div id="typePreview" style="margin-top:8px;font-size:18px;min-height:26px;color:var(--accent)"></div>
-  <div style="margin-top:6px;font-size:12px;color:var(--text3)">Enter = הכנסה וסגירה · Esc = ביטול · בזמן ההקלדה ההקלטה מושהית</div>
+  <div style="margin-top:6px;font-size:12px;color:var(--text3)">Enter = הכנסה וסגירה · Esc = ביטול · <b>/</b> בסוף מילה = מילה רגילה בלי ראשי תיבות · סוגריים מותרים · ההקלטה מושהית</div>
   <div style="margin-top:10px;display:flex;gap:8px;justify-content:flex-start">
     <button type="button" class="btn btn-primary" onclick="commitTypeBox()">הכנסה</button>
     <button type="button" class="btn btn-ghost" onclick="closeTypeBox(false)">ביטול</button>
@@ -351,20 +352,45 @@ function intToGematria(n) {
   s = s.split('').map(c => NONFINAL_MAP[c] || c).join('');
   return s.length === 1 ? s + GERESH : s.slice(0, -1) + GERSHAYIM + s.slice(-1);
 }
-function formatTypedToken(tok) {
-  if (/^\d+$/.test(tok)) { return intToGematria(parseInt(tok, 10)) || tok; }
+function formatCoreToken(core) {
+  if (/^\d+$/.test(core)) { return intToGematria(parseInt(core, 10)) || core; }
   // גרש/גרשיים שהוקלדו (ASCII או עבריים) - מכבדים כמו שהם, מנרמלים לתווים העבריים
-  if (/["'\u05f3\u05f4\u201d\u2019]/.test(tok)) {
-    return tok.replace(/["\u05f4\u201d]/g, GERSHAYIM).replace(/['\u2019\u05f3]/g, GERESH);
+  if (/["'\u05f3\u05f4\u201d\u2019]/.test(core)) {
+    return core.replace(/["\u05f4\u201d]/g, GERSHAYIM).replace(/['\u2019\u05f3]/g, GERESH);
   }
-  if (!/^[\u05d0-\u05ea]+$/.test(tok)) return tok;   // לא אותיות עבריות בלבד - לא נוגעים
-  const chars = tok.split('').map(c => NONFINAL_MAP[c] || c);
+  if (!/^[\u05d0-\u05ea]+$/.test(core)) return core;   // לא אותיות עבריות בלבד - לא נוגעים
+  const chars = core.split('').map(c => NONFINAL_MAP[c] || c);
   chars[chars.length - 1] = FINAL_MAP[chars[chars.length - 1]] || chars[chars.length - 1];
   if (chars.length === 1) return chars[0] + GERESH;
   return chars.slice(0, -1).join('') + GERSHAYIM + chars[chars.length - 1];
 }
+// מילה אחת: סוגריים/פיסוק בקצוות נשארים בחוץ, כך שהגרשיים נכנסים לפני האות האחרונה
+// של המילה עצמה ולא לפני הסוגר: "(שוע)" => "(שו״ע)". "/" בסוף (או בכל מקום
+// בטוקן) = "מילה רגילה" - בלי ראשי תיבות: "לעיל/" => "לעיל".
+function formatTypedToken(tok) {
+  const literal = tok.indexOf('/') !== -1;
+  tok = tok.replace(/\//g, '');
+  const lead = (tok.match(/^[(\[{]+/) || [''])[0];
+  tok = tok.slice(lead.length);
+  const trail = (tok.match(/[)\]}.,:;!?]+$/) || [''])[0];
+  const core = tok.slice(0, tok.length - trail.length);
+  if (!core) return lead + trail;
+  return lead + (literal ? core : formatCoreToken(core)) + trail;
+}
 function formatTypedText(text) {
   return (text || '').trim().split(/\s+/).filter(Boolean).map(formatTypedToken).join(' ');
+}
+// הוספת הטקסט המוקלד כסגמנט literal; רווח אוטומטי: אחרי סוגר פותח / לפני סוגר
+// סוגר או פיסוק - בלי רווח (כמו כפתורי הפיסוק).
+function pushTypedLiteral(out) {
+  if (!out) return;
+  segments.push({
+    literal: out,
+    bold: state.bold, underline: state.underline, heading: state.heading,
+    new_paragraph: false,
+    no_space_before: /^[)\]}.,:;!?]/.test(out),
+    no_space_after: /[(\[{]$/.test(out),
+  });
 }
 
 let typing = false;
@@ -389,13 +415,7 @@ function closeTypeBox(commit) {
   document.getElementById('typeBox').style.display = 'none';
   typing = false;
   if (!recording) return;       // ההקלטה הופסקה בינתיים
-  if (out) {
-    segments.push({
-      literal: out,
-      bold: state.bold, underline: state.underline, heading: state.heading,
-      new_paragraph: false, no_space_before: false, no_space_after: false,
-    });
-  }
+  pushTypedLiteral(out);
   beginSegment(false);
 }
 function commitTypeBox() { closeTypeBox(true); }
@@ -465,8 +485,7 @@ function stopRecording() {
   if (typing) {   // הקלדה פתוחה בעצירה - מה שהוקלד כבר נשמר (לא הולך לאיבוד)
     const typed = formatTypedText(document.getElementById('typeInput').value);
     typing = false; document.getElementById('typeBox').style.display = 'none';
-    if (typed) segments.push({ literal: typed, bold: state.bold, underline: state.underline, heading: state.heading,
-                               new_paragraph: false, no_space_before: false, no_space_after: false });
+    pushTypedLiteral(typed);
   }
   recording = false;
   clearInterval(timerInterval);
@@ -580,6 +599,28 @@ function renderReview() {
   renderPreview();
 }
 
+// טקסט בסוגריים עגולים תואמים - מעט קטן יותר; "(" או ")" בלי בן-זוג (למשל
+// רשימה "1) 2)") נשארים בכתב רגיל. זהה ל-paren_mask ב-services/hebrew_refs.py.
+function parenMask(text) {
+  const m = new Array(text.length).fill(false), st = [];
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (c === '(') st.push(i);
+    else if (c === ')' && st.length) { const s = st.pop(); for (let k = s; k <= i; k++) m[k] = true; }
+  }
+  return m;
+}
+function smallParenHtml(text, mask, offset) {
+  let out = '', buf = '', cur = false;
+  for (let i = 0; i < text.length; i++) {
+    const small = !!mask[offset + i];
+    if (i > 0 && small !== cur) { out += cur ? `<span class="sm">${escapeHtml(buf)}</span>` : escapeHtml(buf); buf = ''; }
+    cur = small; buf += text[i];
+  }
+  if (buf) out += cur ? `<span class="sm">${escapeHtml(buf)}</span>` : escapeHtml(buf);
+  return out;
+}
+
 function renderPreview() {
   const wrap = document.getElementById('previewWrap');
   if (!wrap) return;
@@ -590,9 +631,14 @@ function renderPreview() {
   }
   wrap.className = 'ds-preview';
   wrap.innerHTML = currentContent.map((para, pi) => {
+    // מסכת סוגריים לפסקה כולה (סוגריים יכולים לחצות ריצות עיצוב) - ראה parenMask
+    const mask = parenMask((para.runs || []).map(r => r.text || '').join(''));
+    let offset = 0;
     const runs = (para.runs || []).map((run, ri) => {
       const cls = ['ds-run', run.bold ? 'bold' : '', run.underline ? 'underline' : ''].join(' ').trim();
-      return `<span class="${cls}" contenteditable="true" data-pi="${pi}" data-ri="${ri}">${escapeHtml(run.text)}</span>`;
+      const inner = smallParenHtml(run.text || '', mask, offset);
+      offset += (run.text || '').length;
+      return `<span class="${cls}" contenteditable="true" data-pi="${pi}" data-ri="${ri}">${inner}</span>`;
     }).join('');
     return `<div class="ds-para${para.heading ? ' heading' : ''}">${runs}</div>`;
   }).join('');

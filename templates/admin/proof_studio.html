@@ -27,6 +27,7 @@
 
   .ps-preview { line-height:1.9; }
   .ps-para { margin:0 0 10px; direction:rtl; text-align:right; }
+  .ps-para .sm { font-size:.88em; }
   .ps-para.heading { font-weight:800; font-size:19px; border-bottom:1px solid var(--border); padding-bottom:6px; }
   .ds-run.bold, .ps-box strong, .ps-box b { font-weight:800; }
   .ds-run.underline, .ps-box u { text-decoration:underline; }
@@ -330,10 +331,36 @@ function escapeHtml(s) {
   return d.innerHTML;
 }
 
+// טקסט בסוגריים עגולים תואמים - מעט קטן יותר; "(" או ")" בלי בן-זוג נשארים
+// בכתב רגיל (ראה paren_mask ב-services/hebrew_refs.py). ה-span "sm" לא משפיע על
+// serializeEditableContent (שמסתכל רק על STRONG/EM/U).
+function parenMask(text) {
+  const m = new Array(text.length).fill(false), st = [];
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (c === '(') st.push(i);
+    else if (c === ')' && st.length) { const s = st.pop(); for (let k = s; k <= i; k++) m[k] = true; }
+  }
+  return m;
+}
+function smallParenHtml(text, mask, offset) {
+  let out = '', buf = '', cur = false;
+  for (let i = 0; i < text.length; i++) {
+    const small = !!mask[offset + i];
+    if (i > 0 && small !== cur) { out += cur ? `<span class="sm">${escapeHtml(buf)}</span>` : escapeHtml(buf); buf = ''; }
+    cur = small; buf += text[i];
+  }
+  if (buf) out += cur ? `<span class="sm">${escapeHtml(buf)}</span>` : escapeHtml(buf);
+  return out;
+}
+
 function buildParaHtml(para) {
   const runs = (para.runs && para.runs.length) ? para.runs : [{text: '', bold: false, italic: false, underline: false}];
+  const mask = para.heading ? [] : parenMask(runs.map(r => r.text || '').join(''));
+  let offset = 0;
   let inner = runs.map(r => {
-    let html = escapeHtml(r.text || '');
+    let html = smallParenHtml(r.text || '', mask, offset);
+    offset += (r.text || '').length;
     if (r.bold) html = `<strong>${html}</strong>`;
     if (r.italic) html = `<em>${html}</em>`;
     if (r.underline) html = `<u>${html}</u>`;

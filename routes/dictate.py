@@ -398,6 +398,9 @@ def _dictation_worker(app, page_id, segment_files, segment_meta, engine=None):
 # --------------------------------------------------------------------------
 # בניית ה-Word המעוצב הסופי - אותו סגנון RTL/גופן מוטמע כמו services/transcribe.py
 # --------------------------------------------------------------------------
+PAREN_TEXT_PT = 11.5   # גודל כתב לטקסט בסוגריים (גוף המסמך: 13)
+
+
 def _build_manuscript_docx(customer_name, original_filename, content):
     """בונה את קובץ ה-Word הסופי - אותו דפוס RTL/גופן מוטמע ומוכח בפועל
     כמו services/transcribe.py._build_word_doc (המשמש למסלול התמלול המקצועי),
@@ -411,6 +414,7 @@ def _build_manuscript_docx(customer_name, original_filename, content):
     from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
     from docx.shared import Pt, RGBColor
+    from services.hebrew_refs import paren_mask
     from services.transcribe import (
         FONT_DISPLAY_NAME, FONT_REGULAR_PATH, FONT_BOLD_PATH,
         _embed_font_in_docx, _BIDI_SUCCESSORS,
@@ -642,16 +646,35 @@ def _build_manuscript_docx(customer_name, original_filename, content):
             else:
                 p = doc.add_paragraph()
                 set_rtl(p, justify=True)
-            for run_data in para_data.get('runs', []):
-                run = p.add_run(run_data.get('text', ''))
-                set_hebrew_font(
-                    run,
-                    size=None if is_heading else Pt(13),
-                    bold=bool(run_data.get('bold')) or is_heading,
-                    underline=bool(run_data.get('underline')),
-                )
-                if run_data.get('italic'):
-                    run.italic = True
+            # גודל כתב: טקסט בסוגריים עגולים תואמים מעט קטן יותר (ראה paren_mask;
+            # "(" או ")" בלי בן-זוג נשארים בכתב רגיל). המסכה מחושבת על טקסט
+            # הפסקה כולו, כי סוגריים יכולים לחצות ריצות עיצוב (מודגש/קו תחתון).
+            runs_data = para_data.get('runs', [])
+            full_text = ''.join((r.get('text') or '') for r in runs_data)
+            mask = paren_mask(full_text) if not is_heading else None
+            offset = 0
+            for run_data in runs_data:
+                text = run_data.get('text') or ''
+                pieces = []   # (טקסט, בסוגריים?)
+                if mask is None or not text:
+                    pieces.append((text, False))
+                else:
+                    start = 0
+                    for k in range(1, len(text) + 1):
+                        if k == len(text) or mask[offset + k] != mask[offset + start]:
+                            pieces.append((text[start:k], mask[offset + start]))
+                            start = k
+                offset += len(text)
+                for piece_text, small in pieces:
+                    run = p.add_run(piece_text)
+                    set_hebrew_font(
+                        run,
+                        size=None if is_heading else Pt(PAREN_TEXT_PT if small else 13),
+                        bold=bool(run_data.get('bold')) or is_heading,
+                        underline=bool(run_data.get('underline')),
+                    )
+                    if run_data.get('italic'):
+                        run.italic = True
 
     buf = io.BytesIO()
     doc.save(buf)

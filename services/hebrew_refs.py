@@ -287,3 +287,25 @@ def restore_known_abbreviations(text):
     if not text:
         return text
     return _ABBR_RE.sub(lambda m: (m.group(1) or '') + _ABBR_MAP[m.group(2)], text)
+
+
+# ------------------------------------------------------------------
+# גודל כתב בסוגריים: טקסט בין "(" ל-")" תואמים מוצג מעט קטן יותר.
+# "(" בלי ")" מתאים, או ")" בלי "(" (למשל רשימה "1) 2)") - נשארים בכתב רגיל,
+# כך שטעות בסוגריים לא "גוררת" את שאר המסמך לכתב קטן. ההתאמה היא בתוך פסקה
+# אחת בלבד, ומחושבת על טקסט הפסקה כולו (גם אם הסוגריים חוצים ריצות עיצוב).
+# הלוגיקה זהה לפונקציה parenMask ב-dictate_studio.html / proof_studio.html.
+# ------------------------------------------------------------------
+def paren_mask(text):
+    """רשימת בוליאנים באורך הטקסט: True = התו בתוך זוג סוגריים עגולים תואם
+    (כולל הסוגריים עצמם)."""
+    mask = [False] * len(text or '')
+    stack = []
+    for i, ch in enumerate(text or ''):
+        if ch == '(':
+            stack.append(i)
+        elif ch == ')' and stack:
+            start = stack.pop()
+            for k in range(start, i + 1):
+                mask[k] = True
+    return mask
