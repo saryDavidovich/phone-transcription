@@ -176,6 +176,11 @@ def nedarim_callback(charge_id):
             institution.card_last4 = last4
         db.session.commit()
         log.info(f'Institution {institution.id} topped up {charge.amount} via Nedarim (charge {charge_id})')
+        try:
+            from routes.dictate import trigger_pending_manuscripts
+            trigger_pending_manuscripts(institution_id=institution.id)
+        except Exception as e:
+            log.error(f'pending manuscripts trigger failed: {e}')
     else:
         charge.status = 'failed'
         db.session.commit()

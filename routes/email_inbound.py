@@ -893,9 +893,9 @@ def _ocr_worker(filepath, original_filename, customer_id, customer_email, phone)
         char_count = len(ocr_text)
         log.info(f"OCR completed: {char_count} chars")
 
-        import math
-        units = math.ceil(char_count / 1000)  # כל 1000 תווים = יחידה אחת (עיגול למעלה)
-        cost = round(units * price_per_1000, 2)
+        # חיוב יחסי לכמות התווים, מעוגל כלפי מעלה ל-10 אגורות
+        from services.pricing import char_cost
+        cost = char_cost(char_count, 1000, price_per_1000)
 
         with app.app_context():
             customer = Customer.query.get(customer_id)
@@ -1429,8 +1429,8 @@ def process_pending_ocr(customer_id):
                     continue
 
                 char_count = len(ocr_text)
-                units = math.ceil(char_count / 1000)
-                cost = round(units * price_per_1000, 2)
+                from services.pricing import char_cost
+                cost = char_cost(char_count, 1000, price_per_1000)
 
                 ocr_rec.ocr_text = ocr_text
                 ocr_rec.char_count = char_count
@@ -2148,8 +2148,8 @@ def _send_handwriting_instructions_email(to_email, phone, name=''):
 <div style="background:#fffbeb;border-right:4px solid #f59e0b;padding:14px;margin:16px 0;border-radius:8px">
 <p style="margin:0 0 8px;font-weight:700;color:#92400e">💰 מחירון:</p>
 <p style="margin:0;line-height:2;color:#111827">
-⚡ <b>רגיל (זיהוי אוטומטי):</b> ₪{price_ocr} לכל 1,000 תווים — תשובה בדקות ספורות<br>
-✍️ <b>מקצועי (קלדנות דיגיטלית):</b> ₪{pro_unit_price:.2f} לכל {pro_unit_size:,} תווים — בדרך כלל עד 24 שעות, לאחר אישור נציג אנושי (ייתכנו עיכובים בזמני עומס)
+⚡ <b>רגיל (זיהוי אוטומטי):</b> ₪{price_ocr} לכל 1,000 תווים (חיוב יחסי, מעוגל ל-10 אג') — תשובה בדקות ספורות<br>
+✍️ <b>מקצועי (קלדנות דיגיטלית):</b> ₪{pro_unit_price:.2f} לכל {pro_unit_size:,} תווים (חיוב יחסי, מעוגל ל-10 אג') — בדרך כלל עד 24 שעות, לאחר אישור נציג אנושי (ייתכנו עיכובים בזמני עומס)
 </p>
 </div>
 
@@ -2267,7 +2267,7 @@ def _send_choice_email(to_email, row):
 <div style="font-size:18px;font-weight:700;color:#1d4ed8">⚡ רגיל — זיהוי אוטומטי</div>
 <div style="line-height:1.9;margin:8px 0 12px;font-size:14px">
 זיהוי אוטומטי של כתב היד, מהיר וזול. ייתכנו שגיאות בכתב לא ברור.<br>
-💰 מחיר: <b>₪{ocr_price:.2f}</b> לכל 1,000 תווים<br>
+💰 מחיר: <b>₪{ocr_price:.2f}</b> לכל 1,000 תווים (חיוב יחסי לכמות, מעוגל כלפי מעלה ל-10 אגורות)<br>
 ⏱ זמן תגובה: בדרך כלל תוך דקות ספורות, ישירות למייל
 </div>
 <a href="{_choice_link(row, 'regular')}" style="background:#2563eb;color:#fff;text-decoration:none;padding:11px 26px;border-radius:8px;font-weight:700;display:inline-block">בחירה ברגיל</a>
@@ -2276,7 +2276,7 @@ def _send_choice_email(to_email, row):
 <div style="font-size:18px;font-weight:700;color:#047857">✍️ מקצועי — קלדנות דיגיטלית</div>
 <div style="line-height:1.9;margin:8px 0 12px;font-size:14px">
 תוכן מוקלד ומדויק, שעובר אישור של נציג אנושי לפני שהוא נשלח אליכם כקובץ Word.<br>
-💰 מחיר: <b>₪{unit_price:.2f}</b> לכל {unit_size:,} תווים<br>
+💰 מחיר: <b>₪{unit_price:.2f}</b> לכל {unit_size:,} תווים (חיוב יחסי לכמות, מעוגל כלפי מעלה ל-10 אגורות)<br>
 ⏱ זמן תגובה: בדרך כלל עד 24 שעות (ייתכנו עיכובים בזמני עומס)
 </div>
 <a href="{_choice_link(row, 'pro')}" style="background:#059669;color:#fff;text-decoration:none;padding:11px 26px;border-radius:8px;font-weight:700;display:inline-block">בחירה במקצועי</a>

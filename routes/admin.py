@@ -399,6 +399,11 @@ def credit_customer(id):
         )
         db.session.add(txn)
         db.session.commit()
+        try:
+            from routes.dictate import trigger_pending_manuscripts
+            trigger_pending_manuscripts(customer_id=id)
+        except Exception:
+            pass
         flash(f'לקוח זוכה ב-{amount:.2f} ₪')
     return redirect(url_for('admin.customer_detail', id=id))
 
@@ -1157,6 +1162,12 @@ def bulk_customer_action():
             )
             db.session.add(txn)
         db.session.commit()
+        for _c in customers:
+            try:
+                from routes.dictate import trigger_pending_manuscripts
+                trigger_pending_manuscripts(customer_id=_c.id)
+            except Exception:
+                pass
         flash(f'נוסף ₪{amount} ל-{len(customers)} לקוחות')
 
     elif action == 'add_percent':
@@ -1175,6 +1186,12 @@ def bulk_customer_action():
             )
             db.session.add(txn)
         db.session.commit()
+        for _c in customers:
+            try:
+                from routes.dictate import trigger_pending_manuscripts
+                trigger_pending_manuscripts(customer_id=_c.id)
+            except Exception:
+                pass
         flash(f'נוסף {percent}% ל-{len(customers)} לקוחות')
 
     elif action == 'delete':
@@ -1744,6 +1761,12 @@ def adjust_institution_balance(inst_id):
         return redirect(url_for('admin.institution_detail', inst_id=inst.id))
     inst.balance = (inst.balance or 0) + amount
     db.session.commit()
+    if amount > 0:
+        try:
+            from routes.dictate import trigger_pending_manuscripts
+            trigger_pending_manuscripts(institution_id=inst.id)
+        except Exception:
+            pass
     flash('היתרה עודכנה')
     return redirect(url_for('admin.institution_detail', inst_id=inst.id))
 

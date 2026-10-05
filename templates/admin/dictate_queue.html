@@ -1,11 +1,27 @@
 {% extends 'admin/base.html' %}
-{% block title %}הקראת כתבי-יד{% endblock %}
+{% block title %}הקראת כתבי-יד<script>
+async function sendFree(id, btn) {
+  if (!confirm('לשלוח את המסמך ללקוח בלי לחייב אותו כלל?')) return;
+  btn.disabled = true; btn.textContent = 'שולח...';
+  try {
+    const fd = new FormData(); fd.append('free', '1');
+    const res = await fetch(`/admin/dictate/${id}/send`, { method: 'POST', body: fd });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'שליחה נכשלה');
+    location.reload();
+  } catch (e) { alert('⚠ ' + e.message); btn.disabled = false; btn.textContent = '🎁 שלח ללא חיוב'; }
+}
+</script>
+{% endblock %}
 {% block page_title %}תור הקראת כתבי-יד{% endblock %}
 {% block content %}
 
 <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
   <a href="/admin/dictate?status=open" class="btn {% if status_filter=='open' %}btn-primary{% else %}btn-ghost{% endif %}" style="font-size:13px">
     🕓 בתור{% if open_pending_count %} <span class="badge badge-red" style="margin-right:4px">{{ open_pending_count }}</span>{% endif %}
+  </a>
+  <a href="/admin/dictate?status=unpaid" class="btn {% if status_filter=='unpaid' %}btn-primary{% else %}btn-ghost{% endif %}" style="font-size:13px">
+    💳 ממתין לתשלום{% if unpaid_count %} <span class="badge badge-amber" style="margin-right:4px">{{ unpaid_count }}</span>{% endif %}
   </a>
   <a href="/admin/dictate?status=done" class="btn {% if status_filter=='done' %}btn-primary{% else %}btn-ghost{% endif %}" style="font-size:13px">✅ הושלמו</a>
   <a href="/admin/dictate?status=proof" class="btn {% if status_filter=='proof' %}btn-primary{% else %}btn-ghost{% endif %}" style="font-size:13px">
@@ -154,6 +170,7 @@
           {% elif p.status == 'recording' %}<span class="badge badge-blue">בהקלטה</span>
           {% elif p.status == 'processing' %}<span class="badge badge-amber">מתמלל...</span>
           {% elif p.status == 'review' %}<span class="badge badge-amber">ממתין לאישור</span>
+          {% elif p.status == 'pending_payment' %}<span class="badge badge-amber">💳 ממתין לתשלום</span>{% if p.due_cost %} <span style="color:#8892b0;font-size:11.5px">₪{{ "%.2f"|format(p.due_cost) }}</span>{% endif %}
           {% elif p.status == 'done' %}<span class="badge badge-green">נשלח</span>
           {% else %}<span class="badge badge-red">שגיאה</span>{% endif %}
           {% if p.proofing_rounds | selectattr('status', 'equalto', 'pending') | list %}<span class="badge badge-blue" style="margin-right:4px">✏️ הגהה ממתינה</span>{% endif %}
@@ -163,6 +180,7 @@
         <td onclick="location='/admin/dictate/{{p.id}}'" style="cursor:pointer;color:#8892b0">{{ p.created_at | il_time }}</td>
         <td style="display:flex;gap:6px">
           <a href="/admin/dictate/{{p.id}}" class="btn btn-ghost" style="font-size:12px;padding:4px 10px">{% if p.status=='done' %}צפייה{% else %}פתח{% endif %}</a>
+          {% if p.status == 'pending_payment' %}<button type="button" class="btn btn-primary" style="font-size:12px;padding:4px 10px" onclick="sendFree({{p.id}}, this)" title="שליחה ללקוח בלי לחייב">🎁 שלח ללא חיוב</button>{% endif %}
           <form method="POST" action="/admin/dictate/{{p.id}}/delete" onsubmit="return confirm('למחוק לצמיתות את הדף {{ p.original_filename }}? פעולה זו אינה הפיכה!')">
             <button type="submit" class="btn btn-danger" style="font-size:12px;padding:4px 10px">🗑 מחק</button>
           </form>

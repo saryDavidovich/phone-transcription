@@ -69,7 +69,7 @@
       <div class="form-group">
         <label class="form-label">מחיר OCR כתב יד לכל 1,000 תווים (₪)</label>
         <input class="form-input" name="price_per_1000_chars_ocr" type="number" step="0.01" value="{{ settings.price_per_1000_chars_ocr }}">
-        <div style="font-size:11px;color:#4a5568;margin-top:4px">זיהוי טקסט מתמונה/PDF — לקוח שולח תמונת כתב יד במייל</div>
+        <div style="font-size:11px;color:#4a5568;margin-top:4px">זיהוי טקסט מתמונה/PDF — לקוח שולח תמונת כתב יד במייל. החיוב יחסי לכמות התווים בפועל, מעוגל כלפי מעלה ל-10 אגורות</div>
       </div>
 
       <div style="border-top:2px solid #e2e8f0;margin:20px 0 12px;padding-top:16px">
@@ -79,7 +79,7 @@
       <div class="form-group">
         <label class="form-label">גודל יחידת תווים</label>
         <input class="form-input" name="manuscript_char_unit_size" type="number" step="1" min="1" value="{{ settings.manuscript_char_unit_size }}">
-        <div style="font-size:11px;color:#4a5568;margin-top:4px">לדוגמה: 1000 - כלומר החיוב מחושב לכל 1,000 תווים</div>
+        <div style="font-size:11px;color:#4a5568;margin-top:4px">לדוגמה: 1000 - כלומר המחיר מוגדר לכל 1,000 תווים (החיוב בפועל יחסי לכמות, מעוגל כלפי מעלה ל-10 אגורות)</div>
       </div>
       <div class="form-group">
         <label class="form-label">מחיר לכל יחידת תווים (₪)</label>

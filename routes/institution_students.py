@@ -104,6 +104,12 @@ def credit_student(student_id):
         description='זיכוי ע"י המוסד' if amount >= 0 else 'חיוב ע"י המוסד',
     ))
     db.session.commit()
+    if amount > 0:
+        try:
+            from routes.dictate import trigger_pending_manuscripts
+            trigger_pending_manuscripts(customer_id=student.id)
+        except Exception:
+            pass
     flash('היתרה עודכנה')
     return redirect(url_for('institution_students.students_tab'))
 

@@ -109,9 +109,12 @@ def dictate_pending_counts():
             'proof': ProofingRound.query.filter_by(status='pending').count(),
             'fax': IncomingFax.query.filter_by(status='pending').count(),
         }
+        # דפים שהושהו בגלל יתרה לא מספיקה - מחכים ללקוח, לא לצוות: נספרים
+        # בנפרד ולא נכנסים ל-total (שמראה את מה שהצוות צריך לטפל בו).
+        counts['unpaid'] = ManuscriptPage.query.filter_by(status='pending_payment').count()
     except Exception:
         db.session.rollback()
-        counts = {'open': 0, 'proof': 0, 'fax': 0}
+        counts = {'open': 0, 'proof': 0, 'fax': 0, 'unpaid': 0}
     counts['total'] = counts['open'] + counts['proof'] + counts['fax']
     g._dictate_pending_counts = counts
     return counts
@@ -982,6 +985,9 @@ def queue():
         q = q.filter(ManuscriptPage.status.in_(OPEN_STATUSES))
         q = q.order_by(ManuscriptPage.created_at.asc())  # תור - הישן קודם
         pages = q.limit(200).all()
+    elif status_filter == 'unpaid':
+        q = q.filter(ManuscriptPage.status == 'pending_payment').order_by(ManuscriptPage.created_at.asc())
+        pages = q.limit(200).all()
     elif status_filter == 'done':
         q = q.filter(ManuscriptPage.status == 'done')
         q = q.order_by(ManuscriptPage.created_at.desc())
@@ -1017,7 +1023,13 @@ def queue():
     # מספרי "ממתין" על הלשוניות - רק מה שבאמת מחכה לטיפול. "הושלמו" ו"הגהות
     # שהושלמו" בכוונה בלי מספר (אין מה לטפל בהם).
     pending = dictate_pending_counts()
-    return render_template('admin/dictate_queue.html', pages=pages, proof_rounds=proof_rounds,
+    # עלות לתשלום לדפים מושהים (להצגה בתור)
+    from services.pricing import char_cost
+    unit_size, price_per_unit = _manuscript_pricing()
+    for _p in pages:
+        if _p.status == 'pending_payment':
+            _p.due_cost = char_cost(_manuscript_char_count(_p.content), unit_size, price_per_unit)
+    return render_template('admin/dictate_queue.html', pages=pages, proof_rounds=proof_rounds, unpaid_count=pending.get('unpaid', 0),
                             incoming_faxes=incoming_faxes,
                             status_filter=status_filter, open_pending_count=pending['open'],
                             proof_pending_count=pending['proof'], fax_pending_count=pending['fax'])
@@ -1607,72 +1619,141 @@ def redo(page_id):
     return jsonify({'status': 'pending'})
 
 
-@dictate_bp.route('/<int:page_id>/send', methods=['POST'])
-@login_required
-def send(page_id):
-    """מסמן דף כתב-יד כמוכן/משויך, וממסור אותו ללקוח - לפי מי הלקוח, בדרך
-    שונה (ראה גם proof_complete למטה, אותה פילוסופיה בדיוק לסבבי הגהה):
-      1. יש כתובת מייל (הוזנה ידנית בטופס, או קיימת על הלקוח) -> מייל, כמו
-         תמיד.
-      2. אין מייל אבל הלקוח שייך למוסד (institution_id) -> לא דורשים שום
-         דרך מסירה - סימון "מוכן" מספיק, המוסד רואה/מוריד את הקובץ בעצמו
-         בתיק התלמיד באתר (routes/institution_students.py student_detail) -
-         זה הערוץ העיקרי שלהם ותמיד עדכני, בלי תלות בהקלדת מייל של נציג.
-      3. אין מייל ואין מוסד, אבל יש מספר טלפון/פקס ללקוח -> שולחים פקס
-         (_send_manuscript_fax) - אלו "אנשי הפקס" (ראה _send_manuscript_email
-         למעלה) שקודם לכן לא היה אפשר למסור להם את הכתב-יד המוכן בכלל כי
-         הפונקציה דרשה מייל תמיד.
-      4. אף אחד מהנ"ל - שגיאה אמיתית (אין שום דרך להגיע ללקוח)."""
-    from models import ManuscriptPage, Transaction
-    page = ManuscriptPage.query.get_or_404(page_id)
+def _manuscript_billing_account(customer):
+    """החשבון שמחויב על הדף: "מסמך כללי" של מוסד (Customer.is_institution_self,
+    ראה routes/institution.py.ensure_institution_self_customer) לא צובר יתרה
+    משלו - מחייבים ישירות את יתרת המוסד; בכל מקרה אחר - הלקוח עצמו."""
+    if customer and customer.is_institution_self and customer.institution:
+        return customer.institution
+    return customer
+
+
+def _manuscript_held_recipient(customer, billing_account):
+    """למי שולחים הודעת "הדף הושהה - צריך להטעין יתרה", ואיך מציגים את
+    אופן הטעינה. מחזיר (מייל, טלפון_לקישור_טעינה, האם_תלמיד_של_מוסד)."""
+    inst = customer.institution if customer else None
+    if customer and customer.is_institution_self and inst:
+        return ((inst.notify_email or inst.email or '').strip(), (inst.phone or '').strip(), False)
+    if customer and customer.institution_id and inst:
+        return (((customer.email or '').strip() or (inst.notify_email or inst.email or '').strip()), '', True)
+    return (((customer.email or '').strip() if customer else ''), ((customer.phone or '').strip() if customer else ''), False)
+
+
+def _send_manuscript_held_email(page, customer, billing_account, cost):
+    """מייל ללקוח: הדף שלו מוכן אבל הושהה בגלל יתרה לא מספקת. אחרי הטעינה
+    הוא יישלח אליו אוטומטית. מחזיר את הכתובת שאליה נשלח, או None."""
+    to_email, topup_phone, is_student = _manuscript_held_recipient(customer, billing_account)
+    if not to_email:
+        return None
+    try:
+        from routes.email_inbound import _is_system_inbound_address
+        if _is_system_inbound_address(to_email):
+            log.error(f"חסימת שליחת מייל השהיה לכתובת המערכת עצמה ({to_email}) - מניעת לולאה")
+            return None
+        import sendgrid
+        from sendgrid.helpers.mail import Mail, Email
+        from html import escape
+        balance = float(getattr(billing_account, 'balance', 0) or 0)
+        base_url = os.environ.get('APP_BASE_URL', '').rstrip('/')
+        link_html = ''
+        if topup_phone and base_url and os.environ.get('NEDARIM_MOSAD'):
+            from urllib.parse import quote
+            link = f"{base_url}/payment/nedarim/topup-link/{quote(topup_phone)}"
+            link_html = (f'<p style="text-align:center;margin:18px 0"><a href="{link}" '
+                         f'style="background:#2563eb;color:#fff;text-decoration:none;padding:12px 28px;'
+                         f'border-radius:8px;font-weight:700;display:inline-block">💳 לטעינת יתרה בכרטיס אשראי</a></p>')
+        if is_student:
+            who = escape(customer.display_name if customer else '')
+            how_html = (f'<p>הדף שייך ל<b>{who}</b>. כדי שיישלח, יש להעביר יתרה לתלמיד/ה '
+                        f'מאזור המוסד באתר (לשונית התלמידים).</p>')
+        else:
+            how_html = (link_html +
+                        '<p style="text-align:center;font-weight:700;color:#1d4ed8">'
+                        'אפשר גם בטלפון: התקשרו ל-03-3131795 ובתפריט הראשי בחרו בטעינת ארנק</p>')
+        fname = escape(page.original_filename or 'כתב יד')
+        html = f"""<div dir="rtl" style="font-family:Arial,sans-serif;max-width:640px;margin:auto;color:#111827">
+<h2 style="color:#1d4ed8">הקראת כתב היד שלכם מוכנה</h2>
+<p>שלום,</p>
+<p>ההקראה של <b>{fname}</b> הושלמה ומוכנה למשלוח, אך <b>היתרה בארנק אינה מספיקה</b> ולכן היא הושהתה.</p>
+<div style="background:#fef3c7;border-right:4px solid #f59e0b;padding:14px;margin:14px 0;border-radius:8px">
+<p style="margin:0">עלות: <b>₪{cost:.2f}</b><br>יתרה נוכחית: <b>₪{balance:.2f}</b></p>
+</div>
+<p><b>מיד אחרי הטעינה המסמך יישלח אליכם אוטומטית</b> - אין צורך לפנות אלינו שוב.</p>
+{how_html}
+<p style="color:#6b7280;font-size:13px">מערכת תמלול פון 03-3131795</p>
+</div>"""
+        sg = sendgrid.SendGridAPIClient(api_key=os.environ.get('SENDGRID_API_KEY'))
+        sg.send(Mail(
+            from_email=Email(os.environ.get('SENDGRID_FROM_EMAIL', ''), 'תמלול פון'),
+            to_emails=to_email,
+            subject='תמלול פון - הכתב יד מוכן, נדרשת טעינת יתרה',
+            html_content=html,
+        ))
+        log.info(f"manuscript held email sent to {to_email} (page={page.id})")
+        return to_email
+    except Exception as e:
+        log.error(f"manuscript held email error (page={page.id}): {e}")
+        return None
+
+
+def _manuscript_send_core(page, form_email='', free=False, notify_if_held=True):
+    """הלב של "שלח": מוסר את הדף ללקוח ומחייב. מחזיר (payload, http_status).
+    - יתרה מספיקה -> נשלח + חיוב (status='done').
+    - יתרה לא מספיקה -> לא שגיאה: הדף מושהה (status='pending_payment'),
+      נשלח מייל ללקוח עם הסבר/קישור טעינה, ובעת הטעינה הוא יישלח אוטומטית
+      (process_pending_manuscripts). payload['held'] = True.
+    - free=True (נציג בחר "שלח ללא חיוב") -> נשלח בלי שום חיוב."""
+    from models import Transaction
     if not page.content:
-        return jsonify({'error': 'אין תוכן לשליחה'}), 400
+        return {'error': 'אין תוכן לשליחה'}, 400
 
     customer = page.customer
-    to_email = (request.form.get('to_email') or '').strip() or ((customer.email or '').strip() if customer else '')
+    to_email = (form_email or '').strip() or ((customer.email or '').strip() if customer else '')
     is_institution_student = bool(customer and customer.institution_id)
     to_fax_number = ''
     if not to_email and not is_institution_student and customer:
         to_fax_number = (customer.fax or customer.phone or '').strip()
 
     if not to_email and not is_institution_student and not to_fax_number:
-        return jsonify({'error': 'אין כתובת מייל, מספר פקס או שיוך למוסד ליעד - אין דרך למסור ללקוח הזה'}), 400
+        return {'error': 'אין כתובת מייל, מספר פקס או שיוך למוסד ליעד - אין דרך למסור ללקוח הזה'}, 400
 
     # התשלום יורד מהלקוח רק פעם אחת - בפעם הראשונה שהדף באמת מסתיים ונשלח
-    # בהצלחה (status עובר מ-'done'). אם לוחצים "שלח" שוב על דף שכבר נשלח
-    # (למשל כדי לשגר שוב לאותה כתובת/לכתובת אחרת) - זו שליחה חוזרת של אותו
-    # תוכן, לא חיוב נוסף. "הקלט מחדש" (redo) מאפס את status ל-'pending' -
-    # ואז שליחה הבאה היא שוב "שליחה ראשונה" לגיטימית שכן מחויבת.
+    # בהצלחה (status עובר ל-'done'). שליחה חוזרת של דף שכבר נשלח היא לא חיוב
+    # נוסף. "הקלט מחדש" (redo) מאפס ל-'pending' - ושליחה הבאה שוב מחויבת.
     already_sent = (page.status == 'done')
 
-    # "מסמכים כלליים" של מוסד (Customer.is_institution_self, ראה
-    # routes/institution.py.ensure_institution_self_customer) לא אמורים
-    # לצבור יתרה משלהם - מחייבים ישירות את יתרת המוסד עצמו (אותה יתרה
-    # בדיוק שמשמשת גם ל-InstitutionUpload/institution_transcribe).
-    billing_account = customer
-    if customer and customer.is_institution_self and customer.institution:
-        billing_account = customer.institution
+    billing_account = _manuscript_billing_account(customer)
 
     unit_size, price_per_unit = _manuscript_pricing()
     char_count = _manuscript_char_count(page.content)
-    units = math.ceil(char_count / unit_size) if char_count > 0 else 0
-    cost = 0.0 if already_sent else round(units * price_per_unit, 2)
+    # חיוב יחסי לכמות התווים, מעוגל כלפי מעלה ל-10 אגורות
+    from services.pricing import char_cost
+    full_cost = char_cost(char_count, unit_size, price_per_unit)
+    cost = 0.0 if (already_sent or free) else full_cost
 
     if cost > 0:
         if not billing_account:
-            return jsonify({'error': 'לא נמצא לקוח/מוסד משויך לדף זה - לא ניתן לחייב'}), 400
-        if billing_account.balance < cost:
+            return {'error': 'לא נמצא לקוח/מוסד משויך לדף זה - לא ניתן לחייב'}, 400
+        if (billing_account.balance or 0) < cost:
             log.info(
                 f"manuscript send: יתרה לא מספיקה עבור {'institution' if billing_account is not customer else 'customer'} "
-                f"{billing_account.id} (צריך {cost}, יש {billing_account.balance}), page={page_id}"
+                f"{billing_account.id} (צריך {cost}, יש {billing_account.balance}), page={page.id} - מושהה"
             )
-            return jsonify({
-                'error': f'אין מספיק יתרה לשליחה (עלות: ₪{cost:.2f}, יתרה נוכחית: ₪{billing_account.balance:.2f}) - '
-                         f'יש לטעון יתרה ולנסות לשלוח שוב',
-                'insufficient_balance': True,
-                'cost': cost,
-                'balance': billing_account.balance,
-            }), 402
+            was_held = (page.status == 'pending_payment')
+            page.status = 'pending_payment'
+            # כתובת היעד שנבחרה נשמרת (sent_to) כדי שהמשלוח האוטומטי אחרי
+            # הטעינה ילך לאותה כתובת בדיוק.
+            page.sent_to = to_email or None
+            page.sent_via = None
+            db.session.commit()
+            notified = None
+            if notify_if_held and not was_held:
+                notified = _send_manuscript_held_email(page, customer, billing_account, cost)
+            return {
+                'status': 'held', 'held': True, 'cost': cost,
+                'balance': float(billing_account.balance or 0),
+                'notified_to': notified, 'already_held': was_held,
+            }, 200
 
     try:
         if to_email:
@@ -1686,7 +1767,7 @@ def send(page_id):
             page.sent_to = to_fax_number
         else:
             # לקוח מוסד ללא מייל - שום מסירה אקטיבית, רק סימון "מוכן"
-            # (המוסד רואה/מוריד בעצמו - ראה docstring למעלה).
+            # (המוסד רואה/מוריד בעצמו בתיק התלמיד באתר).
             page.sent_via = None
             page.sent_to = None
 
@@ -1698,20 +1779,104 @@ def send(page_id):
                 type='manuscript_dictation',
                 description=f'הקראת כתב יד - {page.original_filename}' + (' (חויב מיתרת המוסד)' if billing_account is not customer else ''),
             ))
+        elif free and not already_sent and customer:
+            db.session.add(Transaction(
+                customer_id=customer.id,
+                amount=0.0,
+                type='manuscript_free',
+                description=f'הקראת כתב יד - {page.original_filename} (נשלח ללא חיוב ע"י נציג, עלות רגילה ₪{full_cost:.2f})',
+            ))
         if not already_sent:
             page.char_count = char_count
             page.cost = cost
         page.sent_at = datetime.utcnow()
         page.status = 'done'
         db.session.commit()
-        return jsonify({
+        return {
             'status': 'sent', 'to': page.sent_to, 'via': page.sent_via or 'portal',
             'cost': cost, 'char_count': char_count, 'resend': already_sent,
-        })
+            'free': bool(free and not already_sent),
+        }, 200
     except Exception as e:
         db.session.rollback()
-        log.error(f"manuscript send error (page={page_id}): {e}", exc_info=True)
-        return jsonify({'error': f'שליחה נכשלה: {e}'}), 500
+        log.error(f"manuscript send error (page={page.id}): {e}", exc_info=True)
+        return {'error': f'שליחה נכשלה: {e}'}, 500
+
+
+@dictate_bp.route('/<int:page_id>/send', methods=['POST'])
+@login_required
+def send(page_id):
+    """מסמן דף כתב-יד כמוכן/משויך, וממסור אותו ללקוח - לפי מי הלקוח, בדרך
+    שונה (ראה גם proof_complete למטה):
+      1. יש כתובת מייל (הוזנה ידנית בטופס, או קיימת על הלקוח) -> מייל.
+      2. אין מייל אבל הלקוח שייך למוסד -> סימון "מוכן" (המוסד רואה/מוריד
+         בעצמו בתיק התלמיד באתר).
+      3. אין מייל ואין מוסד, אבל יש טלפון/פקס -> פקס.
+      4. אף אחד מהנ"ל - שגיאה אמיתית.
+    יתרה לא מספיקה: הדף מושהה (לא שגיאה) והלקוח מקבל מייל - ראה
+    _manuscript_send_core. הפרמטר free=1 = שליחה ללא חיוב (כפתור נציג)."""
+    from models import ManuscriptPage
+    page = ManuscriptPage.query.get_or_404(page_id)
+    free = (request.form.get('free') or '') in ('1', 'true', 'on')
+    payload, code = _manuscript_send_core(page, request.form.get('to_email') or '', free=free)
+    return jsonify(payload), code
+
+
+def process_pending_manuscripts(customer_id=None, institution_id=None):
+    """אחרי טעינת יתרה: שולח אוטומטית כל דף שהושהה (pending_payment) ושעכשיו
+    היתרה מספיקה לו - בלי שום פעולת נציג. customer_id = לקוח/תלמיד שהיתרה
+    שלו התעדכנה; institution_id = מוסד שהיתרה שלו התעדכנה (חל על "מסמכים
+    כלליים" של המוסד, שמחויבים מיתרת המוסד)."""
+    from flask import has_app_context, current_app
+    if has_app_context():
+        app_obj = current_app._get_current_object()
+    else:
+        from app import app as app_obj
+    with app_obj.app_context():
+        from models import ManuscriptPage, Customer
+        q = ManuscriptPage.query.filter_by(status='pending_payment')
+        if customer_id:
+            q = q.filter(ManuscriptPage.customer_id == customer_id)
+        elif institution_id:
+            q = q.join(Customer, ManuscriptPage.customer_id == Customer.id).filter(
+                Customer.institution_id == institution_id, Customer.is_institution_self.is_(True))
+        else:
+            return 0
+        ids = [pid for (pid,) in q.with_entities(ManuscriptPage.id).order_by(ManuscriptPage.created_at.asc()).all()]
+        sent = 0
+        for pid in ids:
+            try:
+                # נעילת השורה - שתי טעינות/webhooks במקביל לא ישלחו פעמיים
+                page = ManuscriptPage.query.filter_by(id=pid).with_for_update().first()
+                if not page or page.status != 'pending_payment' or not page.content:
+                    db.session.rollback()
+                    continue
+                target = page.sent_to if '@' in (page.sent_to or '') else ''
+                payload, code = _manuscript_send_core(page, target, free=False, notify_if_held=False)
+                if payload.get('status') == 'sent':
+                    sent += 1
+                    log.info(f"process_pending_manuscripts: נשלח דף {pid} אחרי טעינה (עלות {payload.get('cost')})")
+                else:
+                    db.session.rollback()
+                    log.info(f"process_pending_manuscripts: דף {pid} עדיין לא נשלח: {payload}")
+            except Exception as e:
+                db.session.rollback()
+                log.error(f"process_pending_manuscripts error (page={pid}): {e}", exc_info=True)
+        return sent
+
+
+def trigger_pending_manuscripts(customer_id=None, institution_id=None, delay=2):
+    """מפעיל את process_pending_manuscripts ברקע (לא חוסם את בקשת הטעינה)."""
+    import threading, time
+
+    def _run():
+        time.sleep(delay)
+        try:
+            process_pending_manuscripts(customer_id=customer_id, institution_id=institution_id)
+        except Exception as e:
+            log.error(f"trigger_pending_manuscripts error: {e}", exc_info=True)
+
+    threading.Thread(target=_run, daemon=True).start()
 
 
 # ==========================================================================

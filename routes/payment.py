@@ -170,6 +170,11 @@ def nedarim_webhook():
         db.session.add(charge)
         db.session.commit()
         log.info(f'Nedarim webhook: credited institution {institution.id} +{amount} (tx {tx_id})')
+        try:
+            from routes.dictate import trigger_pending_manuscripts
+            trigger_pending_manuscripts(institution_id=institution.id)
+        except Exception as e:
+            log.error(f'Nedarim webhook: pending manuscripts trigger failed: {e}')
         return jsonify({'ok': True})
 
     # 2. ניסיון התאמה ללקוח בודד - לפי טלפון. אם אין עדיין לקוח עם הטלפון
@@ -210,6 +215,11 @@ def nedarim_webhook():
             time.sleep(3)
             process_pending_recordings(customer_id)
             process_pending_ocr(customer_id)
+            try:
+                from routes.dictate import process_pending_manuscripts
+                process_pending_manuscripts(customer_id=customer_id)
+            except Exception as e:
+                log.error(f'Nedarim webhook: pending manuscripts failed: {e}')
 
         threading.Thread(target=_delayed_process, args=(customer.id,), daemon=True).start()
 

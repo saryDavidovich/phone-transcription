@@ -422,6 +422,12 @@ def process_pending():
     def _run_both(customer_id):
         process_pending_recordings(customer_id)
         process_pending_ocr(customer_id)
+        try:
+            from routes.dictate import process_pending_manuscripts
+            process_pending_manuscripts(customer_id=customer_id)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(f'process_pending manuscripts failed: {e}')
 
     t = threading.Thread(target=_run_both, args=(customer.id,), daemon=True)
     t.start()

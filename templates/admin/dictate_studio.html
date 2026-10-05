@@ -163,11 +163,17 @@
         <div class="ds-state ds-error">⚠ {{ page.error_message or 'שגיאה בתמלול' }}</div>
         <div style="text-align:center"><button class="btn btn-primary" onclick="redo()">נסה שוב</button></div>
       {% elif page.content %}
+        {% if page.status == 'pending_payment' %}
+        <div id="heldBanner" style="background:#fef3c7;border:1px solid #f59e0b;color:#92400e;border-radius:8px;padding:10px 14px;margin-bottom:10px;font-size:13px">
+          💳 הדף הזה הושהה כי ליתרת הלקוח אין מספיק. הודעה נשלחה ללקוח, והמסמך יישלח אליו אוטומטית מיד אחרי שיטען יתרה. אפשר גם ללחוץ "שלח ללא חיוב".
+        </div>
+        {% endif %}
         <div id="previewWrap"></div>
         <div class="ds-charcount">מספר תווים (כולל רווחים): <strong id="charCountValue">0</strong></div>
         <div class="ds-sendrow">
           <input type="email" id="toEmail" placeholder="כתובת מייל ליעד" value="{{ page.customer.email or '' }}">
           <button class="btn btn-primary" onclick="sendResult()">📤 שלח</button>
+          <button class="btn btn-ghost" onclick="sendResult(true)" title="שליחה ללקוח בלי לחייב את היתרה שלו">🎁 שלח ללא חיוב</button>
           <button class="btn btn-ghost" onclick="saveEdits()">💾 שמור תיקונים</button>
           <button class="btn btn-danger" onclick="redo()">🔄 הקלט מחדש</button>
         </div>
@@ -591,6 +597,7 @@ function renderReview() {
     <div class="ds-sendrow">
       <input type="email" id="toEmail" placeholder="כתובת מייל ליעד" value="{{ page.customer.email or '' }}">
       <button class="btn btn-primary" onclick="sendResult()">📤 שלח</button>
+      <button class="btn btn-ghost" onclick="sendResult(true)" title="שליחה ללקוח בלי לחייב את היתרה שלו">🎁 שלח ללא חיוב</button>
       <button class="btn btn-ghost" onclick="saveEdits()">💾 שמור תיקונים</button>
       <button class="btn btn-danger" onclick="redo()">🔄 הקלט מחדש</button>
     </div>
@@ -687,11 +694,13 @@ async function saveEdits() {
   msg.style.color = res.ok ? 'var(--green)' : 'var(--red)';
 }
 
-async function sendResult() {
+async function sendResult(free) {
+  if (free === true && !confirm('לשלוח את המסמך ללקוח בלי לחייב אותו כלל?')) return;
   await saveEdits();
   const toEmail = document.getElementById('toEmail').value.trim();
   const fd = new FormData();
   if (toEmail) fd.append('to_email', toEmail);
+  if (free === true) fd.append('free', '1');
   const msg = document.getElementById('sendMsg');
   msg.textContent = 'שולח...';
   msg.style.color = 'var(--text2)';
@@ -699,7 +708,14 @@ async function sendResult() {
     const res = await fetch(`/admin/dictate/${PAGE_ID}/send`, { method: 'POST', body: fd });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'שליחה נכשלה');
-    const costPart = (data.cost > 0) ? ` (חויב ₪${data.cost.toFixed(2)})` : (data.resend ? ' (שליחה חוזרת - לא חויב שוב)' : '');
+    if (data.status === 'held') {
+      const who = data.notified_to ? `נשלחה הודעה ללקוח במייל אל ${data.notified_to}` : (data.already_held ? 'ההודעה ללקוח כבר נשלחה קודם' : 'ללקוח אין כתובת מייל - לא נשלחה הודעה, כדאי ליצור קשר בטלפון');
+      msg.textContent = `⏸ הדף עלה, אבל בגלל שאין ליתרת הלקוח מספיק (עלות ₪${data.cost.toFixed(2)}, יתרה ₪${data.balance.toFixed(2)}) הוא הושהה. ${who}. מיד אחרי שיטען יתרה המסמך יישלח אליו אוטומטית. אפשר גם ללחוץ "שלח ללא חיוב".`;
+      msg.style.color = '#b45309';
+      document.getElementById('statusBadge').textContent = 'pending_payment';
+      return;
+    }
+    const costPart = (data.cost > 0) ? ` (חויב ₪${data.cost.toFixed(2)})` : (data.resend ? ' (שליחה חוזרת - לא חויב שוב)' : (data.free ? ' (נשלח ללא חיוב)' : ''));
     let viaPart;
     if (data.via === 'email') viaPart = `נשלח במייל אל ${data.to}`;
     else if (data.via === 'fax') viaPart = `נשלח בפקס אל ${data.to}`;
@@ -707,6 +723,7 @@ async function sendResult() {
     msg.textContent = `✔ ${viaPart}${costPart}`;
     msg.style.color = 'var(--green)';
     document.getElementById('statusBadge').textContent = 'done';
+    const hb = document.getElementById('heldBanner'); if (hb) hb.remove();
   } catch (e) {
     msg.textContent = '⚠ ' + e.message;
     msg.style.color = 'var(--red)';
