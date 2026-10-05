@@ -398,7 +398,7 @@ def _dictation_worker(app, page_id, segment_files, segment_meta, engine=None):
 # --------------------------------------------------------------------------
 # בניית ה-Word המעוצב הסופי - אותו סגנון RTL/גופן מוטמע כמו services/transcribe.py
 # --------------------------------------------------------------------------
-PAREN_TEXT_PT = 11.5   # גודל כתב לטקסט בסוגריים (גוף המסמך: 13)
+PAREN_TEXT_PT = 10     # גודל כתב לטקסט בסוגריים. בוורד גוף הטקסט העברי מוצג בפועל ב-11 (w:szCs של ברירת המחדל במסמך)
 
 
 def _build_manuscript_docx(customer_name, original_filename, content):
@@ -414,7 +414,10 @@ def _build_manuscript_docx(customer_name, original_filename, content):
     from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
     from docx.shared import Pt, RGBColor
-    from services.hebrew_refs import paren_mask
+    try:
+        from services.hebrew_refs import paren_mask
+    except ImportError:   # קובץ ישן בלי הפונקציה - ממשיכים בלי הקטנת סוגריים במקום להיכשל
+        paren_mask = lambda t: [False] * len(t or '')
     from services.transcribe import (
         FONT_DISPLAY_NAME, FONT_REGULAR_PATH, FONT_BOLD_PATH,
         _embed_font_in_docx, _BIDI_SUCCESSORS,
@@ -469,13 +472,26 @@ def _build_manuscript_docx(customer_name, original_filename, content):
         pf.right_indent = 0
         pf.first_line_indent = 0
 
-    def set_hebrew_font(run, size=None, bold=False, underline=False):
+    def set_hebrew_font(run, size=None, bold=False, underline=False, cs_size=None):
         run.font.name = FONT_NAME
         run.bold = bold
         run.underline = underline
         if size:
             run.font.size = size
         rPr = run._r.get_or_add_rPr()
+        # בטקסט עברי (ריצה עם w:rtl) וורד קורא את הגודל מ-w:szCs ("complex script"),
+        # לא מ-w:sz - בלי זה ה-size לא משפיע בוורד בכלל והטקסט מקבל את ברירת המחדל
+        # של המסמך. cs_size מוגדר רק היכן שרוצים גודל שונה בפועל (טקסט בסוגריים).
+        if cs_size is not None:
+            sz_el = rPr.find(qn('w:sz'))
+            szcs = rPr.find(qn('w:szCs'))
+            if szcs is None:
+                szcs = OxmlElement('w:szCs')
+                if sz_el is not None:
+                    sz_el.addnext(szcs)
+                else:
+                    rPr.append(szcs)
+            szcs.set(qn('w:val'), str(int(round(cs_size.pt * 2))))
         rFonts = rPr.find(qn('w:rFonts'))
         if rFonts is None:
             rFonts = OxmlElement('w:rFonts')
@@ -672,6 +688,7 @@ def _build_manuscript_docx(customer_name, original_filename, content):
                         size=None if is_heading else Pt(PAREN_TEXT_PT if small else 13),
                         bold=bool(run_data.get('bold')) or is_heading,
                         underline=bool(run_data.get('underline')),
+                        cs_size=Pt(PAREN_TEXT_PT) if small else None,
                     )
                     if run_data.get('italic'):
                         run.italic = True
