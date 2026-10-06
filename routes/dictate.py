@@ -1138,7 +1138,9 @@ def _image_to_pdf_bytes(raw, part=1):
     (TIFF של פקס) - מציג רק את "חלק" מספר part (PREVIEW_MAX_PAGES עמודים
     בכל חלק). מחזיר (pdf_bytes, total_pages, part_used, per_part), או None אם אי אפשר
     להקטין מספיק."""
-    from PIL import Image, ImageOps, ImageSequence
+    from PIL import Image, ImageOps, ImageSequence, ImageFile
+    # תמונה "קטועה" (הורדה/צירוף חלקי במייל) - מציגים את מה שנקרא ולא נכשלים
+    ImageFile.LOAD_TRUNCATED_IMAGES = True
     try:  # HEIC/HEIF מאייפון - אופציונלי, רק אם החבילה מותקנת
         import pillow_heif
         pillow_heif.register_heif_opener()
@@ -1152,7 +1154,9 @@ def _image_to_pdf_bytes(raw, part=1):
     # img.width/height נקראים מהכותרת בלבד (Pillow "עצלן"), אז הבדיקה זולה.
     # JPEG מקבל תקרה גבוהה בהרבה כי פותחים אותו בדגימה מופחתת (draft) -
     # צילום טלפון של 48-108 מגה-פיקסל לא מפוענח במלואו בזיכרון.
-    is_jpeg = (img.format == 'JPEG')
+    # MPO = JPEG של אייפון/סמסונג עם תמונות נוספות מוצמדות (עומק/תצוגה מקדימה)
+    # - רק הפריים הראשון הוא העמוד האמיתי.
+    is_jpeg = (img.format in ('JPEG', 'MPO'))
     max_pixels = PREVIEW_MAX_JPEG_PIXELS if is_jpeg else PREVIEW_MAX_OTHER_PIXELS
     if img.width * img.height > max_pixels:
         raise _PreviewTooLargeError(
@@ -1163,6 +1167,8 @@ def _image_to_pdf_bytes(raw, part=1):
         img.draft('RGB', (_PREVIEW_LEVELS[0][0], _PREVIEW_LEVELS[0][0]))
 
     total = max(1, int(getattr(img, 'n_frames', 1) or 1))
+    if img.format == 'MPO':
+        total = 1
     per = _pages_per_part(len(raw), total)
     parts = max(1, -(-total // per))
     part = min(max(int(part or 1), 1), parts)
@@ -1381,6 +1387,31 @@ def _file_to_pdf_preview(raw, filename, log_context='', part=1):
                 raise
             except Exception as e:
                 log.error(f"image->PDF conversion error ({log_context}): {e}")
+                # ניסיון שני עם מנוע אחר (MuPDF) - מצליח לפעמים בקבצים ש-Pillow
+                # נכשל בהם (קידוד חריג, תמונה פגומה חלקית).
+                res = None
+                try:
+                    import fitz
+                    _d = fitz.open(stream=raw, filetype=(os.path.splitext(filename or '')[1].lstrip('.').lower() or 'jpg'))
+                    try:
+                        _pdf = _d.convert_to_pdf()
+                    finally:
+                        _d.close()
+                    res = _pdf_part_for_preview_with_timeout(_pdf, part)
+                    if res is not None:
+                        log.info(f"image->PDF fallback via MuPDF succeeded ({log_context})")
+                except Exception as e2:
+                    log.error(f"image->PDF MuPDF fallback failed too ({log_context}): {e2}")
+                if res is not None:
+                    pdf_bytes, total, part_used, per = res
+                    parts = max(1, -(-total // per))
+                    info.update({
+                        'uri': 'data:application/pdf;base64,' + base64.b64encode(pdf_bytes).decode('ascii'),
+                        'is_pdf': True, 'part': part_used, 'parts': parts, 'page_count': total,
+                        'per_part': per, 'first_page': (part_used - 1) * per + 1,
+                        'last_page': min(total, part_used * per),
+                    })
+                    return info
                 # פורמט שלא ניתן לפענוח (למשל HEIC בלי תמיכה) - אפשר להטמיע
                 # את הקובץ המקורי רק אם הוא קטן מספיק; אחרת אין תצוגה.
                 if len(raw) > PREVIEW_MAX_PDF_BYTES:

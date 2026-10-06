@@ -38,7 +38,8 @@
       .then(function(d){
         if (!d.uri) throw new Error('empty');
         var f = document.getElementById(nav.dataset.frame);
-        if (f) f.src = d.uri + (nav.dataset.hash || '');
+        if (f && f.__pdfv) f.__pdfv.load(d.uri);
+        else if (f) f.src = d.uri + (nav.dataset.hash || '');
         cur = d.part; range.textContent = d.first_page + '–' + d.last_page; msg.textContent = '';
       })
       .catch(function(){ msg.textContent = 'שגיאה בטעינת החלק'; })

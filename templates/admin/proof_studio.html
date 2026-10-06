@@ -134,7 +134,10 @@
       {% if not returned_data_uri %}
         <div class="ds-state ds-error" style="padding:24px;color:var(--red)">⚠ הקובץ אינו זמין</div>
       {% elif returned_is_pdf %}
-        <iframe id="pvFrame" src="{{ returned_data_uri }}#zoom=50" title="תיקוני הלקוח"></iframe>
+        <div id="pvFrame" style="width:100%;height:100%"></div>
+        <script src="{{ url_for('static', filename='vendor/pdfjs/pdf.min.js') }}"></script>
+        <script src="{{ url_for('static', filename='js/pdfviewer.js') }}"></script>
+        <script>PdfViewer.mount(document.getElementById('pvFrame'), {uri: {{ returned_data_uri|tojson }}, fit: 'page', filename: 'proof.pdf'});</script>
       {% else %}
         <img src="{{ returned_data_uri }}" alt="תיקוני הלקוח">
       {% endif %}

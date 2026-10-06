@@ -18,7 +18,7 @@
   /* כברירת מחדל התיבה נמוכה (בערך 5 שורות של כתב היד) - כדי שהכפתורים
      מתחתיה תמיד יהיו בתוך תצוגה אחת גם במחשב נייד עם מסך קטן. אפשר
      להגדיל בלחיצה על הכפתור (ראו toggleImgExpand בסקריפט). */
-  .ds-imgbox { height:160px; overflow:auto; border-radius:10px; background:var(--surface2); text-align:center; transition:height .2s ease; }
+  .ds-imgbox { height:260px; overflow:auto; border-radius:10px; background:var(--surface2); text-align:center; transition:height .2s ease; }
   .ds-imgbox.expanded { height:85vh; }
   .ds-imgbox img { max-width:100%; display:block; margin:0 auto; }
 
@@ -95,12 +95,15 @@
     {% set pv_frame = 'pvFrame' %}{% set pv_hash = '' %}{% include 'admin/_preview_nav.html' %}
     <div class="ds-imgbox" id="imgBox">
       {% if not manuscript_data_uri %}
-        <div class="ds-state ds-error" style="padding:24px">⚠ הקובץ אינו זמין</div>
+        <div class="ds-state ds-error" style="padding:24px">⚠ לא ניתן להציג תצוגה מקדימה לקובץ הזה<br><a href="{{ url_for('dictate.page_file', page_id=page.id) }}" style="color:var(--accent)">⬇ הורדת הקובץ המקורי</a></div>
       {% elif manuscript_is_pdf %}
         {# מוטמע ישירות כ-data URI בתוך ה-HTML עצמו (לא src לכתובת נפרדת) - #}
         {# ומומר תמיד ל-PDF (גם אם המקור הוא תמונה) - נטפרי חסם גם תמונות #}
         {# שהוטמעו כ-data URI, אבל לא חוסם PDF באותה צורה. #}
-        <iframe id="pvFrame" src="{{ manuscript_data_uri }}" style="width:100%;height:100%;border:0;display:block" title="כתב יד"></iframe>
+        <div id="pvFrame" style="width:100%;height:100%"></div>
+        <script src="{{ url_for('static', filename='vendor/pdfjs/pdf.min.js') }}"></script>
+        <script src="{{ url_for('static', filename='js/pdfviewer.js') }}"></script>
+        <script>PdfViewer.mount(document.getElementById('pvFrame'), {uri: {{ manuscript_data_uri|tojson }}, fit: 'width', filename: {{ ((page.original_filename or 'document') ~ '.pdf')|tojson }}});</script>
       {% else %}
         {# fallback - רק אם המרה ל-PDF נכשלה מסיבה כלשהי #}
         <img src="{{ manuscript_data_uri }}" alt="כתב יד">
