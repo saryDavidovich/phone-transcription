@@ -255,6 +255,8 @@ def _build_content_from_segments(segments):
     paragraphs = []
     pending_new_paragraph = True  # הסגמנט הראשון תמיד פותח פסקה
     prev_no_space_after = True    # אין רווח לפני התו הראשון בפסקה
+    prev_was_plain_speech = False  # הסגמנט הקודם היה דיבור רגיל (לא איות/מספר/הקלדה/פיסוק)
+    prev_fmt = (False, False)      # (bold, underline) של הסגמנט הקודם
 
     for seg in segments:
         if seg.get('new_paragraph'):
@@ -269,6 +271,22 @@ def _build_content_from_segments(segments):
 
         para = paragraphs[-1]
         runs = para['runs']
+        is_literal = (seg.get('type') == 'literal')
+        # "הכנסה ידנית" = כל מה שלא דיבור רגיל: איות/מספר/הקלדה (T) וסימני
+        # פיסוק שנלחצו בכפתור (סוגריים, מקף, נקודותיים...).
+        is_acronym = is_literal or (seg.get('mode') in ('spell', 'number')) or bool(seg.get('acronym'))
+        # המנוע מסיים כל הקלטה בנקודה (כי זה סוף הקלטה), אבל כשאחריה בא ראשי
+        # תיבות/מראה מקום/סימן פיסוק באמצע המשפט - הנקודה מיותרת ושוברת את
+        # הטקסט. מורידים נקודה בודדת בסוף הדיבור הרגיל שלפני (לא שלוש נקודות
+        # ולא ?!). שורה חדשה (Enter) פותחת פסקה חדשה ולכן הנקודה שלפניה נשארת.
+        # אותו דבר כשהמשפט נחתך בגלל החלפת מודגש/קו תחתון (הדלקה או כיבוי): הנקודה
+        # שהמנוע הוסיף בסוף הסגמנט לא שייכת. החלפת "כותרת" לא נחשבת - לפני כותרת
+        # הנקודה נשארת (בדרך כלל זה גם אחרי Enter, כלומר סוף פסקה).
+        fmt_changed = ((bool(seg.get('bold')), bool(seg.get('underline'))) != prev_fmt)
+        if (is_acronym or fmt_changed) and prev_was_plain_speech and runs:
+            t = runs[-1]['text']
+            if t.endswith('.') and not t.endswith('..'):
+                runs[-1]['text'] = t[:-1]
         suppress_space = prev_no_space_after or bool(seg.get('no_space_before'))
         prefixed = text if (not runs or suppress_space) else (' ' + text)
         bold, underline = bool(seg.get('bold')), bool(seg.get('underline'))
@@ -278,6 +296,15 @@ def _build_content_from_segments(segments):
             runs.append({'text': prefixed, 'bold': bold, 'underline': underline})
 
         prev_no_space_after = bool(seg.get('no_space_after'))
+        prev_was_plain_speech = (not is_literal) and not is_acronym
+        prev_fmt = (bold, underline)
+
+    # כותרת לא מסתיימת בנקודה (המנוע מוסיף נקודה בסוף ההקלטה של הכותרת)
+    for para in paragraphs:
+        if para.get('heading') and para['runs']:
+            t = para['runs'][-1]['text'].rstrip()
+            if t.endswith('.') and not t.endswith('..'):
+                para['runs'][-1]['text'] = t[:-1]
 
     return paragraphs
 

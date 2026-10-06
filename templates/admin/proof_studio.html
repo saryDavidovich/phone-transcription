@@ -20,7 +20,7 @@
      ברירת המחדל הקטן יחסית, באותו אופן בדיוק שכתב-היד המקורי מוצג
      ב-dictate_studio.html (.ds-imgbox) - רק גדול קצת יותר כברירת מחדל כי
      כאן צריך לקרוא תיקוני הגהה בפועל, לא רק לזהות את הדף." */
-  .ps-imgbox { height:300px; overflow:hidden; border-radius:10px; background:var(--surface2); text-align:center; transition:height .2s ease; }
+  .ps-imgbox { height:240px; min-height:110px; max-height:92vh; overflow:hidden; resize:vertical; border-radius:10px; background:var(--surface2); text-align:center; }
   .ps-imgbox.expanded { height:85vh; }
   .ps-imgbox img { max-width:100%; display:block; margin:0 auto; }
   .ps-imgbox iframe { width:100%; height:100%; border:0; display:block; }
@@ -323,6 +323,7 @@ async function timerReset() {
 // -------------------- תצוגה/הגדלה --------------------
 function toggleExpand(boxId, btn) {
   const box = document.getElementById(boxId);
+  box.style.height = '';   // גרירה ידנית (resize) לא תתנגש עם הכפתור
   const expanded = box.classList.toggle('expanded');
   btn.textContent = expanded ? '⤡ הקטנת תצוגה' : '⤢ הגדלת תצוגה';
 }

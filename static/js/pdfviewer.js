@@ -13,8 +13,8 @@
   var CSS = [
     '.pdfv{display:flex;flex-direction:column;width:100%;height:100%;min-height:260px;background:#525659;direction:rtl;position:relative}',
     '.pdfv:fullscreen{background:#525659}',
-    '.pdfv-bar{direction:ltr;display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:4px;padding:5px 8px;background:#323639;color:#fff;font:13px Arial,sans-serif;flex:0 0 auto;user-select:none}',
-    '.pdfv-bar button{background:#4a4e51;color:#fff;border:1px solid #5f6368;border-radius:6px;padding:4px 9px;font:13px Arial,sans-serif;cursor:pointer;line-height:1.2;min-width:30px}',
+    '.pdfv-bar{direction:ltr;display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:3px;padding:3px 6px;background:#323639;color:#fff;font:13px Arial,sans-serif;flex:0 0 auto;user-select:none}',
+    '.pdfv-bar button{background:#4a4e51;color:#fff;border:1px solid #5f6368;border-radius:6px;padding:2px 8px;font:13px Arial,sans-serif;cursor:pointer;line-height:1.2;min-width:30px}',
     '.pdfv-bar button:hover{background:#5f6368}',
     '.pdfv-bar button.on{background:#1a73e8;border-color:#1a73e8}',
     '.pdfv-bar .sep{width:1px;align-self:stretch;background:#5f6368;margin:0 3px}',

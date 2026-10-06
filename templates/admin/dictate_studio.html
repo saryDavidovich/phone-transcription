@@ -18,7 +18,7 @@
   /* כברירת מחדל התיבה נמוכה (בערך 5 שורות של כתב היד) - כדי שהכפתורים
      מתחתיה תמיד יהיו בתוך תצוגה אחת גם במחשב נייד עם מסך קטן. אפשר
      להגדיל בלחיצה על הכפתור (ראו toggleImgExpand בסקריפט). */
-  .ds-imgbox { height:260px; overflow:auto; border-radius:10px; background:var(--surface2); text-align:center; transition:height .2s ease; }
+  .ds-imgbox { height:190px; min-height:110px; max-height:92vh; overflow:hidden; resize:vertical; border-radius:10px; background:var(--surface2); text-align:center; }
   .ds-imgbox.expanded { height:85vh; }
   .ds-imgbox img { max-width:100%; display:block; margin:0 auto; }
 
@@ -109,7 +109,7 @@
         <img src="{{ manuscript_data_uri }}" alt="כתב יד">
       {% endif %}
     </div>
-    <p class="ds-hint">התצוגה מוצגת בקטן כברירת מחדל - אפשר להגדיל אותה בכל רגע בלחיצה על הכפתור למעלה, כדי לקרוא בנוחות</p>
+    <p class="ds-hint">התצוגה מוצגת בקטן כברירת מחדל - אפשר לגרור את הפינה התחתונה של התיבה כדי לשנות את הגובה (הגודל נזכר לפעם הבאה), או ללחוץ על הכפתור למעלה להגדלה מלאה</p>
   </div>
 
   <div class="card">
@@ -133,6 +133,17 @@
       <span class="ds-timer" id="timer">00:00</span>
     </div>
 
+    <div id="ctlArea" style="position:relative">
+  <div id="typeBox" style="display:none;position:absolute;top:0;left:0;right:0;min-height:100%;z-index:30;box-sizing:border-box;background:var(--surface);border:2px solid var(--accent);border-radius:12px;padding:12px 14px;box-shadow:0 4px 16px rgba(0,0,0,.35)">
+    <div style="font-weight:700;margin-bottom:8px">⌨ הקלדת ראשי תיבות / מראה מקום</div>
+    <input id="typeInput" type="text" dir="rtl" autocomplete="off" style="width:100%;padding:9px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:17px;font-family:'Heebo',sans-serif;box-sizing:border-box" placeholder="למשל: (שוע אוח סי' קנד) לעיל/">
+    <div id="typePreview" style="margin-top:8px;font-size:18px;min-height:26px;color:var(--accent)"></div>
+    <div style="margin-top:6px;font-size:12px;color:var(--text3)">Enter = הכנסה וסגירה · Esc = ביטול · <b>/</b> בסוף מילה = מילה רגילה בלי ראשי תיבות · האותיות נשארות כמו שהקלדתם (אות סופית - מקלידים בעצמכם) · ההקלטה מושהית</div>
+    <div style="margin-top:10px;display:flex;gap:8px;justify-content:flex-start">
+      <button type="button" class="btn btn-primary" onclick="commitTypeBox()">הכנסה</button>
+      <button type="button" class="btn btn-ghost" onclick="closeTypeBox(false)">ביטול</button>
+    </div>
+  </div>
     <div class="ds-formatrow">
       <button class="ds-fbtn" id="btnBold" disabled onclick="pushEvent('bold')"><b>B</b> מודגש</button>
       <button class="ds-fbtn" id="btnUnderline" disabled onclick="pushEvent('underline')"><u>U</u> קו תחתון</button>
@@ -158,6 +169,7 @@
       <span id="modeBadge" style="display:none;font-size:12px;font-weight:700;color:var(--accent,#4f6bff)"></span>
     </div>
     <p class="ds-hint" id="modeHint">לראשי תיבות ומראי מקומות: לחצו על <b>איות</b> והקריאו את <b>שמות האותיות</b> (שין, וו, עין = שו״ע; &quot;רווח&quot; בין מילים; &quot;גרש&quot; לקיצור כמו סי׳), או על <b>מספר</b> ואמרו את המספר כרגיל (מאתיים חמישים ושלוש = רנ״ג). לחיצה נוספת חוזרת לדיבור רגיל. במקלדת: A / N (גם בעברית).<br><b>הקלדה (T)</b>: פותחת תיבה קטנה להקלדה ישירה של ראשי תיבות / מראה מקום (בלי תמלול, 100% מדויק) — Enter מכניס וסוגר, Esc מבטל. גרשיים נוספים אוטומטית; מספר (154) הופך לאותיות (קנ״ד). <b>מילה רגילה (בלי ראשי תיבות): / בסוף</b> (לעיל/). אפשר לפתוח ולסגור סוגריים סביב המילים — (שוע אוח) — והגרשיים יישארו לפני האות האחרונה.</p>
+    </div>
 
     <div id="resultArea">
       {% if page.status == 'processing' %}
@@ -188,16 +200,6 @@
   </div>
 </div>
 
-<div id="typeBox" style="display:none;position:fixed;top:90px;left:50%;transform:translateX(-50%);z-index:1000;background:var(--surface);border:2px solid var(--accent);border-radius:12px;padding:14px 16px;box-shadow:0 8px 30px rgba(0,0,0,.45);width:min(420px,92vw)">
-  <div style="font-weight:700;margin-bottom:8px">⌨ הקלדת ראשי תיבות / מראה מקום</div>
-  <input id="typeInput" type="text" dir="rtl" autocomplete="off" style="width:100%;padding:9px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:17px;font-family:'Heebo',sans-serif" placeholder="למשל: (שוע אוח סי' קנד) לעיל/">
-  <div id="typePreview" style="margin-top:8px;font-size:18px;min-height:26px;color:var(--accent)"></div>
-  <div style="margin-top:6px;font-size:12px;color:var(--text3)">Enter = הכנסה וסגירה · Esc = ביטול · <b>/</b> בסוף מילה = מילה רגילה בלי ראשי תיבות · סוגריים מותרים · ההקלטה מושהית</div>
-  <div style="margin-top:10px;display:flex;gap:8px;justify-content:flex-start">
-    <button type="button" class="btn btn-primary" onclick="commitTypeBox()">הכנסה</button>
-    <button type="button" class="btn btn-ghost" onclick="closeTypeBox(false)">ביטול</button>
-  </div>
-</div>
 
 <script>
 const PAGE_ID = {{ page.id }};
@@ -230,9 +232,34 @@ function toggleImgExpand() {
   const box = document.getElementById('imgBox');
   const btn = document.getElementById('imgExpandBtn');
   if (!box || !btn) return;
-  const expanded = box.classList.toggle('expanded');
-  btn.textContent = expanded ? '⤡ הקטנת תצוגה' : '⤢ הגדלת תצוגה';
+  const wasExpanded = box.dataset.exp === '1';
+  if (!wasExpanded) {
+    box.dataset.prev = box.style.height || '';
+    box.dataset.exp = '1';
+    box.style.height = '85vh';
+  } else {
+    box.dataset.exp = '0';
+    box.style.height = box.dataset.prev || '';
+  }
+  btn.textContent = wasExpanded ? '⤢ הגדלת תצוגה' : '⤡ הקטנת תצוגה';
 }
+// גובה תיבת הכתב-יד: ברירת מחדל קטנה, וגרירה של הפינה התחתונה משנה את הגובה
+// (resize בדפדפן) - הגודל שנבחר נשמר בדפדפן הזה לדפים הבאים.
+(function () {
+  const box = document.getElementById('imgBox');
+  if (!box) return;
+  try { const h = parseInt(localStorage.getItem('dsImgBoxH') || '', 10); if (h >= 110 && h <= 2000) box.style.height = h + 'px'; } catch (e) {}
+  if (!window.ResizeObserver) return;
+  let t = null;
+  new ResizeObserver(() => {
+    clearTimeout(t);
+    t = setTimeout(() => {
+      if (box.dataset.exp === '1') return;
+      const h = Math.round(box.getBoundingClientRect().height);
+      if (h >= 110) { try { localStorage.setItem('dsImgBoxH', String(h)); } catch (e) {} }
+    }, 500);
+  }).observe(box);
+})();
 
 function fmtTime(sec) {
   const m = Math.floor(sec / 60).toString().padStart(2, '0');
@@ -368,8 +395,9 @@ function formatCoreToken(core) {
     return core.replace(/["\u05f4\u201d]/g, GERSHAYIM).replace(/['\u2019\u05f3]/g, GERESH);
   }
   if (!/^[\u05d0-\u05ea]+$/.test(core)) return core;   // לא אותיות עבריות בלבד - לא נוגעים
-  const chars = core.split('').map(c => NONFINAL_MAP[c] || c);
-  chars[chars.length - 1] = FINAL_MAP[chars[chars.length - 1]] || chars[chars.length - 1];
+  // האותיות נשארות בדיוק כפי שהוקלדו - אין המרה אוטומטית לאות סופית (מ -> ם):
+  // יש מקורות ושמות שנכתבים עם אות רגילה גם בסוף מילה. רוצים ם - מקלידים ם.
+  const chars = core.split('');
   if (chars.length === 1) return chars[0] + GERESH;
   return chars.slice(0, -1).join('') + GERSHAYIM + chars[chars.length - 1];
 }
@@ -394,7 +422,7 @@ function formatTypedText(text) {
 function pushTypedLiteral(out) {
   if (!out) return;
   segments.push({
-    literal: out,
+    literal: out, acronym: true,
     bold: state.bold, underline: state.underline, heading: state.heading,
     new_paragraph: false,
     no_space_before: /^[)\]}.,:;!?]/.test(out),
@@ -414,7 +442,7 @@ function openTypeBox() {
     const inp = document.getElementById('typeInput');
     inp.value = ''; document.getElementById('typePreview').textContent = '';
     box.style.display = 'block';
-    inp.focus();
+    inp.focus({ preventScroll: true });
   });
 }
 function closeTypeBox(commit) {
@@ -544,6 +572,7 @@ async function uploadAllSegments() {
         type: 'literal', text: seg.literal,
         bold: seg.bold, underline: seg.underline, heading: seg.heading, new_paragraph: seg.new_paragraph,
         no_space_before: !!seg.no_space_before, no_space_after: !!seg.no_space_after,
+        acronym: !!seg.acronym,
       });
     } else {
       fd.append('segments', seg.blob, `seg${i}.webm`);

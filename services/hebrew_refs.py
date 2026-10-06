@@ -58,7 +58,8 @@ _NONFINAL = {v: k for k, v in _FINAL.items()}
 _NONFINAL['ץ'] = 'צ'
 
 _WORD_BREAK = {'רווח', 'רווחים', 'רוח', 'רווחה', 'מילה', 'הבא', 'הבאה', 'נקודה'}
-_IGNORED = {'סופית', 'סופי', 'סופיות', 'אות', 'האות', 'ואז'}
+_FINAL_WORDS = {'סופית', 'סופי', 'סופיות'}   # "מם סופית" => ם (רק כשנאמר במפורש)
+_IGNORED = {'אות', 'האות', 'ואז'}
 _TOK_GERESH = {'גרש', 'גרשים', 'גרשה', 'גרש.'}
 _TOK_GERSHAYIM = {'גרשיים', 'גרשיים', 'גרשיים'}
 
@@ -90,6 +91,8 @@ def _letter_for_token(raw):
         return 'gershayim', None
     if n in _TOK_GERESH:
         return 'geresh', None
+    if n in _FINAL_WORDS:
+        return 'final', None
     if n in _IGNORED:
         return 'ignore', None
     if n in _NAME_TO_LETTER:
@@ -111,9 +114,10 @@ def _format_word(letters, explicit_geresh, explicit_gershayim_at):
     אינדקס (מספר אותיות לפני הגרשיים) או None."""
     if not letters:
         return ''
-    chars = [_NONFINAL.get(c, c) for c in letters]
-    if chars:
-        chars[-1] = _FINAL.get(chars[-1], chars[-1])
+    # בכוונה אין כאן המרה אוטומטית לאות סופית (מ -> ם): יש מקורות ושמות
+    # שנכתבים עם אות רגילה גם בסוף מילה. אות סופית נוצרת רק אם המשתמש אמר
+    # במפורש "סופית" אחרי שם האות (ראה 'final' ב-spelling_to_text).
+    chars = list(letters)
     if explicit_gershayim_at is not None and 0 < explicit_gershayim_at < len(chars):
         # גרשיים מפורשים באמצע; אות סופית רק בסוף המילה
         return ''.join(chars[:explicit_gershayim_at]) + GERSHAYIM + ''.join(chars[explicit_gershayim_at:])
@@ -142,6 +146,9 @@ def spelling_to_text(text):
         kind, val = _letter_for_token(raw)
         if kind == 'letters':
             cur.extend(list(val))
+        elif kind == 'final':
+            if cur:
+                cur[-1] = {**_FINAL, 'צ': 'ץ'}.get(cur[-1], cur[-1])
         elif kind == 'break':
             flush()
         elif kind == 'geresh':
