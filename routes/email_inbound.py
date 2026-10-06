@@ -2109,6 +2109,9 @@ def _send_handwriting_instructions_email(to_email, phone, name=''):
 <p style="margin:8px 0 0;line-height:1.8;color:#111827;font-size:14px">
 ייתכנו שגיאות, מילים משובשות, או קטעים שלא יזוהו כראוי, במיוחד בכתב יד צפוף, לא ברור, או בכתב רש"י.
 </p>
+<p style="margin:8px 0 0;line-height:1.8;color:#111827;font-size:14px">
+גם תמלול מקצועי מבוסס על הבנת הנכתב ובשל כך יתכנו פתיחת ראשי תיבות, שגיאות תרגום ושגיאות נוספות.
+</p>
 </div>
 
 <p style="line-height:1.8">
