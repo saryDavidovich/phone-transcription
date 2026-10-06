@@ -401,7 +401,7 @@ def _dictation_worker(app, page_id, segment_files, segment_meta, engine=None):
 # --------------------------------------------------------------------------
 # בניית ה-Word המעוצב הסופי - אותו סגנון RTL/גופן מוטמע כמו services/transcribe.py
 # --------------------------------------------------------------------------
-PAREN_TEXT_PT = 10     # גודל כתב לטקסט בסוגריים. בוורד גוף הטקסט העברי מוצג בפועל ב-11 (w:szCs של ברירת המחדל במסמך)
+PAREN_TEXT_PT = 9     # גודל כתב לטקסט בסוגריים. בוורד גוף הטקסט העברי מוצג בפועל ב-11 (w:szCs של ברירת המחדל במסמך)
 
 
 def _build_manuscript_docx(customer_name, original_filename, content):
@@ -790,6 +790,7 @@ def _content_to_plain_preview(content):
     return '\n\n'.join(lines)
 
 
+PROOFING_NUMBER_OFFSET = 1000  # ראה _proofing_mailto_link / email_inbound._parse_proofing_subject
 PROOFING_SUBJECT_MARKER = 'הגהה'  # ראה גם routes/email_inbound.py._is_proofing_reply - אותו קידומת בדיוק
 
 
@@ -800,10 +801,11 @@ def _proofing_mailto_link(phone, page_id):
     אוטומטית - הלקוח מצרף בעצמו את קובץ ה-Word המתוקן."""
     from urllib.parse import quote
     from routes.email_inbound import TRANSCRIBE_INBOUND_EMAIL
-    subject = f'{PROOFING_SUBJECT_MARKER} {phone} {page_id}'
+    # מספר הדף מוצג ללקוח עם היסט של 1000 (תמיד 4 ספרות ומעלה, נראה מקצועי) -
+    # routes/email_inbound.py._parse_proofing_subject מחזיר אותו לערך האמיתי.
+    subject = f'{PROOFING_SUBJECT_MARKER} {phone} {page_id + PROOFING_NUMBER_OFFSET}'
     body = (
-        'שלום, מצורף קובץ עם תיקוני ההגהה שביצעתי - קובץ ה-Word המתוקן, '
-        'או צילום/סריקה של הדף המודפס עם התיקונים בכתב יד - נא לעדכן בהתאם. תודה.'
+        'שלום, מצורף קובץ PDF או תמונה עם תיקוני ההגהה שביצעתי - נא לעדכן בהתאם. תודה.'
     )
     return f"mailto:{TRANSCRIBE_INBOUND_EMAIL}?subject={quote(subject)}&body={quote(body)}"
 
@@ -816,6 +818,7 @@ def _send_manuscript_email(to_email, customer_name, customer_phone, page_id, ori
     docx_b64 = base64.b64encode(docx_bytes).decode('utf-8')
     preview = _content_to_plain_preview(content)
     proofing_link = _proofing_mailto_link(customer_phone, page_id)
+    proofing_price = _manuscript_proofing_price()
 
     # הערה: בכוונה **אין** כאן יותר אזכור של אפשרות פקס/קוד אישי בגוף המייל.
     # מי ששולח/מקבל במייל לא אמור לקבל את הקוד האישי שלו במייל בשום מקרה -
@@ -830,11 +833,19 @@ def _send_manuscript_email(to_email, customer_name, customer_phone, page_id, ori
 <h3 style="margin:0 0 12px;color:#065f46">✍️ טקסט</h3>
 <div style="line-height:1.8;white-space:pre-wrap;text-align:right;direction:rtl">{preview}</div>
 </div>
-<div style="background:#eff6ff;border-right:4px solid #2563eb;padding:16px;margin:16px 0;border-radius:8px;text-align:center">
-<p style="margin:0 0 12px;line-height:1.7">מצאת טעות או רוצה לתקן משהו בקובץ המצורף? יש לך מחשב? אפשר לתקן ישירות בקובץ ה-Word המצורף ולשלוח אותו בחזרה. אין לך גישה נוחה למחשב? אפשר להדפיס את הקובץ, לתקן בעט על הדף, ולצלם או לסרוק את הדף המתוקן ולשלוח בחזרה כתמונה - שתי הדרכים עובדות.</p>
-<a href="{proofing_link}" style="background:#2563eb;color:#fff;text-decoration:none;padding:10px 20px;border-radius:6px;font-weight:700;display:inline-block">✏️ שליחת תיקוני הגהה</a>
-<p style="margin:12px 0 0;font-size:12px;color:#6b7280">הכפתור פותח טיוטת מייל מוכנה - רק צריך לצרף את קובץ ה-Word המתוקן, או צילום/סריקה של הדף המתוקן בכתב יד, ולשלוח</p>
+<div style="background:#eff6ff;border-right:4px solid #2563eb;padding:16px;margin:16px 0;border-radius:8px">
+<p style="margin:0 0 12px;line-height:1.8">ניתן לשלוח קובץ PDF או תמונה להגהה אנושית <a href="{proofing_link}" style="color:#1d4ed8;font-weight:700">בקישור זה</a> במחיר <b>₪{proofing_price:.2f}</b> לכל דקה. את ההגהות יש לכתוב לפי ההוראות המצורפות:</p>
+<p style="text-align:center;margin:0 0 14px"><a href="{proofing_link}" style="background:#2563eb;color:#fff;text-decoration:none;padding:10px 20px;border-radius:6px;font-weight:700;display:inline-block">✏️ שליחת קובץ להגהה</a></p>
+<div style="background:#fff;border:1px solid #bfdbfe;border-radius:8px;padding:14px;font-size:14px;line-height:1.8;text-align:right">
+<div style="font-weight:700;font-size:15px;margin-bottom:8px;color:#1e3a8a">כללים לשליחת הגהות</div>
+<p style="margin:0 0 8px"><b>1. לסמן בראש שורה קו –</b><br>בכל מקום שישנו תיקון באותה שורה, לציין עם קו בתחילת השורה מימין. ואם ישנם כמה תיקונים לעשות כמה קווים, שניים או שלושה. (במקרים שאין קו, אין הרבה סיכוי שהמגיה ישים לב שהוספתם נקודה בשורה זו...).</p>
+<p style="margin:0 0 8px"><b>2. מחיקה באמצעות קו חוצה ולא טשטוש</b><br>הקלדן שמכניס את התיקונים מזין לתוכנת חיפוש את המילה השגויה, ומקליד במקומה את המילה הנכונה. ואם עברתם עם עט על כל המילה השגויה כך שאין סיכוי שהקלדן ינחש מה יש מתחת למעטה השחור אז הוא יצטרך "לחפש" בעצמו למה התכוונתם, וזה מכפיל את זמן התיקונים. לכן פשוט תחצו את <s>המילה</s> בקו שתישאר קריאה ויובן שכאן יש שגיאה.</p>
+<p style="margin:0 0 8px"><b>3. הוספת סימונים כגון פסיקים ונקודות</b><br>במקום שהוספתם פסיק או נקודה, חשוב לציין בעזרת עיגול או חץ קטנטן כדי שהקלדן ישים לב למיקום המדוייק. ובמקום שהחלפתם את הנקודה למשל בפסיק, אז לסמן בעיגול את הפסיק ולציין לידו נקודה. כנ"ל לגבי גרשיים / סוגריים / מקף / וכו'.</p>
+<p style="margin:0 0 8px"><b>4. סימנים ברורים לגבי פעולת התיקון</b><br>במקרה וצריך להדגיש, להוסיף רווח, או לרדת שורה, לחבר פיסקאות, יש לציין בבירור את המילים בתוספת סימון המקום, כמו קו תחתון ולכתוב "הדגשה", ואם זה רווח, אז לעשות סוג של קו בין המילים ולציין "רווח/להסיר רווח / קטע חדש / וכו'"</p>
+<p style="margin:0 0 8px"><b>5. לא להוסיף יותר מידי מילים על גבי הטקסט</b><br>במקרה וצריך להוסיף מילים או אותיות, אז לכתוב בכתב ברור מעל המקום הצריך תיקון ולסמן בחץ קטן היכן להכניס את הטקסט, וזה רק במקרה שישנם כמה מילים, אם זו פיסקא שלימה, אז לעשות סימון כגון כוכבית וכדו' למיקום בצידי הדף (בצורה שלא ייקטע בסריקה) ושם לכתוב בצורה קריאה ככל הניתן.</p>
+<p style="margin:0"><b>6. במקרה שהתיקון לא ברור בוודאות</b><br>יש לוודא שהתיקון מובן דיו, שהקלדן ישים לב שהוחלף כאן ה-י' ב-ו' ועדיף גם לכתוב בראש המילה השגויה את המילה המתוקנת, ולא רק לטשטש את האות השגויה ולסמן את האות הנכונה. כגון: "כתובת", אז יש לחצות את המילה בקו, ולכתוב מעליה "כתובות". ותמיד במקרים של שינויים גדולים, כגון החלפת פיסקאות וכדו', יש לכתוב הוראות מפורטות וברורות, ולא להשאיר מקום לניחוש או ראש גדול...</p>
 </div>
+<p style="margin:12px 0 0;font-size:12px;color:#6b7280;text-align:center">הקישור פותח טיוטת מייל מוכנה - רק צריך לצרף את קובץ ה-PDF או התמונה של הדף עם ההגהות, ולשלוח</p>
 </div>'''
 
     sg = sendgrid.SendGridAPIClient(api_key=os.environ.get('SENDGRID_API_KEY'))
@@ -1628,72 +1639,98 @@ def _manuscript_billing_account(customer):
     return customer
 
 
-def _manuscript_held_recipient(customer, billing_account):
-    """למי שולחים הודעת "הדף הושהה - צריך להטעין יתרה", ואיך מציגים את
-    אופן הטעינה. מחזיר (מייל, טלפון_לקישור_טעינה, האם_תלמיד_של_מוסד)."""
+def _manuscript_held_recipients(customer, billing_account):
+    """למי שולחים הודעת "הדף הושהה - צריך להטעין יתרה". מחזיר רשימת
+    (כתובת מייל, סוג, טלפון_לקישור_טעינה) כש"סוג" הוא:
+      'customer' - לקוח רגיל: הסבר + קישור טעינה
+      'institution' - מסמך כללי של מוסד: אל המוסד עצמו, עם קישור טעינה
+      'student' - תלמיד של מוסד: אומרים לו לפנות למוסד לבקש תוספת יתרה
+      'manager' - מנהל המוסד: מודיעים שלתלמיד פלוני ממתין מסמך וצריך להוסיף לו יתרה."""
     inst = customer.institution if customer else None
+    out = []
     if customer and customer.is_institution_self and inst:
-        return ((inst.notify_email or inst.email or '').strip(), (inst.phone or '').strip(), False)
-    if customer and customer.institution_id and inst:
-        return (((customer.email or '').strip() or (inst.notify_email or inst.email or '').strip()), '', True)
-    return (((customer.email or '').strip() if customer else ''), ((customer.phone or '').strip() if customer else ''), False)
+        out.append(((inst.notify_email or inst.email or '').strip(), 'institution', (inst.phone or '').strip()))
+    elif customer and customer.institution_id and inst:
+        student_mail = (customer.email or '').strip()
+        manager_mail = (inst.notify_email or inst.email or '').strip()
+        if manager_mail:
+            out.append((manager_mail, 'manager', ''))
+        if student_mail and student_mail.lower() != manager_mail.lower():
+            out.append((student_mail, 'student', ''))
+    else:
+        out.append(((customer.email or '').strip() if customer else '', 'customer', ((customer.phone or '').strip() if customer else '')))
+    return [r for r in out if r[0]]
 
 
 def _send_manuscript_held_email(page, customer, billing_account, cost):
-    """מייל ללקוח: הדף שלו מוכן אבל הושהה בגלל יתרה לא מספקת. אחרי הטעינה
-    הוא יישלח אליו אוטומטית. מחזיר את הכתובת שאליה נשלח, או None."""
-    to_email, topup_phone, is_student = _manuscript_held_recipient(customer, billing_account)
-    if not to_email:
+    """מיילים על דף שהושהה בגלל יתרה לא מספקת. אחרי הטעינה המסמך יישלח
+    אוטומטית. תלמיד של מוסד: גם התלמיד (לפנות למוסד לבקש תוספת יתרה) וגם
+    מנהל המוסד (לתלמיד פלוני ממתין מסמך וצריך להוסיף לו יתרה) מקבלים מייל.
+    מחזיר את הכתובות שנשלח אליהן (מחרוזת, מופרדות בפסיק), או None."""
+    recipients = _manuscript_held_recipients(customer, billing_account)
+    if not recipients:
         return None
-    try:
-        from routes.email_inbound import _is_system_inbound_address
-        if _is_system_inbound_address(to_email):
-            log.error(f"חסימת שליחת מייל השהיה לכתובת המערכת עצמה ({to_email}) - מניעת לולאה")
-            return None
-        import sendgrid
-        from sendgrid.helpers.mail import Mail, Email
-        from html import escape
-        balance = float(getattr(billing_account, 'balance', 0) or 0)
-        base_url = os.environ.get('APP_BASE_URL', '').rstrip('/')
-        link_html = ''
+    from html import escape
+    from routes.email_inbound import _is_system_inbound_address
+    import sendgrid
+    from sendgrid.helpers.mail import Mail, Email
+    balance = float(getattr(billing_account, 'balance', 0) or 0)
+    base_url = os.environ.get('APP_BASE_URL', '').rstrip('/')
+    fname = escape(page.original_filename or 'כתב יד')
+    student_name = escape(customer.display_name if customer else '')
+    inst_name = escape(customer.institution.name) if (customer and customer.institution) else ''
+    amounts = (f'<div style="background:#fef3c7;border-right:4px solid #f59e0b;padding:14px;margin:14px 0;border-radius:8px">'
+               f'<p style="margin:0">עלות: <b>₪{cost:.2f}</b><br>יתרה נוכחית: <b>₪{balance:.2f}</b></p></div>')
+    footer = '<p style="color:#6b7280;font-size:13px">מערכת תמלול פון 03-3131795</p>'
+    phone_howto = ('<p style="text-align:center;font-weight:700;color:#1d4ed8">'
+                   'אפשר גם בטלפון: התקשרו ל-03-3131795 ובתפריט הראשי בחרו בטעינת ארנק</p>')
+
+    def link_html(topup_phone):
         if topup_phone and base_url and os.environ.get('NEDARIM_MOSAD'):
             from urllib.parse import quote
             link = f"{base_url}/payment/nedarim/topup-link/{quote(topup_phone)}"
-            link_html = (f'<p style="text-align:center;margin:18px 0"><a href="{link}" '
-                         f'style="background:#2563eb;color:#fff;text-decoration:none;padding:12px 28px;'
-                         f'border-radius:8px;font-weight:700;display:inline-block">💳 לטעינת יתרה בכרטיס אשראי</a></p>')
-        if is_student:
-            who = escape(customer.display_name if customer else '')
-            how_html = (f'<p>הדף שייך ל<b>{who}</b>. כדי שיישלח, יש להעביר יתרה לתלמיד/ה '
-                        f'מאזור המוסד באתר (לשונית התלמידים).</p>')
+            return (f'<p style="text-align:center;margin:18px 0"><a href="{link}" '
+                    f'style="background:#2563eb;color:#fff;text-decoration:none;padding:12px 28px;'
+                    f'border-radius:8px;font-weight:700;display:inline-block">💳 לטעינת יתרה בכרטיס אשראי</a></p>')
+        return ''
+
+    def build(kind, topup_phone):
+        if kind == 'student':
+            subject = 'תמלול פון - הכתב יד שלך מוכן, יש לפנות למוסד להוספת יתרה'
+            body = (f'<p>שלום,</p><p>ההקראה של <b>{fname}</b> הושלמה ומוכנה למשלוח, אך <b>אין לך מספיק יתרה</b> '
+                    f'ולכן היא הושהתה.</p>{amounts}'
+                    f'<p><b>עליך לפנות להנהלת המוסד{(" (" + inst_name + ")") if inst_name else ""} ולבקש שיוסיפו לך יתרה.</b> '
+                    f'הודענו להנהלת המוסד על כך. מיד כשהיתרה תתווסף, המסמך יישלח אליך אוטומטית - אין צורך לפנות אלינו.</p>')
+        elif kind == 'manager':
+            subject = f'תמלול פון - לתלמיד {student_name} ממתין מסמך, נדרשת הוספת יתרה'
+            body = (f'<p>שלום,</p><p>התלמיד/ה <b>{student_name}</b> שלח/ה את הקובץ <b>{fname}</b>. ההקראה הושלמה אך '
+                    f'<b>ליתרה של התלמיד אין מספיק</b> ולכן המסמך הושהה.</p>{amounts}'
+                    f'<p><b>כדי שהמסמך יישלח, יש להוסיף ליתרת התלמיד</b> דרך אזור המוסד באתר (לשונית התלמידים, שדה הסכום ליד התלמיד). '
+                    f'מיד לאחר הוספת היתרה המסמך יישלח לתלמיד אוטומטית.</p>')
         else:
-            how_html = (link_html +
-                        '<p style="text-align:center;font-weight:700;color:#1d4ed8">'
-                        'אפשר גם בטלפון: התקשרו ל-03-3131795 ובתפריט הראשי בחרו בטעינת ארנק</p>')
-        fname = escape(page.original_filename or 'כתב יד')
-        html = f"""<div dir="rtl" style="font-family:Arial,sans-serif;max-width:640px;margin:auto;color:#111827">
-<h2 style="color:#1d4ed8">הקראת כתב היד שלכם מוכנה</h2>
-<p>שלום,</p>
-<p>ההקראה של <b>{fname}</b> הושלמה ומוכנה למשלוח, אך <b>היתרה בארנק אינה מספיקה</b> ולכן היא הושהתה.</p>
-<div style="background:#fef3c7;border-right:4px solid #f59e0b;padding:14px;margin:14px 0;border-radius:8px">
-<p style="margin:0">עלות: <b>₪{cost:.2f}</b><br>יתרה נוכחית: <b>₪{balance:.2f}</b></p>
-</div>
-<p><b>מיד אחרי הטעינה המסמך יישלח אליכם אוטומטית</b> - אין צורך לפנות אלינו שוב.</p>
-{how_html}
-<p style="color:#6b7280;font-size:13px">מערכת תמלול פון 03-3131795</p>
-</div>"""
-        sg = sendgrid.SendGridAPIClient(api_key=os.environ.get('SENDGRID_API_KEY'))
-        sg.send(Mail(
-            from_email=Email(os.environ.get('SENDGRID_FROM_EMAIL', ''), 'תמלול פון'),
-            to_emails=to_email,
-            subject='תמלול פון - הכתב יד מוכן, נדרשת טעינת יתרה',
-            html_content=html,
-        ))
-        log.info(f"manuscript held email sent to {to_email} (page={page.id})")
-        return to_email
-    except Exception as e:
-        log.error(f"manuscript held email error (page={page.id}): {e}")
-        return None
+            subject = 'תמלול פון - הכתב יד מוכן, נדרשת טעינת יתרה'
+            body = (f'<p>שלום,</p><p>ההקראה של <b>{fname}</b> הושלמה ומוכנה למשלוח, אך <b>היתרה בארנק אינה מספיקה</b> '
+                    f'ולכן היא הושהתה.</p>{amounts}'
+                    f'<p><b>מיד אחרי הטעינה המסמך יישלח אליכם אוטומטית</b> - אין צורך לפנות אלינו שוב.</p>'
+                    f'{link_html(topup_phone)}{phone_howto}')
+        html = f'<div dir="rtl" style="font-family:Arial,sans-serif;max-width:640px;margin:auto;color:#111827"><h2 style="color:#1d4ed8">הקראת כתב יד מוכנה</h2>{body}{footer}</div>'
+        return subject, html
+
+    sent_to = []
+    for addr, kind, topup_phone in recipients:
+        try:
+            if _is_system_inbound_address(addr):
+                log.error(f"חסימת שליחת מייל השהיה לכתובת המערכת עצמה ({addr}) - מניעת לולאה")
+                continue
+            subject, html = build(kind, topup_phone)
+            sg = sendgrid.SendGridAPIClient(api_key=os.environ.get('SENDGRID_API_KEY'))
+            sg.send(Mail(from_email=Email(os.environ.get('SENDGRID_FROM_EMAIL', ''), 'תמלול פון'),
+                         to_emails=addr, subject=subject, html_content=html))
+            sent_to.append(addr)
+            log.info(f"manuscript held email ({kind}) sent to {addr} (page={page.id})")
+        except Exception as e:
+            log.error(f"manuscript held email error to {addr} (page={page.id}): {e}")
+    return ', '.join(sent_to) or None
 
 
 def _manuscript_send_core(page, form_email='', free=False, notify_if_held=True):

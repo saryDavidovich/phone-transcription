@@ -58,7 +58,7 @@ def nedarim_topup_link(phone):
         'Groupe': NEDARIM_CATEGORY,
         'GroupeLock': '1',
     }
-    return redirect('https://www.matara.pro/nedarimplus/online/?' + urllib.parse.urlencode(params))
+    return redirect('https://www.matara.pro/nedarimplus/online/?' + urllib.parse.urlencode(params, quote_via=urllib.parse.quote))
 
 
 NEDARIM_WEBHOOK_IPS = {'18.196.146.117', '18.194.219.73'}

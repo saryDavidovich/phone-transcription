@@ -90,18 +90,26 @@ def credit_student(student_id):
         return redirect(url_for('institution_students.students_tab'))
 
     # זיכוי תלמיד (סכום חיובי) יורד בפועל מיתרת המוסד עצמה - אחרת נוצר "כסף
-    # מהאוויר". חיוב תלמיד (סכום שלילי) לא נוגע ביתרת המוסד.
+    # מהאוויר". הורדת כסף מתלמיד (סכום שלילי) מחזירה את הסכום ליתרת המוסד
+    # (למשל: 100 -> זיכוי 20 = 80 -> הורדה 15 = 95). אי אפשר להוריד מתלמיד
+    # יותר ממה שיש לו - אחרת היתרה שלו תרד מתחת לאפס והמוסד "ירוויח" כסף.
     if amount > 0:
         if (inst.balance or 0) < amount:
             flash(f'אין למוסד מספיק יתרה לזיכוי הזה (יתרת המוסד: {inst.balance or 0:.2f} ₪). נא לטעון יתרה בלשונית "הגדרות חיוב".')
             return redirect(url_for('institution_students.students_tab'))
-        inst.balance = (inst.balance or 0) - amount
+        inst.balance = round((inst.balance or 0) - amount, 2)
+    elif amount < 0:
+        take = -amount
+        if take > round(student.balance or 0, 2) + 1e-9:
+            flash(f'אי אפשר להוריד לתלמיד {take:.2f} ₪ - יש לו רק {student.balance or 0:.2f} ₪.')
+            return redirect(url_for('institution_students.students_tab'))
+        inst.balance = round((inst.balance or 0) + take, 2)
 
-    student.balance = (student.balance or 0) + amount
+    student.balance = round((student.balance or 0) + amount, 2)
     db.session.add(Transaction(
         customer_id=student.id, amount=amount,
         type='credit' if amount >= 0 else 'debit',
-        description='זיכוי ע"י המוסד' if amount >= 0 else 'חיוב ע"י המוסד',
+        description='זיכוי ע"י המוסד' if amount >= 0 else 'הורדת יתרה ע"י המוסד (הוחזר ליתרת המוסד)',
     ))
     db.session.commit()
     if amount > 0:

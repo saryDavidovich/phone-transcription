@@ -292,6 +292,11 @@ def _parse_proofing_subject(subject):
         page_id = int(tokens[1])
     except ValueError:
         return None
+    # המספר שהלקוח רואה הוא מספר הדף + 1000 (תמיד 4 ספרות ומעלה, ראה
+    # routes/dictate.py._proofing_mailto_link). מספרים מתחת ל-1000 הם מיילים
+    # ישנים שנשלחו עם המספר האמיתי.
+    if page_id >= 1000:
+        page_id -= 1000
     return phone, page_id
 
 
