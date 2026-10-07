@@ -80,12 +80,28 @@
     <a href="/admin/customers/{{ page.customer_id }}" class="btn btn-ghost ds-topbtn">👤 {{ page.customer.display_name }}{% if page.customer.institution %} · 🏫 {{ page.customer.institution.name }}{% endif %}</a>
   </div>
   <div class="ds-topbar-right">
+    {% if acct_balance is not none %}
+    <span id="acctBalance" class="badge {% if acct_balance <= 0 %}badge-red{% else %}badge-green{% endif %}" title="{{ 'יתרת המוסד (מסמך כללי)' if acct_is_institution else 'יתרת הלקוח' }}">💰 {{ 'מוסד: ' if acct_is_institution else 'יתרה: ' }}₪{{ '%.2f'|format(acct_balance) }}</span>
+    {% endif %}
+    {% if page.status in ['pending', 'recording'] %}
+    <button type="button" id="noBalBtn" class="btn btn-ghost ds-topbtn" onclick="notifyNoBalance(this)" title="שולח ללקוח מייל שאין לו יתרה מספקת והעיבוד לא התחיל, ומעביר את הדף ללשונית 'מוקפאים' עד שיטען">✉ אין יתרה - שלח הודעה</button>
+    {% endif %}
     <span id="statusBadge" class="badge badge-gray">{{ page.status }}</span>
     <span id="engineBadge" style="color:var(--text3);font-size:12px">{% if page.engine %}מנוע: {{ 'ג׳מיני' if page.engine == 'gemini' else 'OpenAI' }}{% endif %}</span>
     {% if page.claimed_by %}<span style="color:var(--text3);font-size:12px">נפתח ע"י {{ page.claimed_by }}</span>{% endif %}
   </div>
 </div>
 
+{% if page.status == 'awaiting_topup' %}
+<div style="background:#e0e7ff;border:1px solid #6366f1;color:#312e81;border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:13px;display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+  <span>❄️ ללקוח נשלחה הודעה שאין לו יתרה מספקת - הדף מוקפא ויחזור לתור אוטומטית אחרי שיטען יתרה.</span>
+  <button type="button" class="btn btn-ghost ds-topbtn" onclick="unfreezeThis(this)">↩ החזר לתור עכשיו</button>
+</div>
+{% elif customer_blocked and page.status in ['pending', 'recording'] %}
+<div style="background:#e0e7ff;border:1px solid #6366f1;color:#312e81;border-radius:8px;padding:8px 14px;margin-bottom:12px;font-size:13px">
+  ❄️ ללקוח הזה יש דף אחר שממתין לתשלום/לטעינה - הדף הזה מוסתר מהתור הראשי עד שהלקוח ישלם (נמצא בלשונית "מוקפאים").
+</div>
+{% endif %}
 <div class="ds-wrap">
   <div class="card">
     <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;gap:8px">
@@ -562,6 +578,7 @@ function cancelRecording() {
 }
 
 async function uploadAllSegments() {
+  const nb = document.getElementById('noBalBtn'); if (nb) nb.remove();
   document.getElementById('resultArea').innerHTML = '<div class="ds-state">⏳ מעלה ומתמלל...</div>';
   const fd = new FormData();
   const meta = [];
@@ -594,10 +611,27 @@ async function uploadAllSegments() {
   }
 }
 
+let pollFails = 0, pollEmpty = 0, pollStarted = 0;
 async function pollStatus() {
-  const res = await fetch(`/admin/dictate/${PAGE_ID}/status`);
-  const data = await res.json();
-  if (data.status === 'processing') { setTimeout(pollStatus, 1500); return; }
+  if (!pollStarted) pollStarted = Date.now();
+  let data = null;
+  try {
+    // no-store + מזהה ייחודי: מונע מפרוקסי/סינון (נטפרי) או מהדפדפן להחזיר תשובה ישנה מהמטמון
+    const res = await fetch(`/admin/dictate/${PAGE_ID}/status?_=${Date.now()}`, { cache: 'no-store', credentials: 'same-origin' });
+    data = await res.json();
+    pollFails = 0;
+  } catch (e) {
+    // תקלת רשת רגעית / תשובה לא תקינה - לא מוותרים, מנסים שוב (השרת ממשיך לעבוד ברקע)
+    pollFails++;
+    const area = document.getElementById('resultArea');
+    if (pollFails >= 40) {
+      area.innerHTML = `<div class="ds-state ds-error">⚠ אין חיבור לשרת. התמלול ממשיך ברקע ולא הולך לאיבוד - <a href="#" onclick="location.reload();return false">לחצו לרענון הדף</a> כדי לראות את התוצאה.</div>`;
+      return;
+    }
+    area.innerHTML = '<div class="ds-state">⏳ מתמלל... (מתחבר מחדש לשרת)</div>';
+    setTimeout(pollStatus, 3000);
+    return;
+  }
   if (data.status === 'error') {
     document.getElementById('resultArea').innerHTML =
       `<div class="ds-state ds-error">⚠ ${data.error_message || 'שגיאה בתמלול'}</div>
@@ -606,6 +640,15 @@ async function pollStatus() {
     document.getElementById('engineSelect').disabled = false;
     return;
   }
+  const hasContent = Array.isArray(data.content) && data.content.length > 0;
+  // כל מצב שבו עוד אין תוצאה (מעבד / עוד לא נרשם / תוכן עדיין ריק) - ממשיכים לחכות, עד 15 דקות
+  const waiting = data.status === 'processing' || (!hasContent && pollEmpty < 20);
+  if (waiting && Date.now() - pollStarted < 15 * 60 * 1000) {
+    if (data.status !== 'processing') pollEmpty++;
+    setTimeout(pollStatus, 1500);
+    return;
+  }
+  pollStarted = 0; pollEmpty = 0;
   currentContent = data.content;
   renderReview();
   document.getElementById('statusBadge').textContent = data.status;
@@ -664,7 +707,7 @@ function renderPreview() {
   const wrap = document.getElementById('previewWrap');
   if (!wrap) return;
   if (!currentContent || !currentContent.length) {
-    wrap.innerHTML = '<p style="color:var(--text3)">לא זוהה תוכן</p>';
+    wrap.innerHTML = '<p style="color:var(--text3)">לא זוהה תוכן - <a href="#" onclick="location.reload();return false">רענון הדף</a> (אם ההקלטה כבר תומללה בשרת, התוצאה תופיע)</p>';
     updateCharCount();
     return;
   }
@@ -760,6 +803,23 @@ async function sendResult(free) {
     msg.textContent = '⚠ ' + e.message;
     msg.style.color = 'var(--red)';
   }
+}
+
+async function notifyNoBalance(btn) {
+  if (!confirm('לשלוח ללקוח מייל שאין לו יתרה מספקת והעיבוד לא התחיל? הדף יעבור ללשונית "מוקפאים" ויחזור לתור כשהלקוח יטען.')) return;
+  btn.disabled = true; const orig = btn.textContent; btn.textContent = 'שולח...';
+  try {
+    const res = await fetch(`/admin/dictate/${PAGE_ID}/notify-no-balance`, { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'שליחה נכשלה');
+    alert('✔ נשלחה הודעה אל: ' + data.notified_to + '\nהדף הוקפא ויחזור לתור אחרי טעינה.');
+    location.href = '/admin/dictate';
+  } catch (e) { alert('⚠ ' + e.message); btn.disabled = false; btn.textContent = orig; }
+}
+async function unfreezeThis(btn) {
+  btn.disabled = true;
+  await fetch(`/admin/dictate/${PAGE_ID}/unfreeze`, { method: 'POST' });
+  location.reload();
 }
 
 async function redo() {

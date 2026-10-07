@@ -1,5 +1,10 @@
 {% extends 'admin/base.html' %}
 {% block title %}הקראת כתבי-יד<script>
+async function unfreezePage(id, btn) {
+  btn.disabled = true;
+  try { await fetch(`/admin/dictate/${id}/unfreeze`, { method: 'POST' }); location.reload(); }
+  catch (e) { alert('⚠ ' + e.message); btn.disabled = false; }
+}
 async function sendFree(id, btn) {
   if (!confirm('לשלוח את המסמך ללקוח בלי לחייב אותו כלל?')) return;
   btn.disabled = true; btn.textContent = 'שולח...';
@@ -18,20 +23,23 @@ async function sendFree(id, btn) {
 
 <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
   <a href="/admin/dictate?status=open" class="btn {% if status_filter=='open' %}btn-primary{% else %}btn-ghost{% endif %}" style="font-size:13px">
-    🕓 בתור{% if open_pending_count %} <span class="badge badge-red" style="margin-right:4px">{{ open_pending_count }}</span>{% endif %}
+    🕓 בתור{% if open_pending_count %} <span class="badge badge-purple" style="margin-right:4px">{{ open_pending_count }}</span>{% endif %}
   </a>
   <a href="/admin/dictate?status=unpaid" class="btn {% if status_filter=='unpaid' %}btn-primary{% else %}btn-ghost{% endif %}" style="font-size:13px">
     💳 ממתין לתשלום{% if unpaid_count %} <span class="badge badge-amber" style="margin-right:4px">{{ unpaid_count }}</span>{% endif %}
   </a>
+  <a href="/admin/dictate?status=frozen" class="btn {% if status_filter=='frozen' %}btn-primary{% else %}btn-ghost{% endif %}" style="font-size:13px" title="דפים של לקוחות שקיבלו הודעה על חוסר יתרה - חוזרים לתור אוטומטית אחרי טעינה">
+    ❄️ מוקפאים{% if frozen_count %} <span class="badge badge-gray" style="margin-right:4px">{{ frozen_count }}</span>{% endif %}
+  </a>
   <a href="/admin/dictate?status=done" class="btn {% if status_filter=='done' %}btn-primary{% else %}btn-ghost{% endif %}" style="font-size:13px">✅ הושלמו</a>
   <a href="/admin/dictate?status=proof" class="btn {% if status_filter=='proof' %}btn-primary{% else %}btn-ghost{% endif %}" style="font-size:13px">
-    ✏️ ממתין להגהה{% if proof_pending_count %} <span class="badge badge-red" style="margin-right:4px">{{ proof_pending_count }}</span>{% endif %}
+    ✏️ ממתין להגהה{% if proof_pending_count %} <span class="badge badge-purple" style="margin-right:4px">{{ proof_pending_count }}</span>{% endif %}
   </a>
   <a href="/admin/dictate?status=proof_done" class="btn {% if status_filter=='proof_done' %}btn-primary{% else %}btn-ghost{% endif %}" style="font-size:13px">
     📗 הגהות שהושלמו
   </a>
   <a href="/admin/dictate?status=fax" class="btn {% if status_filter=='fax' %}btn-primary{% else %}btn-ghost{% endif %}" style="font-size:13px">
-    📠 פקסים ממתינים לשיוך{% if fax_pending_count %} <span class="badge badge-red" style="margin-right:4px">{{ fax_pending_count }}</span>{% endif %}
+    📠 פקסים ממתינים לשיוך{% if fax_pending_count %} <span class="badge badge-purple" style="margin-right:4px">{{ fax_pending_count }}</span>{% endif %}
   </a>
 </div>
 
@@ -171,6 +179,8 @@ async function sendFree(id, btn) {
           {% elif p.status == 'processing' %}<span class="badge badge-amber">מתמלל...</span>
           {% elif p.status == 'review' %}<span class="badge badge-amber">ממתין לאישור</span>
           {% elif p.status == 'pending_payment' %}<span class="badge badge-amber">💳 ממתין לתשלום</span>{% if p.due_cost %} <span style="color:#8892b0;font-size:11.5px">₪{{ "%.2f"|format(p.due_cost) }}</span>{% endif %}
+          {% elif p.status == 'awaiting_topup' %}<span class="badge badge-gray">❄️ ממתין לטעינה</span> <span style="color:#8892b0;font-size:11.5px">נשלחה ללקוח הודעה - העיבוד לא התחיל</span>
+          {% elif p.frozen_note %}<span class="badge badge-gray">❄️ מוקפא</span> <span style="color:#8892b0;font-size:11.5px">{{ p.frozen_note }}</span>
           {% elif p.status == 'done' %}<span class="badge badge-green">נשלח</span>
           {% else %}<span class="badge badge-red">שגיאה</span>{% endif %}
           {% if p.proofing_rounds | selectattr('status', 'equalto', 'pending') | list %}<span class="badge badge-blue" style="margin-right:4px">✏️ הגהה ממתינה</span>{% endif %}
@@ -180,6 +190,7 @@ async function sendFree(id, btn) {
         <td onclick="location='/admin/dictate/{{p.id}}'" style="cursor:pointer;color:#8892b0">{{ p.created_at | il_time }}</td>
         <td style="display:flex;gap:6px">
           <a href="/admin/dictate/{{p.id}}" class="btn btn-ghost" style="font-size:12px;padding:4px 10px">{% if p.status=='done' %}צפייה{% else %}פתח{% endif %}</a>
+          {% if p.status == 'awaiting_topup' %}<button type="button" class="btn btn-ghost" style="font-size:12px;padding:4px 10px" onclick="unfreezePage({{p.id}}, this)" title="להחזיר לתור הרגיל בלי לחכות לטעינה">↩ החזר לתור</button>{% endif %}
           {% if p.status == 'pending_payment' %}<button type="button" class="btn btn-primary" style="font-size:12px;padding:4px 10px" onclick="sendFree({{p.id}}, this)" title="שליחה ללקוח בלי לחייב">🎁 שלח ללא חיוב</button>{% endif %}
           <form method="POST" action="/admin/dictate/{{p.id}}/delete" onsubmit="return confirm('למחוק לצמיתות את הדף {{ p.original_filename }}? פעולה זו אינה הפיכה!')">
             <button type="submit" class="btn btn-danger" style="font-size:12px;padding:4px 10px">🗑 מחק</button>

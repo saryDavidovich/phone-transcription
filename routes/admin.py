@@ -229,6 +229,10 @@ def customers():
 
     paginated = query.paginate(page=page, per_page=50)
 
+    # חיפוש מהסרגל הצדדי (go=1): תוצאה אחת בלבד - נכנסים ישר לכרטיס הלקוח
+    if search and request.args.get('go') and paginated.total == 1:
+        return redirect(url_for('admin.customer_detail', id=paginated.items[0][0].id))
+
     customers_list = [row[0] for row in paginated.items]
     recording_counts = {row[0].id: row[3] for row in paginated.items}
     load_counts = {row[0].id: row[1] for row in paginated.items}

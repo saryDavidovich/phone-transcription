@@ -91,6 +91,31 @@ DICTATION_AUDIO_DIR = os.environ.get('DICTATION_AUDIO_DIR', 'dictation_audio')
 os.makedirs(DICTATION_AUDIO_DIR, exist_ok=True)
 
 OPEN_STATUSES = ('pending', 'recording', 'processing', 'review', 'error')
+# סטטוסים שבהם הלקוח "חסום": קיבל מייל שדף שלו ממתין לתשלום / שאין לו יתרה
+# מספקת. דפים נוספים שלו שעוד לא התחילו (pending/recording) לא מוצגים בתור
+# הראשי אלא בלשונית "מוקפאים", ויחזרו לתור (לפי תאריך ההגעה המקורי) ברגע
+# שהחסימה מוסרת. 'awaiting_topup' = הנציג שלח ללקוח "אין יתרה, העיבוד לא התחיל".
+BLOCKING_STATUSES = ('pending_payment', 'awaiting_topup')
+NOT_STARTED_STATUSES = ('pending', 'recording')
+
+
+def _blocked_customer_ids():
+    """תת-שאילתה: מזהי הלקוחות שיש להם דף ממתין לתשלום / ממתין לטעינה."""
+    from models import ManuscriptPage
+    return db.session.query(ManuscriptPage.customer_id).filter(
+        ManuscriptPage.status.in_(BLOCKING_STATUSES)).subquery()
+
+
+def _frozen_condition():
+    """תנאי SQL: דף שמוקפא - ממתין לטעינה, או שעוד לא התחיל והלקוח חסום."""
+    from sqlalchemy import or_, and_
+    from models import ManuscriptPage
+    blocked = _blocked_customer_ids()
+    return or_(
+        ManuscriptPage.status == 'awaiting_topup',
+        and_(ManuscriptPage.status.in_(NOT_STARTED_STATUSES),
+             ManuscriptPage.customer_id.in_(db.session.query(blocked.c.customer_id))),
+    )
 
 
 def dictate_pending_counts():
@@ -105,16 +130,17 @@ def dictate_pending_counts():
     from models import ManuscriptPage, ProofingRound, IncomingFax
     try:
         counts = {
-            'open': ManuscriptPage.query.filter(ManuscriptPage.status.in_(OPEN_STATUSES)).count(),
+            'open': ManuscriptPage.query.filter(ManuscriptPage.status.in_(OPEN_STATUSES), ~_frozen_condition()).count(),
             'proof': ProofingRound.query.filter_by(status='pending').count(),
             'fax': IncomingFax.query.filter_by(status='pending').count(),
         }
         # דפים שהושהו בגלל יתרה לא מספיקה - מחכים ללקוח, לא לצוות: נספרים
         # בנפרד ולא נכנסים ל-total (שמראה את מה שהצוות צריך לטפל בו).
         counts['unpaid'] = ManuscriptPage.query.filter_by(status='pending_payment').count()
+        counts['frozen'] = ManuscriptPage.query.filter(_frozen_condition()).count()
     except Exception:
         db.session.rollback()
-        counts = {'open': 0, 'proof': 0, 'fax': 0, 'unpaid': 0}
+        counts = {'open': 0, 'proof': 0, 'fax': 0, 'unpaid': 0, 'frozen': 0}
     counts['total'] = counts['open'] + counts['proof'] + counts['fax']
     g._dictate_pending_counts = counts
     return counts
@@ -1020,8 +1046,11 @@ def queue():
     proof_rounds = []
     incoming_faxes = []
     if status_filter == 'open':
-        q = q.filter(ManuscriptPage.status.in_(OPEN_STATUSES))
+        q = q.filter(ManuscriptPage.status.in_(OPEN_STATUSES), ~_frozen_condition())
         q = q.order_by(ManuscriptPage.created_at.asc())  # תור - הישן קודם
+        pages = q.limit(200).all()
+    elif status_filter == 'frozen':
+        q = q.filter(_frozen_condition()).order_by(ManuscriptPage.created_at.asc())
         pages = q.limit(200).all()
     elif status_filter == 'unpaid':
         q = q.filter(ManuscriptPage.status == 'pending_payment').order_by(ManuscriptPage.created_at.asc())
@@ -1065,9 +1094,11 @@ def queue():
     from services.pricing import char_cost
     unit_size, price_per_unit = _manuscript_pricing()
     for _p in pages:
+        if _p.status in NOT_STARTED_STATUSES and status_filter == 'frozen':
+            _p.frozen_note = 'ממתין מאחורי דף של אותו לקוח שממתין לתשלום'
         if _p.status == 'pending_payment':
             _p.due_cost = char_cost(_manuscript_char_count(_p.content), unit_size, price_per_unit)
-    return render_template('admin/dictate_queue.html', pages=pages, proof_rounds=proof_rounds, unpaid_count=pending.get('unpaid', 0),
+    return render_template('admin/dictate_queue.html', pages=pages, proof_rounds=proof_rounds, unpaid_count=pending.get('unpaid', 0), frozen_count=pending.get('frozen', 0),
                             incoming_faxes=incoming_faxes,
                             status_filter=status_filter, open_pending_count=pending['open'],
                             proof_pending_count=pending['proof'], fax_pending_count=pending['fax'])
@@ -1526,9 +1557,18 @@ def studio(page_id):
         page.claimed_at = datetime.utcnow()
         db.session.commit()
     pv = _manuscript_preview(page, request.args.get('part', 1, type=int))
+    _acct = _manuscript_billing_account(page.customer)
+    acct_balance = float(getattr(_acct, 'balance', 0) or 0) if _acct is not None else None
+    acct_is_institution = bool(_acct is not None and _acct is not page.customer)
+    # יש ללקוח דף אחר שממתין לתשלום / לטעינה - הדפים שלו שעוד לא התחילו מוסתרים מהתור
+    from models import ManuscriptPage as _MP
+    customer_blocked = _MP.query.filter(
+        _MP.customer_id == page.customer_id, _MP.id != page.id,
+        _MP.status.in_(BLOCKING_STATUSES)).count() > 0
     return render_template(
         'admin/dictate_studio.html',
-        page=page,
+        page=page, acct_balance=acct_balance, acct_is_institution=acct_is_institution,
+        customer_blocked=customer_blocked,
         default_engine=DEFAULT_DICTATION_ENGINE,
         manuscript_data_uri=pv['uri'],
         manuscript_is_pdf=pv['is_pdf'],
@@ -1630,12 +1670,14 @@ def process(page_id):
 def status(page_id):
     from models import ManuscriptPage
     page = ManuscriptPage.query.get_or_404(page_id)
-    return jsonify({
+    resp = jsonify({
         'status': page.status,
         'content': page.content,
         'error_message': page.error_message,
         'engine': page.engine,
     })
+    resp.headers['Cache-Control'] = 'no-store, max-age=0'   # שלא יוחזר מהמטמון של פרוקסי/דפדפן
+    return resp
 
 
 @dictate_bp.route('/<int:page_id>/content', methods=['POST'])
@@ -1720,10 +1762,12 @@ def _manuscript_held_recipients(customer, billing_account):
     return [r for r in out if r[0]]
 
 
-def _send_manuscript_held_email(page, customer, billing_account, cost):
+def _send_manuscript_held_email(page, customer, billing_account, cost, not_started=False):
     """מיילים על דף שהושהה בגלל יתרה לא מספקת. אחרי הטעינה המסמך יישלח
     אוטומטית. תלמיד של מוסד: גם התלמיד (לפנות למוסד לבקש תוספת יתרה) וגם
     מנהל המוסד (לתלמיד פלוני ממתין מסמך וצריך להוסיף לו יתרה) מקבלים מייל.
+    not_started=True: ההודעה נשלחת *לפני* שההקראה התחילה (הנציג ראה שהיתרה
+    נמוכה והקובץ ארוך) - "אין יתרה מספקת, העיבוד טרם התחיל"; אין עלות מחושבת.
     מחזיר את הכתובות שנשלח אליהן (מחרוזת, מופרדות בפסיק), או None."""
     recipients = _manuscript_held_recipients(customer, billing_account)
     if not recipients:
@@ -1737,8 +1781,14 @@ def _send_manuscript_held_email(page, customer, billing_account, cost):
     fname = escape(page.original_filename or 'כתב יד')
     student_name = escape(customer.display_name if customer else '')
     inst_name = escape(customer.institution.name) if (customer and customer.institution) else ''
-    amounts = (f'<div style="background:#fef3c7;border-right:4px solid #f59e0b;padding:14px;margin:14px 0;border-radius:8px">'
-               f'<p style="margin:0">עלות: <b>₪{cost:.2f}</b><br>יתרה נוכחית: <b>₪{balance:.2f}</b></p></div>')
+    if not_started:
+        unit_size, price_per_unit = _manuscript_pricing()
+        amounts = (f'<div style="background:#fef3c7;border-right:4px solid #f59e0b;padding:14px;margin:14px 0;border-radius:8px">'
+                   f'<p style="margin:0">יתרה נוכחית: <b>₪{balance:.2f}</b><br>'
+                   f'תמחור: ₪{price_per_unit:g} לכל {unit_size:g} תווים (העלות המדויקת נקבעת לפי אורך הטקסט)</p></div>')
+    else:
+        amounts = (f'<div style="background:#fef3c7;border-right:4px solid #f59e0b;padding:14px;margin:14px 0;border-radius:8px">'
+                   f'<p style="margin:0">עלות: <b>₪{cost:.2f}</b><br>יתרה נוכחית: <b>₪{balance:.2f}</b></p></div>')
     footer = '<p style="color:#6b7280;font-size:13px">מערכת תמלול פון 03-3131795</p>'
     phone_howto = ('<p style="text-align:center;font-weight:700;color:#1d4ed8">'
                    'אפשר גם בטלפון: התקשרו ל-03-3131795 ובתפריט הראשי בחרו בטעינת ארנק</p>')
@@ -1752,7 +1802,30 @@ def _send_manuscript_held_email(page, customer, billing_account, cost):
                     f'border-radius:8px;font-weight:700;display:inline-block">💳 לטעינת יתרה בכרטיס אשראי</a></p>')
         return ''
 
+    def build_not_started(kind, topup_phone):
+        if kind == 'student':
+            subject = 'תמלול פון - הקובץ שלך ממתין, יש לפנות למוסד להוספת יתרה'
+            body = (f'<p>שלום,</p><p>קיבלנו את הקובץ <b>{fname}</b>, אך <b>אין לך מספיק יתרה</b> '
+                    f'ולכן <b>העיבוד טרם התחיל</b>.</p>{amounts}'
+                    f'<p><b>עליך לפנות להנהלת המוסד{(" (" + inst_name + ")") if inst_name else ""} ולבקש שיוסיפו לך יתרה.</b> '
+                    f'הודענו להנהלת המוסד על כך. לאחר הוספת היתרה הקובץ ייכנס לעיבוד וימסר אליך - אין צורך לפנות אלינו.</p>')
+        elif kind == 'manager':
+            subject = f'תמלול פון - התלמיד {student_name} שלח קובץ, נדרשת הוספת יתרה'
+            body = (f'<p>שלום,</p><p>התלמיד/ה <b>{student_name}</b> שלח/ה את הקובץ <b>{fname}</b>. '
+                    f'<b>ליתרה של התלמיד אין מספיק</b> ולכן <b>העיבוד טרם התחיל</b>.</p>{amounts}'
+                    f'<p><b>כדי שהקובץ ייכנס לעיבוד, יש להוסיף ליתרת התלמיד</b> דרך אזור המוסד באתר (לשונית התלמידים, שדה הסכום ליד התלמיד).</p>')
+        else:
+            subject = 'תמלול פון - הקובץ שלכם ממתין, נדרשת טעינת יתרה'
+            body = (f'<p>שלום,</p><p>קיבלנו את הקובץ <b>{fname}</b>, אך <b>היתרה בארנק אינה מספיקה</b> '
+                    f'ולכן <b>העיבוד טרם התחיל</b>.</p>{amounts}'
+                    f'<p><b>מיד אחרי טעינת היתרה הקובץ ייכנס לעיבוד</b> (לפי סדר הגעתו) והמסמך המוכן יישלח אליכם - אין צורך לפנות אלינו שוב.</p>'
+                    f'{link_html(topup_phone)}{phone_howto}')
+        html = f'<div dir="rtl" style="font-family:Arial,sans-serif;max-width:640px;margin:auto;color:#111827"><h2 style="color:#1d4ed8">נדרשת טעינת יתרה</h2>{body}{footer}</div>'
+        return subject, html
+
     def build(kind, topup_phone):
+        if not_started:
+            return build_not_started(kind, topup_phone)
         if kind == 'student':
             subject = 'תמלול פון - הכתב יד שלך מוכן, יש לפנות למוסד להוספת יתרה'
             body = (f'<p>שלום,</p><p>ההקראה של <b>{fname}</b> הושלמה ומוכנה למשלוח, אך <b>אין לך מספיק יתרה</b> '
@@ -1917,6 +1990,66 @@ def send(page_id):
     return jsonify(payload), code
 
 
+@dictate_bp.route('/<int:page_id>/notify-no-balance', methods=['POST'])
+@login_required
+def notify_no_balance(page_id):
+    """הנציג רואה (בסטודיו) שליתרת הלקוח אין מספיק, והקובץ ארוך - שולח ללקוח
+    "אין יתרה מספקת, העיבוד טרם התחיל" ומקפיא את הדף: הוא יוצא מהתור הראשי
+    (ועימו שאר הדפים שעוד לא התחילו של אותו לקוח) ויחזור אליו, לפי תאריך
+    ההגעה המקורי, כשהלקוח יטען יתרה (ראה process_pending_manuscripts)."""
+    from models import ManuscriptPage
+    page = ManuscriptPage.query.get_or_404(page_id)
+    if page.status not in NOT_STARTED_STATUSES:
+        return jsonify({'error': 'אפשר לשלוח הודעה כזו רק לדף שההקראה שלו עוד לא התחילה'}), 400
+    customer = page.customer
+    if not customer:
+        return jsonify({'error': 'לא נמצא לקוח משויך לדף'}), 400
+    billing_account = _manuscript_billing_account(customer)
+    notified = _send_manuscript_held_email(page, customer, billing_account, 0.0, not_started=True)
+    if not notified:
+        return jsonify({'error': 'לא נמצאה כתובת מייל לשליחת ההודעה (ללקוח/למוסד) - לא נשלח כלום והדף לא הוקפא'}), 400
+    page.status = 'awaiting_topup'
+    db.session.commit()
+    return jsonify({'status': 'awaiting_topup', 'notified_to': notified,
+                    'balance': float(getattr(billing_account, 'balance', 0) or 0)})
+
+
+@dictate_bp.route('/<int:page_id>/unfreeze', methods=['POST'])
+@login_required
+def unfreeze(page_id):
+    """מחזיר דף שהוקפא (awaiting_topup) לתור הרגיל ידנית."""
+    from models import ManuscriptPage
+    page = ManuscriptPage.query.get_or_404(page_id)
+    if page.status == 'awaiting_topup':
+        page.status = 'pending'
+        db.session.commit()
+    return jsonify({'status': page.status})
+
+
+def _release_awaiting_topup(customer_id=None, institution_id=None):
+    """אחרי טעינה: דפים שהוקפאו כי "אין יתרה, העיבוד לא התחיל" חוזרים לתור
+    (status='pending', תאריך ההגעה המקורי נשמר - ולכן הם חוזרים למקומם לפי
+    התאריך). חל רק אם יתרת החשבון המחויב חיובית עכשיו. מחזיר כמה שוחררו."""
+    from models import ManuscriptPage, Customer, Institution
+    q = ManuscriptPage.query.filter_by(status='awaiting_topup')
+    if customer_id:
+        q = q.filter(ManuscriptPage.customer_id == customer_id)
+    elif institution_id:
+        q = q.join(Customer, ManuscriptPage.customer_id == Customer.id).filter(
+            Customer.institution_id == institution_id, Customer.is_institution_self.is_(True))
+    else:
+        return 0
+    released = 0
+    for page in q.all():
+        acct = _manuscript_billing_account(page.customer)
+        if acct is not None and (acct.balance or 0) > 0:
+            page.status = 'pending'
+            released += 1
+    if released:
+        db.session.commit()
+    return released
+
+
 def process_pending_manuscripts(customer_id=None, institution_id=None):
     """אחרי טעינת יתרה: שולח אוטומטית כל דף שהושהה (pending_payment) ושעכשיו
     היתרה מספיקה לו - בלי שום פעולת נציג. customer_id = לקוח/תלמיד שהיתרה
@@ -1929,6 +2062,11 @@ def process_pending_manuscripts(customer_id=None, institution_id=None):
         from app import app as app_obj
     with app_obj.app_context():
         from models import ManuscriptPage, Customer
+        try:
+            _release_awaiting_topup(customer_id=customer_id, institution_id=institution_id)
+        except Exception as e:
+            db.session.rollback()
+            log.error(f"release awaiting_topup error: {e}", exc_info=True)
         q = ManuscriptPage.query.filter_by(status='pending_payment')
         if customer_id:
             q = q.filter(ManuscriptPage.customer_id == customer_id)
