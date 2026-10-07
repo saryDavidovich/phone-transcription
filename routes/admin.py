@@ -635,11 +635,135 @@ def bulk_delete_recordings():
     next_url = request.form.get('next') or url_for('admin.recordings')
     return redirect(next_url)
 
+def _recording_prior_net_charge(rec):
+    """כמה כסף נגבה בפועל מהלקוח על ההקלטה הזו (חיובים פחות זיכויים שקשורים
+    אליה). 0 אם לא נגבה כלום או שכבר זוכה."""
+    total = db.session.query(func.coalesce(func.sum(Transaction.amount), 0)).filter(
+        Transaction.recording_id == rec.id).scalar() or 0
+    return round(-float(total), 2) if total < 0 else 0.0
+
+
 @admin_bp.route('/recordings/<int:id>')
 @login_required
 def recording_detail(id):
+    import math
     recording = Recording.query.get_or_404(id)
-    return render_template('admin/recording_detail.html', recording=recording)
+    customer = recording.customer
+    units = math.ceil((recording.duration_seconds or 0) / 1200) or 1
+    price_basic = float(get_setting('price_per_20min_basic', '0.90') or 0.90)
+    price_premium = float(get_setting('price_per_20min_premium', '1.90') or 1.90)
+    return render_template(
+        'admin/recording_detail.html', recording=recording,
+        rt_units=units, rt_cost_basic=round(units * price_basic, 2),
+        rt_cost_premium=round(units * price_premium, 2),
+        rt_balance=float(customer.balance or 0) if customer else 0.0,
+        rt_prior_charge=_recording_prior_net_charge(recording),
+        rt_in_progress=recording.status in ('recording', 'processing', 'transcribing', 'alefbot_pending', 'queued'),
+    )
+
+
+def _recording_source_available(rec):
+    """בודק שקובץ האודיו של ההקלטה עדיין זמין לפני שליחה חוזרת לתמלול.
+    מחזיר (True, '') או (False, הסבר)."""
+    import requests as _rq
+    url = (rec.rec_url or '').strip()
+    if not url:
+        return False, 'אין כתובת קובץ שמורה להקלטה הזו - אי אפשר לשלוח אותה שוב לתמלול'
+    if '/api/recordings-email/' in url:
+        # הקלטה שהגיעה במייל - נשמרת בדיסק המקומי של השרת (נמחק בדפלוי)
+        from routes.email_inbound import RECORDINGS_EMAIL_DIR
+        filename = url.rsplit('/', 1)[-1]
+        path = os.path.join(RECORDINGS_EMAIL_DIR, filename)
+        if os.path.exists(path):
+            return True, ''
+        if rec.file_data:
+            try:
+                os.makedirs(RECORDINGS_EMAIL_DIR, exist_ok=True)
+                with open(path, 'wb') as f:
+                    f.write(rec.file_data)
+                return True, ''
+            except OSError as e:
+                return False, f'שחזור הקובץ נכשל: {e}'
+        return False, 'קובץ האודיו של ההקלטה הזו (שהגיעה במייל) כבר לא נמצא בשרת - כנראה נמחק בעדכון מערכת. יש לבקש מהלקוח לשלוח אותו שוב'
+    try:
+        r = _rq.get(url, timeout=20, stream=True, headers={
+            'User-Agent': ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+                           '(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36')})
+        ok = r.status_code < 400
+        r.close()
+        if not ok:
+            return False, f'קובץ האודיו לא זמין כרגע (שגיאה {r.status_code})'
+        return True, ''
+    except Exception as e:
+        return False, f'לא ניתן להגיע לקובץ האודיו: {e}'
+
+
+@admin_bp.route('/recordings/<int:id>/retranscribe', methods=['POST'])
+@login_required
+def retranscribe_recording(id):
+    """שולח הקלטה שוב לתמלול (רגיל=ג'מיני / מקצועי=אלף-בוט) - חיוב ושליחה ללקוח
+    בדיוק כמו תמלול רגיל. אם כבר נגבה כסף על ההקלטה, אפשר לסמן זיכוי של החיוב
+    הקודם כדי שהלקוח לא ישלם פעמיים."""
+    from services.transcribe import transcribe_async
+    rec = Recording.query.get_or_404(id)
+    customer = rec.customer
+    back = redirect(url_for('admin.recording_detail', id=id))
+    choice = request.form.get('tier', '')
+    tier = {'regular': 'gemini', 'professional': 'premium'}.get(choice)
+    if not tier:
+        flash('יש לבחור סוג תמלול: רגיל או מקצועי')
+        return back
+    if not customer:
+        flash('לא נמצא לקוח משויך להקלטה')
+        return back
+
+    method = rec.delivery_method
+    target = (rec.delivered_to or '').strip()
+    if not target:
+        if (customer.email or '').strip():
+            method, target = 'email', customer.email.strip()
+        else:
+            flash('אין כתובת מייל/פקס למסירה ללקוח הזה - אי אפשר לשלוח את התמלול בסיום')
+            return back
+    if method not in ('email', 'fax'):
+        method = 'email' if '@' in target else 'fax'
+
+    ok, why = _recording_source_available(rec)
+    if not ok:
+        flash('⚠ ' + why)
+        return back
+
+    prior = _recording_prior_net_charge(rec)
+    if prior > 0 and request.form.get('refund') == '1':
+        customer.balance = (customer.balance or 0) + prior
+        db.session.add(Transaction(
+            customer_id=customer.id, amount=prior, type='credit', recording_id=rec.id,
+            description=f'זיכוי על חיוב קודם - תמלול חוזר (הקלטה #{rec.id})'))
+
+    rec.transcription_tier = tier
+    rec.delivery_method = method
+    rec.delivered_to = target
+    rec.transcript = None
+    rec.summary = None
+    rec.alefbot_job_id = None
+    rec.expires_at = None
+    rec.cost = 0.0
+    maintenance_on = get_setting('maintenance_mode', '0') == '1'
+    rec.status = 'queued_maintenance' if maintenance_on else 'queued'
+    db.session.commit()
+
+    if maintenance_on:
+        flash('מצב תחזוקה דלוק - ההקלטה תיכנס לתמלול (' + ('מקצועי' if tier == 'premium' else 'רגיל') + ') כשיכבה')
+        return back
+    transcribe_async(
+        call_id=rec.call_id, rec_url=rec.rec_url, customer_id=customer.id,
+        delivery_method=method, delivered_to=target,
+        duration_seconds=rec.duration_seconds or 0, transcription_tier=tier,
+        language=rec.language or 'he', output_language=rec.output_language or 'he',
+    )
+    flash('✔ ההקלטה נשלחה שוב לתמלול ' + ('מקצועי' if tier == 'premium' else 'רגיל') +
+          ' - תחויב ותישלח ללקוח בסיום (' + target + ')')
+    return back
 
 @admin_bp.route('/recordings/<int:id>/download-audio')
 @login_required
