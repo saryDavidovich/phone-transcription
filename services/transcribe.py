@@ -1384,6 +1384,21 @@ def _embed_font_in_docx(docx_bytes, font_name, regular_path, bold_path=None):
         return docx_bytes
 
 
+def add_no_expand_shift_return(doc):
+    """מוסיף ל-settings.xml את w:doNotExpandShiftReturn (בתוך w:compat) - ראה
+    הערה ב-_build_word_doc. בטוח להפעלה חוזרת."""
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+    settings_el = doc.settings.element
+    compat = settings_el.find(qn('w:compat'))
+    if compat is None:
+        compat = OxmlElement('w:compat')
+        settings_el.append(compat)
+    if compat.find(qn('w:doNotExpandShiftReturn')) is None:
+        # בסכימה doNotExpandShiftReturn בא לפני useFELayout והגדרות compatSetting
+        compat.insert(0, OxmlElement('w:doNotExpandShiftReturn'))
+
+
 def _build_word_doc(name, duration_str, transcript_fixed, transcript_raw=None, title='תמלול שיחה', call_time=None):
     from docx import Document
     from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -1571,6 +1586,11 @@ def _build_word_doc(name, duration_str, transcript_fixed, transcript_raw=None, t
         theme_font_lang = OxmlElement('w:themeFontLang')
         settings_el.append(theme_font_lang)
     theme_font_lang.set(qn('w:bidi'), 'he-IL')
+
+    # שורה שנגמרת במעבר שורה ידני (Shift+Enter) בפסקה מיושרת-לשני-הצדדים נמתחת
+    # בוורד לרוחב מלא - כך נראה סוף כל קטע בתמלול שנגמר באמצע שורה. ההגדרה הזו
+    # (תאימות "אל תמתח שורות שנגמרות במעבר שורה") משאירה אותן צמודות לצד הימני.
+    add_no_expand_shift_return(doc)
 
     # מסמן לוורד שיש גופנים מוטמעים בקובץ, כך שהם ישמשו גם אצל נמענים שאין להם את הגופן מותקן
     embed_ttf = OxmlElement('w:embedTrueTypeFonts')

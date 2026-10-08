@@ -655,6 +655,12 @@ def _build_manuscript_docx(customer_name, original_filename, content):
         theme_font_lang = OxmlElement('w:themeFontLang')
         settings_el.append(theme_font_lang)
     theme_font_lang.set(qn('w:bidi'), 'he-IL')
+    try:
+        from services.transcribe import add_no_expand_shift_return
+        add_no_expand_shift_return(doc)   # שורה שנגמרת במעבר שורה ידני לא נמתחת לרוחב מלא
+    except ImportError:
+        pass
+
 
     embed_ttf = OxmlElement('w:embedTrueTypeFonts')
     settings_el.insert_element_before(
