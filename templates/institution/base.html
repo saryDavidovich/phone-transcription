@@ -116,8 +116,11 @@ table tr { border-bottom:1px solid var(--border); }
 </style>
 {% block head %}{% endblock %}
 </head>
-<body class="{{ 'no-sidebar' if not current_user.is_authenticated }}">
-{% if current_user.is_authenticated %}
+{# הסרגל הצדדי רק למוסד מחובר בפועל. אם באותו דפדפן מחובר מנהל המערכת (אותו מנגנון
+   התחברות), דף הכניסה של המוסד צריך להיראות נקי - בלי הסרגל של אזור המוסד. #}
+{% set inst_logged_in = current_user.is_authenticated and current_user.__class__.__name__ == 'Institution' %}
+<body class="{{ 'no-sidebar' if not inst_logged_in }}">
+{% if inst_logged_in %}
 <aside class="sidebar">
   <div class="sidebar-logo"><span class="dot"></span> אזור מוסד</div>
   <nav class="sidebar-nav">
