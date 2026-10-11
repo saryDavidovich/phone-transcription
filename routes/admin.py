@@ -54,15 +54,36 @@ def set_setting(key, value):
         db.session.add(s)
     db.session.commit()
 
+def _admin_credentials_from_env():
+    """שם משתמש וסיסמה של מנהל-העל נקבעים אך ורק במשתני הסביבה (Railway):
+    ADMIN_USERNAME (ברירת מחדל: admin) ו-ADMIN_PASSWORD. שום דבר מזה לא נשמר
+    או נקרא מהגדרות הניהול / מסד הנתונים."""
+    return (os.environ.get('ADMIN_USERNAME') or 'admin').strip(), os.environ.get('ADMIN_PASSWORD') or ''
+
+
 @admin_bp.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
-        username = request.form.get('username')
-        password = request.form.get('password')
-        user = AdminUser.query.filter_by(username=username).first()
-        if user and check_password_hash(user.password_hash, password):
+        import hmac, time
+        username = (request.form.get('username') or '').strip()
+        password = request.form.get('password') or ''
+        env_user, env_pass = _admin_credentials_from_env()
+        if not env_pass:
+            log.error('admin login refused: ADMIN_PASSWORD environment variable is not set')
+            flash('לא הוגדר משתנה הסביבה ADMIN_PASSWORD בשרת - יש להגדיר אותו ב-Railway')
+            return render_template('admin/login.html')
+        ok = (hmac.compare_digest(username.encode('utf-8'), env_user.encode('utf-8'))
+              and hmac.compare_digest(password.encode('utf-8'), env_pass.encode('utf-8')))
+        if ok:
+            # Flask-Login צריך אובייקט משתמש; השורה בטבלה משמשת רק כמזהה (ללא סיסמה)
+            user = AdminUser.query.filter_by(username=env_user).first()
+            if not user:
+                user = AdminUser(username=env_user, password_hash='!env-only')
+                db.session.add(user)
+                db.session.commit()
             login_user(user)
             return redirect(url_for('admin.dashboard'))
+        time.sleep(1)  # האטה קלה נגד ניחושים
         flash('שם משתמש או סיסמה שגויים')
     return render_template('admin/login.html')
 
@@ -898,27 +919,8 @@ def reports():
 @admin_bp.route('/change-password', methods=['POST'])
 @login_required
 def change_password():
-    from werkzeug.security import check_password_hash, generate_password_hash
-
-    current_password = request.form.get('current_password', '')
-    new_password = request.form.get('new_password', '')
-    confirm_password = request.form.get('confirm_password', '')
-
-    if not check_password_hash(current_user.password_hash, current_password):
-        flash('הסיסמה הנוכחית שגויה')
-        return redirect(url_for('admin.settings'))
-
-    if len(new_password) < 8:
-        flash('הסיסמה החדשה חייבת להכיל לפחות 8 תווים')
-        return redirect(url_for('admin.settings'))
-
-    if new_password != confirm_password:
-        flash('הסיסמאות החדשות אינן תואמות')
-        return redirect(url_for('admin.settings'))
-
-    current_user.password_hash = generate_password_hash(new_password)
-    db.session.commit()
-    flash('הסיסמה שונתה בהצלחה')
+    # הסיסמה מוגדרת רק במשתנה הסביבה ADMIN_PASSWORD (Railway) - לא משתנה מכאן
+    flash('סיסמת המנהל מוגדרת במשתני הסביבה בשרת (ADMIN_PASSWORD) ואי אפשר לשנות אותה מכאן')
     return redirect(url_for('admin.settings'))
 
 

@@ -434,18 +434,9 @@ def _migrate_db():
 
 
 def _create_default_admin():
-    try:
-        from models import AdminUser
-        if not AdminUser.query.first():
-            from werkzeug.security import generate_password_hash
-            admin = AdminUser(
-                username='admin',
-                password_hash=generate_password_hash('admin123')
-            )
-            db.session.add(admin)
-            db.session.commit()
-    except Exception:
-        db.session.rollback()
+    # כבר לא יוצרים מנהל ברירת מחדל (admin/admin123): הכניסה של המנהל נקבעת רק במשתני
+    # הסביבה ADMIN_USERNAME / ADMIN_PASSWORD (ראה routes/admin.py login).
+    return
 
 app = create_app()
 if __name__ == '__main__':
