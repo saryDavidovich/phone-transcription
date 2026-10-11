@@ -75,7 +75,19 @@ def create_app():
     from routes.institution_students import institution_students_bp
     from routes.recording_proxy import download_bp
     from routes.dictate import dictate_bp
+    from routes.student_link import student_link_bp
 
+    @app.before_request
+    def _keep_institutions_out_of_admin():
+        # מוסדות מתחברים דרך אותו Flask-Login כמו המנהל (ראה Institution.get_id).
+        # בלי החסימה הזו מוסד מחובר יכול היה לפתוח את כל דפי /admin של המנהל.
+        from flask import request, redirect
+        from flask_login import current_user
+        if request.path.startswith('/admin') and request.path not in ('/admin/login', '/admin/logout'):
+            if current_user.is_authenticated and current_user.__class__.__name__ == 'Institution':
+                return redirect('/institution/dashboard')
+
+    app.register_blueprint(student_link_bp)
     app.register_blueprint(ivr_bp, url_prefix='/ivr')
     app.register_blueprint(admin_bp, url_prefix='/admin')
     app.register_blueprint(payment_bp, url_prefix='/payment')
@@ -278,6 +290,9 @@ def _migrate_db():
         # (max_usage_per_student נשארת בטבלה בלי שימוש, לתאימות לאחור)
         "ALTER TABLE institutions ADD COLUMN IF NOT EXISTS max_minutes_per_period FLOAT",
         "ALTER TABLE institutions ADD COLUMN IF NOT EXISTS limit_period VARCHAR(10)",
+        # טעינה עצמית של תלמידים: חלק היתרה שהוא כסף התלמיד עצמו + מתג מוסד
+        "ALTER TABLE customers ADD COLUMN IF NOT EXISTS self_funded FLOAT DEFAULT 0.0",
+        "ALTER TABLE institutions ADD COLUMN IF NOT EXISTS allow_student_topup BOOLEAN DEFAULT TRUE",
         # שלב ב' של הקראת כתבי-יד (routes/dictate.py) - תמחור לפי תווים, מחויב
         # ללקוח רק בפועל בעת שליחה סופית (ראה models.ManuscriptPage)
         "ALTER TABLE manuscript_pages ADD COLUMN IF NOT EXISTS char_count INTEGER DEFAULT 0",

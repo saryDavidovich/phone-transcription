@@ -56,6 +56,8 @@ def get_customer(phone):
         'fax': customer.fax or '',
         'delivery_method': customer.delivery_method or 'email',
         'is_blocked': customer.is_blocked,
+        # תלמיד מוסד רשאי לטעון בעצמו רק אם המתג המרכזי והמתג של המוסד דלוקים (לשלוחת הטעינה ב-IVR)
+        'topup_allowed': __import__('services.student_links', fromlist=['x']).student_self_topup_allowed(customer),
         'default_settings': customer.default_settings or {},
         'name': customer.name or '',
     })

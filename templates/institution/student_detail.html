@@ -32,7 +32,7 @@
 <h1 style="margin-top:10px;">{{ student.name }}</h1>
 <p style="color:var(--text2); font-size:13px; margin-bottom:20px;">
   מספר תלמיד: {{ student.student_number or '—' }} · טלפון: {{ student.phone or '—' }} ·
-  יתרה: {{ "%.2f"|format(student.balance or 0) }} ₪
+  יתרה: {{ "%.2f"|format(student.balance or 0) }} ₪{% if student.self_funded %} (מתוכה {{ "%.2f"|format(student.self_funded) }} ₪ כסף של התלמיד עצמו){% endif %}
 </p>
 {% endif %}
 

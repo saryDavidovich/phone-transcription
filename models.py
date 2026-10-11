@@ -15,7 +15,13 @@ class Customer(db.Model):
     # ראה routes/dictate.py._ensure_customer_fax_code - ולא בהכרח קיים לכל
     # לקוח ישן. ראה גם models.IncomingFax לשיוך פקסים נכנסים שהתקבלו.
     fax_code = db.Column(db.String(10), unique=True, nullable=True, index=True)
-    balance = db.Column(db.Float, default=0.0)
+    # active_history: שנדע את הערך הקודם בכל שינוי יתרה (ראה _track_self_funded למטה)
+    balance = db.Column(db.Float, default=0.0, active_history=True)
+    # החלק מהיתרה של תלמיד מוסד שהוא כסף של התלמיד עצמו (טעינה עצמית, או יתרה
+    # שהייתה לו כלקוח עצמאי לפני שצורף למוסד) - ולכן המוסד לא יכול להוריד אותו.
+    # שאר היתרה (balance - self_funded) היא כסף שהמוסד נתן. הצריכה יורדת קודם
+    # מחלק המוסד. ראה routes/institution_students.py credit_student.
+    self_funded = db.Column(db.Float, default=0.0)
     is_blocked = db.Column(db.Boolean, default=False)
     delivery_method = db.Column(db.String(10), default='email')
     default_settings = db.Column(db.JSON, nullable=True)  # ברירות מחדל: tier, language, output_language
@@ -71,6 +77,9 @@ class Institution(db.Model, UserMixin):
     notify_email = db.Column(db.String(200), nullable=True)  # מייל שאליו מגיעים כל התמלולים עם פרטי התלמיד
     notify_fax = db.Column(db.String(20), nullable=True)
     authorized_logins = db.Column(db.JSON, nullable=True)  # [{"email":..., "name":...}, ...] - מורשי כניסה נוספים
+    # האם תלמידי המוסד רשאים לטעון יתרה בעצמם (בנוסף למה שהמוסד נותן להם). פועל רק
+    # כשהמתג המרכזי בהגדרות הניהול (allow_student_self_topup) דלוק. ברירת מחדל: מותר.
+    allow_student_topup = db.Column(db.Boolean, nullable=True, default=True)
 
     # --- הגדרות חיוב (נדרים פלוס - ראו routes/institution_billing.py) ---
     card_last4 = db.Column(db.String(4), nullable=True)
@@ -502,3 +511,59 @@ class InboxMessage(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
 
     thread = db.relationship('GeneralInboxMessage', backref=db.backref('messages', order_by='InboxMessage.created_at'))
+
+
+class StudentLinkRequest(db.Model):
+    """בקשת מוסד לצרף כתלמיד לקוח שכבר קיים במערכת (עם טלפון קיים). הלקוח חייב
+    לאשר (קישור במייל), או - אם אין לו מייל - מנהל המערכת מאשר ידנית
+    (needs_admin). רק אחרי אישור הלקוח הופך לתלמיד של המוסד; היתרה וההיסטוריה
+    שלו נשמרות והיתרה הקיימת נחשבת כסף שלו (ראה Customer.self_funded)."""
+    __tablename__ = 'student_link_requests'
+
+    id = db.Column(db.Integer, primary_key=True)
+    institution_id = db.Column(db.Integer, db.ForeignKey('institutions.id'), nullable=False, index=True)
+    customer_id = db.Column(db.Integer, db.ForeignKey('customers.id'), nullable=False, index=True)
+    token = db.Column(db.String(64), unique=True, nullable=False, index=True)
+    display_name = db.Column(db.String(100), nullable=True)   # השם שהמוסד נתן לתלמיד
+    status = db.Column(db.String(12), default='pending', index=True)  # pending / approved / declined / cancelled / expired
+    needs_admin = db.Column(db.Boolean, default=False)         # אין מייל ללקוח - אישור ע"י מנהל המערכת
+    sent_to = db.Column(db.String(200), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    expires_at = db.Column(db.DateTime, nullable=True)
+    responded_at = db.Column(db.DateTime, nullable=True)
+
+    institution = db.relationship('Institution')
+    customer = db.relationship('Customer')
+
+
+# --------------------------------------------------------------------------
+# מעקב Customer.self_funded: כל הפחתת יתרה (צריכה/הורדה) יורדת קודם מחלק המוסד,
+# ורק מה שמעבר לו מחלק התלמיד. נעשה ברמת ה-session כדי לתפוס את כל נקודות
+# החיוב במערכת (תמלול, OCR, כתבי יד, הגהות...) בלי לגעת בכל אחת מהן. כשהקוד
+# עצמו משנה את self_funded באותה פעולה (טעינה עצמית) - לא מתערבים.
+# --------------------------------------------------------------------------
+from sqlalchemy import event as _sa_event, inspect as _sa_inspect
+from sqlalchemy.orm import Session as _SASession
+
+
+@_sa_event.listens_for(_SASession, 'before_flush')
+def _track_self_funded(session, flush_context, instances):
+    for obj in list(session.dirty):
+        if not isinstance(obj, Customer):
+            continue
+        try:
+            st = _sa_inspect(obj)
+            bh = st.attrs.balance.history
+            if not (bh.has_changes() and bh.deleted and bh.added):
+                continue
+            if st.attrs.self_funded.history.has_changes():
+                continue
+            old, new = float(bh.deleted[0] or 0), float(bh.added[0] or 0)
+            cur = float(obj.self_funded or 0)
+            if new >= old or cur <= 0:
+                continue
+            inst_part = max(0.0, old - cur)
+            take_from_self = max(0.0, (old - new) - inst_part)
+            obj.self_funded = round(max(0.0, min(cur - take_from_self, max(new, 0.0))), 2)
+        except Exception:
+            continue

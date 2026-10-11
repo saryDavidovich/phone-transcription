@@ -1762,7 +1762,15 @@ def _manuscript_held_recipients(customer, billing_account):
         if manager_mail:
             out.append((manager_mail, 'manager', ''))
         if student_mail and student_mail.lower() != manager_mail.lower():
-            out.append((student_mail, 'student', ''))
+            # קישור טעינה עצמית לתלמיד - רק כשהמתג המרכזי ומתג המוסד דלוקים והיה לו טלפון
+            topup_phone = ''
+            try:
+                from services.student_links import student_self_topup_allowed
+                if (customer.phone or '').strip() and student_self_topup_allowed(customer):
+                    topup_phone = customer.phone.strip()
+            except Exception:
+                topup_phone = ''
+            out.append((student_mail, 'student', topup_phone))
     else:
         out.append(((customer.email or '').strip() if customer else '', 'customer', ((customer.phone or '').strip() if customer else '')))
     return [r for r in out if r[0]]
@@ -1814,7 +1822,8 @@ def _send_manuscript_held_email(page, customer, billing_account, cost, not_start
             body = (f'<p>שלום,</p><p>קיבלנו את הקובץ <b>{fname}</b>, אך <b>אין לך מספיק יתרה</b> '
                     f'ולכן <b>העיבוד טרם התחיל</b>.</p>{amounts}'
                     f'<p><b>עליך לפנות להנהלת המוסד{(" (" + inst_name + ")") if inst_name else ""} ולבקש שיוסיפו לך יתרה.</b> '
-                    f'הודענו להנהלת המוסד על כך. לאחר הוספת היתרה הקובץ ייכנס לעיבוד וימסר אליך - אין צורך לפנות אלינו.</p>')
+                    f'הודענו להנהלת המוסד על כך. לאחר הוספת היתרה הקובץ ייכנס לעיבוד וימסר אליך - אין צורך לפנות אלינו.</p>'
+                    + (f'<p><b>או שאפשר לטעון יתרה בעצמך:</b></p>{link_html(topup_phone)}{phone_howto}' if topup_phone else ''))
         elif kind == 'manager':
             subject = f'תמלול פון - התלמיד {student_name} שלח קובץ, נדרשת הוספת יתרה'
             body = (f'<p>שלום,</p><p>התלמיד/ה <b>{student_name}</b> שלח/ה את הקובץ <b>{fname}</b>. '
@@ -1837,7 +1846,8 @@ def _send_manuscript_held_email(page, customer, billing_account, cost, not_start
             body = (f'<p>שלום,</p><p>ההקראה של <b>{fname}</b> הושלמה ומוכנה למשלוח, אך <b>אין לך מספיק יתרה</b> '
                     f'ולכן היא הושהתה.</p>{amounts}'
                     f'<p><b>עליך לפנות להנהלת המוסד{(" (" + inst_name + ")") if inst_name else ""} ולבקש שיוסיפו לך יתרה.</b> '
-                    f'הודענו להנהלת המוסד על כך. מיד כשהיתרה תתווסף, המסמך יישלח אליך אוטומטית - אין צורך לפנות אלינו.</p>')
+                    f'הודענו להנהלת המוסד על כך. מיד כשהיתרה תתווסף, המסמך יישלח אליך אוטומטית - אין צורך לפנות אלינו.</p>'
+                    + (f'<p><b>או שאפשר לטעון יתרה בעצמך:</b></p>{link_html(topup_phone)}{phone_howto}' if topup_phone else ''))
         elif kind == 'manager':
             subject = f'תמלול פון - לתלמיד {student_name} ממתין מסמך, נדרשת הוספת יתרה'
             body = (f'<p>שלום,</p><p>התלמיד/ה <b>{student_name}</b> שלח/ה את הקובץ <b>{fname}</b>. ההקראה הושלמה אך '

@@ -51,6 +51,20 @@ def nedarim_topup_link(phone):
     if not mosad:
         return 'חיבור נדרים פלוס לא הוגדר עדיין בצד השרת', 500
 
+    # תלמיד של מוסד שהטעינה העצמית כבויה עבורו - לא מפנים לתשלום (הכסף היה נכנס ליתרה שלו
+    # בכל מקרה, אז מונעים מראש במקום לקבל תשלום ש"לא אמור" להיות)
+    try:
+        from services.student_links import student_self_topup_allowed
+        from models import Customer
+        cands = _phone_match_candidates(phone)
+        stu = Customer.query.filter(Customer.phone.in_(cands)).first() if cands else None
+        if stu and stu.institution_id and not student_self_topup_allowed(stu):
+            return ('<div dir="rtl" style="font-family:Arial;max-width:480px;margin:60px auto;text-align:center">'
+                    '<h3>טעינה עצמית אינה זמינה</h3><p>המוסד שלך לא הפעיל טעינה עצמית. '
+                    'לטעינת יתרה יש לפנות להנהלת המוסד.</p></div>'), 403
+    except Exception as e:
+        log.warning(f'topup-link student check failed: {e}')
+
     from routes.institution_billing import NEDARIM_CATEGORY
     params = {
         'mosad': mosad,
@@ -195,6 +209,11 @@ def nedarim_webhook():
 
         customer.balance = (customer.balance or 0) + total_credit
         desc = f'טעינת יתרה דרך נדרים פלוס ₪{amount:.2f}'
+        if customer.institution_id and not customer.is_institution_self:
+            # תלמיד מוסד שטען בעצמו: הכסף שלו (המוסד לא יכול להוריד אותו) ומסומן כך
+            # בתנועות, כדי שהמוסד יראה את הטעינות העצמיות.
+            customer.self_funded = round((customer.self_funded or 0) + total_credit, 2)
+            desc = f'טעינה עצמית ע"י התלמיד - נדרים פלוס ₪{amount:.2f}'
         if bonus > 0:
             desc += f' + בונוס ₪{bonus:.2f} = סה"כ ₪{total_credit:.2f}'
         if confirmation:

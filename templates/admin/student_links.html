@@ -1,0 +1,30 @@
+{% extends 'admin/base.html' %}
+{% block title %}בקשות שיוך תלמידים{% endblock %}
+{% block page_title %}בקשות שיוך תלמידים - ממתינות לאישור מנהל{% endblock %}
+{% block content %}
+<div class="table-card">
+  <div style="padding:10px 16px;color:var(--text2);font-size:13px;border-bottom:1px solid var(--border)">
+    בקשות של מוסדות לצרף כתלמיד לקוח קיים <b>שאין לו כתובת מייל</b> לאישור עצמי. ודא (בטלפון) שהלקוח מסכים לפני אישור.
+  </div>
+  <table>
+    <thead><tr><th>מוסד</th><th>לקוח</th><th>טלפון</th><th>יתרה</th><th>נשלח</th><th></th></tr></thead>
+    <tbody>
+    {% for r in rows %}
+      <tr>
+        <td>{{ r.institution.name }}</td>
+        <td>{{ r.customer.name or '—' }}{% if r.display_name %} <span style="color:var(--text3)">(שם במוסד: {{ r.display_name }})</span>{% endif %}</td>
+        <td>{{ r.customer.phone }}</td>
+        <td>₪{{ "%.2f"|format(r.customer.balance or 0) }}</td>
+        <td style="color:var(--text3)">{{ r.created_at | il_time }}</td>
+        <td style="display:flex;gap:6px">
+          <form method="post" action="/admin/student-links/{{ r.id }}/approve" onsubmit="return confirm('לאשר את הצירוף?')"><button class="btn btn-success" style="font-size:12px;padding:4px 10px">✔ אשר</button></form>
+          <form method="post" action="/admin/student-links/{{ r.id }}/decline"><button class="btn btn-danger" style="font-size:12px;padding:4px 10px">✖ דחה</button></form>
+        </td>
+      </tr>
+    {% else %}
+      <tr><td colspan="6" style="text-align:center;color:var(--text3);padding:24px">אין בקשות ממתינות</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

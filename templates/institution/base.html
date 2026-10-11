@@ -117,8 +117,9 @@ table tr { border-bottom:1px solid var(--border); }
 {% block head %}{% endblock %}
 </head>
 {# הסרגל הצדדי רק למוסד מחובר בפועל. אם באותו דפדפן מחובר מנהל המערכת (אותו מנגנון
-   התחברות), דף הכניסה של המוסד צריך להיראות נקי - בלי הסרגל של אזור המוסד. #}
-{% set inst_logged_in = current_user.is_authenticated and current_user.__class__.__name__ == 'Institution' %}
+   התחברות), דף הכניסה של המוסד צריך להיראות נקי - בלי הסרגל של אזור המוסד. כך גם כשמוסד
+   מחובר וגולש שוב לדף הכניסה (institution.login). #}
+{% set inst_logged_in = current_user.is_authenticated and current_user.__class__.__name__ == 'Institution' and request.endpoint != 'institution.login' %}
 <body class="{{ 'no-sidebar' if not inst_logged_in }}">
 {% if inst_logged_in %}
 <aside class="sidebar">

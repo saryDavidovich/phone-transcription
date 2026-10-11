@@ -121,6 +121,17 @@
         </div>
         {% endfor %}
       </div>
+      <div class="form-group" style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:12px">
+        <input type="hidden" name="_topup_field" value="1">
+        <label style="display:flex;gap:8px;align-items:center;cursor:pointer;font-weight:700;font-size:13px">
+          <input type="checkbox" name="allow_student_self_topup" value="1" {% if settings.allow_student_self_topup %}checked{% endif %}>
+          לאפשר טעינה עצמית של תלמידי מוסדות
+        </label>
+        <div style="font-size:11px;color:#6b7280;margin-top:6px">
+          מתג מרכזי: כשהוא דלוק, כל מוסד רואה בהגדרות שלו מתג משלו ("לאפשר לתלמידים לטעון יתרה בעצמם", ברירת מחדל: מותר) ויכול לכבות אותו.
+          תלמיד מקבל קישור/אפשרות טעינה רק כשגם המתג המרכזי וגם מתג המוסד דלוקים. כשהוא כבוי - אין מתג אצל המוסדות ותלמידים לא מקבלים קישור טעינה.
+        </div>
+      </div>
       <div class="form-group">
         <label class="form-label">יתרה מינימלית להקלטה (₪)</label>
         <input class="form-input" name="min_balance" type="number" step="0.01" value="{{ settings.min_balance }}">

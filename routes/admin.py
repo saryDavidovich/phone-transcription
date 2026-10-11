@@ -950,6 +950,8 @@ def settings():
         set_setting('welcome_new', request.form.get('welcome_new', ''))
         set_setting('welcome_returning', request.form.get('welcome_returning', ''))
         set_setting('system_explanation', request.form.get('system_explanation', ''))
+        if request.form.get('_topup_field') == '1':
+            set_setting('allow_student_self_topup', '1' if request.form.get('allow_student_self_topup') == '1' else '0')
         flash('הגדרות נשמרו בהצלחה')
         return redirect(url_for('admin.settings'))
 
@@ -973,6 +975,7 @@ def settings():
             {'threshold': get_setting(f'bonus_threshold_{i}', ''), 'amount': get_setting(f'bonus_amount_{i}', '')}
             for i in range(1, 4)
         ],
+        'allow_student_self_topup': get_setting('allow_student_self_topup', '0') == '1',
         'min_balance': get_setting('min_balance', '5'),
         'max_recording_seconds': get_setting('max_recording_seconds', '1800'),
         'welcome_new': get_setting('welcome_new', 'שלום וברוכים הבאים למערכת התמלול.'),

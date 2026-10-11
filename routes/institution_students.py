@@ -37,7 +37,24 @@ def students_tab():
     students = (Customer.query.filter_by(institution_id=current_user.id)
                 .filter(Customer.is_institution_self.isnot(True))
                 .order_by(Customer.created_at.desc()).all())
-    return render_template('institution/students.html', students=students)
+    from sqlalchemy import func
+    from models import StudentLinkRequest
+    # טעינות עצמיות של התלמידים (סך הכל לכל תלמיד) - המוסד רואה כמה התלמיד טען בעצמו
+    self_topups = dict(
+        db.session.query(Transaction.customer_id, func.coalesce(func.sum(Transaction.amount), 0))
+        .filter(Transaction.customer_id.in_([s.id for s in students]),
+                Transaction.type == 'charge', Transaction.amount > 0,
+                Transaction.description.like('טעינה עצמית%'))
+        .group_by(Transaction.customer_id).all()
+    ) if students else {}
+    link_requests = (StudentLinkRequest.query.filter_by(institution_id=current_user.id)
+                     .filter(StudentLinkRequest.status.in_(('pending', 'declined', 'expired')))
+                     .order_by(StudentLinkRequest.created_at.desc()).limit(30).all())
+    from services.student_links import global_self_topup_enabled, institution_self_topup_on
+    return render_template('institution/students.html', students=students, self_topups=self_topups,
+                           link_requests=link_requests, now=datetime.utcnow(),
+                           topup_global_on=global_self_topup_enabled(),
+                           topup_inst_on=institution_self_topup_on(current_user))
 
 
 @institution_students_bp.route('/institution/students/add', methods=['POST'])
@@ -50,8 +67,14 @@ def add_student():
     initial_balance = float(request.form.get('initial_balance') or 0)
     inst = current_user
 
-    if phone and Customer.query.filter_by(phone=phone).first():
-        flash('מספר הטלפון הזה כבר קיים במערכת')
+    existing = Customer.query.filter_by(phone=phone).first() if phone else None
+    if existing:
+        # לקוח שכבר קיים במערכת - לא נוצר כרטיס חדש, אלא נשלחת בקשת שיוך באישור הלקוח
+        from services.student_links import request_link
+        code, msg, _req = request_link(inst, existing, display_name=name)
+        if code in ('sent', 'needs_admin') and initial_balance > 0:
+            msg += ' (זיכוי פתיחה לא ניתן בשלב הבקשה - אפשר לזכות אותו אחרי שיאשר)'
+        flash(msg)
         return redirect(url_for('institution_students.students_tab'))
 
     if initial_balance > 0 and (inst.balance or 0) < initial_balance:
@@ -100,8 +123,12 @@ def credit_student(student_id):
         inst.balance = round((inst.balance or 0) - amount, 2)
     elif amount < 0:
         take = -amount
-        if take > round(student.balance or 0, 2) + 1e-9:
-            flash(f'אי אפשר להוריד לתלמיד {take:.2f} ₪ - יש לו רק {student.balance or 0:.2f} ₪.')
+        from services.student_links import institution_withdrawable
+        can_take = institution_withdrawable(student)
+        if take > can_take + 1e-9:
+            own = round(student.self_funded or 0, 2)
+            extra = f' (מתוך היתרה {own:.2f} ₪ הם כסף של התלמיד עצמו - לא ניתן להורידו)' if own > 0 else ''
+            flash(f'אי אפשר להוריד לתלמיד {take:.2f} ₪ - ניתן להוריד עד {can_take:.2f} ₪{extra}.')
             return redirect(url_for('institution_students.students_tab'))
         inst.balance = round((inst.balance or 0) + take, 2)
 
@@ -140,6 +167,7 @@ def remove_student(student_id):
     student = Customer.query.filter_by(id=student_id, institution_id=current_user.id).first_or_404()
     student.institution_id = None
     student.student_number = None
+    student.self_funded = 0.0
     db.session.commit()
     flash('התלמיד הוסר מהמוסד')
     return redirect(url_for('institution_students.students_tab'))
@@ -199,6 +227,8 @@ def upload_excel():
     remaining_inst_balance = inst.balance or 0
     added = 0
     skipped_balance = 0
+    link_requests_sent = 0
+    link_conflicts = 0
     for row in ws.iter_rows(min_row=2, values_only=True):
         if not row or all(v is None for v in row):
             continue
@@ -207,8 +237,16 @@ def upload_excel():
         email = str(row[idx_email]).strip() if idx_email is not None and row[idx_email] else None
         requested_balance = float(row[idx_balance]) if idx_balance is not None and row[idx_balance] else 0.0
 
-        if phone and Customer.query.filter_by(phone=phone).first():
-            continue  # דילוג על טלפון כפול, לא עוצר את כל הייבוא
+        existing = Customer.query.filter_by(phone=phone).first() if phone else None
+        if existing:
+            # לקוח קיים - בקשת שיוך באישור הלקוח במקום דילוג שקט (לא עוצר את הייבוא)
+            from services.student_links import request_link
+            code, _msg, _req = request_link(inst, existing, display_name=name)
+            if code in ('sent', 'needs_admin'):
+                link_requests_sent += 1
+            else:
+                link_conflicts += 1
+            continue
 
         # לא נותנים לתלמיד יתרת פתיחה שהמוסד בפועל לא מכסה - התלמיד עדיין
         # מיובא, רק בלי הזיכוי (או עם חלק ממנו אם היתרה הצטמצמה באמצע הקובץ).
@@ -234,7 +272,27 @@ def upload_excel():
     msg = f'יובאו {added} תלמידים בהצלחה'
     if skipped_balance:
         msg += f' - שימו לב: ל-{skipped_balance} מהם לא ניתנה יתרת הפתיחה שביקשתם כי יתרת המוסד לא הספיקה'
+    if link_requests_sent:
+        msg += f' · {link_requests_sent} מספרים כבר קיימים במערכת כלקוחות - נשלחה להם בקשת שיוך לאישור'
+    if link_conflicts:
+        msg += f' · {link_conflicts} מספרים דולגו (כבר אצלכם / משויכים למוסד אחר / בקשה כבר ממתינה)'
     flash(msg)
+    return redirect(url_for('institution_students.students_tab'))
+
+
+@institution_students_bp.route('/institution/students/link-request/<int:req_id>/<action>', methods=['POST'])
+@institution_login_required
+def link_request_action(req_id, action):
+    """ביטול בקשת שיוך שממתינה, או שליחה חוזרת של המייל ללקוח."""
+    from models import StudentLinkRequest
+    from services.student_links import send_link_email
+    req = StudentLinkRequest.query.filter_by(id=req_id, institution_id=current_user.id).first_or_404()
+    if action == 'cancel' and req.status == 'pending':
+        req.status = 'cancelled'
+        db.session.commit()
+        flash('הבקשה בוטלה')
+    elif action == 'resend' and req.status == 'pending' and not req.needs_admin:
+        flash('המייל נשלח שוב ללקוח' if send_link_email(req) else 'שליחת המייל נכשלה')
     return redirect(url_for('institution_students.students_tab'))
 
 

@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>בקשת שיוך כתלמיד | תמלול פון</title>
+<style>
+body{font-family:Arial,Heebo,sans-serif;background:#f3f5fa;margin:0;color:#111827}
+.box{max-width:520px;margin:40px auto;background:#fff;border-radius:14px;padding:28px;box-shadow:0 8px 24px -12px rgba(20,25,40,.2)}
+h1{font-size:20px;margin:0 0 14px;color:#1d4ed8}
+ul{line-height:1.8;padding-right:20px}
+.btns{display:flex;gap:10px;margin-top:20px}
+button{flex:1;padding:12px;border:none;border-radius:8px;font-size:15px;font-weight:700;cursor:pointer}
+.ok{background:#16a34a;color:#fff}.no{background:#e5e7eb;color:#111827}
+.msg{padding:12px;border-radius:8px;margin-top:14px}
+.good{background:#dcfce7;color:#166534}.bad{background:#fee2e2;color:#991b1b}.info{background:#e0e7ff;color:#312e81}
+.small{color:#6b7280;font-size:13px;margin-top:18px}
+</style></head>
+<body><div class="box">
+<h1>בקשה לצירופך כתלמיד</h1>
+{% if result %}
+  <div class="msg {{ 'good' if result[0] else 'bad' }}">{{ result[1] }}</div>
+{% elif state == 'pending' %}
+  <p>המוסד <b>{{ req.institution.name }}</b> מבקש לצרף אותך כתלמיד שלו במערכת תמלול פון (המספר {{ req.customer.phone }}).</p>
+  <ul>
+    <li>המוסד יוכל להוסיף לך יתרה, להגביל את השימוש שלך, ולראות את הפעילות שלך כתלמיד (תמלולים, קבצים ותנועות יתרה).</li>
+    <li>היתרה שיש לך היום (₪{{ "%.2f"|format(req.customer.balance or 0) }}) נשארת <b>שלך</b> - המוסד לא יכול להוריד אותה.</li>
+    <li>היסטוריית השימוש שלך נשמרת.</li>
+  </ul>
+  <form method="post"><div class="btns">
+    <button class="ok" name="action" value="approve" type="submit">אישור הצירוף</button>
+    <button class="no" name="action" value="decline" type="submit">דחייה</button>
+  </div></form>
+  <div class="small">אם אינך מכיר את המוסד או לא ביקשת זאת - לחץ "דחייה". לשאלות: 03-3131795</div>
+{% elif state == 'approved' %}<div class="msg good">הבקשה כבר אושרה.</div>
+{% elif state == 'declined' %}<div class="msg info">הבקשה נדחתה.</div>
+{% elif state == 'expired' %}<div class="msg bad">תוקף הבקשה פג. אפשר לבקש מהמוסד לשלוח בקשה חדשה.</div>
+{% else %}<div class="msg info">הבקשה בוטלה.</div>{% endif %}
+</div></body></html>
