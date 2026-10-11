@@ -58,13 +58,18 @@ def _admin_credentials_from_env():
     """שם משתמש וסיסמה של מנהל-העל נקבעים אך ורק במשתני הסביבה (Railway):
     ADMIN_USERNAME (ברירת מחדל: admin) ו-ADMIN_PASSWORD. שום דבר מזה לא נשמר
     או נקרא מהגדרות הניהול / מסד הנתונים."""
-    return (os.environ.get('ADMIN_USERNAME') or 'admin').strip(), os.environ.get('ADMIN_PASSWORD') or ''
+    from services.security import admin_credentials
+    return admin_credentials()
 
 
 @admin_bp.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
         import hmac, time
+        from services import security as sec
+        if sec.login_blocked():
+            flash('יותר מדי ניסיונות כניסה שגויים - נסה שוב בעוד 15 דקות')
+            return render_template('admin/login.html'), 429
         username = (request.form.get('username') or '').strip()
         password = request.form.get('password') or ''
         env_user, env_pass = _admin_credentials_from_env()
@@ -75,22 +80,136 @@ def login():
         ok = (hmac.compare_digest(username.encode('utf-8'), env_user.encode('utf-8'))
               and hmac.compare_digest(password.encode('utf-8'), env_pass.encode('utf-8')))
         if ok:
-            # Flask-Login צריך אובייקט משתמש; השורה בטבלה משמשת רק כמזהה (ללא סיסמה)
-            user = AdminUser.query.filter_by(username=env_user).first()
-            if not user:
-                user = AdminUser(username=env_user, password_hash='!env-only')
-                db.session.add(user)
-                db.session.commit()
-            login_user(user)
-            return redirect(url_for('admin.dashboard'))
+            if sec.google_required():
+                # שלב ב': אימות Google, רק מהכתובות שהוגדרו ב-ADMIN_GOOGLE_EMAILS.
+                # עד שלב ב' המשתמש עוד לא מחובר - רק סימון זמני ש"הסיסמה עברה".
+                if not (os.environ.get('GOOGLE_OAUTH_CLIENT_ID') and os.environ.get('GOOGLE_OAUTH_CLIENT_SECRET')):
+                    log.error('admin login: ADMIN_GOOGLE_EMAILS is set but GOOGLE_OAUTH_CLIENT_ID/SECRET are missing')
+                    flash('נדרש אימות Google אך Google OAuth לא הוגדר בשרת (GOOGLE_OAUTH_CLIENT_ID / GOOGLE_OAUTH_CLIENT_SECRET)')
+                    return render_template('admin/login.html')
+                from flask import session as flask_session
+                flask_session.clear()
+                flask_session['admin_pw_ok'] = time.time()
+                return redirect(url_for('admin.google_start'))
+            return _finish_admin_login(env_user)
+        sec.register_failed_login()
+        log.warning(f'admin login failed from {sec.client_ip()}')
         time.sleep(1)  # האטה קלה נגד ניחושים
         flash('שם משתמש או סיסמה שגויים')
     return render_template('admin/login.html')
+
+def _finish_admin_login(env_user, google_email=None):
+    """מסיים כניסה של מנהל אחרי שכל שלבי האימות עברו."""
+    from flask import session as flask_session
+    from services import security as sec
+    # Flask-Login צריך אובייקט משתמש; השורה בטבלה משמשת רק כמזהה (ללא סיסמה)
+    user = AdminUser.query.filter_by(username=env_user).first()
+    if not user:
+        user = AdminUser(username=env_user, password_hash='!env-only')
+        db.session.add(user)
+        db.session.commit()
+    flask_session.clear()
+    login_user(user)
+    flask_session['admin_fp'] = sec.admin_session_fp()
+    if google_email:
+        flask_session['admin_google'] = google_email.lower()
+    flask_session.permanent = True
+    sec.clear_failed_logins()
+    return redirect(url_for('admin.dashboard'))
+
+
+GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth'
+GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token'
+GOOGLE_USERINFO_URL = 'https://www.googleapis.com/oauth2/v3/userinfo'
+PW_STEP_MAX_AGE = 600  # אחרי שהסיסמה עברה - 10 דקות להשלים את שלב Google
+
+
+@admin_bp.route('/auth/google/start')
+def google_start():
+    import secrets, time, urllib.parse
+    from flask import session as flask_session
+    from services import security as sec
+    if not sec.google_required():
+        return redirect(url_for('admin.login'))
+    if time.time() - float(flask_session.get('admin_pw_ok') or 0) > PW_STEP_MAX_AGE:
+        flash('יש להתחיל את הכניסה מחדש עם שם משתמש וסיסמה')
+        return redirect(url_for('admin.login'))
+    client_id = os.environ.get('GOOGLE_OAUTH_CLIENT_ID')
+    if not client_id:
+        flash('Google OAuth לא הוגדר בשרת')
+        return redirect(url_for('admin.login'))
+    state = secrets.token_urlsafe(24)
+    flask_session['admin_google_state'] = state
+    params = {
+        'client_id': client_id,
+        'redirect_uri': url_for('admin.google_callback', _external=True),
+        'response_type': 'code', 'scope': 'openid email', 'state': state,
+        'prompt': 'select_account',
+    }
+    return redirect(f'{GOOGLE_AUTH_URL}?{urllib.parse.urlencode(params)}')
+
+
+@admin_bp.route('/auth/google/callback')
+def google_callback():
+    import time, hmac
+    import requests as req
+    from flask import session as flask_session
+    from services import security as sec
+    if not sec.google_required():
+        return redirect(url_for('admin.login'))
+    if sec.login_blocked():
+        flash('יותר מדי ניסיונות כניסה שגויים - נסה שוב בעוד 15 דקות')
+        return render_template('admin/login.html'), 429
+    expected_state = flask_session.pop('admin_google_state', None)
+    pw_ok_at = float(flask_session.get('admin_pw_ok') or 0)
+    got_state = request.args.get('state') or ''
+    if (not expected_state or not hmac.compare_digest(got_state.encode(), expected_state.encode())
+            or time.time() - pw_ok_at > PW_STEP_MAX_AGE):
+        flask_session.clear()
+        flash('אירעה שגיאת אימות, יש להתחיל את הכניסה מחדש')
+        return redirect(url_for('admin.login'))
+    code = request.args.get('code')
+    if not code:
+        flask_session.clear()
+        flash('ההתחברות עם Google בוטלה')
+        return redirect(url_for('admin.login'))
+    try:
+        token_res = req.post(GOOGLE_TOKEN_URL, data={
+            'code': code,
+            'client_id': os.environ.get('GOOGLE_OAUTH_CLIENT_ID'),
+            'client_secret': os.environ.get('GOOGLE_OAUTH_CLIENT_SECRET'),
+            'redirect_uri': url_for('admin.google_callback', _external=True),
+            'grant_type': 'authorization_code',
+        }, timeout=15)
+        token_res.raise_for_status()
+        access_token = token_res.json().get('access_token')
+        info_res = req.get(GOOGLE_USERINFO_URL, headers={'Authorization': f'Bearer {access_token}'}, timeout=15)
+        info_res.raise_for_status()
+        info = info_res.json()
+    except Exception:
+        log.exception('admin google callback: token/userinfo exchange failed')
+        flask_session.clear()
+        flash('שגיאה באימות Google, נסה שוב')
+        return redirect(url_for('admin.login'))
+    email = (info.get('email') or '').strip().lower()
+    verified = info.get('email_verified') in (True, 'true', 'True')
+    if not (email and verified and email in sec.allowed_admin_emails()):
+        sec.register_failed_login()
+        log.warning(f'admin google login DENIED for {email!r} (verified={verified}) from {sec.client_ip()}')
+        flask_session.clear()
+        flash('חשבון Google זה אינו מורשה להיכנס לממשק הניהול')
+        return redirect(url_for('admin.login'))
+    env_user, _ = _admin_credentials_from_env()
+    log.info(f'admin login OK via password + google ({email})')
+    return _finish_admin_login(env_user, email)
+
 
 @admin_bp.route('/logout')
 @login_required
 def logout():
     logout_user()
+    from flask import session as flask_session
+    flask_session.clear()
     return redirect(url_for('admin.login'))
 
 @admin_bp.route('/')

@@ -18,7 +18,7 @@ def create_app():
     # היא הסבר סביר מאוד לכך שהם "לא יודעים לאן לשלוח" עדכון תשלום.
     app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 
-    app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'change-this')
+    app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'change-this')  # נקבע סופית ב-init_security (מפתח חזק)
     database_url = os.environ.get('DATABASE_URL', 'sqlite:///transcription.db')
     if database_url.startswith('postgres://'):
         database_url = database_url.replace('postgres://', 'postgresql://', 1)
@@ -60,6 +60,8 @@ def create_app():
     app.config['CARDCOM_TERMINAL'] = os.environ.get('CARDCOM_TERMINAL', '')
     app.config['CARDCOM_USERNAME'] = os.environ.get('CARDCOM_USERNAME', '')
     
+    from services.security import init_security
+    init_security(app)
     db.init_app(app)
     login_manager.init_app(app)
     login_manager.login_view = 'admin.login'
@@ -76,16 +78,6 @@ def create_app():
     from routes.recording_proxy import download_bp
     from routes.dictate import dictate_bp
     from routes.student_link import student_link_bp
-
-    @app.before_request
-    def _keep_institutions_out_of_admin():
-        # מוסדות מתחברים דרך אותו Flask-Login כמו המנהל (ראה Institution.get_id).
-        # בלי החסימה הזו מוסד מחובר יכול היה לפתוח את כל דפי /admin של המנהל.
-        from flask import request, redirect
-        from flask_login import current_user
-        if request.path.startswith('/admin') and request.path not in ('/admin/login', '/admin/logout'):
-            if current_user.is_authenticated and current_user.__class__.__name__ == 'Institution':
-                return redirect('/institution/dashboard')
 
     app.register_blueprint(student_link_bp)
     app.register_blueprint(ivr_bp, url_prefix='/ivr')
