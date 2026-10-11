@@ -13,7 +13,8 @@
   <h3 style="font-size:15px; margin-bottom:12px;">הוספת תלמיד</h3>
   <form method="post" action="{{ url_for('institution_students.add_student') }}">
     <div class="field"><label>שם</label><input class="input" name="name" required></div>
-    <div class="field"><label>טלפון (רשות - אם ריק, ייווצר מספר תלמיד אוטומטי)</label><input class="input" name="phone"></div>
+    <div class="field"><label>טלפון (רשות - אם ריק, ייווצר מספר תלמיד אוטומטי)</label><input class="input" name="phone">
+      <div style="font-size:12px;color:var(--text3);margin-top:4px">אם המספר כבר קיים במערכת כלקוח - נשלח אליו מייל לאישור הצירוף כתלמיד שלכם.</div></div>
     <div class="field"><label>מייל (רשות)</label><input class="input" name="email"></div>
     <div class="field"><label>פקס (רשות)</label><input class="input" name="fax"></div>
     <div class="field"><label>זיכוי פתיחה (רשות)</label><input class="input" name="initial_balance" type="number" step="0.01"></div>
@@ -43,17 +44,46 @@
   </div>
 </div>
 
+{% if link_requests %}
+<div class="card" style="margin-bottom:20px;">
+  <h3 style="font-size:15px; margin-bottom:10px;">בקשות שיוך של לקוחות קיימים</h3>
+  <table style="width:100%; border-collapse:collapse; font-size:13px;">
+    <tr style="text-align:right; border-bottom:1px solid var(--border); color:var(--text2);"><th style="padding:6px 0;">לקוח</th><th>טלפון</th><th>סטטוס</th><th></th></tr>
+    {% for r in link_requests %}
+    <tr style="border-bottom:1px solid var(--border);">
+      <td style="padding:6px 0;">{{ r.display_name or r.customer.name or '—' }}</td>
+      <td>{{ r.customer.phone }}</td>
+      <td>{% if r.status == 'declined' %}נדחתה{% elif r.status == 'expired' or (r.expires_at and r.expires_at < now) %}פג תוקף{% elif r.needs_admin %}ממתין לאישור מנהל המערכת{% else %}ממתין לאישור הלקוח (נשלח מייל){% endif %}</td>
+      <td style="display:flex;gap:6px;">
+        {% if r.status == 'pending' %}
+        {% if not r.needs_admin %}<form method="post" action="{{ url_for('institution_students.link_request_action', req_id=r.id, action='resend') }}"><button class="btn btn-secondary btn-sm" type="submit">שליחה חוזרת</button></form>{% endif %}
+        <form method="post" action="{{ url_for('institution_students.link_request_action', req_id=r.id, action='cancel') }}"><button class="btn btn-danger btn-sm" type="submit">ביטול</button></form>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+{% endif %}
+
+{% if topup_global_on %}
+<div style="font-size:13px;color:var(--text2);margin-bottom:12px;">
+  טעינה עצמית של תלמידים: <b>{{ 'מופעלת' if topup_inst_on else 'כבויה' }}</b> (ניתן לשנות ב<a href="{{ url_for('institution.settings') }}" style="color:var(--accent)">הגדרות מוסד</a>).
+</div>
+{% endif %}
+
 <div class="card">
   <table style="width:100%; border-collapse:collapse; font-size:14px;">
     <tr style="text-align:right; border-bottom:1px solid var(--border); color:var(--text2);">
-      <th style="padding:8px 0;">מספר תלמיד</th><th>שם</th><th>טלפון</th><th>יתרה</th><th>סטטוס</th><th></th>
+      <th style="padding:8px 0;">מספר תלמיד</th><th>שם</th><th>טלפון</th><th>יתרה</th><th>טעינה עצמית</th><th>סטטוס</th><th></th>
     </tr>
     {% for s in students %}
     <tr style="border-bottom:1px solid var(--border);">
       <td style="padding:8px 0;"><a href="{{ url_for('institution_students.student_detail', student_id=s.id) }}" style="color:var(--accent); text-decoration:none;">{{ s.student_number or '—' }}</a></td>
       <td>{{ s.name }}</td>
       <td>{{ s.phone or '—' }}</td>
-      <td>{{ "%.2f"|format(s.balance or 0) }} ₪</td>
+      <td>{{ "%.2f"|format(s.balance or 0) }} ₪{% if s.self_funded %}<div style="font-size:11px;color:var(--text3)">מתוכה {{ "%.2f"|format(s.self_funded) }} ₪ של התלמיד</div>{% endif %}</td>
+      <td>{% if self_topups.get(s.id) %}{{ "%.2f"|format(self_topups[s.id]) }} ₪{% else %}—{% endif %}</td>
       <td>{{ 'חסום' if s.is_blocked else 'פעיל' }}</td>
       <td>
         <div style="display:flex; gap:6px; align-items:center; flex-wrap:nowrap;">
@@ -71,7 +101,7 @@
       </td>
     </tr>
     {% else %}
-    <tr><td colspan="6" style="padding:16px 0; color:var(--text2);">עדיין אין תלמידים.</td></tr>
+    <tr><td colspan="7" style="padding:16px 0; color:var(--text2);">עדיין אין תלמידים.</td></tr>
     {% endfor %}
   </table>
 </div>

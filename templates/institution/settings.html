@@ -41,6 +41,18 @@
       <input class="input" name="notify_fax" value="{{ inst.notify_fax or '' }}">
     </div>
 
+    {% if topup_global_on %}
+    <div class="field">
+      <label style="display:flex;gap:8px;align-items:center;cursor:pointer;">
+        <input type="checkbox" name="allow_student_topup" value="1" {{ 'checked' if inst.allow_student_topup is not false }}>
+        לאפשר לתלמידים לטעון יתרה בעצמם
+      </label>
+      <div style="font-size:12px; color:var(--text3); margin-top:6px;">
+        הכסף שהתלמיד טוען נכנס ליתרה שלו ונשאר שלו - אי אפשר להורידו מהמוסד. הטעינות העצמיות מופיעות ברשימת התלמידים ובתנועות של כל תלמיד.
+      </div>
+    </div>
+    {% endif %}
+
     <button type="submit" class="btn btn-block">שמירת הגדרות</button>
   </form>
 </div>

@@ -339,10 +339,15 @@ def settings():
         inst.allowed_hours_end = request.form.get('allowed_hours_end') or None
         inst.notify_email = request.form.get('notify_email') or None
         inst.notify_fax = request.form.get('notify_fax') or None
+        from services.student_links import global_self_topup_enabled
+        if global_self_topup_enabled():
+            # תיבת הסימון קיימת בטופס רק כשהמתג המרכזי דלוק
+            inst.allow_student_topup = (request.form.get('allow_student_topup') == '1')
         db.session.commit()
         flash('ההגדרות נשמרו')
         return redirect(url_for('institution.settings'))
-    return render_template('institution/settings.html', inst=inst)
+    from services.student_links import global_self_topup_enabled
+    return render_template('institution/settings.html', inst=inst, topup_global_on=global_self_topup_enabled())
 
 
 @institution_bp.route('/settings/add-authorized', methods=['POST'])
