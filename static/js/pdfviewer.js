@@ -340,7 +340,14 @@
       }).catch(function (err) {
         if (myLoad !== state.loadId) return;
         if (window.console) console.error('pdfviewer: failed, falling back to iframe', err);
-        fallbackIframe(uri, 'pdf.js v' + (window.pdfjsLib && window.pdfjsLib.version) + ': ' + (err && (err.name + ' ' + err.message) || err));
+        // אבחון: האם הקובץ הגיע שלם? (קובץ PDF תקין מסתיים ב-%%EOF; סינון תוכן/רשת עלול לקצץ תשובות גדולות)
+        var diag = '';
+        try {
+          var tail = '';
+          for (var q = Math.max(0, bytes.length - 1100); q < bytes.length; q++) tail += String.fromCharCode(bytes[q]);
+          diag = ' | received ' + bytes.length + ' bytes, ends-with-EOF=' + (tail.indexOf('%%EOF') >= 0) + ', uri-chars=' + uri.length;
+        } catch (e2) {}
+        fallbackIframe(uri, 'pdf.js v' + (window.pdfjsLib && window.pdfjsLib.version) + ': ' + (err && (err.name + ' ' + err.message) || err) + diag);
       });
     }
 
