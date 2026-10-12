@@ -308,47 +308,95 @@
       }
     }
 
+    // PDF גדול לא מוטמע בדף (סינון תוכן חותך תשובות גדולות) - השרת נותן 'chunks:<sha>:<n>' והקובץ נמשך
+    // כאן במקטעי JSON קטנים (כל אחד עם ניסיונות חוזרים) ומורכב מחדש.
+    function fetchChunks(uri, myLoad) {
+      var parts = uri.split(':'), sha = parts[1], n = parseInt(parts[2], 10) || 0;
+      var chunks = new Array(n), done = 0, total = -1;
+      function one(i, attempt) {
+        return fetch('/admin/dictate/preview-chunk/' + sha + '/' + i, { credentials: 'same-origin', cache: 'no-store' })
+          .then(function (r) {
+            if (!r.ok) { var e = new Error(r.status === 404 ? 'preview expired - reload the page' : 'HTTP ' + r.status); e.fatal = (r.status === 404); throw e; }
+            return r.json();
+          })
+          .then(function (j) {
+            var bin = atob(j.d), out = new Uint8Array(bin.length);
+            for (var k = 0; k < bin.length; k++) out[k] = bin.charCodeAt(k);
+            chunks[i] = out; total = j.size; done++;
+            if (myLoad === state.loadId) message('טוען... ' + Math.round(done * 100 / n) + '%');
+          })
+          .catch(function (e) {
+            if (e && e.fatal || attempt >= 3) throw e;
+            return new Promise(function (res) { setTimeout(res, 400 * (attempt + 1)); }).then(function () { return one(i, attempt + 1); });
+          });
+      }
+      var idx = 0, workers = [];
+      function worker() {
+        if (idx >= n) return Promise.resolve();
+        var i = idx++;
+        return one(i, 0).then(worker);
+      }
+      for (var w = 0; w < Math.min(3, n); w++) workers.push(worker());
+      return Promise.all(workers).then(function () {
+        var all = new Uint8Array(total >= 0 ? total : 0), off = 0;
+        for (var i = 0; i < n; i++) { all.set(chunks[i], off); off += chunks[i].length; }
+        if (off !== total) throw new Error('incomplete download: ' + off + ' of ' + total + ' bytes');
+        return all;
+      });
+    }
+
+    function getBytes(uri, myLoad) {
+      if (uri.indexOf('chunks:') === 0) return fetchChunks(uri, myLoad);
+      try { return Promise.resolve(dataUriToBytes(uri)); } catch (e) { return Promise.reject(new Error('cannot decode file: ' + e)); }
+    }
+
     function load(uri) {
       state.loadId++;
       var myLoad = state.loadId;
-      state.uri = uri; state.pages = []; state.doc = null; state.rotation = 0; state.current = 1;
+      state.uri = uri; state.pages = []; state.doc = null; state.bytes = null; state.rotation = 0; state.current = 1;
       if (!uri) { message('⚠ הקובץ אינו זמין'); return; }
-      if (!hasLib) { fallbackIframe(uri, 'pdf.js library did not load (blocked or old browser)'); return; }
+      if (!hasLib) { getBytes(uri, myLoad).then(function (b) { state.bytes = b; fallbackIframe(uri, 'pdf.js library did not load (blocked or old browser)'); }, function (e) { loadFailed(uri, e); }); return; }
       message('טוען...');
-      var bytes;
-      try { bytes = dataUriToBytes(uri); } catch (e) { fallbackIframe(uri, 'cannot decode file: ' + e); return; }
-      state.bytes = bytes;
-      window.pdfjsLib.getDocument({ data: bytes.slice(0) }).promise.then(function (doc) {
+      getBytes(uri, myLoad).then(function (bytes) {
         if (myLoad !== state.loadId) return;
-        state.doc = doc;
-        var tasks = [];
-        for (var i = 1; i <= doc.numPages; i++) tasks.push(doc.getPage(i));
-        return Promise.all(tasks).then(function (pgs) {
+        state.bytes = bytes;
+        return window.pdfjsLib.getDocument({ data: bytes.slice(0) }).promise.then(function (doc) {
           if (myLoad !== state.loadId) return;
-          scroll.innerHTML = '';
-          state.pages = pgs.map(function (pg, idx) {
-            var vp = pg.getViewport({ scale: 1, rotation: 0 });
-            var wrap = document.createElement('div'); wrap.className = 'pdfv-page';
-            scroll.appendChild(wrap);
-            return { index: idx + 1, wrap: wrap, task: null, rendered: false,
-                     info: { w0: vp.width, h0: vp.height, baseRotate: pg.rotate || 0 } };
+          state.doc = doc;
+          var tasks = [];
+          for (var i = 1; i <= doc.numPages; i++) tasks.push(doc.getPage(i));
+          return Promise.all(tasks).then(function (pgs) {
+            if (myLoad !== state.loadId) return;
+            scroll.innerHTML = '';
+            state.pages = pgs.map(function (pg, idx) {
+              var vp = pg.getViewport({ scale: 1, rotation: 0 });
+              var wrap = document.createElement('div'); wrap.className = 'pdfv-page';
+              scroll.appendChild(wrap);
+              return { index: idx + 1, wrap: wrap, task: null, rendered: false,
+                       info: { w0: vp.width, h0: vp.height, baseRotate: pg.rotate || 0 } };
+            });
+            pgInput.value = '1'; pgTotal.textContent = '/ ' + doc.numPages;
+            scroll.scrollTop = 0;
+            layout();
           });
-          pgInput.value = '1'; pgTotal.textContent = '/ ' + doc.numPages;
-          scroll.scrollTop = 0;
-          layout();
+        }).catch(function (err) {
+          if (myLoad !== state.loadId) return;
+          if (window.console) console.error('pdfviewer: failed, falling back', err);
+          // אבחון: האם הקובץ הגיע שלם? (קובץ PDF תקין מסתיים ב-%%EOF)
+          var diag = '';
+          try {
+            var tail = '';
+            for (var q = Math.max(0, bytes.length - 1100); q < bytes.length; q++) tail += String.fromCharCode(bytes[q]);
+            diag = ' | received ' + bytes.length + ' bytes, ends-with-EOF=' + (tail.indexOf('%%EOF') >= 0) + ', source=' + (uri.indexOf('chunks:') === 0 ? 'chunks sha=' + uri.split(':')[1].slice(0, 10) : 'inline ' + uri.length + ' chars');
+          } catch (e2) {}
+          fallbackIframe(uri, 'pdf.js v' + (window.pdfjsLib && window.pdfjsLib.version) + ': ' + (err && (err.name + ' ' + err.message) || err) + diag);
         });
-      }).catch(function (err) {
-        if (myLoad !== state.loadId) return;
-        if (window.console) console.error('pdfviewer: failed, falling back to iframe', err);
-        // אבחון: האם הקובץ הגיע שלם? (קובץ PDF תקין מסתיים ב-%%EOF; סינון תוכן/רשת עלול לקצץ תשובות גדולות)
-        var diag = '';
-        try {
-          var tail = '';
-          for (var q = Math.max(0, bytes.length - 1100); q < bytes.length; q++) tail += String.fromCharCode(bytes[q]);
-          diag = ' | received ' + bytes.length + ' bytes, ends-with-EOF=' + (tail.indexOf('%%EOF') >= 0) + ', uri-chars=' + uri.length;
-        } catch (e2) {}
-        fallbackIframe(uri, 'pdf.js v' + (window.pdfjsLib && window.pdfjsLib.version) + ': ' + (err && (err.name + ' ' + err.message) || err) + diag);
-      });
+      }, function (e) { if (myLoad === state.loadId) loadFailed(uri, e); });
+    }
+
+    function loadFailed(uri, e) {
+      message('⚠ טעינת הקובץ נכשלה (' + String(e && e.message || e).slice(0, 120) + ') <br><br><button type="button" class="pdfv-retry" style="padding:6px 14px;border-radius:6px;border:1px solid #5f6368;background:#4a4e51;color:#fff;cursor:pointer">נסה שוב</button>');
+      var b = scroll.querySelector('.pdfv-retry'); if (b) b.addEventListener('click', function () { load(uri); });
     }
 
     var api = { load: load, rotate: rotate, el: el };

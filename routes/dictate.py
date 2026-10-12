@@ -1395,6 +1395,52 @@ def _pdf_part_for_preview_with_timeout(raw, part=1):
         )
 
 
+# ---- העברת PDF לתצוגה במקטעים קטנים ----
+# סינון תוכן/רשת (נטפרי) חותך תשובות גדולות (נמדד בפועל: דף עם PDF מוטמע של ~400KB הגיע חתוך ל-~164KB
+# ולכן כל צופה נכשל). לכן PDF שגדול מהסף לא מוטמע בדף; הדף מקבל רק מזהה ("chunks:<sha>:<מספר מקטעים>"),
+# והצופה (static/js/pdfviewer.js) מושך אותו במקטעי JSON קטנים ומרכיב מחדש.
+PREVIEW_INLINE_LIMIT = 60_000     # עד גודל זה (בבייטים) ממשיכים להטמיע ישירות כמו קודם
+PREVIEW_CHUNK_BYTES = 30_000      # גודל מקטע (כ-40KB בקידוד base64 - מתחת לסף החיתוך)
+_PREVIEW_CACHE_DIR = os.path.join(os.environ.get('TMPDIR') or '/tmp', 'preview_cache')
+_PREVIEW_CACHE_MAX_AGE = 6 * 3600
+
+
+def _preview_cache_cleanup():
+    try:
+        now = time.time()
+        for name in os.listdir(_PREVIEW_CACHE_DIR):
+            fp = os.path.join(_PREVIEW_CACHE_DIR, name)
+            if now - os.path.getmtime(fp) > _PREVIEW_CACHE_MAX_AGE:
+                os.remove(fp)
+    except Exception:
+        pass
+
+
+def _pdf_uri_for_page(pdf_bytes):
+    """data URI לקובץ קטן; לקובץ גדול - שומר בקאש בדיסק ומחזיר 'chunks:<sha256>:<n>'."""
+    import hashlib
+    # אבחון: מה השרת בפועל מייצר (גודל + האם נגמר ב-%%EOF) - מופיע בלוג של Railway
+    log.info('preview pdf built: %d bytes, sha=%s, ends-with-EOF=%s',
+             len(pdf_bytes), hashlib.sha256(pdf_bytes).hexdigest()[:10], b'%%EOF' in pdf_bytes[-1100:])
+    if len(pdf_bytes) <= PREVIEW_INLINE_LIMIT:
+        return 'data:application/pdf;base64,' + base64.b64encode(pdf_bytes).decode('ascii')
+    try:
+        os.makedirs(_PREVIEW_CACHE_DIR, exist_ok=True)
+        sha = hashlib.sha256(pdf_bytes).hexdigest()
+        fp = os.path.join(_PREVIEW_CACHE_DIR, sha + '.pdf')
+        if not os.path.exists(fp):
+            tmp = fp + '.%d.tmp' % os.getpid()
+            with open(tmp, 'wb') as f:
+                f.write(pdf_bytes)
+            os.replace(tmp, fp)
+            _preview_cache_cleanup()
+        n = -(-len(pdf_bytes) // PREVIEW_CHUNK_BYTES)
+        return f'chunks:{sha}:{n}'
+    except Exception as e:
+        log.warning(f'preview chunk cache unavailable ({e}) - embedding inline instead')
+        return 'data:application/pdf;base64,' + base64.b64encode(pdf_bytes).decode('ascii')
+
+
 def _file_to_pdf_preview(raw, filename, log_context='', part=1):
     """הליבה המשותפת של המרת bytes+filename ל-data URI מוטמע, ממיר תמיד
     ל-PDF (גם אם המקור תמונה) - ראה _manuscript_data_uri למטה להסבר המלא
@@ -1470,7 +1516,7 @@ def _file_to_pdf_preview(raw, filename, log_context='', part=1):
                     pdf_bytes, total, part_used, per = res
                     parts = max(1, -(-total // per))
                     info.update({
-                        'uri': 'data:application/pdf;base64,' + base64.b64encode(pdf_bytes).decode('ascii'),
+                        'uri': _pdf_uri_for_page(pdf_bytes),
                         'is_pdf': True, 'part': part_used, 'parts': parts, 'page_count': total,
                         'per_part': per, 'first_page': (part_used - 1) * per + 1,
                         'last_page': min(total, part_used * per),
@@ -1496,7 +1542,7 @@ def _file_to_pdf_preview(raw, filename, log_context='', part=1):
     pdf_bytes, total, part_used, per = res
     parts = max(1, -(-total // per))
     info.update({
-        'uri': 'data:application/pdf;base64,' + base64.b64encode(pdf_bytes).decode('ascii'),
+        'uri': _pdf_uri_for_page(pdf_bytes),
         'is_pdf': True, 'part': part_used, 'parts': parts, 'page_count': total,
         'per_part': per,
         'first_page': (part_used - 1) * per + 1,
@@ -1581,6 +1627,27 @@ def studio(page_id):
         pv=pv,
         pv_url=url_for('dictate.studio_preview_part', page_id=page.id),
     )
+
+
+@dictate_bp.route('/preview-chunk/<sha>/<int:i>')
+@login_required
+def preview_chunk(sha, i):
+    """מקטע i של PDF התצוגה המקדימה (ראו _pdf_uri_for_page). JSON קטן שלא נחתך ברשת."""
+    import re
+    if not re.fullmatch(r'[0-9a-f]{64}', sha or ''):
+        abort(404)
+    fp = os.path.join(_PREVIEW_CACHE_DIR, sha + '.pdf')
+    if not os.path.exists(fp):
+        return jsonify({'error': 'expired'}), 404
+    with open(fp, 'rb') as f:
+        data = f.read()
+    n = -(-len(data) // PREVIEW_CHUNK_BYTES)
+    if i < 0 or i >= n:
+        abort(404)
+    chunk = data[i * PREVIEW_CHUNK_BYTES:(i + 1) * PREVIEW_CHUNK_BYTES]
+    resp = jsonify({'i': i, 'n': n, 'size': len(data), 'd': base64.b64encode(chunk).decode('ascii')})
+    resp.headers['Cache-Control'] = 'no-store'
+    return resp
 
 
 @dictate_bp.route('/<int:page_id>/preview-part')
