@@ -312,7 +312,8 @@
     // כאן במקטעי JSON קטנים (כל אחד עם ניסיונות חוזרים) ומורכב מחדש.
     function fetchChunks(uri, myLoad) {
       var parts = uri.split(':'), sha = parts[1], n = parseInt(parts[2], 10) || 0;
-      var chunks = new Array(n), done = 0, total = -1;
+      var chunks = new Array(n), done = 0, total = -1, key = [];
+      for (var q = 0; q < 32; q++) key.push(parseInt(sha.substr(q * 2, 2), 16));
       function one(i, attempt) {
         return fetch('/admin/dictate/preview-chunk/' + sha + '/' + i, { credentials: 'same-origin', cache: 'no-store' })
           .then(function (r) {
@@ -321,7 +322,7 @@
           })
           .then(function (j) {
             var bin = atob(j.d), out = new Uint8Array(bin.length);
-            for (var k = 0; k < bin.length; k++) out[k] = bin.charCodeAt(k);
+            for (var k = 0; k < bin.length; k++) out[k] = bin.charCodeAt(k) ^ key[(j.o + k) % 32];
             chunks[i] = out; total = j.size; done++;
             if (myLoad === state.loadId) message('טוען... ' + Math.round(done * 100 / n) + '%');
           })

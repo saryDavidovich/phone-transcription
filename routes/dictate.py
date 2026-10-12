@@ -1644,8 +1644,13 @@ def preview_chunk(sha, i):
     n = -(-len(data) // PREVIEW_CHUNK_BYTES)
     if i < 0 or i >= n:
         abort(404)
-    chunk = data[i * PREVIEW_CHUNK_BYTES:(i + 1) * PREVIEW_CHUNK_BYTES]
-    resp = jsonify({'i': i, 'n': n, 'size': len(data), 'd': base64.b64encode(chunk).decode('ascii')})
+    off = i * PREVIEW_CHUNK_BYTES
+    chunk = data[off:off + PREVIEW_CHUNK_BYTES]
+    # ערבול (XOR עם מפתח שנגזר מה-sha): מסנן תוכן ברשת (נטפרי) מזהה תמונות JPEG בתוך הטקסט ופוגע בהן
+    # (נמדד: ה-PDF הגיע חתוך בדיוק בתוך תמונת ה-JPEG השנייה). אחרי הערבול אין בתשובה שום חתימת תמונה.
+    key = bytes.fromhex(sha)
+    chunk = bytes(b ^ key[(off + k) % 32] for k, b in enumerate(chunk))
+    resp = jsonify({'i': i, 'n': n, 'o': off, 'size': len(data), 'd': base64.b64encode(chunk).decode('ascii')})
     resp.headers['Cache-Control'] = 'no-store'
     return resp
 
