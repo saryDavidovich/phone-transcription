@@ -29,6 +29,13 @@ class Customer(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     recordings = db.relationship('Recording', backref='customer', lazy=True)
     transactions = db.relationship('Transaction', backref='customer', lazy=True)
+    # מספרי טלפון נוספים שמשויכים לאותו לקוח/חשבון חיוב (למשל בעל ואשה): יתרה אחת,
+    # היסטוריה אחת. ראה CustomerPhone ו-services/customer_phones.py.
+    extra_phones = db.relationship('CustomerPhone', backref='customer', lazy=True,
+                                   cascade='all, delete-orphan', order_by='CustomerPhone.id')
+    # כבוי (ברירת מחדל): כל התמלולים נשלחים למייל/פקס של הלקוח. דלוק: לכל מספר
+    # אפשר להגדיר מייל/פקס משלו (מספר בלי הגדרה - נופל חזרה לשל הלקוח).
+    phones_separate = db.Column(db.Boolean, nullable=True, default=False)
 
     # --- שיוך למוסד (תלמיד) ---
     # לקוח "רגיל" (הרשמה עצמאית) - institution_id ריק. "תלמיד" ששייך למוסד -
@@ -567,3 +574,19 @@ def _track_self_funded(session, flush_context, instances):
             obj.self_funded = round(max(0.0, min(cur - take_from_self, max(new, 0.0))), 2)
         except Exception:
             continue
+
+
+class CustomerPhone(db.Model):
+    """מספר טלפון נוסף של לקוח קיים (ראה Customer.extra_phones). בכל מקום שמזהים
+    לקוח לפי טלפון, המספר הזה מזוהה כמו המספר הראשי של הלקוח. email/fax/
+    delivery_method אופציונליים ופעילים רק כש-Customer.phones_separate דלוק."""
+    __tablename__ = 'customer_phones'
+
+    id = db.Column(db.Integer, primary_key=True)
+    customer_id = db.Column(db.Integer, db.ForeignKey('customers.id'), nullable=False, index=True)
+    phone = db.Column(db.String(20), unique=True, nullable=False, index=True)
+    label = db.Column(db.String(60), nullable=True)           # למשל "אשתי"
+    email = db.Column(db.String(200), nullable=True)
+    fax = db.Column(db.String(20), nullable=True)
+    delivery_method = db.Column(db.String(10), nullable=True)  # email / fax; ריק = כמו של הלקוח
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)

@@ -2703,8 +2703,10 @@ def fax_customer_search():
     q = (request.args.get('q') or '').strip()
     if not q:
         return jsonify({'results': []})
+    from models import CustomerPhone
+    extra_ids = db.session.query(CustomerPhone.customer_id).filter(CustomerPhone.phone.ilike(f'%{q}%'))
     matches = (Customer.query.filter(
-        db.or_(Customer.phone.ilike(f'%{q}%'), Customer.fax_code == q)
+        db.or_(Customer.phone.ilike(f'%{q}%'), Customer.fax_code == q, Customer.id.in_(extra_ids))
     ).order_by(Customer.created_at.desc()).limit(15).all())
     return jsonify({'results': [
         {'id': c.id, 'phone': c.phone, 'name': c.name or '', 'fax_code': c.fax_code or ''}
@@ -2729,8 +2731,9 @@ def fax_customer_verify():
     code = (request.args.get('code') or '').strip()
     if not phone or not code:
         return jsonify({'customer': None, 'reason': 'missing_fields'})
-    customer = Customer.query.filter_by(phone=phone, fax_code=code).first()
-    if not customer:
+    from services.customer_phones import find_customer_by_phone
+    customer = find_customer_by_phone(phone)
+    if not customer or (customer.fax_code or '') != code:
         return jsonify({'customer': None, 'reason': 'no_match'})
     return jsonify({'customer': {
         'id': customer.id, 'phone': customer.phone, 'name': customer.name or '',

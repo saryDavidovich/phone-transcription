@@ -352,10 +352,14 @@ def customers():
         .add_columns(load_count_col, load_total_col, rec_count_col)
 
     if search:
+        from models import CustomerPhone
+        _extra_ids = db.session.query(CustomerPhone.customer_id).filter(
+            CustomerPhone.phone.contains(search) | CustomerPhone.email.contains(search))
         query = query.filter(
             Customer.phone.contains(search) |
             Customer.name.contains(search) |
-            Customer.email.contains(search)
+            Customer.email.contains(search) |
+            Customer.id.in_(_extra_ids)
         )
 
     sort_map = {
@@ -398,7 +402,8 @@ def add_customer():
             flash('מספר טלפון הוא שדה חובה')
             return render_template('admin/add_customer.html')
 
-        existing = Customer.query.filter_by(phone=phone).first()
+        from services.customer_phones import find_customer_by_phone
+        existing = find_customer_by_phone(phone)
         if existing:
             flash('לקוח עם מספר טלפון זה כבר קיים')
             return render_template('admin/add_customer.html')
@@ -581,6 +586,57 @@ def update_customer(id):
     db.session.commit()
     flash('פרטי לקוח עודכנו')
     return redirect(url_for('admin.customer_detail', id=id))
+
+# ---------------------------------------------------------------------
+# מספרי טלפון נוספים על לקוח אחד (חשבון חיוב משותף - למשל בעל ואשה)
+# ---------------------------------------------------------------------
+@admin_bp.route('/customers/<int:id>/phones/add', methods=['POST'])
+@login_required
+def add_customer_phone(id):
+    from services.customer_phones import add_phone
+    customer = Customer.query.get_or_404(id)
+    ok, msg = add_phone(customer, request.form.get('phone', ''), request.form.get('label'),
+                        request.form.get('email'), request.form.get('fax'))
+    flash(msg)
+    return redirect(url_for('admin.customer_detail', id=id) + '#extra-phones')
+
+
+@admin_bp.route('/customers/<int:id>/phones/<int:phone_id>/update', methods=['POST'])
+@login_required
+def update_customer_phone(id, phone_id):
+    from models import CustomerPhone
+    row = CustomerPhone.query.filter_by(id=phone_id, customer_id=id).first_or_404()
+    row.label = (request.form.get('label') or '').strip() or None
+    row.email = (request.form.get('email') or '').strip() or None
+    row.fax = (request.form.get('fax') or '').strip() or None
+    dm = request.form.get('delivery_method') or ''
+    row.delivery_method = dm if dm in ('email', 'fax') else None
+    db.session.commit()
+    flash('פרטי המספר עודכנו')
+    return redirect(url_for('admin.customer_detail', id=id) + '#extra-phones')
+
+
+@admin_bp.route('/customers/<int:id>/phones/<int:phone_id>/delete', methods=['POST'])
+@login_required
+def delete_customer_phone(id, phone_id):
+    from models import CustomerPhone
+    row = CustomerPhone.query.filter_by(id=phone_id, customer_id=id).first_or_404()
+    phone = row.phone
+    db.session.delete(row)
+    db.session.commit()
+    flash(f'המספר {phone} הוסר מהלקוח')
+    return redirect(url_for('admin.customer_detail', id=id) + '#extra-phones')
+
+
+@admin_bp.route('/customers/<int:id>/phones/mode', methods=['POST'])
+@login_required
+def set_customer_phones_mode(id):
+    customer = Customer.query.get_or_404(id)
+    customer.phones_separate = request.form.get('separate') == '1'
+    db.session.commit()
+    flash('מצב המשלוח עודכן: ' + ('מייל/פקס נפרד לכל מספר' if customer.phones_separate else 'כל התמלולים למייל/פקס של הלקוח'))
+    return redirect(url_for('admin.customer_detail', id=id) + '#extra-phones')
+
 
 @admin_bp.route('/customers/<int:id>/send-recordings', methods=['POST'])
 @login_required
@@ -1485,10 +1541,14 @@ def customers_filter():
         query = query.filter(~Customer.id.in_(active_ids))
 
     if search:
+        from models import CustomerPhone
+        _extra_ids = db.session.query(CustomerPhone.customer_id).filter(
+            CustomerPhone.phone.contains(search) | CustomerPhone.email.contains(search))
         query = query.filter(
             Customer.phone.contains(search) |
             Customer.name.contains(search) |
-            Customer.email.contains(search)
+            Customer.email.contains(search) |
+            Customer.id.in_(_extra_ids)
         )
 
     customers = query.order_by(Customer.created_at.desc()).paginate(page=page, per_page=50)
@@ -1932,7 +1992,8 @@ def assign_inbox_message(id):
     thread = GeneralInboxMessage.query.get_or_404(id)
     phone = _normalize_israeli_phone(request.form.get('phone', ''))
 
-    customer = Customer.query.filter_by(phone=phone).first() if phone else None
+    from services.customer_phones import find_customer_by_phone
+    customer = find_customer_by_phone(phone) if phone else None
     if not customer:
         flash('לא נמצא לקוח עם מספר הטלפון הזה')
         return redirect(url_for('admin.inbox_thread_detail', id=id))

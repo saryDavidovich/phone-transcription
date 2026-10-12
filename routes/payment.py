@@ -57,7 +57,8 @@ def nedarim_topup_link(phone):
         from services.student_links import student_self_topup_allowed
         from models import Customer
         cands = _phone_match_candidates(phone)
-        stu = Customer.query.filter(Customer.phone.in_(cands)).first() if cands else None
+        from services.customer_phones import find_customer_by_phones
+        stu = find_customer_by_phones(cands) if cands else None
         if stu and stu.institution_id and not student_self_topup_allowed(stu):
             return ('<div dir="rtl" style="font-family:Arial;max-width:480px;margin:60px auto;text-align:center">'
                     '<h3>טעינה עצמית אינה זמינה</h3><p>המוסד שלך לא הפעיל טעינה עצמית. '
@@ -197,7 +198,8 @@ def nedarim_webhook():
     # הטעינה עצמה היא מה שיוצרת לו חשבון).
     customer = None
     if phone_candidates:
-        customer = Customer.query.filter(Customer.phone.in_(phone_candidates)).first()
+        from services.customer_phones import find_customer_by_phones
+        customer = find_customer_by_phones(phone_candidates)
         if not customer:
             customer = Customer(phone=local_phone, name=client_name or None, balance=0.0)
             db.session.add(customer)

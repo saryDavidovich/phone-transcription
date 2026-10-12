@@ -2,6 +2,7 @@ from flask import Blueprint, request
 from app import db
 from models import Customer, Recording, Settings
 from services.transcribe import transcribe_async
+from services.customer_phones import find_customer_by_phone
 import uuid, logging, os
 
 ivr_bp = Blueprint('ivr', __name__)
@@ -47,7 +48,7 @@ def incoming():
 
     # שלוחה 0 — כניסה ראשונה
     if ext == '' or ext == '0' or not step:
-        customer = Customer.query.filter_by(phone=phone).first()
+        customer = find_customer_by_phone(phone)
         if not customer:
             customer = Customer(phone=phone, balance=0.0)
             db.session.add(customer)
@@ -74,7 +75,7 @@ def incoming():
     # שלוחה 2 — תפריט אפשרויות
     if ext == '2' or step == 'handle_options':
         if digits == '1':
-            customer = Customer.query.filter_by(phone=phone).first()
+            customer = find_customer_by_phone(phone)
             balance = customer.balance if customer else 0
             set_step(call_id, 'handle_wallet')
             return r(f'יתרתך היא {balance:.2f} שקל. לשמיעת יתרה הקש 1. לטעינה הקש 2. לחזרה הקש 0.')
@@ -124,7 +125,7 @@ def incoming():
 
     if step == 'handle_wallet':
         if digits == '1':
-            customer = Customer.query.filter_by(phone=phone).first()
+            customer = find_customer_by_phone(phone)
             balance = customer.balance if customer else 0
             set_step(call_id, 'handle_wallet')
             return r(f'יתרתך היא {balance:.2f} שקל.')
@@ -153,7 +154,7 @@ def incoming():
             return r('בחירה לא חוקית.')
 
     if step == 'save_fax':
-        customer = Customer.query.filter_by(phone=phone).first()
+        customer = find_customer_by_phone(phone)
         if customer and digits:
             customer.fax = digits
             db.session.commit()
@@ -162,7 +163,7 @@ def incoming():
         return r('שגיאה. נסה שוב.')
 
     if step == 'choose_delivery':
-        customer = Customer.query.filter_by(phone=phone).first()
+        customer = find_customer_by_phone(phone)
         if customer:
             customer.delivery_method = 'email' if digits == '1' else 'fax'
             db.session.commit()
@@ -175,7 +176,7 @@ def incoming():
 
 
 def check_balance(call_id, phone):
-    customer = Customer.query.filter_by(phone=phone).first()
+    customer = find_customer_by_phone(phone)
     min_balance = float(get_setting('min_balance', '0'))
     if not customer or customer.balance <= min_balance:
         set_step(call_id, 'wallet_or_continue')
@@ -193,7 +194,7 @@ def recording_done(call_id, phone):
     rec_url = get_param('RecordingUrl')
     duration = int(get_param('Duration', '0'))
 
-    customer = Customer.query.filter_by(phone=phone).first()
+    customer = find_customer_by_phone(phone)
     if not customer:
         return r('שגיאה. נסה שוב.')
 

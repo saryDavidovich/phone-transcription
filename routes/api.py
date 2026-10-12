@@ -2,6 +2,7 @@ from flask import current_app, Blueprint, request, jsonify
 from app import db
 from models import Customer, Recording, Settings, CallLog
 from services.transcribe import transcribe_async
+from services.customer_phones import find_customer_by_phone, find_customer_and_row, effective_contact
 from datetime import datetime
 import uuid
 
@@ -44,17 +45,20 @@ def call_end():
 
 @api_bp.route('/customer/<phone>', methods=['GET'])
 def get_customer(phone):
-    customer = Customer.query.filter_by(phone=phone).first()
+    customer, _row = find_customer_and_row(phone)
     if not customer:
         customer = Customer(phone=phone, balance=0.0)
         db.session.add(customer)
         db.session.commit()
+    # מספר נוסף של לקוח: אותה יתרה; מייל/פקס/אופן משלוח - של המספר הזה אם הוגדרו (מצב "נפרד")
+    email, fax, delivery_method = effective_contact(customer, phone)
     return jsonify({
-        'phone': customer.phone,
+        'phone': phone,
+        'primary_phone': customer.phone,
         'balance': round(max(customer.balance, 0), 2),
-        'email': customer.email or '',
-        'fax': customer.fax or '',
-        'delivery_method': customer.delivery_method or 'email',
+        'email': email or '',
+        'fax': fax or '',
+        'delivery_method': delivery_method or 'email',
         'is_blocked': customer.is_blocked,
         # תלמיד מוסד רשאי לטעון בעצמו רק אם המתג המרכזי והמתג של המוסד דלוקים (לשלוחת הטעינה ב-IVR)
         'topup_allowed': __import__('services.student_links', fromlist=['x']).student_self_topup_allowed(customer),
@@ -71,7 +75,7 @@ def get_customer_fax_code(phone):
     לטלפון הזה - ראה routes/dictate.py._ensure_customer_fax_code (אותה
     פונקציה בדיוק, כדי שלא יהיו שני מקורות ליצירת הקוד)."""
     from routes.dictate import _ensure_customer_fax_code
-    customer = Customer.query.filter_by(phone=phone).first()
+    customer = find_customer_by_phone(phone)
     if not customer:
         customer = Customer(phone=phone, balance=0.0)
         db.session.add(customer)
@@ -92,7 +96,7 @@ def get_pending_recordings():
     import math
 
     phone = request.args.get('phone', '')
-    customer = Customer.query.filter_by(phone=phone).first()
+    customer = find_customer_by_phone(phone)
     if not customer:
         return jsonify({'has_pending': False})
 
@@ -128,15 +132,17 @@ def get_pending_recordings():
 def update_customer():
     data = request.json
     phone = data.get('phone')
-    customer = Customer.query.filter_by(phone=phone).first()
+    customer, row = find_customer_and_row(phone)
     if not customer:
         return jsonify({'error': 'not found'}), 404
+    # מצב "מייל/פקס נפרד לכל מספר": שינוי שמגיע ממספר נוסף נשמר על המספר הזה בלבד
+    target = row if (row is not None and getattr(customer, 'phones_separate', False)) else customer
     if 'email' in data:
-        customer.email = data['email']
+        target.email = data['email']
     if 'fax' in data:
-        customer.fax = data['fax']
+        target.fax = data['fax']
     if 'delivery_method' in data:
-        customer.delivery_method = data['delivery_method']
+        target.delivery_method = data['delivery_method']
     if 'default_settings' in data:
         customer.default_settings = data['default_settings']
     db.session.commit()
@@ -155,7 +161,7 @@ def transcribe():
     language = data.get('language', 'he')
     output_language = data.get('output_language', 'he')
 
-    customer = Customer.query.filter_by(phone=phone).first()
+    customer = find_customer_by_phone(phone)
     if not customer:
         return jsonify({'error': 'customer not found'}), 404
 
@@ -165,10 +171,11 @@ def transcribe():
         if limit_error:
             return jsonify({'error': limit_error}), 403
 
+    _eff_email, _eff_fax, _eff_method = effective_contact(customer, phone)
     if not delivered_to:
-        delivered_to = customer.email or customer.fax or ''
+        delivered_to = _eff_email or _eff_fax or ''
     if not delivery_method:
-        delivery_method = customer.delivery_method or 'email'
+        delivery_method = _eff_method or 'email'
 
     existing = Recording.query.filter_by(call_id=call_id).first()
     if existing:
@@ -417,7 +424,7 @@ def process_pending():
 
     data = request.get_json(silent=True) or {}
     phone = data.get('phone', '')
-    customer = Customer.query.filter_by(phone=phone).first()
+    customer = find_customer_by_phone(phone)
     if not customer:
         return jsonify({'status': 'not_found'}), 404
 

@@ -81,6 +81,70 @@
   </div>
 </div>
 
+<div id="extra-phones" style="margin-top:20px" class="table-card">
+  <div class="table-header"><span class="table-title">📞 מספרי טלפון נוספים (חשבון חיוב משותף)</span></div>
+  <div style="padding:16px">
+    <div style="font-size:13px;color:#8892b0;margin-bottom:12px">
+      כל מספר שמוסיפים כאן מזוהה במערכת כמו המספר הראשי ({{ customer.phone or '—' }}): אותה יתרה, אותה היסטוריה, וטעינה מכל אחד מהמספרים נכנסת לאותו חשבון.
+    </div>
+
+    <form method="POST" action="/admin/customers/{{ customer.id }}/phones/mode" style="margin-bottom:16px;padding:10px;background:var(--surface2);border:1px solid var(--border);border-radius:8px">
+      <label style="display:flex;gap:8px;align-items:center;cursor:pointer;font-weight:700;font-size:13px">
+        <input type="checkbox" name="separate" value="1" {% if customer.phones_separate %}checked{% endif %}>
+        מייל / פקס נפרד לכל מספר
+      </label>
+      <div style="font-size:12px;color:#8892b0;margin:6px 0 8px">
+        כבוי: כל התמלולים נשלחים למייל/הפקס של הלקוח למעלה. דלוק: לכל מספר אפשר להגדיר מייל/פקס משלו, והתמלול יישלח למספר שהקליט (מספר בלי הגדרה - למייל/פקס של הלקוח).
+      </div>
+      <button class="btn" type="submit">שמור מצב משלוח</button>
+    </form>
+
+    {% if customer.extra_phones %}
+    <table>
+      <thead><tr><th>מספר</th><th>שם / תיאור</th><th>מייל</th><th>פקס</th><th>משלוח</th><th></th></tr></thead>
+      <tbody>
+      {% for p in customer.extra_phones %}
+      <tr>
+        <form method="POST" action="/admin/customers/{{ customer.id }}/phones/{{ p.id }}/update" id="ph{{ p.id }}"></form>
+        <td style="font-weight:700">{{ p.phone }}</td>
+        <td><input class="form-input" form="ph{{ p.id }}" name="label" value="{{ p.label or '' }}" placeholder="למשל: אשתי"></td>
+        <td><input class="form-input" form="ph{{ p.id }}" name="email" value="{{ p.email or '' }}" {% if not customer.phones_separate %}disabled title="פעיל רק במצב 'מייל/פקס נפרד'"{% endif %}></td>
+        <td><input class="form-input" form="ph{{ p.id }}" name="fax" value="{{ p.fax or '' }}" {% if not customer.phones_separate %}disabled{% endif %}></td>
+        <td>
+          <select class="form-input" style="min-width:110px" form="ph{{ p.id }}" name="delivery_method" {% if not customer.phones_separate %}disabled{% endif %}>
+            <option value="" {% if not p.delivery_method %}selected{% endif %}>כמו הלקוח</option>
+            <option value="email" {% if p.delivery_method == 'email' %}selected{% endif %}>מייל</option>
+            <option value="fax" {% if p.delivery_method == 'fax' %}selected{% endif %}>פקס</option>
+          </select>
+        </td>
+        <td style="white-space:nowrap">
+          <button class="btn" form="ph{{ p.id }}" type="submit">שמור</button>
+          <button class="btn btn-danger" type="submit" form="phdel{{ p.id }}" onclick="return confirm('להסיר את המספר {{ p.phone }} מהלקוח?')">הסר</button>
+          <form method="POST" action="/admin/customers/{{ customer.id }}/phones/{{ p.id }}/delete" id="phdel{{ p.id }}"></form>
+        </td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div style="color:#8892b0;font-size:13px;margin-bottom:8px">אין עדיין מספרים נוספים.</div>
+    {% endif %}
+
+    <form method="POST" action="/admin/customers/{{ customer.id }}/phones/add" style="display:flex;gap:8px;flex-wrap:wrap;align-items:end;margin-top:14px">
+      <div class="form-group" style="margin:0"><label class="form-label">מספר טלפון נוסף</label>
+        <input class="form-input" name="phone" placeholder="0501234567" required></div>
+      <div class="form-group" style="margin:0"><label class="form-label">שם / תיאור</label>
+        <input class="form-input" name="label" placeholder="למשל: אשתי"></div>
+      <div class="form-group" style="margin:0"><label class="form-label">מייל (אופציונלי)</label>
+        <input class="form-input" name="email"></div>
+      <div class="form-group" style="margin:0"><label class="form-label">פקס (אופציונלי)</label>
+        <input class="form-input" name="fax"></div>
+      <button class="btn btn-primary" type="submit">➕ חבר מספר</button>
+    </form>
+    <div style="font-size:12px;color:#8892b0;margin-top:8px">מייל/פקס שמוזנים כאן פעילים רק כשמצב "מייל / פקס נפרד לכל מספר" דלוק.</div>
+  </div>
+</div>
+
 <div style="margin-top:20px" class="table-card">
   <div class="table-header"><span class="table-title">🎧 הקלטות</span></div>
   <table>

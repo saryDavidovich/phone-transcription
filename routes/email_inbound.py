@@ -66,6 +66,9 @@ def _normalize_israeli_phone(raw):
         phone = '0' + phone[3:]
     return phone
 
+from services.customer_phones import (find_customer_by_phone, sender_is_registered,
+                                      delivery_email_for_sender, effective_contact)
+
 email_bp = Blueprint('email_inbound', __name__)
 
 # כתובת המייל הציבורית שאליה לקוחות שולחים הקלטות לתמלול
@@ -410,8 +413,8 @@ def _find_customer_by_phone_anywhere(text, sender_email):
         phone = _normalize_israeli_phone(m.group(0))
         if not phone or not phone.isdigit():
             continue
-        customer = Customer.query.filter_by(phone=phone).first()
-        if customer and (customer.email or '').strip().lower() == (sender_email or '').strip().lower():
+        customer = find_customer_by_phone(phone)
+        if customer and sender_is_registered(customer, sender_email):
             return customer
     return None
 
@@ -774,7 +777,7 @@ def _process_ocr_email(filepath, original_filename, customer, sender_email, phon
             original_filename=original_filename,
             original_file_path=filepath,
             status='queued_maintenance',
-            delivered_to=customer.email,
+            delivered_to=delivery_email_for_sender(customer, sender_email),
             file_data=file_backup,
         )
         db.session.add(ocr_rec)
@@ -783,7 +786,7 @@ def _process_ocr_email(filepath, original_filename, customer, sender_email, phon
         return
 
     from services.transcribe import ocr_async
-    ocr_async(_ocr_worker, filepath, original_filename, customer.id, customer.email, phone)
+    ocr_async(_ocr_worker, filepath, original_filename, customer.id, delivery_email_for_sender(customer, sender_email), phone)
 
 
 def resume_queued_ocr():
@@ -1532,12 +1535,12 @@ def email_inbound():
 
         with app.app_context():
             from models import ManuscriptPage
-            customer = Customer.query.filter_by(phone=phone).first()
+            customer = find_customer_by_phone(phone)
             if not customer:
                 log.warning(f"email-inbound: תגובת הגהה מטלפון {phone} שלא קיים כלקוח (page_id={page_id}, from={sender_email})")
                 return jsonify({'status': 'rejected', 'reason': 'customer_not_found'}), 200
             registered_email = (customer.email or '').strip().lower()
-            if not registered_email or registered_email != sender_email:
+            if not sender_is_registered(customer, sender_email):
                 log.warning(
                     f"email-inbound: תגובת הגהה נדחתה עקב אי-התאמת מייל - "
                     f"customer_id={customer.id} phone={phone} page_id={page_id} "
@@ -1583,11 +1586,11 @@ def email_inbound():
 
         with app.app_context():
             from models import CustomerMessage, ConversationThread
-            customer = Customer.query.filter_by(phone=phone).first()
+            customer = find_customer_by_phone(phone)
             if not customer:
                 return jsonify({'status': 'rejected', 'reason': 'customer_not_found'}), 200
             registered_email = (customer.email or '').strip().lower()
-            if not registered_email or registered_email != sender_email:
+            if not sender_is_registered(customer, sender_email):
                 return jsonify({'status': 'rejected', 'reason': 'email_mismatch'}), 200
 
             raw_text = request.form.get('text') or ''
@@ -1677,7 +1680,7 @@ def email_inbound():
     phone = parsed['phone']
 
     with app.app_context():
-        customer = Customer.query.filter_by(phone=phone).first()
+        customer = find_customer_by_phone(phone)
 
         if not customer:
             _send_guidance_email(sender_email, 'not_registered', phone=phone)
@@ -1688,7 +1691,7 @@ def email_inbound():
             return jsonify({'status': 'rejected', 'reason': 'blocked'}), 200
 
         registered_email = (customer.email or '').strip().lower()
-        if not registered_email or registered_email != sender_email:
+        if not sender_is_registered(customer, sender_email):
             _send_guidance_email(sender_email, 'email_mismatch', phone=phone)
             return jsonify({'status': 'rejected', 'reason': 'email_mismatch'}), 200
 
@@ -1788,7 +1791,7 @@ def email_inbound():
             duration_seconds=duration_seconds,
             status='queued_maintenance' if maintenance_on else 'recording',
             delivery_method='email',
-            delivered_to=customer.email,
+            delivered_to=delivery_email_for_sender(customer, sender_email),
             rec_url=rec_url,
             source_filename=original_filename,
             transcription_tier=parsed['tier'],
@@ -1814,7 +1817,7 @@ def email_inbound():
             rec_url=rec_url,
             customer_id=customer.id,
             delivery_method='email',
-            delivered_to=customer.email,
+            delivered_to=delivery_email_for_sender(customer, sender_email),
             duration_seconds=duration_seconds,
             transcription_tier=parsed['tier'],
             language=parsed['language'],
@@ -1925,13 +1928,14 @@ def send_email_instructions():
         return jsonify({'status': 'error', 'reason': 'missing_phone'}), 400
 
     with app.app_context():
-        customer = Customer.query.filter_by(phone=phone).first()
+        customer = find_customer_by_phone(phone)
 
-        if not customer or not (customer.email or '').strip():
+        _to_email = effective_contact(customer, phone)[0] if customer else None
+        if not customer or not (_to_email or '').strip():
             log.info(f"send-email-instructions: אין כתובת מייל רשומה ל-{phone}")
             return jsonify({'status': 'no_email'}), 200
 
-        _send_instructions_email(customer.email, customer.phone, customer.name)
+        _send_instructions_email(_to_email, phone, customer.name)
         return jsonify({'status': 'sent'}), 200
 
 
@@ -2076,13 +2080,14 @@ def send_handwriting_instructions():
         return jsonify({'status': 'error', 'reason': 'missing_phone'}), 400
 
     with app.app_context():
-        customer = Customer.query.filter_by(phone=phone).first()
+        customer = find_customer_by_phone(phone)
 
-        if not customer or not (customer.email or '').strip():
+        _to_email = effective_contact(customer, phone)[0] if customer else None
+        if not customer or not (_to_email or '').strip():
             log.info(f"send-handwriting-instructions: אין כתובת מייל רשומה ל-{phone}")
             return jsonify({'status': 'no_email'}), 200
 
-        _send_handwriting_instructions_email(customer.email, customer.phone, customer.name)
+        _send_handwriting_instructions_email(_to_email, phone, customer.name)
         return jsonify({'status': 'sent'}), 200
 
 

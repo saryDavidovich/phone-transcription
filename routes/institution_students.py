@@ -67,7 +67,7 @@ def add_student():
     initial_balance = float(request.form.get('initial_balance') or 0)
     inst = current_user
 
-    existing = Customer.query.filter_by(phone=phone).first() if phone else None
+    existing = __import__('services.customer_phones', fromlist=['x']).find_customer_by_phone(phone) if phone else None
     if existing:
         # לקוח שכבר קיים במערכת - לא נוצר כרטיס חדש, אלא נשלחת בקשת שיוך באישור הלקוח
         from services.student_links import request_link
@@ -237,7 +237,7 @@ def upload_excel():
         email = str(row[idx_email]).strip() if idx_email is not None and row[idx_email] else None
         requested_balance = float(row[idx_balance]) if idx_balance is not None and row[idx_balance] else 0.0
 
-        existing = Customer.query.filter_by(phone=phone).first() if phone else None
+        existing = __import__('services.customer_phones', fromlist=['x']).find_customer_by_phone(phone) if phone else None
         if existing:
             # לקוח קיים - בקשת שיוך באישור הלקוח במקום דילוג שקט (לא עוצר את הייבוא)
             from services.student_links import request_link
