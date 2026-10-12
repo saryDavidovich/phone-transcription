@@ -92,6 +92,24 @@ def create_app():
     app.register_blueprint(download_bp)
     app.register_blueprint(dictate_bp, url_prefix='/admin/dictate')
 
+    # מונע מהדפדפן/סינון (נטפרי) להמשיך להשתמש בגרסה ישנה של קבצי JS/CSS אחרי עדכון:
+    # כל קישור לקובץ static מקבל ?v=<זמן עדכון הקובץ>, כך שקובץ שהתעדכן נטען מחדש אוטומטית.
+    @app.url_defaults
+    def _static_cache_bust(endpoint, values):
+        if endpoint == 'static' and 'v' not in values and values.get('filename'):
+            try:
+                fp = os.path.join(app.static_folder, values['filename'])
+                values['v'] = int(os.path.getmtime(fp))
+            except OSError:
+                pass
+
+    @app.after_request
+    def _static_revalidate(resp):
+        from flask import request as _rq
+        if (_rq.path or '').startswith(('/static/js/', '/static/css/')):
+            resp.headers['Cache-Control'] = 'no-cache'   # תמיד בודקים מול השרת (304 אם לא השתנה)
+        return resp
+
     # Route ציבורי לקבצי פקס זמניים
     @app.route('/static/fax_tmp/<filename>')
     def fax_file(filename):
