@@ -1732,6 +1732,8 @@ def email_inbound():
             mime = (attached_file.mimetype or '').lower()
             ext = IMAGE_MIME_TYPES.get(mime) or \
                   os.path.splitext(attached_file.filename or '')[1].lstrip('.').lower() or 'jpg'
+            if ext not in IMAGE_EXTENSIONS:
+                ext = 'jpg'   # אבטחה: לא שומרים סיומות מסוכנות (html/svg וכו') בתיקייה שמוגשת ציבורית
             filename = f"{uuid.uuid4().hex}.{ext}"
             filepath = os.path.join(RECORDINGS_EMAIL_DIR, filename)
             attached_file.save(filepath)
@@ -1746,6 +1748,8 @@ def email_inbound():
                 (audio_file.mimetype or '').lower(),
                 (os.path.splitext(audio_file.filename or '')[1].lstrip('.') or 'mp3').lower()
             )
+            if ext not in AUDIO_VIDEO_EXTENSIONS:
+                ext = 'mp3'   # אבטחה: סיומת מדיה מוכרת בלבד
             filename = f"{uuid.uuid4().hex}.{ext}"
             filepath = os.path.join(RECORDINGS_EMAIL_DIR, filename)
             audio_file.save(filepath)

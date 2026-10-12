@@ -441,7 +441,7 @@ async function saveEdited(isAuto) {
     if (msg) msg.textContent = '✔ נשמר ' + now.toLocaleTimeString('he-IL', {hour: '2-digit', minute: '2-digit'});
     const info = document.getElementById('uploadedInfo');
     info.style.display = 'block';
-    info.innerHTML = `✔ קובץ סופי עדכני: <strong>${data.filename}</strong> - <a href="/admin/dictate/proof/${ROUND_ID}/final.docx">הורדה לבדיקה</a>`;
+    info.innerHTML = `✔ קובץ סופי עדכני: <strong>${escapeHtml(data.filename)}</strong> - <a href="/admin/dictate/proof/${ROUND_ID}/final.docx">הורדה לבדיקה</a>`;
   } catch (e) {
     if (msg) msg.textContent = '⚠ ' + e.message;
   }
@@ -822,7 +822,7 @@ async function uploadFinal() {
     msg.style.color = 'var(--green)';
     const info = document.getElementById('uploadedInfo');
     info.style.display = 'block';
-    info.innerHTML = `✔ קובץ סופי נוכחי: <strong>${data.filename}</strong> - <a href="/admin/dictate/proof/${ROUND_ID}/final.docx">הורדה לבדיקה</a>`;
+    info.innerHTML = `✔ קובץ סופי נוכחי: <strong>${escapeHtml(data.filename)}</strong> - <a href="/admin/dictate/proof/${ROUND_ID}/final.docx">הורדה לבדיקה</a>`;
   } catch (e) {
     msg.textContent = '⚠ ' + e.message;
     msg.style.color = 'var(--red)';

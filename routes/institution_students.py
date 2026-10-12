@@ -528,7 +528,8 @@ def upload_for_student(student_id):
     import uuid
     static_dir = os.path.join(os.path.dirname(__file__), '..', 'static', 'fax_tmp')
     os.makedirs(static_dir, exist_ok=True)
-    ext = os.path.splitext(file.filename)[1] or '.wav'
+    from services.security import safe_audio_ext
+    ext = safe_audio_ext(file.filename)
     filename = f"student_{uuid.uuid4().hex}{ext}"
     file.save(os.path.join(static_dir, filename))
 

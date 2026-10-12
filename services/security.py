@@ -80,23 +80,128 @@ def is_valid_admin_session():
     return True
 
 
-def client_ip():
+def _is_private_ip(ip):
+    import ipaddress
+    try:
+        a = ipaddress.ip_address(ip)
+    except ValueError:
+        return True   # ערך לא תקין - לא סומכים עליו
+    return a.is_private or a.is_loopback or a.is_link_local or a.is_reserved or \
+        (a.version == 4 and a in ipaddress.ip_network('100.64.0.0/10'))
+
+
+def real_client_ip():
+    """כתובת ה-IP האמיתית של הפונה, בלי אפשרות זיוף.
+
+    הפרוקסי של Railway *מוסיף* את הכתובת האמיתית בסוף כותרת X-Forwarded-For,
+    ואילו כל מה שנמצא משמאלה הוא מידע שהפונה עצמו שלח (ניתן לזיוף). לכן הולכים
+    מימין לשמאל, מדלגים על כתובות פנימיות של הרשת, ולוקחים את הציבורית הראשונה.
+    (הקוד הישן לקח את הערך השמאלי ביותר - ולכן אפשר היה לזייף "אני נדרים פלוס".)"""
+    chain = [p.strip() for p in (request.headers.get('X-Forwarded-For') or '').split(',') if p.strip()]
+    if request.remote_addr:
+        chain.append(request.remote_addr)
+    for ip in reversed(chain):
+        if not _is_private_ip(ip):
+            return ip
     return request.remote_addr or '?'
 
 
-def login_blocked():
+def client_ip():
+    return real_client_ip()
+
+
+# --- מונה ניסיונות כללי לפי מפתח (IP / חשבון), בזיכרון ---
+def hits_blocked(key, max_hits=MAX_FAILS, window=WINDOW_SECONDS):
     now = time.time()
-    hits = [t for t in _FAILS.get(client_ip(), []) if now - t < WINDOW_SECONDS]
-    _FAILS[client_ip()] = hits
-    return len(hits) >= MAX_FAILS
+    hits = [t for t in _FAILS.get(key, []) if now - t < window]
+    _FAILS[key] = hits
+    if not hits:
+        _FAILS.pop(key, None)
+    return len(hits) >= max_hits
+
+
+def hits_add(key):
+    _FAILS.setdefault(key, []).append(time.time())
+    if len(_FAILS) > 20000:   # הגנה מניפוח זיכרון
+        for k in list(_FAILS)[:5000]:
+            _FAILS.pop(k, None)
+
+
+def hits_clear(key):
+    _FAILS.pop(key, None)
+
+
+def login_blocked():
+    return hits_blocked('ip:' + client_ip())
 
 
 def register_failed_login():
-    _FAILS.setdefault(client_ip(), []).append(time.time())
+    hits_add('ip:' + client_ip())
 
 
 def clear_failed_logins():
-    _FAILS.pop(client_ip(), None)
+    hits_clear('ip:' + client_ip())
+
+
+def nedarim_key_ok():
+    """אופציונלי: NEDARIM_WEBHOOK_KEY - סוד שמצורף ככתובת ה-Webhook (?key=...).
+    אם הוגדר, בקשה בלעדיו נדחית גם אם הגיעה מכתובת IP "נכונה". אם לא הוגדר - אין שינוי."""
+    secret = os.environ.get('NEDARIM_WEBHOOK_KEY', '')
+    if not secret:
+        return True
+    return hmac.compare_digest((request.args.get('key') or '').encode(), secret.encode())
+
+
+def new_login_code():
+    """קוד כניסה זמני בן 6 ספרות, מחולל קריפטוגרפי (לא random רגיל שניתן לחיזוי)."""
+    import secrets
+    return ''.join(secrets.choice('0123456789') for _ in range(6))
+
+
+def nedarim_request_ok(allowed_ips, ip=None):
+    """אימות עדכון שמגיע מנדרים פלוס, לפי התיעוד שלהם:
+    1. אם הוגדר NEDARIM_WEBHOOK_SECRET (אפשר כמה מפתחות מופרדים בפסיק, להחלפת מפתח) - חובה חתימת
+       HMAC-SHA256 תקינה על timestamp + "." + גוף הבקשה הגולמי, וחותמת זמן בטווח של 5 דקות.
+       החתימה היא ההוכחה הקריפטוגרפית; כתובת IP שונה רק נרשמת באזהרה (הכתובות שלהם עלולות להתחלף).
+    2. אם לא הוגדר - בדיקת כתובת IP אמיתית (ואם הוגדר NEDARIM_WEBHOOK_KEY - גם המפתח ב-?key=)."""
+    import re
+    secrets_ = [x for x in re.split(r'[,\s]+', os.environ.get('NEDARIM_WEBHOOK_SECRET', '')) if x]
+    ip = ip or real_client_ip()
+    if secrets_:
+        ts = (request.headers.get('X-Nedarim-Timestamp') or '').strip()
+        sig = (request.headers.get('X-Nedarim-Signature') or '').strip()
+        if sig.startswith('v1='):
+            sig = sig[3:]
+        try:
+            fresh = abs(time.time() - int(ts)) <= 300
+        except ValueError:
+            fresh = False
+        if not (ts and sig and fresh):
+            log.warning(f'nedarim update rejected: missing/stale signature headers (ip={ip})')
+            return False
+        raw = request.get_data()
+        for sec_ in secrets_:
+            expected = hmac.new(sec_.encode(), ts.encode() + b'.' + raw, hashlib.sha256).hexdigest()
+            if hmac.compare_digest(expected, sig.lower()):
+                if ip not in allowed_ips:
+                    log.warning(f'nedarim update has valid signature but unexpected IP {ip} - Nedarim IPs may have changed')
+                return True
+        log.warning(f'nedarim update rejected: bad signature (ip={ip})')
+        return False
+    if ip not in allowed_ips:
+        log.warning(f'nedarim update rejected: unexpected IP {ip}')
+        return False
+    return nedarim_key_ok()
+
+
+SAFE_UPLOAD_EXTS = {'wav', 'mp3', 'm4a', 'mp4', 'ogg', 'oga', 'opus', 'webm', 'flac', 'aac', 'amr', 'wma', '3gp', 'mov', 'aiff', 'caf'}
+
+
+def safe_audio_ext(filename, default='wav'):
+    """סיומת בטוחה לקובץ שהמשתמש העלה ונשמר בתיקייה ציבורית. סיומות כמו .html/.svg
+    היו מאפשרות להעלות דף שמריץ קוד באתר שלנו - לכן רק סיומות מדיה מוכרות."""
+    ext = os.path.splitext(filename or '')[1].lstrip('.').lower()
+    return '.' + (ext if ext in SAFE_UPLOAD_EXTS else default)
 
 
 def resolve_secret_key():
@@ -165,9 +270,28 @@ def init_security(app):
         return None
 
     @app.before_request
-    def _api_key_guard():
-        secret = os.environ.get('API_SHARED_SECRET', '')
+    def _institution_csrf_guard():
+        """בקשות שמשנות מידע באזור המוסדות חייבות להגיע מהאתר עצמו (הגנה מתקיפת CSRF)."""
         path = request.path or ''
+        if request.method in SAFE_METHODS or not path.startswith('/institution'):
+            return None
+        if not _same_origin():
+            log.warning(f'institution request blocked: cross-origin {request.method} {path}')
+            return jsonify({'error': 'forbidden'}), 403
+        return None
+
+    @app.before_request
+    def _api_key_guard():
+        path = request.path or ''
+        # אופציונלי: WEBHOOK_SECRET - מפתח ב-?key=... לשלוש ה-webhooks החיצוניים (מייל נכנס, אלף בוט, דוח פקס).
+        # מגדירים אותו גם בכתובת ה-Webhook אצל הספק. לא מוגדר = אין שינוי.
+        wsecret = os.environ.get('WEBHOOK_SECRET', '')
+        if wsecret and path in ('/api/email-inbound', '/api/alefbot-webhook', '/api/fax-delivery-webhook'):
+            if not hmac.compare_digest((request.args.get('key') or '').encode(), wsecret.encode()):
+                log.warning(f'webhook rejected (bad/missing key): {path}')
+                return jsonify({'error': 'unauthorized'}), 401
+            return None
+        secret = os.environ.get('API_SHARED_SECRET', '')
         if not secret or not path.startswith('/api/') or path.startswith(API_KEY_EXEMPT_PREFIXES):
             return None
         sent = request.headers.get('X-API-Key') or request.args.get('key') or ''
@@ -184,6 +308,12 @@ def init_security(app):
         if secure:
             resp.headers.setdefault('Strict-Transport-Security', 'max-age=31536000')
         path = request.path or ''
+        if path.startswith('/static/fax_tmp/') or path.startswith('/api/recordings-email/'):
+            # קבצים שהועלו ע"י משתמשים ומוגשים ציבורית: אסור שיפעילו קוד באתר גם אם הועלה HTML
+            if (resp.mimetype or '').startswith(('text/html', 'image/svg', 'application/xhtml', 'text/xml', 'application/xml')):
+                resp.headers['Content-Security-Policy'] = "default-src 'none'; sandbox"
+                resp.headers['Content-Type'] = 'application/octet-stream'
+                resp.headers['Content-Disposition'] = 'attachment'
         if path == '/admin' or path.startswith('/admin/') or path.startswith('/institution'):
             resp.headers['Cache-Control'] = 'no-store'
             resp.headers.setdefault('Pragma', 'no-cache')

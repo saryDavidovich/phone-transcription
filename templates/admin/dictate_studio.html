@@ -202,7 +202,7 @@
         <div id="previewWrap"></div>
         <div class="ds-charcount">מספר תווים (כולל רווחים): <strong id="charCountValue">0</strong></div>
         <div class="ds-sendrow">
-          <input type="email" id="toEmail" placeholder="כתובת מייל ליעד" value="{{ page.customer.email or '' }}">
+          <input type="email" id="toEmail" placeholder="כתובת מייל ליעד">
           <button class="btn btn-primary" onclick="sendResult()">📤 שלח</button>
           <button class="btn btn-ghost" onclick="sendResult(true)" title="שליחה ללקוח בלי לחייב את היתרה שלו">🎁 שלח ללא חיוב</button>
           <button class="btn btn-ghost" onclick="saveEdits()">💾 שמור תיקונים</button>
@@ -606,7 +606,7 @@ async function uploadAllSegments() {
     }
     pollStatus();
   } catch (e) {
-    document.getElementById('resultArea').innerHTML = `<div class="ds-state ds-error">⚠ העלאה נכשלה: ${e.message}</div>`;
+    document.getElementById('resultArea').innerHTML = `<div class="ds-state ds-error">⚠ העלאה נכשלה: ${escapeHtml(e.message)}</div>`;
     resetRecordButton();
   }
 }
@@ -634,7 +634,7 @@ async function pollStatus() {
   }
   if (data.status === 'error') {
     document.getElementById('resultArea').innerHTML =
-      `<div class="ds-state ds-error">⚠ ${data.error_message || 'שגיאה בתמלול'}</div>
+      `<div class="ds-state ds-error">⚠ ${escapeHtml(data.error_message || 'שגיאה בתמלול')}</div>
        <div style="text-align:center"><button class="btn btn-primary" onclick="redo()">נסה שוב</button></div>`;
     document.getElementById('statusBadge').textContent = 'error';
     document.getElementById('engineSelect').disabled = false;
@@ -670,7 +670,7 @@ function renderReview() {
     <div id="previewWrap"></div>
     <div class="ds-charcount">מספר תווים (כולל רווחים): <strong id="charCountValue">0</strong></div>
     <div class="ds-sendrow">
-      <input type="email" id="toEmail" placeholder="כתובת מייל ליעד" value="{{ page.customer.email or '' }}">
+      <input type="email" id="toEmail" placeholder="כתובת מייל ליעד">
       <button class="btn btn-primary" onclick="sendResult()">📤 שלח</button>
       <button class="btn btn-ghost" onclick="sendResult(true)" title="שליחה ללקוח בלי לחייב את היתרה שלו">🎁 שלח ללא חיוב</button>
       <button class="btn btn-ghost" onclick="saveEdits()">💾 שמור תיקונים</button>
@@ -678,6 +678,7 @@ function renderReview() {
     </div>
     <div id="sendMsg" style="margin-top:8px;font-size:13px"></div>
   `;
+  document.getElementById('toEmail').value = {{ (page.customer.email or '')|tojson }};
   renderPreview();
 }
 

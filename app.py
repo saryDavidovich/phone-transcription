@@ -285,6 +285,7 @@ def _migrate_db():
         # טעינה עצמית של תלמידים: חלק היתרה שהוא כסף התלמיד עצמו + מתג מוסד
         "ALTER TABLE customers ADD COLUMN IF NOT EXISTS self_funded FLOAT DEFAULT 0.0",
         "ALTER TABLE institutions ADD COLUMN IF NOT EXISTS allow_student_topup BOOLEAN DEFAULT TRUE",
+        "ALTER TABLE institutions ADD COLUMN IF NOT EXISTS reset_requested_at TIMESTAMP",
         # מספרי טלפון נוספים על לקוח אחד: מצב משלוח נפרד לכל מספר
         "ALTER TABLE customers ADD COLUMN IF NOT EXISTS phones_separate BOOLEAN DEFAULT FALSE",
         # שלב ב' של הקראת כתבי-יד (routes/dictate.py) - תמחור לפי תווים, מחויב

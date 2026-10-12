@@ -45,10 +45,9 @@ NEDARIM_CATEGORY = 'תמלול פון'
 
 
 def _client_ip():
-    fwd = request.headers.get('X-Forwarded-For', '')
-    if fwd:
-        return fwd.split(',')[0].strip()
-    return request.remote_addr
+    # כתובת אמיתית בלבד (לא הערך השמאלי של X-Forwarded-For - שאותו הפונה יכול לזייף)
+    from services.security import real_client_ip
+    return real_client_ip()
 
 
 @institution_billing_bp.route('/institution/billing')
@@ -79,11 +78,12 @@ def topup():
     if not mosad or not api_valid:
         return jsonify({'error': 'חיבור נדרים פלוס לא הוגדר עדיין בצד השרת (משתני סביבה חסרים)'}), 500
 
+    import math
     try:
-        amount = float(request.json.get('amount'))
+        amount = round(float((request.get_json(silent=True) or {}).get('amount')), 2)
     except (TypeError, ValueError):
         return jsonify({'error': 'סכום לא תקין'}), 400
-    if amount <= 0:
+    if not math.isfinite(amount) or amount <= 0 or amount > 100000:
         return jsonify({'error': 'סכום לא תקין'}), 400
 
     charge = InstitutionChargeLog(institution_id=inst.id, amount=amount, status='pending')
@@ -98,6 +98,9 @@ def topup():
         log.warning(f'topup: callback base url came out as http:// ({app_url}) - forcing https, but check APP_URL env var')
         app_url = 'https://' + app_url[len('http://'):]
     callback_url = f"{app_url}/api/nedarim/callback/{charge.id}"
+    if os.environ.get('NEDARIM_WEBHOOK_KEY'):
+        import urllib.parse as _up
+        callback_url += '?key=' + _up.quote(os.environ['NEDARIM_WEBHOOK_KEY'], safe='')
 
     try:
         resp = requests.post(NEDARIM_CREATE_URL, data={
@@ -116,6 +119,7 @@ def topup():
             # שמתבצע תחת אותו מספר מוסד בנדרים פלוס.
             'Comment': f'טעינת יתרה - מוסד #{inst.id}',
             'Param1': str(charge.id),
+            'AjaxId': f'{charge.id}-{int(__import__("time").time())}',  # לפי התיעוד: מונע שליחה כפולה של אותה בקשה
             'CallBack': callback_url,
         }, timeout=15)
         data = resp.json()
@@ -153,8 +157,9 @@ def nedarim_callback(charge_id):
        הוא מספר סידורי פשוט לניחוש; בלי החסימה הזו, כל אחד שינחש/יריץ
        מספרים ברצף על הכתובת הזו יכול היה "לזכות" יתרה למוסד בלי לשלם.
     """
+    from services.security import nedarim_request_ok
     ip = _client_ip()
-    if ip not in NEDARIM_CALLBACK_IPS:
+    if not nedarim_request_ok(NEDARIM_CALLBACK_IPS, _client_ip()):
         log.warning(f'Nedarim callback REJECTED - unexpected IP: {ip} (charge_id={charge_id})')
         return jsonify({'ok': False, 'error': 'forbidden'}), 403
 
@@ -167,6 +172,30 @@ def nedarim_callback(charge_id):
     data = request.get_json(force=True, silent=True) or {}
     if not data:
         log.warning(f'Nedarim callback: empty/unparsable body for charge {charge_id}, raw={request.get_data(as_text=True)[:500]}')
+    # הצלבה לפי התיעוד: ה-Param ששלחנו, מזהה העסקה והסכום חייבים להתאים לבקשה המקורית שלנו.
+    mismatch = None
+    if data.get('Status') == 'OK':
+        if str(data.get('Param1') or charge.id) != str(charge.id):
+            mismatch = 'Param1'
+        elif data.get('TransactionId') and charge.provider_ref and str(data.get('TransactionId')) != str(charge.provider_ref):
+            mismatch = 'TransactionId'
+        else:
+            try:
+                if data.get('Amount') not in (None, '') and abs(float(str(data.get('Amount')).replace(',', '')) - float(charge.amount)) > 0.01:
+                    mismatch = 'Amount'
+            except ValueError:
+                pass
+        if mismatch:
+            log.warning(f'Nedarim callback: {mismatch} mismatch for charge {charge_id} - NOT crediting automatically. data={data}')
+            try:
+                from models import ManagerMessage
+                db.session.add(ManagerMessage(
+                    phone='—', source='nedarim_unmatched',
+                    transcript=f'עדכון תשלום ממוסד #{charge.institution_id} (חיוב {charge_id}) לא תאם לבקשה המקורית ({mismatch}). לא זוכה אוטומטית - יש לבדוק בנדרים פלוס ולזכות ידנית אם התשלום תקין. פרטים: {str(data)[:400]}'))
+                db.session.commit()
+            except Exception:
+                db.session.rollback()
+            return jsonify({'ok': True, 'review': True})
     if data.get('Status') == 'OK':
         charge.status = 'success'
         institution = Institution.query.get(charge.institution_id)

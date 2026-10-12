@@ -6,7 +6,7 @@
 # לבדיקה בלבד (לא לפרודקשן!) - ערכי סביבת הבדיקות של נדרים פלוס עצמם,
 # בדקתי מולם בפועל ועובד:
 #   NEDARIM_MOSAD=0
-#   NEDARIM_API_VALID=j+iyEFN3bE
+#   NEDARIM_API_VALID=(ערך הבדיקה של נדרים פלוס - לא נשמר כאן)
 #
 # APP_URL - כתובת הבסיס הציבורית של האתר שלכם (ל-CallBack), לדוגמה:
 #   APP_URL=https://your-app.up.railway.app

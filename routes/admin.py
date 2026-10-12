@@ -2044,7 +2044,7 @@ def create_institution():
 
     inst = Institution(
         name=name, email=email, phone=phone,
-        login_code=''.join(random.choices(string.digits, k=6)),
+        login_code=__import__('services.security', fromlist=['new_login_code']).new_login_code(),
     )
     db.session.add(inst)
     db.session.commit()
@@ -2101,7 +2101,7 @@ def regenerate_institution_code(inst_id):
     import random, string
     from models import Institution
     inst = Institution.query.get_or_404(inst_id)
-    inst.login_code = ''.join(random.choices(string.digits, k=6))
+    inst.login_code = __import__('services.security', fromlist=['new_login_code']).new_login_code()
     inst.password_hash = None  # חוזר למצב "כניסה ראשונה" עם הקוד החדש
     db.session.commit()
     flash(f'קוד כניסה חדש למוסד: {inst.login_code}')

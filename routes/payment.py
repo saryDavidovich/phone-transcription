@@ -6,10 +6,9 @@ log = logging.getLogger(__name__)
 
 
 def _client_ip():
-    fwd = request.headers.get('X-Forwarded-For', '')
-    if fwd:
-        return fwd.split(',')[0].strip()
-    return request.remote_addr
+    # כתובת אמיתית בלבד (לא הערך השמאלי של X-Forwarded-For - שאותו הפונה יכול לזייף)
+    from services.security import real_client_ip
+    return real_client_ip()
 
 
 def _phone_match_candidates(raw_phone):
@@ -72,6 +71,7 @@ def nedarim_topup_link(phone):
         'Phone': phone,
         'Groupe': NEDARIM_CATEGORY,
         'GroupeLock': '1',
+        'OnlyShekel': '1',   # שקל בלבד - כדי שלא ישלמו בדולר ויזוכו בטעות כשקלים
     }
     return redirect('https://www.matara.pro/nedarimplus/online/?' + urllib.parse.urlencode(params, quote_via=urllib.parse.quote))
 
@@ -115,9 +115,9 @@ def nedarim_webhook():
     from app import db
     from models import Institution, InstitutionChargeLog, Customer, Transaction, ManagerMessage
 
-    ip = _client_ip()
-    if ip not in NEDARIM_WEBHOOK_IPS:
-        log.warning(f'Nedarim webhook REJECTED - unexpected IP: {ip}')
+    from services.security import nedarim_request_ok
+    if not nedarim_request_ok(NEDARIM_WEBHOOK_IPS, _client_ip()):
+        log.warning(f'Nedarim webhook REJECTED - failed IP/signature/key check: {_client_ip()}')
         return jsonify({'ok': False, 'error': 'forbidden'}), 403
 
     data = request.get_json(force=True, silent=True) or {}
@@ -155,6 +155,20 @@ def nedarim_webhook():
     if amount <= 0 or not tx_id:
         log.warning(f'Nedarim webhook: missing amount/tx_id, data={data}')
         return jsonify({'ok': True})
+
+    # לפי התיעוד: Currency 1 = שקל, 2 = דולר. אין לזכות 100$ כ-100 ש"ח - מעבירים לטיפול ידני.
+    if str(data.get('Currency') or '1').strip() not in ('1', 'ILS', ''):
+        log.warning(f'Nedarim webhook: non-shekel payment tx={tx_id} currency={data.get("Currency")!r} - not credited automatically')
+        try:
+            from models import ManagerMessage as _MM
+            db.session.add(_MM(phone=phone or '—', name=client_name or None, source='nedarim_unmatched',
+                transcript=f'התקבל תשלום במטבע שאינו שקל (Currency={data.get("Currency")}), סכום {amount}, מזהה עסקה {tx_id}. לא זוכה אוטומטית - יש לטפל ידנית.'))
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+        return jsonify({'ok': True})
+    if not confirmation:
+        log.warning(f'Nedarim webhook: tx={tx_id} has no Confirmation (documented as a temporary transaction) - crediting anyway, please verify in Nedarim')
 
     # מניעת זיכוי כפול - בודקים אם ה-TransactionId הזה כבר נקלט אצלנו
     if InstitutionChargeLog.query.filter_by(provider_ref=tx_id).first():

@@ -70,6 +70,7 @@ class Institution(db.Model, UserMixin):
     phone = db.Column(db.String(20), nullable=True)    # התחברות אפשרית לפי טלפון
     login_code = db.Column(db.String(20), nullable=True)      # קוד שנוצר ע"י מנהל-העל, בשימוש עד שהמוסד מגדיר סיסמה
     password_hash = db.Column(db.String(256), nullable=True)  # מוגדר בכניסה ראשונה, מחליף את login_code
+    reset_requested_at = db.Column(db.DateTime, nullable=True)  # "שכחתי סיסמה": הקוד שנשלח תקף 30 דקות, בלי למחוק את הסיסמה הקיימת
     google_id = db.Column(db.String(100), nullable=True, unique=True)  # אימות גוגל אופציונלי, ללא קוד
     balance = db.Column(db.Float, default=0.0)   # יתרה כללית של המוסד (מוזן ע"י מנהל-העל / חיוב אשראי)
     is_blocked = db.Column(db.Boolean, default=False)

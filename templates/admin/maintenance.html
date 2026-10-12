@@ -116,6 +116,8 @@
 </div>
 
 <script>
+function _esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
+
 let maintenanceOn = {{ 'true' if maintenance_mode else 'false' }};
 let pollTimer = null;
 
@@ -167,7 +169,7 @@ function renderStatus(data) {
     grid.innerHTML = ordered.map(k => {
       const job = (data.jobs || []).find(j => j.kind === k);
       const label = job ? job.kind_label : k;
-      return `<div class="mt-kindcard"><div class="mt-kindnum">${data.by_kind[k]}</div><div class="mt-kindlabel">${label}</div></div>`;
+      return `<div class="mt-kindcard"><div class="mt-kindnum">${data.by_kind[k]}</div><div class="mt-kindlabel">${_esc(label)}</div></div>`;
     }).join('');
   }
 
@@ -176,7 +178,7 @@ function renderStatus(data) {
   if (data.stale_count > 0) {
     staleCard.style.display = '';
     staleList.innerHTML = (data.stale_jobs || []).map(j =>
-      `<div class="mt-jobrow"><span class="mt-jobkind">${j.kind_label}</span><span class="mt-joblabel">${j.label || ''}</span><span class="mt-jobtime">${fmtSeconds(j.seconds)}</span></div>`
+      `<div class="mt-jobrow"><span class="mt-jobkind">${_esc(j.kind_label)}</span><span class="mt-joblabel">${_esc(j.label || '')}</span><span class="mt-jobtime">${fmtSeconds(j.seconds)}</span></div>`
     ).join('');
   } else {
     staleCard.style.display = 'none';

@@ -48,7 +48,8 @@ def upload():
     output_language = request.form.get('output_language', 'he')
 
     os.makedirs(STATIC_TMP_DIR, exist_ok=True)
-    ext = os.path.splitext(file.filename)[1] or '.wav'
+    from services.security import safe_audio_ext
+    ext = safe_audio_ext(file.filename)
     filename = f"inst_{uuid.uuid4().hex}{ext}"
     dest_path = os.path.join(STATIC_TMP_DIR, filename)
     file.save(dest_path)

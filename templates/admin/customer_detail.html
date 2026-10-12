@@ -119,7 +119,7 @@
         </td>
         <td style="white-space:nowrap">
           <button class="btn" form="ph{{ p.id }}" type="submit">שמור</button>
-          <button class="btn btn-danger" type="submit" form="phdel{{ p.id }}" onclick="return confirm('להסיר את המספר {{ p.phone }} מהלקוח?')">הסר</button>
+          <button class="btn btn-danger" type="submit" form="phdel{{ p.id }}" data-phone="{{ p.phone }}" onclick="return confirm('להסיר את המספר ' + this.dataset.phone + ' מהלקוח?')">הסר</button>
           <form method="POST" action="/admin/customers/{{ customer.id }}/phones/{{ p.id }}/delete" id="phdel{{ p.id }}"></form>
         </td>
       </tr>

@@ -48,6 +48,8 @@ def incoming():
 
     # שלוחה 0 — כניסה ראשונה
     if ext == '' or ext == '0' or not step:
+        if not phone:
+            return r('מצטערים, לא זוהה מספר הטלפון שלך. נסה שוב מאוחר יותר.')
         customer = find_customer_by_phone(phone)
         if not customer:
             customer = Customer(phone=phone, balance=0.0)
