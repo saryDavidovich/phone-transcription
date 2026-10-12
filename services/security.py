@@ -91,18 +91,18 @@ def _is_private_ip(ip):
 
 
 def real_client_ip():
-    """כתובת ה-IP האמיתית של הפונה, בלי אפשרות זיוף.
-
-    הפרוקסי של Railway *מוסיף* את הכתובת האמיתית בסוף כותרת X-Forwarded-For,
-    ואילו כל מה שנמצא משמאלה הוא מידע שהפונה עצמו שלח (ניתן לזיוף). לכן הולכים
-    מימין לשמאל, מדלגים על כתובות פנימיות של הרשת, ולוקחים את הציבורית הראשונה.
-    (הקוד הישן לקח את הערך השמאלי ביותר - ולכן אפשר היה לזייף "אני נדרים פלוס".)"""
-    chain = [p.strip() for p in (request.headers.get('X-Forwarded-For') or '').split(',') if p.strip()]
-    if request.remote_addr:
-        chain.append(request.remote_addr)
-    for ip in reversed(chain):
-        if not _is_private_ip(ip):
-            return ip
+    """כתובת ה-IP של הפונה: הערך השמאלי ביותר ב-X-Forwarded-For (כך Railway מתעד זאת, וכך נבדק בפועל
+    בשרת ייצור - ראו הלוג של עדכון נדרים: הערך הימני הוא שרת ה-CDN של Railway ולא הלקוח).
+    שים לב: אם הפרוקסי לא מוחק ערכים שהפונה שלח, אפשר לזייף את הערך הזה - ולכן אימות עדכוני תשלום
+    נשען על חתימת HMAC (NEDARIM_WEBHOOK_SECRET) ולא רק על IP, וניסיונות כניסה מוגבלים גם לפי החשבון עצמו."""
+    import ipaddress
+    for part in (request.headers.get('X-Forwarded-For') or '').split(','):
+        part = part.strip()
+        try:
+            ipaddress.ip_address(part)
+            return part
+        except ValueError:
+            continue
     return request.remote_addr or '?'
 
 
@@ -132,11 +132,13 @@ def hits_clear(key):
 
 
 def login_blocked():
-    return hits_blocked('ip:' + client_ip())
+    # גם לפי IP וגם מונה כללי: אם ה-IP ניתן לזיוף, המונה הכללי עדיין חוסם ניחוש סיסמה המוני
+    return hits_blocked('ip:' + client_ip()) or hits_blocked('admin-global', 60)
 
 
 def register_failed_login():
     hits_add('ip:' + client_ip())
+    hits_add('admin-global')
 
 
 def clear_failed_logins():

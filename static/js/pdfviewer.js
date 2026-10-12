@@ -180,8 +180,13 @@
           if (myLoad !== state.loadId) return;
           p.task = null; p.rendered = true;
           p.wrap.innerHTML = ''; p.wrap.appendChild(canvas);
-        }).catch(function () { p.task = null; });
-      }).catch(function () { p.task = null; });
+        }).catch(function (err) {
+          p.task = null;
+          if (err && err.name === 'RenderingCancelledException') return;
+          p.wrap.innerHTML = '<div class="pdfv-msg" style="color:#b00020;direction:rtl">⚠ שגיאה בהצגת העמוד. אפשר להוריד את הקובץ בכפתור ⬇ שבסרגל.</div>';
+          if (window.console) console.error('pdfviewer: page render failed', err);
+        });
+      }).catch(function (err) { p.task = null; if (window.console) console.error('pdfviewer: getPage failed', err); });
     }
 
     var scrollTimer = null;
@@ -267,12 +272,40 @@
     }
 
     // ---------- טעינה ----------
-    function fallbackIframe(uri) {
-      el.classList.remove('pdfv');
+    // כשהצופה המובנה נכשל (ספריית pdf.js לא נטענה/נחסמה, דפדפן ישן, קובץ חריג) - לא משאירים
+    // iframe חסר-כלים של הדפדפן (שבתוך data URI נכשל ב"טעינה של מסמך ה-PDF נכשלה", בלי כפתור הורדה).
+    // במקום זה: הודעה ברורה + כפתורי הורדה ופתיחה בלשונית חדשה (עובדים מהבייטים שכבר אצלנו),
+    // והסיבה המדויקת לכישלון כדי שיהיה אפשר לאבחן; ומתחתיהם ניסיון הצגה דרך blob (אמין יותר מ-data URI).
+    function fallbackIframe(uri, reason) {
+      var bytes = state.bytes;
+      if (!bytes) { try { bytes = dataUriToBytes(uri); state.bytes = bytes; } catch (e) { bytes = null; } }
+      el.classList.add('pdfv');
       el.innerHTML = '';
-      var f = document.createElement('iframe');
-      f.src = uri; f.style.cssText = 'width:100%;height:100%;border:0;display:block'; f.title = 'מסמך';
-      el.appendChild(f);
+      var top = document.createElement('div'); top.className = 'pdfv-bar';
+      top.style.flexDirection = 'column'; top.style.padding = '10px';
+      var msg = document.createElement('div');
+      msg.style.cssText = 'direction:rtl;font:14px Arial,sans-serif;margin-bottom:6px';
+      msg.textContent = '⚠ לא ניתן להציג את המסמך בתצוגה המובנית. אפשר להוריד אותו או לפתוח בלשונית חדשה:';
+      top.appendChild(msg);
+      var row = document.createElement('div'); row.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap;justify-content:center';
+      row.appendChild(mkBtn('⬇ הורדת הקובץ', 'הורדת הקובץ', download));
+      var blobUrl = null;
+      if (bytes) { try { blobUrl = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' })); } catch (e) {} }
+      row.appendChild(mkBtn('↗ פתיחה בלשונית חדשה', 'פתיחה בלשונית חדשה', function () { if (blobUrl) window.open(blobUrl, '_blank'); }));
+      top.appendChild(row);
+      if (reason) {
+        var why = document.createElement('div');
+        why.style.cssText = 'direction:ltr;font:11px monospace;color:#9aa0a6;margin-top:6px;max-width:100%;overflow-wrap:anywhere';
+        why.textContent = String(reason).slice(0, 300);
+        top.appendChild(why);
+      }
+      el.appendChild(top);
+      if (blobUrl) {
+        var f = document.createElement('iframe');
+        f.src = blobUrl; f.title = 'מסמך';
+        f.style.cssText = 'width:100%;flex:1 1 auto;min-height:240px;border:0;display:block;background:#fff';
+        el.appendChild(f);
+      }
     }
 
     function load(uri) {
@@ -280,10 +313,10 @@
       var myLoad = state.loadId;
       state.uri = uri; state.pages = []; state.doc = null; state.rotation = 0; state.current = 1;
       if (!uri) { message('⚠ הקובץ אינו זמין'); return; }
-      if (!hasLib) { fallbackIframe(uri); return; }
+      if (!hasLib) { fallbackIframe(uri, 'pdf.js library did not load (blocked or old browser)'); return; }
       message('טוען...');
       var bytes;
-      try { bytes = dataUriToBytes(uri); } catch (e) { fallbackIframe(uri); return; }
+      try { bytes = dataUriToBytes(uri); } catch (e) { fallbackIframe(uri, 'cannot decode file: ' + e); return; }
       state.bytes = bytes;
       window.pdfjsLib.getDocument({ data: bytes.slice(0) }).promise.then(function (doc) {
         if (myLoad !== state.loadId) return;
@@ -307,7 +340,7 @@
       }).catch(function (err) {
         if (myLoad !== state.loadId) return;
         if (window.console) console.error('pdfviewer: failed, falling back to iframe', err);
-        fallbackIframe(uri);
+        fallbackIframe(uri, 'pdf.js v' + (window.pdfjsLib && window.pdfjsLib.version) + ': ' + (err && (err.name + ' ' + err.message) || err));
       });
     }
 
