@@ -81,6 +81,30 @@
   </div>
 </div>
 
+<div class="card" style="margin-top:20px">
+  <div style="font-size:14px;font-weight:600;margin-bottom:12px">🏫 שיוך למוסד</div>
+  {% if customer.is_institution_self %}
+    <div style="font-size:13px;color:#8892b0">זהו חשבון של מוסד, לא לקוח רגיל.</div>
+  {% elif customer.institution_id %}
+    <div style="font-size:13px">תלמיד של <a href="/admin/institutions/{{ customer.institution_id }}"><b>{{ customer.institution.name }}</b></a> · מספר תלמיד {{ customer.student_number or '—' }}</div>
+  {% elif all_institutions %}
+    <div style="font-size:13px;color:#8892b0;margin-bottom:12px">צירוף מיידי כתלמיד, <b>בלי</b> לשלוח ללקוח בקשת אישור. היתרה הנוכחית (₪{{ "%.2f"|format(customer.balance or 0) }}) נשארת של הלקוח, והמוסד לא יוכל להוריד אותה.</div>
+    <form method="POST" action="/admin/customers/{{ customer.id }}/link-institution" style="display:flex;gap:8px;flex-wrap:wrap;align-items:end"
+          onsubmit="return confirm('לצרף את הלקוח כתלמיד של המוסד שנבחר, בלי אישור הלקוח?')">
+      <div><label class="form-label">מוסד</label>
+        <select class="form-input" name="institution_id" required>
+          <option value="">— בחר מוסד —</option>
+          {% for i in all_institutions %}<option value="{{ i.id }}">{{ i.name }}</option>{% endfor %}
+        </select></div>
+      <div><label class="form-label">שם במוסד (לא חובה)</label>
+        <input class="form-input" name="display_name" value="{{ customer.name or '' }}"></div>
+      <button class="btn btn-primary" type="submit">צרף כתלמיד</button>
+    </form>
+  {% else %}
+    <div style="font-size:13px;color:#8892b0">אין מוסדות במערכת.</div>
+  {% endif %}
+</div>
+
 <div id="extra-phones" style="margin-top:20px" class="table-card">
   <div class="table-header"><span class="table-title">📞 מספרי טלפון נוספים (חשבון חיוב משותף)</span></div>
   <div style="padding:16px">

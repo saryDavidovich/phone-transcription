@@ -484,7 +484,7 @@ def export_customers_excel():
 @admin_bp.route('/customers/<int:id>')
 @login_required
 def customer_detail(id):
-    from models import OcrResult, ConversationThread, ManuscriptPage, ProofingRound
+    from models import OcrResult, ConversationThread, ManuscriptPage, ProofingRound, Institution
     customer = Customer.query.get_or_404(id)
     recordings = Recording.query.filter_by(customer_id=id).order_by(Recording.created_at.desc()).all()
     transactions = Transaction.query.filter_by(customer_id=id).order_by(Transaction.created_at.desc()).all()
@@ -507,7 +507,20 @@ def customer_detail(id):
     return render_template('admin/customer_detail.html',
         customer=customer, recordings=recordings, transactions=transactions,
         ocr_results=ocr_results, manuscript_pages=manuscript_pages, proofing_rounds=proofing_rounds,
-        threads=threads, timedelta=timedelta)
+        threads=threads, timedelta=timedelta,
+        all_institutions=Institution.query.order_by(Institution.name).all())
+
+@admin_bp.route('/customers/<int:id>/link-institution', methods=['POST'])
+@login_required
+def force_link_institution(id):
+    """מנהל-העל הופך לקוח לתלמיד של מוסד - מיד, בלי בקשת אישור ללקוח."""
+    from models import Institution
+    from services.student_links import admin_force_link
+    customer = Customer.query.get_or_404(id)
+    inst = Institution.query.get(request.form.get('institution_id', type=int) or 0)
+    ok, msg = admin_force_link(inst, customer, request.form.get('display_name'))
+    flash(('✅ ' if ok else '⚠️ ') + msg)
+    return redirect(url_for('admin.customer_detail', id=id))
 
 @admin_bp.route('/customers/<int:id>/block', methods=['POST'])
 @login_required

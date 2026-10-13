@@ -186,6 +186,37 @@ def approve_link(req, by_admin=False):
     return True, 'הצירוף אושר'
 
 
+def admin_force_link(inst, customer, display_name=None):
+    """מנהל-העל משייך לקוח למוסד מיד - בלי בקשת אישור ובלי מייל ללקוח.
+    אותה תוצאה כמו approve_link: היתרה הקיימת נשארת כסף של הלקוח (self_funded),
+    ההיסטוריה נשמרת. בקשות שיוך ממתינות של הלקוח מסומנות 'approved'/'cancelled'.
+    מחזיר (True/False, הודעה)."""
+    from models import StudentLinkRequest
+    if not inst or not customer:
+        return False, 'מוסד או לקוח לא נמצאו'
+    if customer.is_institution_self:
+        return False, 'החשבון הזה שייך למוסד עצמו ולא ללקוח רגיל'
+    if customer.institution_id == inst.id:
+        return False, 'הלקוח כבר תלמיד של המוסד הזה'
+    if customer.institution_id:
+        return False, 'הלקוח כבר משויך למוסד אחר'
+    from routes.institution_students import _generate_student_number
+    name = (display_name or '').strip() or None
+    customer.institution_id = inst.id
+    customer.student_number = _generate_student_number()
+    customer.student_display_name = name or customer.name
+    if not customer.name and name:
+        customer.name = name
+    customer.self_funded = round(max(0.0, float(customer.balance or 0)), 2)
+    now = datetime.utcnow()
+    for r in StudentLinkRequest.query.filter_by(customer_id=customer.id, status='pending').all():
+        r.status = 'approved' if r.institution_id == inst.id else 'cancelled'
+        r.responded_at = now
+    db.session.commit()
+    log.info(f'admin force-linked customer {customer.id} to institution {inst.id}')
+    return True, f'הלקוח צורף כתלמיד של "{inst.name}" (מספר תלמיד {customer.student_number})'
+
+
 def decline_link(req):
     if req.status != 'pending':
         return False, 'הבקשה כבר טופלה'
