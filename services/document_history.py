@@ -80,7 +80,12 @@ def list_documents(customer):
                      'spoken': f'{TYPE_NAMES["manuscript"]} {_spoken_date(p.created_at)}'})
     docs.sort(key=lambda d: d['date'] or datetime.min, reverse=True)
     docs = docs[:MAX_DOCS]
+    # שדות להשמעה בהקלטות (ה-IVR מרכיב: "מסמך" + מספר + סוג + "מתאריך" + תאריך עברי + אורך)
+    rec_secs = {r.id: (r.duration_seconds or 0) for r in recs}
     for d in docs:
+        loc = d['date'].replace(tzinfo=ZoneInfo('UTC')).astimezone(_IL) if d['date'] else None
+        d['date_ddmmyyyy'] = loc.strftime('%d/%m/%Y') if loc else None
+        d['minutes'] = max(1, round(rec_secs.get(d['id'], 0) / 60)) if d['type'] == 'recording' else None
         d['date'] = d['date'].isoformat() if d['date'] else None
     return docs
 
