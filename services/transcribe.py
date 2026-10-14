@@ -34,9 +34,13 @@ def ocr_async(func, *args, **kwargs):
     label = str(args[1]) if len(args) > 1 else ''
 
     def _run_tracked():
+        # רישום ב"פעילות מערכת" ניגש ל-DB ולכן צריך app context (התהליכון ברקע
+        # לא יורש אותו). העבודה עצמה (func) פותחת context משלה כמו קודם.
+        from app import app as _app
         from services.job_tracker import tracked
-        with tracked('ocr', label=label):
-            return func(*args, **kwargs)
+        with _app.app_context():
+            with tracked('ocr', label=label):
+                return func(*args, **kwargs)
 
     return _ocr_executor.submit(_run_tracked)
 

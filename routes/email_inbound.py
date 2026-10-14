@@ -526,6 +526,13 @@ def _download_gdrive_file(file_id, dest_dir):
 
             log.warning(f"Drive URL {url[:60]} returned HTML, trying next...")
 
+        # אחרי כל הניסיונות עדיין דף HTML (בד"כ: הקובץ לא משותף "לכל מי שיש לו קישור",
+        # וגוגל מחזיר דף כניסה). בעבר הדף נשמר כאילו הוא קובץ mp3 ונשלח לתמלול שנכשל -
+        # עכשיו מחזירים כישלון, והלקוח מקבל מייל הסבר איך לשתף נכון.
+        if r is None or 'text/html' in content_type:
+            log.warning(f"Google Drive download: file_id={file_id} - קיבלנו דף HTML ולא קובץ (כנראה הקובץ לא משותף לכולם)")
+            return None, None, None
+
         # קבע סיומת לפי Content-Type
         ct_to_ext = {
             'audio/mpeg': 'mp3', 'audio/mp3': 'mp3',
@@ -537,6 +544,8 @@ def _download_gdrive_file(file_id, dest_dir):
             'video/x-msvideo': 'avi', 'video/x-matroska': 'mkv',
             'video/3gpp': '3gp', 'application/octet-stream': 'mp3',
         }
+        # גם תמונות/PDF (כתב יד) - בעבר PDF מ-Drive נשמר עם סיומת mp3
+        ct_to_ext.update(IMAGE_MIME_TYPES)
         ct_base = content_type.split(';')[0].strip().lower()
         ext = ct_to_ext.get(ct_base, 'mp3')
 
@@ -546,6 +555,10 @@ def _download_gdrive_file(file_id, dest_dir):
         fn_match = re.search(r'filename\*?=["\']?(?:UTF-8\'\')?([^"\';\r\n]+)', cd, re.IGNORECASE)
         if fn_match:
             original_filename = urllib.parse.unquote(fn_match.group(1).strip())
+        # סיומת השם המקורי (אם מוכרת) קובעת - Drive מחזיר לפעמים octet-stream גם ל-PDF/תמונה
+        name_ext = os.path.splitext(original_filename or '')[1].lstrip('.').lower()
+        if name_ext in IMAGE_EXTENSIONS or name_ext in AUDIO_VIDEO_EXTENSIONS:
+            ext = name_ext
         if not original_filename:
             original_filename = f"gdrive_{file_id}.{ext}"
 
