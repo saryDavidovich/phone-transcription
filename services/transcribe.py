@@ -44,6 +44,14 @@ def ocr_async(func, *args, **kwargs):
 
     return _ocr_executor.submit(_run_tracked)
 
+MIN_PHONE_RECORDING_SECONDS = 6
+
+
+def _is_phone_recording_url(url):
+    """הקלטה מהטלפון = קובץ בימות המשיח (call2all). הקלטות מייל/דרייב לא נבדקות."""
+    return 'call2all.co.il' in (url or '')
+
+
 def transcribe_async(call_id, rec_url, customer_id, delivery_method, delivered_to, duration_seconds, transcription_tier='basic', language='he', output_language='he'):
     waiting = _ocr_executor._work_queue.qsize()
     log.info(f"transcribe_async: call_id={call_id} נכנס לתור (ממתינים בתור: {waiting})")
@@ -91,6 +99,21 @@ def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, durat
                 db.session.commit()
 
             db.session.remove()
+
+            # --- הקלטת טעות: הקלטה מהטלפון (ימות) שקצרה מ-6 שניות לא נשלחת לתמלול ---
+            # בלי חיוב ובלי שליחה ללקוח; בפרופיל הלקוח מופיע "הקלטת טעות".
+            if _is_phone_recording_url(rec_url):
+                from services import audio_prep
+                secs = audio_prep.probe_duration(rec_url)
+                if secs is not None and secs < MIN_PHONE_RECORDING_SECONDS:
+                    rec = Recording.query.filter_by(call_id=call_id).first()
+                    if rec:
+                        rec.status = 'too_short'
+                        rec.cost = 0.0
+                        rec.duration_seconds = int(secs)
+                        db.session.commit()
+                    log.info(f"{call_id}: הקלטת טעות ({secs:.1f} שניות) - לא נשלחת לתמלול, בלי חיוב")
+                    return
 
             tier = transcription_tier
 
@@ -178,15 +201,22 @@ def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, durat
                                     elif job_status in ('failed', 'cancelled'):
                                         log.error(f"AlefBot poll: job {job_id} failed with status {job_status}")
                                         from models import Recording
-                                        rec_err = Recording.query.filter_by(call_id=call_id).first()
-                                        if rec_err:
-                                            rec_err.status = 'error'
-                                            db.session.commit()
+                                        from services.recording_alerts import notify_recording_error
+                                        notify_recording_error(call_id, f'אלף-בוט החזיר סטטוס "{job_status}" לתמלול (job {job_id})')
                                         return
                                 except Exception as poll_err:
                                     log.warning(f"AlefBot poll error attempt {attempt+1}: {poll_err}")
 
                             log.error(f"AlefBot poll: job {job_id} timed out after 30 minutes")
+                            try:
+                                from services.recording_alerts import notify_recording_error
+                                from models import Recording as _Rec
+                                rec_to = _Rec.query.filter_by(call_id=call_id).first()
+                                if rec_to and rec_to.status == 'alefbot_pending':
+                                    notify_recording_error(call_id, f'אלף-בוט לא סיים את התמלול תוך 30 דקות (job {job_id}). '
+                                                                    'ייתכן שעוד יגיע - אם לא, אפשר לשלוח שוב', mark_error=False)
+                            except Exception:
+                                pass
 
                     t = threading.Thread(
                         target=_poll_alefbot,
@@ -197,10 +227,8 @@ def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, durat
                     return
                 else:
                     db.session.remove()
-                    rec = Recording.query.filter_by(call_id=call_id).first()
-                    if rec:
-                        rec.status = 'error'
-                        db.session.commit()
+                    from services.recording_alerts import notify_recording_error
+                    notify_recording_error(call_id, 'השליחה לתמלול מקצועי (אלף-בוט) נכשלה - פרטים בלוג תחת "AlefBot submit error"')
                     return
 
             else:
@@ -278,9 +306,8 @@ def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, durat
                     time.sleep(3)
 
             if not transcript_raw:
-                if rec:
-                    rec.status = 'error'
-                    db.session.commit()
+                from services.recording_alerts import notify_recording_error
+                notify_recording_error(call_id, 'התמלול (רגיל) לא החזיר טקסט - הקובץ לא ירד, לא בפורמט מוכר, או ש-Gemini נכשל. פרטים בלוג תחת "Gemini"')
                 return
 
             price_per_20min = float(_get_setting(price_key, '0.90'))
@@ -340,7 +367,14 @@ def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, durat
                 db.session.commit()
 
         except Exception as e:
-            log.error(f"Error processing {call_id}: {e}")
+            log.error(f"Error processing {call_id}: {e}", exc_info=True)
+            # בעבר ההקלטה נשארה "transcribing" לנצח; עכשיו מסומנת שגיאה (אם עוד לא חויבה) + התראה
+            try:
+                db.session.rollback()
+            except Exception:
+                pass
+            from services.recording_alerts import notify_recording_error
+            notify_recording_error(call_id, f'תקלה בעיבוד: {type(e).__name__}: {e}')
 
 
 def _get_pending_recordings(customer_id):
@@ -706,7 +740,14 @@ def finalize_alefbot_recording(call_id, transcript_text):
             log.info(f"AlefBot recording {call_id} finalized and delivered")
 
         except Exception as e:
-            log.error(f"AlefBot finalize error for {call_id}: {e}")
+            log.error(f"AlefBot finalize error for {call_id}: {e}", exc_info=True)
+            try:
+                db.session.rollback()
+            except Exception:
+                pass
+            from services.recording_alerts import notify_recording_error
+            notify_recording_error(call_id, f'התמלול המקצועי חזר מאלף-בוט, אבל השליחה ללקוח נכשלה: {type(e).__name__}: {e}',
+                                   mark_error=False)
 
 
 def _split_wav_chunks(audio_content, mime_type, chunk_seconds=300):

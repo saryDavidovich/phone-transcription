@@ -34,6 +34,7 @@
               {% elif rec.status == 'transcribing' %}<span class="badge badge-amber">מתמלל</span>
               {% elif rec.status == 'pending_payment' %}<span class="badge badge-amber">ממתין לתשלום</span>
               {% elif rec.status == 'error' %}<span class="badge badge-red">שגיאה</span>
+          {% elif rec.status == 'too_short' %}<span class="badge badge-gray" title="קצרה מ-6 שניות - לא נשלחה לתמלול, בלי חיוב">הקלטת טעות</span>
               {% else %}<span class="badge badge-gray">{{ rec.status }}</span>{% endif %}</td>
       </tr>
       {% endfor %}

@@ -208,3 +208,33 @@ def chunk_count(path, chunk_seconds=300):
         return 0
     per = info[2] * chunk_seconds
     return max(1, -(-info[3] // per))
+
+
+PROBE_LIMIT = 2 * 1024 * 1024   # 2MB - יותר מ-6 שניות בכל פורמט WAV סביר
+
+
+def probe_duration(url, timeout=60):
+    """בודק את אורך ההקלטה בלי להוריד את כולה: מוריד עד 2MB. אם הקובץ נגמר
+    לפני כן - מחזיר את האורך המדויק בשניות (float). אם הוא גדול יותר - מחזיר
+    float('inf') (בטוח ארוך מ-6 שניות). None - לא WAV תקין / לא ניתן להוריד."""
+    local = local_path_for_url(url)
+    if local:
+        info = wav_info(local)
+        return (info[3] / info[2]) if info and info[2] else None
+    import requests
+    data = bytearray()
+    try:
+        with requests.get(url, timeout=timeout, stream=True) as r:
+            r.raise_for_status()
+            for chunk in r.iter_content(chunk_size=64 * 1024):
+                data.extend(chunk)
+                if len(data) > PROBE_LIMIT:
+                    return float('inf')
+    except Exception as e:
+        log.warning(f"audio_prep: probe נכשל: {e}")
+        return None
+    try:
+        with wave.open(io.BytesIO(bytes(data)), 'rb') as w:
+            return w.getnframes() / w.getframerate() if w.getframerate() else None
+    except Exception:
+        return None

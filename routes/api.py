@@ -84,6 +84,37 @@ def get_customer_fax_code(phone):
     return jsonify({'fax_code': code})
 
 
+@api_bp.route('/customer/<phone>/documents', methods=['GET'])
+def customer_documents(phone):
+    """שלוחה 8 ב-IVR: היסטוריית המסמכים של הלקוח (ראה services/document_history.py).
+    כל מסמך כולל 'spoken' - משפט מוכן להקראה (TTS) בטלפון."""
+    from services import document_history as dh
+    customer = find_customer_by_phone(phone)
+    if not customer:
+        return jsonify({'docs': [], 'count': 0, 'via': None})
+    docs = dh.list_documents(customer)
+    via, _to = dh.delivery_target(customer)
+    return jsonify({'docs': docs, 'count': len(docs), 'via': via,
+                    'fax_price': dh.fax_resend_price()})
+
+
+@api_bp.route('/customer/<phone>/documents/resend', methods=['POST'])
+def customer_document_resend(phone):
+    """שליחה חוזרת של מסמך ליעד הנוכחי של הלקוח. מייל - חינם. פקס - בתשלום,
+    ורק עם confirm=1 (ה-IVR שואל קודם את הלקוח)."""
+    from services import document_history as dh
+    data = request.get_json(silent=True) or request.form
+    customer = find_customer_by_phone(phone)
+    if not customer:
+        return jsonify({'status': 'not_found'}), 404
+    try:
+        doc_id = int(data.get('id'))
+    except (TypeError, ValueError):
+        return jsonify({'status': 'not_found'}), 400
+    confirm = str(data.get('confirm', '')).lower() in ('1', 'true', 'yes')
+    return jsonify(dh.resend(customer, (data.get('type') or '').strip(), doc_id, confirm=confirm))
+
+
 @api_bp.route('/customer/pending-recordings', methods=['GET'])
 def get_pending_recordings():
     """
