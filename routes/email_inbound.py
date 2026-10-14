@@ -1781,6 +1781,26 @@ def email_inbound():
                 return _hold_image_for_choice(filepath, original_filename, customer, sender_email)
             return _route_image(image_mode, filepath, original_filename, customer, sender_email, phone, db)
 
+        # אותו קובץ כבר בטיפול אצל אותו לקוח (נשלח שוב כי התמלול לוקח זמן, או
+        # ששירות המייל שלח שוב) - לא מתחילים תמלול כפול. אחרי שגיאה מותר לשלוח שוב.
+        from datetime import datetime as _dt, timedelta as _td
+        if original_filename:
+            dup = (Recording.query
+                   .filter(Recording.customer_id == customer.id,
+                           Recording.source_filename == original_filename,
+                           Recording.status.in_(('recording', 'transcribing', 'alefbot_pending', 'queued_maintenance')),
+                           Recording.created_at > _dt.utcnow() - _td(hours=6))
+                   .first())
+            if dup:
+                log.info(f"email-inbound: {original_filename} כבר בטיפול עבור לקוח {customer.id} "
+                         f"(call_id={dup.call_id}) - לא מתחילים שוב")
+                try:
+                    if os.path.exists(filepath):
+                        os.remove(filepath)
+                except OSError:
+                    pass
+                return jsonify({'status': 'duplicate', 'call_id': dup.call_id}), 200
+
         call_id = f"email-{uuid.uuid4().hex}"
 
         # מצב תחזוקה (/admin/maintenance) - כמו בשיחות טלפון (/api/transcribe),
@@ -1795,7 +1815,12 @@ def email_inbound():
         # שנמחק בכל דפלוי, בדיוק כמו שקרה עם כתבי היד לפני התיקון. שיחות
         # טלפון לא צריכות את זה כי ה-rec_url שלהן מצביע לשרת חיצוני.
         file_backup = None
-        if maintenance_on:
+        # קובץ ענק (הקלטה של שעה+ באיכות גבוהה) לא נכנס ל-DB - ניסיון לגבות קובץ
+        # של 1GB הפיל את הבקשה ("cannot allocate memory"). הוא נשאר בדיסק בלבד.
+        _backup_limit = 150 * 1024 * 1024
+        if maintenance_on and os.path.getsize(filepath) > _backup_limit:
+            log.warning(f"email-inbound: {filepath} גדול מ-150MB - לא מגובה ב-DB במצב תחזוקה (נשאר בדיסק)")
+        elif maintenance_on:
             try:
                 with open(filepath, 'rb') as f:
                     file_backup = f.read()

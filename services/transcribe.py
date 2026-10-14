@@ -561,45 +561,47 @@ def _send_insufficient_balance_email(to_email, duration_seconds, cost, balance):
 
 
 def _alefbot_submit(rec_url, call_id, model_tier='standard', translate_to_hebrew=False):
-    """שולח ל-AlefBot ומחזיר job_id מיד"""
+    """שולח ל-AlefBot ומחזיר job_id מיד.
+    הקובץ לא נטען לזיכרון: נקרא מהדיסק (או מורד בזרימה), מומר ל-16kHz מונו
+    בחלקים (services/audio_prep.py), ומועלה ישירות מהקובץ. כך גם הקלטה של
+    1-2GB לא מפילה את השרת."""
+    from services import audio_prep
+    src = prepared = None
     try:
-        import wave, io
-
         api_key = os.environ.get('ALEFBOT_API_KEY')
         base_url = 'https://alef-bot.top/api/v1'
         webhook_url = os.environ.get('APP_BASE_URL', '').rstrip('/') + '/api/alefbot-webhook'
 
-        r = requests.get(rec_url, timeout=300)
-        r.raise_for_status()
-        file_bytes = r.content
-        log.info(f"Downloaded {len(file_bytes)} bytes for AlefBot")
-
-        actual_duration = 0
-        try:
-            with wave.open(io.BytesIO(file_bytes)) as wav_in:
-                actual_duration = wav_in.getnframes() // wav_in.getframerate()
-            log.info(f"Duration: {actual_duration}s")
-        except Exception as e:
-            log.warning(f"Could not read WAV metadata: {e}")
+        src = audio_prep.open_source(rec_url)
+        prepared = audio_prep.prepare_wav(src[0], replace_original=not src[1])
+        if prepared:
+            upload_path, actual_duration = prepared[0], prepared[2]
+        else:
+            # פורמט שלא הצלחנו להמיר - שולחים את המקור כמו שהוא (כמו פעם)
+            upload_path, actual_duration = src[0], 0
+            log.warning(f"AlefBot: לא הומר, נשלח המקור כמו שהוא ({os.path.getsize(upload_path)} bytes)")
+        size_bytes = os.path.getsize(upload_path)
+        log.info(f"AlefBot: מוכן להעלאה {size_bytes} bytes, Duration: {actual_duration}s")
 
         # שלב 1 — צור upload slot
         upload_res = requests.post(
             f'{base_url}/uploads',
             headers={'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'},
-            json={'filename': f'{call_id}.wav', 'content_type': 'audio/wav', 'size_bytes': len(file_bytes)},
+            json={'filename': f'{call_id}.wav', 'content_type': 'audio/wav', 'size_bytes': size_bytes},
             timeout=30
         )
         upload_res.raise_for_status()
         upload_id = upload_res.json().get('upload_id')
         log.info(f"AlefBot upload slot created: {upload_id}")
 
-        # שלב 2 — העלה את הקובץ
-        put_res = requests.put(
-            f'{base_url}/uploads/{upload_id}/binary',
-            headers={'Authorization': f'Bearer {api_key}'},
-            data=file_bytes,
-            timeout=300
-        )
+        # שלב 2 — העלה את הקובץ, בזרימה מהדיסק
+        with open(upload_path, 'rb') as fh:
+            put_res = requests.put(
+                f'{base_url}/uploads/{upload_id}/binary',
+                headers={'Authorization': f'Bearer {api_key}', 'Content-Length': str(size_bytes)},
+                data=fh,
+                timeout=(30, 600)
+            )
         put_res.raise_for_status()
         log.info(f"AlefBot file uploaded")
 
@@ -626,6 +628,8 @@ def _alefbot_submit(rec_url, call_id, model_tier='standard', translate_to_hebrew
     except Exception as e:
         log.error(f"AlefBot submit error: {e}")
         return None, 0
+    finally:
+        audio_prep.cleanup(prepared, src)
 
 
 def finalize_alefbot_recording(call_id, transcript_text):
@@ -757,6 +761,7 @@ def _split_wav_chunks(audio_content, mime_type, chunk_seconds=300):
 
 def _gemini_from_url(url, language='he', output_language='he'):
     log.info(f"Gemini: language={language}, output_language={output_language}")
+    _cleanup_items = []
     try:
         import wave, audioop, io
         from google import genai
@@ -765,80 +770,45 @@ def _gemini_from_url(url, language='he', output_language='he'):
         api_key = os.environ.get('GOOGLE_API_KEY')
         client = genai.Client(api_key=api_key)
 
-        r = requests.get(url, timeout=300)
-        r.raise_for_status()
-        log.info(f"Downloaded {len(r.content)} bytes for Gemini")
+        # הקובץ לא נטען כולו לזיכרון (ראה services/audio_prep.py): נקרא מהדיסק או
+        # מורד בזרימה, מומר ל-WAV 16kHz מונו בחלקים, ומפוצל לחלקי 5 דקות מהדיסק.
+        from services import audio_prep
+        CHUNK_SECONDS = 300  # 5 דקות
+        src = audio_prep.open_source(url)
+        _cleanup_items.append(src)
+        file_size = os.path.getsize(src[0])
+        log.info(f"Downloaded {file_size} bytes for Gemini")
+        with open(src[0], 'rb') as _fh:
+            _head = _fh.read(16)
 
-        actual_duration = 0
-        audio_content = r.content
-        file_size = len(audio_content)
-
-        # זיהוי סוג הקובץ — לפי magic bytes ואחר כך לפי URL
         def _is_mp4(data):
             # MP4/MOV/M4A מתחילים ב-ftyp box לאחר 4 בייטים של גודל
             return len(data) > 8 and data[4:8] in (b'ftyp', b'moov', b'mdat', b'free', b'skip')
 
         url_lower = url.lower().split('?')[0]
         is_video_url = any(url_lower.endswith(ext) for ext in ('.mp4', '.mov', '.avi', '.mkv', '.3gp', '.m4v'))
+        is_video = _is_mp4(_head) or is_video_url
+        actual_duration = 0
 
-        if _is_mp4(audio_content) or is_video_url:
-            mime_type = 'video/mp4'
-            ext = '.mp4'
-        else:
+        prepared = audio_prep.prepare_wav(src[0], replace_original=not src[1])
+        if prepared:
+            _cleanup_items.append(prepared)
+            actual_duration = prepared[2]
             mime_type = 'audio/wav'
-            ext = '.wav'
-
-        # המרת וידאו/אודיו לא-WAV ל-WAV לצורך פיצול ותמלול
-        if mime_type == 'video/mp4' or (mime_type == 'audio/wav' and not audio_content[:4] == b'RIFF'):
-            try:
-                from pydub import AudioSegment
-                import tempfile, os as _os
-                log.info(f"Converting {mime_type} to WAV for chunking...")
-                with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp_in:
-                    tmp_in.write(audio_content)
-                    tmp_in_path = tmp_in.name
-                try:
-                    seg = AudioSegment.from_file(tmp_in_path)
-                    seg = seg.set_frame_rate(16000).set_channels(1).set_sample_width(2)
-                    buf = io.BytesIO()
-                    seg.export(buf, format='wav')
-                    audio_content = buf.getvalue()
-                    actual_duration = len(seg) // 1000
-                    mime_type = 'audio/wav'
-                    ext = '.wav'
-                    log.info(f"Converted to WAV: {len(audio_content)} bytes, {actual_duration}s")
-                finally:
-                    _os.unlink(tmp_in_path)
-            except Exception as e:
-                log.warning(f"Could not convert to WAV: {e}, sending as-is to Gemini")
-
-        if mime_type == 'audio/wav':
-            try:
-                with wave.open(io.BytesIO(audio_content)) as wav_in:
-                    frames = wav_in.readframes(wav_in.getnframes())
-                    sampwidth = wav_in.getsampwidth()
-                    nchannels = wav_in.getnchannels()
-                    framerate = wav_in.getframerate()
-                    actual_duration = wav_in.getnframes() // framerate
-
-                log.info(f"Duration: {actual_duration}s, framerate: {framerate}Hz")
-
-                if framerate != 16000:
-                    frames, _ = audioop.ratecv(frames, sampwidth, nchannels, framerate, 16000, None)
-                    framerate = 16000
-                    log.info("Upsampled to 16000Hz for Gemini")
-
-                    output_buffer = io.BytesIO()
-                    with wave.open(output_buffer, 'wb') as wav_out:
-                        wav_out.setnchannels(nchannels)
-                        wav_out.setsampwidth(sampwidth)
-                        wav_out.setframerate(16000)
-                        wav_out.writeframes(frames)
-                    audio_content = output_buffer.getvalue()
-                    file_size = len(audio_content)
-
-            except Exception as e:
-                log.warning(f"Could not process WAV: {e}, using original")
+            log.info(f"Duration: {actual_duration}s, framerate: 16000Hz (מונו)")
+            n_chunks = audio_prep.chunk_count(prepared[0], CHUNK_SECONDS)
+            chunks = audio_prep.iter_wav_chunks(prepared[0], CHUNK_SECONDS)
+        else:
+            # לא הצלחנו להמיר (פורמט לא מוכר וגם ffmpeg לא עזר) - שולחים את המקור
+            # כחלק אחד, כמו פעם. קובץ ענק כזה ממילא לא יעבור - עוצרים עם שגיאה ברורה.
+            if file_size > 200 * 1024 * 1024:
+                log.error(f"Gemini: קובץ של {file_size} bytes בפורמט שלא ניתן להמיר - לא נשלח")
+                return None, 0, False
+            mime_type = 'video/mp4' if is_video else 'audio/wav'
+            with open(src[0], 'rb') as _fh:
+                chunks = [_fh.read()]
+            n_chunks = 1
+            log.warning(f"Could not convert to WAV, sending as-is to Gemini ({mime_type})")
 
         input_lang_map = {'he': 'עברית', 'yi': 'יידיש', 'en': 'English'}
         input_lang_name = input_lang_map.get(language, 'עברית')
@@ -875,15 +845,13 @@ def _gemini_from_url(url, language='he', output_language='he'):
 - שמור על מינוח תורני נכון, ארמית, ראשי תיבות וגרסאות.
 - החזר רק את הטקסט המתומלל ללא הערות נוספות."""
 
-        # פיצול לחלקי 5 דקות ותמלול כל חלק בנפרד
-        CHUNK_SECONDS = 300  # 5 דקות
-        chunks = _split_wav_chunks(audio_content, mime_type, CHUNK_SECONDS)
-        log.info(f"Split into {len(chunks)} chunks of up to {CHUNK_SECONDS}s each")
+        # תמלול כל חלק של 5 דקות בנפרד (החלקים נקראים מהדיסק אחד-אחד)
+        log.info(f"Split into {n_chunks} chunks of up to {CHUNK_SECONDS}s each")
 
         transcript_parts = []
         for i, chunk_bytes in enumerate(chunks):
             chunk_num = i + 1
-            log.info(f"Transcribing chunk {chunk_num}/{len(chunks)} ({len(chunk_bytes)} bytes)")
+            log.info(f"Transcribing chunk {chunk_num}/{n_chunks} ({len(chunk_bytes)} bytes)")
             chunk_transcript = None
             for attempt in range(5):
                 try:
@@ -891,7 +859,7 @@ def _gemini_from_url(url, language='he', output_language='he'):
                         model='gemini-3.5-flash',
                         contents=[
                             prompt,
-                            gtypes.Part.from_bytes(data=chunk_bytes, mime_type='audio/wav'),
+                            gtypes.Part.from_bytes(data=chunk_bytes, mime_type=mime_type),
                         ],
                     )
                     chunk_transcript = response.text.strip()
@@ -933,11 +901,14 @@ def _gemini_from_url(url, language='he', output_language='he'):
                     else:
                         log.error("Translation failed after 5 attempts, using original")
 
-        return transcript, actual_duration, mime_type.startswith('video/')
+        return transcript, actual_duration, is_video
 
     except Exception as e:
         log.error(f"Gemini error: {e}")
         return None, 0, False
+    finally:
+        from services import audio_prep as _ap
+        _ap.cleanup(*_cleanup_items)
 
 
 def _gemini_pro_solo(url, language='he', output_language='he'):
@@ -1068,35 +1039,20 @@ def _gemini_pro_solo(url, language='he', output_language='he'):
 
 
 def _download_and_prepare_audio(url):
-    """מוריד את קובץ האודיו ומבצע upsample ל-16kHz אם צריך. מחזיר (audio_bytes, actual_duration)."""
-    import wave, audioop, io
-
-    r = requests.get(url, timeout=300)
-    r.raise_for_status()
-    audio_content = r.content
-    actual_duration = 0
-
+    """מוריד את קובץ האודיו ומחזיר אותו כ-WAV 16kHz מונו. מחזיר (audio_bytes, actual_duration).
+    ההמרה נעשית על הדיסק בחלקים (services/audio_prep.py) - בזיכרון נשאר רק הקובץ המוקטן."""
+    from services import audio_prep
+    src = audio_prep.open_source(url)
+    prepared = None
     try:
-        with wave.open(io.BytesIO(r.content)) as wav_in:
-            frames = wav_in.readframes(wav_in.getnframes())
-            sampwidth = wav_in.getsampwidth()
-            nchannels = wav_in.getnchannels()
-            framerate = wav_in.getframerate()
-            actual_duration = wav_in.getnframes() // framerate
-
-        if framerate != 16000:
-            frames, _ = audioop.ratecv(frames, sampwidth, nchannels, framerate, 16000, None)
-            output_buffer = io.BytesIO()
-            with wave.open(output_buffer, 'wb') as wav_out:
-                wav_out.setnchannels(nchannels)
-                wav_out.setsampwidth(sampwidth)
-                wav_out.setframerate(16000)
-                wav_out.writeframes(frames)
-            audio_content = output_buffer.getvalue()
-    except Exception as e:
-        log.warning(f"could not process WAV: {e}, using original")
-
-    return audio_content, actual_duration
+        prepared = audio_prep.prepare_wav(src[0])
+        path, actual_duration = (prepared[0], prepared[2]) if prepared else (src[0], 0)
+        if not prepared:
+            log.warning("could not process audio, using original")
+        with open(path, 'rb') as fh:
+            return fh.read(), actual_duration
+    finally:
+        audio_prep.cleanup(prepared, src)
 
 
 def _gemini_review_pass(url, language='he', output_language='he'):
