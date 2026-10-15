@@ -82,12 +82,33 @@ def list_documents(customer):
     docs = docs[:MAX_DOCS]
     # שדות להשמעה בהקלטות (ה-IVR מרכיב: "מסמך" + מספר + סוג + "מתאריך" + תאריך עברי + אורך)
     rec_secs = {r.id: (r.duration_seconds or 0) for r in recs}
+    rec_play = {r.id: yemot_play_path(r.rec_url) for r in recs}
     for d in docs:
         loc = d['date'].replace(tzinfo=ZoneInfo('UTC')).astimezone(_IL) if d['date'] else None
         d['date_ddmmyyyy'] = loc.strftime('%d/%m/%Y') if loc else None
+        d['hour'] = loc.hour if loc else None
+        d['minute'] = loc.minute if loc else None
         d['minutes'] = max(1, round(rec_secs.get(d['id'], 0) / 60)) if d['type'] == 'recording' else None
+        # הקלטה מהטלפון יושבת בימות - ה-IVR יכול להשמיע אותה ישירות. הקלטת מייל/דרייב - לא.
+        d['play_path'] = rec_play.get(d['id']) if d['type'] == 'recording' else None
         d['date'] = d['date'].isoformat() if d['date'] else None
     return docs
+
+
+def yemot_play_path(rec_url):
+    """'...DownloadFile?...&path=ivr2:/recordings/051.wav' -> '/recordings/051' (לנגינה בימות), אחרת None."""
+    import re
+    from urllib.parse import unquote
+    if not rec_url or 'call2all.co.il' not in rec_url:
+        return None
+    m = re.search(r'[?&]path=ivr2:([^&]+)', rec_url)
+    if not m:
+        return None
+    path = unquote(m.group(1)).strip()
+    if not path.startswith('/'):
+        path = '/' + path
+    path = re.sub(r'\.(wav|mp3)$', '', path, flags=re.I)
+    return path if re.fullmatch(r'[/\w\- ]+', path) else None
 
 
 def delivery_target(customer):
