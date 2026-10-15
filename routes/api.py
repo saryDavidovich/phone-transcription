@@ -115,6 +115,15 @@ def customer_document_resend(phone):
     return jsonify(dh.resend(customer, (data.get('type') or '').strip(), doc_id, confirm=confirm))
 
 
+@api_bp.route('/phone-edit', methods=['POST'])
+def phone_edit():
+    """"הקלטה עם עריכה" מה-IVR (ניסיוני, מתפריט המנהל) - ראה services/phone_edit.py."""
+    from services import phone_edit as pe
+    data = request.get_json(silent=True) or {}
+    body, status = pe.start(data.get('phone'), data.get('call_id'), data.get('segments'))
+    return jsonify(body), status
+
+
 @api_bp.route('/customer/pending-recordings', methods=['GET'])
 def get_pending_recordings():
     """
