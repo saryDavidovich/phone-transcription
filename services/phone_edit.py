@@ -89,8 +89,17 @@ def process(call_id, customer_id, segments):
             for i, (text, secs) in zip(audio_idx, results):
                 segments[i]['text'] = text
                 total_secs += secs
+            # לוג מפורט: כל קטע לפי הסדר - סוג, קובץ/סימן, עיצוב, אורך ותחילת הטקסט
+            for n, sg in enumerate(segments, 1):
+                src = sg.get('rec_url', '').split('path=ivr2:')[-1] if sg['type'] == 'audio' else sg.get('text')
+                log.info(f"phone_edit {call_id} seg {n}/{len(segments)}: {sg['type']} {src!r} "
+                         f"bold={sg['bold']} underline={sg['underline']} new_par={sg['new_paragraph']} "
+                         f"text={(sg.get('text') or '')[:60]!r}")
             content = _build_content_from_segments(segments)
             text = _plain_text(content)
+            log.info(f"phone_edit {call_id}: {len(content)} פסקאות, ריצות: " + ' | '.join(
+                f"[{'B' if r['bold'] else ''}{'U' if r['underline'] else ''}]{r['text'][:25]!r}"
+                for p in content for r in p['runs']))
 
             customer = Customer.query.get(customer_id)
             rec = Recording.query.filter_by(call_id=call_id).first()
@@ -154,6 +163,7 @@ def start(phone, call_id, raw_segments):
     if not customer:
         return {'ok': False, 'error': 'customer_not_found'}, 404
     segments = _clean_segments(raw_segments)
+    log.info(f"phone_edit start {call_id}: התקבלו {len(raw_segments or [])} קטעים, תקינים {len(segments)}")
     if not any(s['type'] == 'audio' for s in segments):
         return {'ok': False, 'error': 'no_audio'}, 400
     via, to = delivery_target(customer)
