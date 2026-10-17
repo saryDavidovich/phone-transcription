@@ -49,6 +49,7 @@ routes/dictate.py
 העיצוב (מודגש/קו תחתון/כותרת) מגיע בפועל ללקוח הסופי כ-Word מעוצב אמיתי.
 """
 import os
+from services.email_layout import wrap_existing as _email_wrap
 import io
 import json
 from html import escape as _html_escape
@@ -457,7 +458,7 @@ def _dictation_worker(app, page_id, segment_files, segment_meta, engine=None):
 PAREN_TEXT_PT = 9     # גודל כתב לטקסט בסוגריים. בוורד גוף הטקסט העברי מוצג בפועל ב-11 (w:szCs של ברירת המחדל במסמך)
 
 
-def _build_manuscript_docx(customer_name, original_filename, content):
+def _build_manuscript_docx(customer_name, original_filename, content, title_text=None):
     """בונה את קובץ ה-Word הסופי - אותו דפוס RTL/גופן מוטמע ומוכח בפועל
     כמו services/transcribe.py._build_word_doc (המשמש למסלול התמלול המקצועי),
     כולל התיקון הקריטי ל"סימן הפסקה" עצמו (w:rtl ברמת ה-rPr של pPr, לא רק
@@ -535,6 +536,20 @@ def _build_manuscript_docx(customer_name, original_filename, content):
         if size:
             run.font.size = size
         rPr = run._r.get_or_add_rPr()
+        # הדגשה בעברית: כמו הגודל (ראו למטה), בריצה עם w:rtl וורד קורא את ההדגשה
+        # מ-w:bCs ולא מ-w:b. בלי זה הטקסט "מודגש" בקובץ אבל לא מוצג מודגש בוורד.
+        b_el = rPr.find(qn('w:b'))
+        bcs = rPr.find(qn('w:bCs'))
+        if bcs is None:
+            bcs = OxmlElement('w:bCs')
+            if b_el is not None:
+                b_el.addnext(bcs)
+            else:
+                rPr.insert(0, bcs)
+        if bold:
+            bcs.attrib.pop(qn('w:val'), None)
+        else:
+            bcs.set(qn('w:val'), '0')
         # בטקסט עברי (ריצה עם w:rtl) וורד קורא את הגודל מ-w:szCs ("complex script"),
         # לא מ-w:sz - בלי זה ה-size לא משפיע בוורד בכלל והטקסט מקבל את ברירת המחדל
         # של המסמך. cs_size מוגדר רק היכן שרוצים גודל שונה בפועל (טקסט בסוגריים).
@@ -679,7 +694,7 @@ def _build_manuscript_docx(customer_name, original_filename, content):
 
     add_footer(doc)
 
-    title = doc.add_heading(f'כתב יד - {original_filename}', 0)
+    title = doc.add_heading(title_text or f'כתב יד - {original_filename}', 0)
     set_rtl(title)
     clear_indent(title)
     for run in title.runs:
@@ -913,7 +928,7 @@ def _send_manuscript_email(to_email, customer_name, customer_phone, page_id, ori
         from_email=Email(os.environ.get('SENDGRID_FROM_EMAIL', ''), 'תמלול פון'),
         to_emails=to_email,
         subject=f'כתב יד - {original_filename}',
-        html_content=html,
+        html_content=_email_wrap(html, phone=customer_phone),
     )
     message.attachment = Attachment(
         FileContent(docx_b64),
@@ -968,7 +983,7 @@ def _send_proofed_manuscript_email(to_email, customer_name, original_filename, f
         from_email=Email(os.environ.get('SENDGRID_FROM_EMAIL', ''), 'תמלול פון'),
         to_emails=to_email,
         subject=f'כתב יד מתוקן - {original_filename}',
-        html_content=html,
+        html_content=_email_wrap(html, phone=None),
     )
     message.attachment = Attachment(
         FileContent(docx_b64),
@@ -1944,7 +1959,7 @@ def _send_manuscript_held_email(page, customer, billing_account, cost, not_start
             subject, html = build(kind, topup_phone)
             sg = sendgrid.SendGridAPIClient(api_key=os.environ.get('SENDGRID_API_KEY'))
             sg.send(Mail(from_email=Email(os.environ.get('SENDGRID_FROM_EMAIL', ''), 'תמלול פון'),
-                         to_emails=addr, subject=subject, html_content=html))
+                         to_emails=addr, subject=subject, html_content=_email_wrap(html, phone=topup_phone)))
             sent_to.append(addr)
             log.info(f"manuscript held email ({kind}) sent to {addr} (page={page.id})")
         except Exception as e:

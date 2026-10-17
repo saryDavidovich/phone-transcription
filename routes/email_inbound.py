@@ -36,6 +36,7 @@ routes/email_inbound.py
 """
 
 import os
+from services.email_layout import wrap_existing as _email_wrap
 import re
 import time
 import uuid
@@ -1308,7 +1309,7 @@ def _send_ocr_result_email(to, original_filename, ocr_text, char_count, cost):
                 from_email=Email(os.environ.get('SENDGRID_FROM_EMAIL', ''), 'תמלול פון'),
                 to_emails=to,
                 subject=f'שגיאה בזיהוי כתב יד - {original_filename}',
-                html_content=html
+                html_content=_email_wrap(html, phone=None)
             )
             sg = sendgrid.SendGridAPIClient(api_key=os.environ.get('SENDGRID_API_KEY'))
             sg.send(message)
@@ -1328,7 +1329,7 @@ def _send_ocr_result_email(to, original_filename, ocr_text, char_count, cost):
 <p style="color:#6b7280">תווים שזוהו: <b>{char_count}</b> | עלות: <b>₪{cost}</b></p>
 <div style="background:#f0fdf4;border-right:4px solid #10b981;padding:16px;margin:16px 0;border-radius:8px">
 <h3 style="margin:0 0 12px;color:#065f46">✍️ טקסט מזוהה</h3>
-<div style="line-height:1.8;white-space:pre-wrap;text-align:right;direction:rtl">{ocr_text}</div>
+<div style="line-height:1.8;white-space:pre-wrap;text-align:justify;text-justify:inter-word;direction:rtl">{ocr_text}</div>
 </div>
 </div>'''
 
@@ -1338,7 +1339,7 @@ def _send_ocr_result_email(to, original_filename, ocr_text, char_count, cost):
             from_email=Email(os.environ.get('SENDGRID_FROM_EMAIL', ''), 'תמלול פון'),
             to_emails=to,
             subject=f'זיהוי כתב יד - {original_filename}',
-            html_content=html
+            html_content=_email_wrap(html, phone=None)
         )
         message.attachment = Attachment(
             FileContent(word_b64),
@@ -1387,7 +1388,7 @@ def _send_ocr_insufficient_balance_email(to_email, cost, balance):
             from_email=Email(os.environ.get('SENDGRID_FROM_EMAIL', ''), 'תמלול פון'),
             to_emails=to_email,
             subject='תמלול פון - יתרה אינה מספיקה לזיהוי כתב היד',
-            html_content=html
+            html_content=_email_wrap(html, phone=None)
         )
         sg.send(message)
         log.info(f"OCR insufficient balance email sent to {to_email}")
@@ -1946,7 +1947,7 @@ def _send_guidance_email(to_email, reason, phone=''):
             from_email=Email(os.environ.get('SENDGRID_FROM_EMAIL', os.environ.get('GMAIL_USER', '')), 'תמלול פון'),
             to_emails=to_email,
             subject='תמלול פון - לא ניתן לעבד את הבקשה',
-            html_content=html,
+            html_content=_email_wrap(html, phone=phone),
         )
         sg.send(message)
         log.info(f"Guidance email sent to {to_email} (reason: {reason})")
@@ -2098,7 +2099,7 @@ def _send_instructions_email(to_email, phone, name=''):
             from_email=Email(os.environ.get('SENDGRID_FROM_EMAIL', os.environ.get('GMAIL_USER', '')), 'תמלול פון'),
             to_emails=to_email,
             subject='תמלול פון - הוראות לשליחת הקלטה לתמלול במייל',
-            html_content=html,
+            html_content=_email_wrap(html, phone=phone),
         )
         sg.send(message)
         log.info(f"Instructions email sent to {to_email}")
@@ -2220,7 +2221,7 @@ def _send_handwriting_instructions_email(to_email, phone, name=''):
             from_email=Email(os.environ.get('SENDGRID_FROM_EMAIL', os.environ.get('GMAIL_USER', '')), 'תמלול פון'),
             to_emails=to_email,
             subject='תמלול פון - הוראות לשליחת כתב יד לזיהוי',
-            html_content=html,
+            html_content=_email_wrap(html, phone=phone),
         )
         sg.send(message)
         log.info(f"Handwriting instructions email sent to {to_email}")
@@ -2352,7 +2353,7 @@ def _send_choice_email(to_email, row):
             from_email=Email(os.environ.get('SENDGRID_FROM_EMAIL', os.environ.get('GMAIL_USER', '')), 'תמלול פון'),
             to_emails=to_email,
             subject='תמלול פון - איך לעבד את הקובץ שלכם? (רגיל או מקצועי)',
-            html_content=html,
+            html_content=_email_wrap(html, phone=getattr(row, 'phone', None)),
         )
         sg.send(message)
         log.info(f"Choice email sent to {to_email} (choice_id={row.id})")

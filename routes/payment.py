@@ -1,4 +1,5 @@
 import logging
+from services.email_layout import wrap_existing as _email_wrap
 from flask import Blueprint, request, jsonify
 
 payment_bp = Blueprint('payment', __name__)
@@ -526,7 +527,7 @@ def _send_receipt_email(to, amount, bonus, total_credit, approval, receipt_url):
             from_email=Email(os.environ.get('SENDGRID_FROM_EMAIL', ''), 'תמלול פון'),
             to_emails=to,
             subject=f'הארנק נטען - ₪{total_credit:.2f} | תמלול פון',
-            html_content=html
+            html_content=_email_wrap(html, phone=None)
         )
         sg.send(message)
         log.info(f"Receipt email sent to {to}")

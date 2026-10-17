@@ -1,4 +1,5 @@
 import os, requests, logging, threading, time, math
+from services.email_layout import wrap_existing as _email_wrap
 from concurrent.futures import ThreadPoolExecutor
 
 _TRANSCRIBE_INBOUND_EMAIL = os.environ.get('TRANSCRIBE_INBOUND_EMAIL', '033131795@sheasystem.com')
@@ -588,7 +589,7 @@ def _send_insufficient_balance_email(to_email, duration_seconds, cost, balance):
         from_email=Email(os.environ.get('SENDGRID_FROM_EMAIL', os.environ.get('GMAIL_USER', '')), 'תמלול פון'),
         to_emails=to_email,
         subject='תמלול פון - יתרה אינה מספיקה, הקובץ נשמר',
-        html_content=html,
+        html_content=_email_wrap(html, phone=None),
     )
     sg.send(message)
     log.info(f"Insufficient balance email sent to {to_email}")
@@ -1923,34 +1924,23 @@ def _send_email(to, transcript, customer, rec_url, duration_seconds, source_file
         # אם ההקלטה התקבלה במייל - הכותרת היא שם הקובץ שנשלח, ולא נכלל קישור להורדת ההקלטה
         title = source_filename if source_filename else 'תמלול שיחה'
 
-        if is_premium:
-            badge = '''<div style="display:inline-block;background:linear-gradient(135deg,#7c3aed,#a855f7);color:#fff;padding:6px 16px;border-radius:20px;font-size:13px;font-weight:700;margin-bottom:10px">
-💎 תמלול מקצועי
-</div><br>'''
-        else:
-            badge = '''<div style="display:inline-block;background:#f3f4f6;color:#4b5563;padding:6px 16px;border-radius:20px;font-size:13px;font-weight:700;margin-bottom:10px">
-📝 תמלול רגיל
-</div><br>'''
-
         word_bytes = _build_word_doc(name, duration_str, transcript, title=title)
         word_b64 = base64.b64encode(word_bytes).decode('utf-8')
 
-        download_block = ''
+        from html import escape as _esc
+        from datetime import datetime as _dt
+        from zoneinfo import ZoneInfo as _ZI
+        from services import email_layout as L
+        today = _dt.now(_ZI('Asia/Jerusalem')).strftime('%d/%m/%Y')
+        first_name = (customer.name or '').split()[0] if customer is not None and getattr(customer, 'name', None) else ''
+        card = (L.badge(is_premium)
+                + L.title(f'שלום {_esc(first_name)}, התמלול מוכן' if first_name else 'התמלול מוכן')
+                + L.meta((f'{_esc(source_filename)} · ' if source_filename else '') + f'{today} · משך {duration_str} דקות')
+                + L.text_block(transcript))
+        # הקלטה שהתקבלה במייל - אין קישור להורדה (הלקוח כבר מחזיק את הקובץ)
         if not source_filename and rec_url:
-            download_block = f'''<div style="background:#fff7ed;border-right:4px solid #f97316;padding:16px;margin:16px 0;border-radius:8px">
-<a href="{rec_url}" style="color:#ea580c;font-weight:600;font-size:15px;text-decoration:none">⬇️ להורדת ההקלטה לחצו כאן</a>
-</div>'''
-
-        html = f'''<div dir="rtl" style="font-family:Arial,sans-serif;max-width:600px;margin:auto">
-{badge}
-<h2 style="color:#1d4ed8;margin-top:4px">{title}</h2>
-<p style="color:#6b7280">לקוח: <b>{name}</b> | משך: <b>{duration_str}</b></p>
-<div style="background:#f0fdf4;border-right:4px solid #10b981;padding:16px;margin:16px 0;border-radius:8px">
-<h3 style="margin:0 0 12px;color:#065f46">✨ תמלול</h3>
-<div style="line-height:1.8;white-space:pre-wrap;text-align:justify">{transcript}</div>
-</div>
-{download_block}
-</div>'''
+            card += L.button(rec_url, 'להורדת ההקלטה')
+        html = L.wrap(card, phone=getattr(customer, 'phone', None))
 
         sg = sendgrid.SendGridAPIClient(api_key=os.environ.get('SENDGRID_API_KEY'))
         message = Mail(
