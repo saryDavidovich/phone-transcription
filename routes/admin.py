@@ -755,6 +755,14 @@ def delete_conversation_thread(id, thread_id):
     return redirect(url_for('admin.customer_detail', id=id))
 
 
+def _service_message_html(body, phone=None):
+    """הודעת שירות לקוחות (שיחה עם לקוח / תיבת פניות) - באותו עיצוב של כל המיילים.
+    body נכנס כמו שהוא (כמו קודם), כולל ירידות שורה."""
+    from services import email_layout as L
+    card = L.title('הודעה מתמלול פון') + L.text_block(body, escape_text=False) + L.signature(can_reply=True)
+    return L.wrap(card, phone=phone)
+
+
 def _send_customer_conversation_email(to_email, phone, body, message_id, in_reply_to=None):
     """שולח מייל שיחה ללקוח (מהמנהל). רץ ברקע (thread נפרד) כדי לא לעכב את
     התגובה למנהל. Reply-To מוגדר לכתובת הקליטה הכללית של המערכת. Message-ID
@@ -765,18 +773,7 @@ def _send_customer_conversation_email(to_email, phone, body, message_id, in_repl
         import sendgrid
         from sendgrid.helpers.mail import Mail, Email, ReplyTo, Header
 
-        html = f'''<div dir="rtl" style="font-family:Arial,sans-serif;max-width:600px;margin:auto">
-<h2 style="color:#1e3a8a">הודעה מתמלול פון</h2>
-<div style="background:#eff6ff;border-right:4px solid #3b82f6;padding:16px;margin:16px 0;border-radius:8px;line-height:1.8;white-space:pre-wrap">
-{body}
-</div>
-<p style="color:#6b7280;font-size:13px;line-height:1.6">
-ניתן להשיב למייל זה<br>
-לשירותכם<br>
-צוות תמלול פון<br>
-03-3131795
-</p>
-</div>'''
+        html = _service_message_html(body, phone=phone)
 
         sg = sendgrid.SendGridAPIClient(api_key=os.environ.get('SENDGRID_API_KEY'))
         message = Mail(
@@ -1767,18 +1764,9 @@ def _broadcast_email_html(subject, body):
     """HTML פשוט לפי אותו מיתוג שכבר קיים בהודעות ללקוח (_send_customer_conversation_email) -
     כותרת, תוכן (עם ירידות שורה), וחתימה קבועה."""
     from markupsafe import escape
-    safe_body = str(escape(body)).replace('\n', '<br>')
-    return f'''<div dir="rtl" style="font-family:Arial,sans-serif;max-width:600px;margin:auto">
-<h2 style="color:#1e3a8a">{escape(subject)}</h2>
-<div style="background:#eff6ff;border-right:4px solid #3b82f6;padding:16px;margin:16px 0;border-radius:8px;line-height:1.8">
-{safe_body}
-</div>
-<p style="color:#6b7280;font-size:13px;line-height:1.6">
-לשירותכם<br>
-צוות תמלול פון<br>
-03-3131795
-</p>
-</div>'''
+    from services import email_layout as L
+    card = L.title(str(escape(subject))) + L.text_block(body) + L.signature()
+    return L.wrap(card)
 
 
 def _send_broadcast_email(to_email, subject, html):
@@ -1894,18 +1882,7 @@ def _send_inbox_reply_email(to_email, subject, body, message_id, in_reply_to=Non
         import sendgrid
         from sendgrid.helpers.mail import Mail, Email, ReplyTo, Header
 
-        html = f'''<div dir="rtl" style="font-family:Arial,sans-serif;max-width:600px;margin:auto">
-<h2 style="color:#1e3a8a">הודעה מתמלול פון</h2>
-<div style="background:#eff6ff;border-right:4px solid #3b82f6;padding:16px;margin:16px 0;border-radius:8px;line-height:1.8;white-space:pre-wrap">
-{body}
-</div>
-<p style="color:#6b7280;font-size:13px;line-height:1.6">
-ניתן להשיב למייל זה<br>
-לשירותכם<br>
-צוות תמלול פון<br>
-03-3131795
-</p>
-</div>'''
+        html = _service_message_html(body, phone=None)
 
         sg = sendgrid.SendGridAPIClient(api_key=os.environ.get('SENDGRID_API_KEY'))
         message = Mail(

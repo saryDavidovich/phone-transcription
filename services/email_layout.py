@@ -8,6 +8,7 @@
 שחוסמות CSS חיצוני ותמונות (גם ציור המסמך בעיגול בנוי מקווים, לא מתמונה).
 """
 import os
+import re
 from html import escape
 from urllib.parse import quote
 
@@ -59,6 +60,12 @@ def button(href, label):
             f'padding:13px 30px;border-radius:30px">{label}</a></div>')
 
 
+def signature(can_reply=False):
+    reply = 'ניתן להשיב למייל זה<br>' if can_reply else ''
+    return (f'<div style="margin-top:18px;font-size:14px;color:{SOFT};line-height:1.7">'
+            f'{reply}לשירותכם,<br>צוות תמלול פון</div>')
+
+
 def _circles(phone):
     link = topup_url(phone)
     balance = ''
@@ -82,8 +89,15 @@ def _circles(phone):
             f'style="margin:18px auto 0;text-align:center"><tr>{balance}{docs}</tr></table>')
 
 
+BOX_BORDER = '#cfe0fb'
+_SIDE_STRIPE = re.compile(r'border-(?:right|left)\s*:\s*\d+px\s+solid\s+#[0-9a-fA-F]{3,6}')
+
+
 def wrap(card_html, phone=None, show_circles=True):
-    """עוטף את תוכן המייל במסגרת האחידה. card_html - מה שנכנס לתוך הכרטיס הלבן."""
+    """עוטף את תוכן המייל במסגרת האחידה. card_html - מה שנכנס לתוך הכרטיס הלבן.
+    תיבות צבעוניות נשארות כמו שהן, אבל הפס הצדדי העבה שלהן מוחלף במסגרת
+    שלמה ודקה בכחול בהיר - בלי צד אחד בולט."""
+    card_html = _SIDE_STRIPE.sub(f'border:1px solid {BOX_BORDER}', card_html or '')
     circles = _circles(phone) if show_circles else ''
     return (f'<div dir="rtl" style="max-width:600px;margin:0 auto;font-family:Arial,Helvetica,sans-serif;'
             f'color:{INK};background:{PAGE};text-align:right">'
@@ -99,6 +113,5 @@ def wrap(card_html, phone=None, show_circles=True):
 def wrap_existing(html, phone=None, show_circles=True):
     """למיילים קיימים: מכניס את ה-HTML הקיים כמו שהוא לתוך הכרטיס. מוריד את
     max-width/margin של העטיפה החיצונית שלו כדי שלא תצר את הכרטיס."""
-    import re
     inner = re.sub(r'max-width:\s*\d+px;?\s*margin:\s*(?:0 )?auto;?', '', html or '', count=1)
     return wrap(inner, phone=phone, show_circles=show_circles)

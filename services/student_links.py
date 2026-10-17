@@ -65,9 +65,10 @@ def _send_mail(to, subject, html):
     try:
         import sendgrid
         from sendgrid.helpers.mail import Mail, Email
+        from services.email_layout import wrap_existing
         sg = sendgrid.SendGridAPIClient(api_key=os.environ.get('SENDGRID_API_KEY'))
         sg.send(Mail(from_email=Email(os.environ.get('SENDGRID_FROM_EMAIL', ''), 'תמלול פון'),
-                     to_emails=to, subject=subject, html_content=html))
+                     to_emails=to, subject=subject, html_content=wrap_existing(html)))
         return True
     except Exception as e:
         log.error(f'student link mail error to {to}: {e}')

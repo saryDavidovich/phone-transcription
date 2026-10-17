@@ -165,6 +165,7 @@ def forgot_password():
 
 def _send_login_code_email(inst):
     import sendgrid
+    from services.email_layout import wrap_existing
     from sendgrid.helpers.mail import Mail, Email
 
     html = f'''<div dir="rtl" style="font-family:Arial,sans-serif;max-width:600px;margin:auto">
@@ -181,7 +182,7 @@ def _send_login_code_email(inst):
         from_email=Email(os.environ.get('SENDGRID_FROM_EMAIL', os.environ.get('GMAIL_USER', '')), 'תמלול פון'),
         to_emails=inst.email,
         subject='קוד כניסה זמני חדש - מערכת תמלול',
-        html_content=html,
+        html_content=wrap_existing(html, show_circles=False),
     )
     sg.send(message)
 
