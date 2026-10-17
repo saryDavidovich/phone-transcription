@@ -33,6 +33,7 @@ def _phone_match_candidates(raw_phone):
     return list(candidates)
 
 
+@payment_bp.route('/nedarim/topup-link', defaults={'phone': ''})
 @payment_bp.route('/nedarim/topup-link/<phone>')
 def nedarim_topup_link(phone):
     """מפנה טלפון נתון לדף התשלום המתארח של נדרים פלוס (שיטת ה-Redirect
@@ -67,6 +68,8 @@ def nedarim_topup_link(phone):
         log.warning(f'topup-link student check failed: {e}')
 
     from routes.institution_billing import NEDARIM_CATEGORY
+    # בלי טלפון (קישור כללי ממייל שלא ידוע לאיזה טלפון הוא שייך) - דף התשלום נפתח
+    # ריק והלקוח מקליד את מספר הטלפון שלו בעצמו; הזיכוי לפי הטלפון שהוקלד (ב-Webhook).
     params = {
         'mosad': mosad,
         'Phone': phone,
@@ -74,6 +77,8 @@ def nedarim_topup_link(phone):
         'GroupeLock': '1',
         'OnlyShekel': '1',   # שקל בלבד - כדי שלא ישלמו בדולר ויזוכו בטעות כשקלים
     }
+    if not phone:
+        params.pop('Phone')
     return redirect('https://www.matara.pro/nedarimplus/online/?' + urllib.parse.urlencode(params, quote_via=urllib.parse.quote))
 
 

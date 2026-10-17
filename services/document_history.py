@@ -19,7 +19,7 @@ from zoneinfo import ZoneInfo
 
 log = logging.getLogger(__name__)
 
-MAX_DOCS = 30
+MAX_DOCS = 200
 MAX_RESENDS_PER_DAY = 10
 _IL = ZoneInfo('Asia/Jerusalem')
 _MONTHS = ['ינואר', 'פברואר', 'מרץ', 'אפריל', 'מאי', 'יוני', 'יולי', 'אוגוסט',

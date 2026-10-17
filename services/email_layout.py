@@ -20,12 +20,14 @@ PAGE = '#eef4fb'
 PHONE_NUMBER = '03-3131795'
 
 
-def topup_url(phone):
+def topup_url(phone=None):
+    """קישור לדף הטעינה בנדרים פלוס. עם טלפון - ממולא מראש; בלי טלפון - דף ריק
+    שבו הלקוח מקליד את מספר הטלפון שלו בעצמו."""
     base = os.environ.get('APP_BASE_URL', os.environ.get('APP_URL', '')).rstrip('/')
-    phone = (phone or '').strip()
-    if not base or not phone:
+    if not base:
         return ''
-    return f'{base}/payment/nedarim/topup-link/{quote(phone)}'
+    phone = (phone or '').strip()
+    return f'{base}/payment/nedarim/topup-link/{quote(phone)}' if phone else f'{base}/payment/nedarim/topup-link'
 
 
 # --- חלקים לשימוש בתוך הכרטיס ---
