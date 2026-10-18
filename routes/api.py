@@ -177,12 +177,8 @@ def update_customer():
         return jsonify({'error': 'not found'}), 404
     # מצב "מייל/פקס נפרד לכל מספר": שינוי שמגיע ממספר נוסף נשמר על המספר הזה בלבד
     target = row if (row is not None and getattr(customer, 'phones_separate', False)) else customer
-    welcome_to = None
+    old_email = target.email
     if 'email' in data:
-        new_email = (data['email'] or '').strip()
-        # כתובת חדשה (ששונה מהקודמת) שאושרה בטלפון - מייל "ברוכים הבאים" עם קישור לטעינת הארנק
-        if new_email and new_email.lower() != (target.email or '').strip().lower():
-            welcome_to = new_email
         target.email = data['email']
     if 'fax' in data:
         target.fax = data['fax']
@@ -191,9 +187,10 @@ def update_customer():
     if 'default_settings' in data:
         customer.default_settings = data['default_settings']
     db.session.commit()
-    if welcome_to:
-        from services.welcome_email import send_welcome_async
-        send_welcome_async(welcome_to, customer.name, phone, float(customer.balance or 0))
+    if 'email' in data:
+        # כתובת חדשה שאושרה בטלפון - מייל "ברוכים הבאים" עם קישור לטעינת הארנק
+        from services.welcome_email import welcome_if_new
+        welcome_if_new(old_email, data['email'], customer.name, phone, customer.balance)
     return jsonify({'ok': True})
 
 @api_bp.route('/transcribe', methods=['POST'])

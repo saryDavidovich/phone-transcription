@@ -1,7 +1,8 @@
 """
-מייל "ברוכים הבאים" - נשלח פעם אחת, מיד כשלקוח מגדיר כתובת מייל חדשה ומאשר
-אותה בטלפון (ה-IVR קורא ל-/api/customer/update רק אחרי אישור). כתובת שלא
-השתנתה לא מקבלת מייל שוב. העיצוב - המסגרת האחידה של כל המיילים (email_layout),
+מייל "ברוכים הבאים" - נשלח פעם אחת, מיד כשנקבעת ללקוח כתובת מייל חדשה:
+כשהלקוח מגדיר ומאשר אותה בטלפון (ה-IVR קורא ל-/api/customer/update רק אחרי
+אישור), או כשהמנהל מוסיף/מעדכן אותה בממשק הניהול. כתובת שלא השתנתה לא
+מקבלת מייל שוב. העיצוב - המסגרת האחידה של כל המיילים (email_layout),
 עם כפתור בולט לטעינת הארנק (קישור אישי לנדרים פלוס לפי הטלפון).
 """
 import os
@@ -58,3 +59,13 @@ def send_welcome_async(to, name, phone, balance):
         except Exception as e:
             log.error(f'welcome email to {to} failed: {e}')
     threading.Thread(target=run, daemon=True).start()
+
+
+def welcome_if_new(old_email, new_email, name, phone, balance):
+    """שולח "ברוכים הבאים" רק אם נקבעה כתובת חדשה (שונה מהקודמת, לא ריקה).
+    משמש גם את עדכון הכתובת בטלפון וגם את עדכון/הוספת לקוח בממשק הניהול."""
+    new = (new_email or '').strip()
+    if new and new.lower() != (old_email or '').strip().lower():
+        send_welcome_async(new, name, phone, float(balance or 0))
+        return True
+    return False

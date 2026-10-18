@@ -418,6 +418,8 @@ def add_customer():
         )
         db.session.add(customer)
         db.session.commit()
+        from services.welcome_email import welcome_if_new
+        welcome_if_new(None, email, name, phone, balance)
 
         if balance > 0:
             txn = Transaction(
@@ -592,12 +594,15 @@ def charge_customer(id):
 @login_required
 def update_customer(id):
     customer = Customer.query.get_or_404(id)
+    old_email = customer.email
     customer.name = request.form.get('name', customer.name)
     customer.email = request.form.get('email', customer.email)
     customer.fax = request.form.get('fax', customer.fax)
     customer.delivery_method = request.form.get('delivery_method', customer.delivery_method)
     db.session.commit()
-    flash('פרטי לקוח עודכנו')
+    from services.welcome_email import welcome_if_new
+    sent = welcome_if_new(old_email, customer.email, customer.name, customer.phone, customer.balance)
+    flash('פרטי לקוח עודכנו' + (' - נשלח מייל "ברוכים הבאים" לכתובת החדשה' if sent else ''))
     return redirect(url_for('admin.customer_detail', id=id))
 
 # ---------------------------------------------------------------------
@@ -610,6 +615,12 @@ def add_customer_phone(id):
     customer = Customer.query.get_or_404(id)
     ok, msg = add_phone(customer, request.form.get('phone', ''), request.form.get('label'),
                         request.form.get('email'), request.form.get('fax'))
+    if ok:
+        from services.welcome_email import welcome_if_new
+        from services.customer_phones import normalize_phone
+        if welcome_if_new(None, request.form.get('email'), customer.name,
+                          normalize_phone(request.form.get('phone', '')), customer.balance):
+            msg += ' - נשלח מייל "ברוכים הבאים"'
     flash(msg)
     return redirect(url_for('admin.customer_detail', id=id) + '#extra-phones')
 
@@ -619,13 +630,17 @@ def add_customer_phone(id):
 def update_customer_phone(id, phone_id):
     from models import CustomerPhone
     row = CustomerPhone.query.filter_by(id=phone_id, customer_id=id).first_or_404()
+    old_email = row.email
     row.label = (request.form.get('label') or '').strip() or None
     row.email = (request.form.get('email') or '').strip() or None
     row.fax = (request.form.get('fax') or '').strip() or None
     dm = request.form.get('delivery_method') or ''
     row.delivery_method = dm if dm in ('email', 'fax') else None
     db.session.commit()
-    flash('פרטי המספר עודכנו')
+    from services.welcome_email import welcome_if_new
+    sent = welcome_if_new(old_email, row.email, row.customer.name if row.customer else None, row.phone,
+                          row.customer.balance if row.customer else 0)
+    flash('פרטי המספר עודכנו' + (' - נשלח מייל "ברוכים הבאים" לכתובת החדשה' if sent else ''))
     return redirect(url_for('admin.customer_detail', id=id) + '#extra-phones')
 
 
