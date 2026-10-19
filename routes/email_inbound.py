@@ -722,6 +722,36 @@ def _handle_incoming_fax(sender_email, subject, db):
     return jsonify({'status': 'ok', 'reason': 'fax_received', 'fax_id': fax.id}), 200
 
 
+def _save_message_attachments(db, inbox_message_id=None, customer_message_id=None):
+    """שומר תמונות / PDF / ZIP שצורפו למייל שנכנס כהודעה (בלי נושא תקין), כדי
+    שהמנהל יוכל להעביר אותם להקראה. מחזיר כמה נשמרו. כשל כאן לא מפיל את שמירת ההודעה."""
+    from models import MessageAttachment
+    from services.manuscript_merge import ACCEPT_EXT, ext_of, MAX_FILE_BYTES, MAX_TOTAL_BYTES
+    saved, total = 0, 0
+    try:
+        for key in request.files:
+            f = request.files[key]
+            if not f or not f.filename or ext_of(f.filename) not in ACCEPT_EXT:
+                continue
+            data = f.read()
+            if not data or len(data) > MAX_FILE_BYTES or total + len(data) > MAX_TOTAL_BYTES:
+                log.warning(f"email-inbound: קובץ מצורף להודעה לא נשמר (גודל): {f.filename!r} {len(data)}B")
+                continue
+            total += len(data)
+            db.session.add(MessageAttachment(inbox_message_id=inbox_message_id, customer_message_id=customer_message_id,
+                                             filename=f.filename[:255], content_type=(f.mimetype or '')[:100],
+                                             size=len(data), file_data=data))
+            saved += 1
+        if saved:
+            db.session.commit()
+            log.info(f"email-inbound: נשמרו {saved} קבצים מצורפים להודעה "
+                     f"(inbox_msg={inbox_message_id}, customer_msg={customer_message_id})")
+    except Exception as e:
+        db.session.rollback()
+        log.error(f"email-inbound: שמירת קבצים מצורפים נכשלה: {e}", exc_info=True)
+    return saved
+
+
 def _capture_manuscript_page(filepath, original_filename, customer, db):
     """
     שומר עותק עצמאי של דף כתב-היד עבור תור ההקראה/הקלטה החדש (routes/dictate.py) -
@@ -1663,6 +1693,7 @@ def email_inbound():
                                        direction='in', body=body_text, is_read=False)
                 db.session.add(msg)
                 db.session.commit()
+                _save_message_attachments(db, customer_message_id=msg.id)
                 log.info(f"email-inbound: הודעה כללית שויכה ללקוח {matched_customer.phone} (thread_id={thread.id})")
                 return jsonify({'status': 'ok', 'reason': 'matched_to_customer_inbox'}), 200
 
@@ -1687,6 +1718,7 @@ def email_inbound():
             thread.is_read = False
             db.session.add(inbox_msg)
             db.session.commit()
+            _save_message_attachments(db, inbox_message_id=inbox_msg.id)
             log.warning(f"email-inbound: הודעה ללא זיהוי לקוח מאת {sender_email} - נשמרה בתיבה הכללית (thread_id={thread.id})")
 
         return jsonify({'status': 'ok', 'reason': 'saved_to_general_inbox'}), 200

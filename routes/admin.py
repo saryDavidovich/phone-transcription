@@ -510,6 +510,7 @@ def customer_detail(id):
         customer=customer, recordings=recordings, transactions=transactions,
         ocr_results=ocr_results, manuscript_pages=manuscript_pages, proofing_rounds=proofing_rounds,
         threads=threads, timedelta=timedelta,
+        msg_attachments=_attachments_for('customer_message_id', [m.id for t in threads for m in t.messages]),
         all_institutions=Institution.query.order_by(Institution.name).all())
 
 @admin_bp.route('/customers/<int:id>/link-institution', methods=['POST'])
@@ -763,6 +764,10 @@ def send_customer_message(id):
 def delete_conversation_thread(id, thread_id):
     from models import ConversationThread, CustomerMessage
     thread = ConversationThread.query.filter_by(id=thread_id, customer_id=id).first_or_404()
+    from models import MessageAttachment
+    ids = [m.id for m in CustomerMessage.query.filter_by(thread_id=thread.id).all()]
+    if ids:
+        MessageAttachment.query.filter(MessageAttachment.customer_message_id.in_(ids)).delete(synchronize_session=False)
     CustomerMessage.query.filter_by(thread_id=thread.id).delete()
     db.session.delete(thread)
     db.session.commit()
@@ -1935,7 +1940,8 @@ def inbox_thread_detail(id):
     if not thread.is_read:
         thread.is_read = True
         db.session.commit()
-    return render_template('admin/inbox_thread.html', thread=thread)
+    return render_template('admin/inbox_thread.html', thread=thread,
+                           attachments=_attachments_for('inbox_message_id', [m.id for m in thread.messages]))
 
 
 @admin_bp.route('/inbox/<int:id>/reply', methods=['POST'])
@@ -1979,6 +1985,10 @@ def reply_inbox_thread(id):
 def delete_inbox_message(id):
     from models import GeneralInboxMessage, InboxMessage
     thread = GeneralInboxMessage.query.get_or_404(id)
+    from models import MessageAttachment
+    ids = [m.id for m in InboxMessage.query.filter_by(thread_id=thread.id).all()]
+    if ids:
+        MessageAttachment.query.filter(MessageAttachment.inbox_message_id.in_(ids)).delete(synchronize_session=False)
     InboxMessage.query.filter_by(thread_id=thread.id).delete()
     db.session.delete(thread)
     db.session.commit()
@@ -2013,16 +2023,109 @@ def assign_inbox_message(id):
         body = m.body
         if i == 0 and thread.subject:
             body = f'[נושא מקורי: {thread.subject}]\n{body}'
-        db.session.add(CustomerMessage(
+        new_msg = CustomerMessage(
             thread_id=new_thread.id, customer_id=customer.id,
             direction=m.direction, body=body, is_read=True,
-        ))
+        )
+        db.session.add(new_msg)
+        db.session.flush()
+        from models import MessageAttachment
+        MessageAttachment.query.filter_by(inbox_message_id=m.id).update(
+            {'inbox_message_id': None, 'customer_message_id': new_msg.id}, synchronize_session=False)
 
     InboxMessage.query.filter_by(thread_id=thread.id).delete()
     db.session.delete(thread)
     db.session.commit()
     flash(f'השרשור שויך ללקוח {customer.phone}' + (f' ({customer.name})' if customer.name else ''))
     return redirect(url_for('admin.customer_detail', id=customer.id))
+
+
+# ===================== העלאה ידנית להקראה + קבצים מצורפים להודעות =====================
+
+def _attachments_for(field, ids):
+    """{message_id: [MessageAttachment בלי התוכן עצמו]} - לתצוגה ליד כל הודעה."""
+    from sqlalchemy.orm import defer
+    from models import MessageAttachment
+    if not ids:
+        return {}
+    col = getattr(MessageAttachment, field)
+    out = {}
+    for a in MessageAttachment.query.options(defer(MessageAttachment.file_data)).filter(col.in_(ids)) \
+            .order_by(MessageAttachment.id).all():
+        out.setdefault(getattr(a, field), []).append(a)
+    return out
+
+
+@admin_bp.route('/customers/<int:id>/manuscript-upload', methods=['POST'])
+@login_required
+def manuscript_upload(id):
+    """המנהל מעלה קבצים להקראה עבור הלקוח (גם אם לא נשלחו כראוי). כמה קבצים / ZIP
+    מאוחדים לקובץ PDF אחד לפי סדר השמות. החיוב - כרגיל, בעת שליחת המסמך המוכן."""
+    from services.manuscript_merge import create_manuscript_page
+    customer = Customer.query.get_or_404(id)
+    files = [(f.filename, f.read()) for f in request.files.getlist('files') if f and f.filename]
+    if not files:
+        flash('לא נבחרו קבצים')
+        return redirect(url_for('admin.customer_detail', id=id))
+    try:
+        page, note = create_manuscript_page(customer, files, (request.form.get('label') or '').strip() or None)
+        flash(f'נוסף לתור ההקראה (דף #{page.id}): {note}')
+    except ValueError as e:
+        flash(f'לא נוסף להקראה: {e}')
+    return redirect(url_for('admin.customer_detail', id=id))
+
+
+@admin_bp.route('/attachments/<int:att_id>')
+@login_required
+def download_attachment(att_id):
+    from io import BytesIO
+    from flask import send_file
+    from models import MessageAttachment
+    a = MessageAttachment.query.get_or_404(att_id)
+    return send_file(BytesIO(a.file_data or b''), download_name=a.filename or f'file_{a.id}',
+                     mimetype=a.content_type or 'application/octet-stream', as_attachment=True)
+
+
+@admin_bp.route('/attachments/to-manuscript', methods=['POST'])
+@login_required
+def attachments_to_manuscript():
+    """מעביר את הקבצים של הודעה אחת להקראה: בשיחה עם לקוח - ללקוח הזה; בתיבה
+    הכללית - ללקוח לפי הטלפון שהמנהל הקליד."""
+    from models import MessageAttachment, CustomerMessage, InboxMessage
+    from services.manuscript_merge import create_manuscript_page
+    cmsg_id = request.form.get('customer_message_id', type=int)
+    imsg_id = request.form.get('inbox_message_id', type=int)
+    if cmsg_id:
+        msg = CustomerMessage.query.get_or_404(cmsg_id)
+        customer = Customer.query.get(msg.customer_id)
+        atts = MessageAttachment.query.filter_by(customer_message_id=cmsg_id).order_by(MessageAttachment.id).all()
+        back = url_for('admin.customer_detail', id=customer.id) + f'#thread-{msg.thread_id}'
+    elif imsg_id:
+        msg = InboxMessage.query.get_or_404(imsg_id)
+        back = url_for('admin.inbox_thread_detail', id=msg.thread_id)
+        from routes.email_inbound import _normalize_israeli_phone
+        from services.customer_phones import find_customer_by_phone
+        phone = _normalize_israeli_phone(request.form.get('phone', ''))
+        customer = find_customer_by_phone(phone) if phone else None
+        if not customer:
+            flash('לא נמצא לקוח עם מספר הטלפון הזה')
+            return redirect(back)
+        atts = MessageAttachment.query.filter_by(inbox_message_id=imsg_id).order_by(MessageAttachment.id).all()
+    else:
+        flash('בקשה לא תקינה')
+        return redirect(url_for('admin.dashboard'))
+    if not atts:
+        flash('אין בהודעה הזו קבצים')
+        return redirect(back)
+    try:
+        page, note = create_manuscript_page(customer, [(a.filename, a.file_data) for a in atts])
+        for a in atts:
+            a.manuscript_page_id = page.id
+        db.session.commit()
+        flash(f'הקבצים הועברו להקראה של {customer.name or customer.phone} (דף #{page.id}): {note}')
+    except ValueError as e:
+        flash(f'לא הועבר להקראה: {e}')
+    return redirect(back)
 
 
 # ===================== מוסדות (ניהול מוסד - super-admin) =====================

@@ -28,6 +28,18 @@
           {% if m.direction == 'out' %}מנהל{% else %}{{ thread.from_email }}{% endif %} · {{ m.created_at | il_time }}
         </div>
         {{ m.body }}
+        {% set atts = attachments.get(m.id, []) %}
+        {% if atts %}
+        <div style="margin-top:8px;padding-top:6px;border-top:1px solid rgba(255,255,255,.15);white-space:normal">
+          {% for a in atts %}<div style="font-size:12px">📎 <a href="/admin/attachments/{{ a.id }}" style="color:#93c5fd">{{ a.filename }}</a>
+            <span style="opacity:.6">({{ (a.size / 1024)|round|int }}KB)</span>{% if a.manuscript_page_id %} · <a href="/admin/dictate/{{ a.manuscript_page_id }}" style="color:#86efac">הועבר להקראה</a>{% endif %}</div>{% endfor %}
+          <form method="POST" action="/admin/attachments/to-manuscript" style="margin-top:6px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+            <input type="hidden" name="inbox_message_id" value="{{ m.id }}">
+            <input class="form-input" type="text" name="phone" placeholder="טלפון הלקוח" required style="max-width:140px;padding:4px 8px;font-size:12px">
+            <button class="btn btn-primary" type="submit" style="font-size:12px;padding:4px 10px">🗣️ העבר להקראה{% if atts|length > 1 %} (קובץ אחד מאוחד){% endif %}</button>
+          </form>
+        </div>
+        {% endif %}
       </div>
     </div>
     {% endfor %}

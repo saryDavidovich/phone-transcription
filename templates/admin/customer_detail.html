@@ -302,6 +302,19 @@ function confirmOcrDelete() {
    הקראה (ראה models.ProofingRound). #}
 <div style="margin-top:20px" class="table-card">
   <div class="table-header"><span class="table-title">🗣️ הקראה ראשונית (כתבי יד)</span></div>
+  <form method="POST" action="/admin/customers/{{ customer.id }}/manuscript-upload" enctype="multipart/form-data"
+        style="padding:12px 16px;border-bottom:1px solid #2d3561;display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
+    <div style="flex:1;min-width:220px">
+      <label class="form-label" style="margin:0 0 4px">העלאת קבצים להקראה עבור הלקוח</label>
+      <input class="form-input" type="file" name="files" multiple accept="image/*,.pdf,.zip,.heic">
+    </div>
+    <div style="min-width:180px">
+      <label class="form-label" style="margin:0 0 4px">שם (לא חובה)</label>
+      <input class="form-input" type="text" name="label" placeholder="למשל: חידושים פרשת נח">
+    </div>
+    <button class="btn btn-primary" type="submit" style="font-size:13px">📤 הוסף לתור ההקראה</button>
+    <div style="flex-basis:100%;font-size:12px;color:#8892b0">תמונות, PDF או ZIP של תיקייה. כמה קבצים מאוחדים לקובץ אחד לפי סדר השמות (מספרים לפי הערך, אותיות לפי הא-ב). החיוב כרגיל, כשהמסמך נשלח ללקוח.</div>
+  </form>
   <table>
     <thead><tr>
       <th>תאריך</th><th>קובץ</th><th>תווים</th><th>עלות הקראה</th><th>סטטוס</th><th>סבבי הגהה</th><th></th>
@@ -434,6 +447,17 @@ function confirmOcrDelete() {
           {% if m.direction == 'out' %}מנהל{% else %}לקוח{% endif %} · {{ m.created_at | il_time }}
         </div>
         {{ m.body }}
+        {% set atts = msg_attachments.get(m.id, []) %}
+        {% if atts %}
+        <div style="margin-top:8px;padding-top:6px;border-top:1px solid rgba(255,255,255,.15);white-space:normal">
+          {% for a in atts %}<div style="font-size:12px">📎 <a href="/admin/attachments/{{ a.id }}" style="color:#93c5fd">{{ a.filename }}</a>
+            <span style="opacity:.6">({{ (a.size / 1024)|round|int }}KB)</span>{% if a.manuscript_page_id %} · <a href="/admin/dictate/{{ a.manuscript_page_id }}" style="color:#86efac">הועבר להקראה</a>{% endif %}</div>{% endfor %}
+          <form method="POST" action="/admin/attachments/to-manuscript" style="margin-top:6px">
+            <input type="hidden" name="customer_message_id" value="{{ m.id }}">
+            <button class="btn btn-primary" type="submit" style="font-size:12px;padding:4px 10px">🗣️ העבר להקראה{% if atts|length > 1 %} (קובץ אחד מאוחד){% endif %}</button>
+          </form>
+        </div>
+        {% endif %}
       </div>
     </div>
     {% endfor %}

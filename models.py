@@ -591,3 +591,22 @@ class CustomerPhone(db.Model):
     fax = db.Column(db.String(20), nullable=True)
     delivery_method = db.Column(db.String(10), nullable=True)  # email / fax; ריק = כמו של הלקוח
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class MessageAttachment(db.Model):
+    """קובץ שצורף למייל שנכנס כהודעה (לתיבה הכללית או לשיחה עם לקוח) - למשל
+    לקוח ששלח כתב יד בלי לכתוב נושא. נשמרים רק תמונות, PDF ו-ZIP, כדי שהמנהל
+    יוכל להעביר אותם להקראה בלחיצה (services/manuscript_merge.py).
+    בדיוק אחד מ-inbox_message_id / customer_message_id מלא (בלי FK - נמחק ידנית
+    יחד עם השרשור, ומועבר כשמשייכים שרשור מהתיבה הכללית ללקוח)."""
+    __tablename__ = 'message_attachments'
+
+    id = db.Column(db.Integer, primary_key=True)
+    inbox_message_id = db.Column(db.Integer, nullable=True, index=True)
+    customer_message_id = db.Column(db.Integer, nullable=True, index=True)
+    filename = db.Column(db.String(255))
+    content_type = db.Column(db.String(100))
+    size = db.Column(db.Integer)
+    file_data = db.Column(db.LargeBinary)
+    manuscript_page_id = db.Column(db.Integer, nullable=True)  # אם כבר הועבר להקראה
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
