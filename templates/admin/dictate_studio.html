@@ -102,6 +102,18 @@
   ❄️ ללקוח הזה יש דף אחר שממתין לתשלום/לטעינה - הדף הזה מוסתר מהתור הראשי עד שהלקוח ישלם (נמצא בלשונית "מוקפאים").
 </div>
 {% endif %}
+{% if page.status == 'paused' %}
+<div id="pausedBanner" style="background:#e0f2fe;border:1px solid #38bdf8;color:#0c4a6e;border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:13px;line-height:1.7">
+  ⏸ <b>ההקראה מושהית</b>{% if page.paused_at %} מאז {{ page.paused_at | il_time }}{% endif %}
+  {% if page.bookmark_page %} · סימניה: <b>עמוד {{ page.bookmark_page }}</b>{% endif %}
+  {% if page.bookmark_note %} · {{ page.bookmark_note }}{% endif %}
+  · נשמרו עד כה {{ paused_chars }} תווים ({{ page.dictation_sessions or 1 }} הקראות)
+  {% if page.bookmark_page %}<button type="button" class="btn btn-ghost" style="font-size:12px;padding:3px 10px;margin-right:6px" onclick="goToBookmark()">📍 לעמוד הסימניה</button>{% endif %}
+  {% if paused_tail %}<div style="margin-top:4px">המילים האחרונות שהוקראו: <i>"{{ paused_tail }}"</i></div>{% endif %}
+  {% if page.error_message %}<div style="margin-top:4px;color:#b91c1c">⚠ {{ page.error_message }}</div>{% endif %}
+  <div style="margin-top:4px">כדי להמשיך - לחצו "התחל הקלטה". מה שתקריאו יתווסף אחרי מה שכבר נשמר. אפשר להשהות שוב כמה פעמים שצריך.</div>
+</div>
+{% endif %}
 <div class="ds-wrap">
   <div class="card">
     <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;gap:8px">
@@ -116,10 +128,10 @@
         {# מוטמע ישירות כ-data URI בתוך ה-HTML עצמו (לא src לכתובת נפרדת) - #}
         {# ומומר תמיד ל-PDF (גם אם המקור הוא תמונה) - נטפרי חסם גם תמונות #}
         {# שהוטמעו כ-data URI, אבל לא חוסם PDF באותה צורה. #}
-        <div id="pvFrame" style="width:100%;height:100%"></div>
+        <div id="pvFrame" data-first-page="{{ pv.first_page or 1 }}" style="width:100%;height:100%"></div>
         <script src="{{ url_for('static', filename='vendor/pdfjs/pdf.min.js') }}"></script>
         <script src="{{ url_for('static', filename='js/pdfviewer.js') }}"></script>
-        <script>PdfViewer.mount(document.getElementById('pvFrame'), {uri: {{ manuscript_data_uri|tojson }}, fit: 'width', filename: {{ ((page.original_filename or 'document') ~ '.pdf')|tojson }}});</script>
+        <script>PdfViewer.mount(document.getElementById('pvFrame'), {uri: {{ manuscript_data_uri|tojson }}, fit: 'width', startPage: {{ start_page|tojson }}, filename: {{ ((page.original_filename or 'document') ~ '.pdf')|tojson }}});</script>
       {% else %}
         {# fallback - רק אם המרה ל-PDF נכשלה מסיבה כלשהי #}
         <img src="{{ manuscript_data_uri }}" alt="כתב יד">
@@ -146,7 +158,21 @@
         <span id="recBtnLabel">התחל הקלטה</span>
       </button>
       <button id="cancelBtn" class="btn btn-ghost" style="display:none" onclick="cancelRecording()">✖ ביטול הקלטה</button>
+      <button id="pauseBtn" class="btn btn-ghost" style="display:none" onclick="openPauseBox()" title="שומר את מה שהוקרא עד עכשיו, עם סימניה, וממשיכים מתי שרוצים">⏸ השהה ושמור</button>
       <span class="ds-timer" id="timer">00:00</span>
+    </div>
+
+    <div id="pauseBox" style="display:none;margin:10px 0;padding:12px 14px;border:2px solid #38bdf8;border-radius:12px;background:var(--surface2)">
+      <div style="font-weight:700;margin-bottom:8px">⏸ השהיה - איפה עצרתם?</div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+        <label style="font-size:13px">עמוד בקובץ<br><input id="bookmarkPage" type="number" min="1" style="width:90px;padding:7px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text)"></label>
+        <label style="font-size:13px;flex:1;min-width:200px">הערה לסימניה (לא חובה)<br><input id="bookmarkNote" type="text" maxlength="500" placeholder="למשל: באמצע הפסקה השנייה, אחרי &quot;וזה לשונו&quot;" style="width:100%;padding:7px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);box-sizing:border-box"></label>
+      </div>
+      <div style="margin-top:6px;font-size:12px;color:var(--text3)">העמוד מולא לפי העמוד שמוצג עכשיו בתצוגה - אפשר לתקן. ההקלטה ממשיכה עד שלוחצים "שמור והשהה".</div>
+      <div style="margin-top:10px;display:flex;gap:8px">
+        <button type="button" class="btn btn-primary" onclick="confirmPause()">💾 שמור והשהה</button>
+        <button type="button" class="btn btn-ghost" onclick="document.getElementById('pauseBox').style.display='none'">חזרה להקלטה</button>
+      </div>
     </div>
 
     <div id="ctlArea" style="position:relative">
@@ -190,6 +216,8 @@
     <div id="resultArea">
       {% if page.status == 'processing' %}
         <div class="ds-state">⏳ מתמלל את ההקלטה...</div>
+      {% elif page.status == 'paused' %}
+        <div class="ds-state">⏸ מושהה - לחצו "התחל הקלטה" כדי להמשיך מהסימניה</div>
       {% elif page.status == 'error' %}
         <div class="ds-state ds-error">⚠ {{ page.error_message or 'שגיאה בתמלול' }}</div>
         <div style="text-align:center"><button class="btn btn-primary" onclick="redo()">נסה שוב</button></div>
@@ -326,6 +354,8 @@ async function startRecording() {
   btn.classList.add('rec');
   document.getElementById('recBtnLabel').textContent = 'עצור הקלטה';
   document.getElementById('cancelBtn').style.display = 'inline-flex';
+  document.getElementById('pauseBtn').style.display = 'inline-flex';
+  pauseInfo = null;
   setFormatButtonsEnabled(true);
   document.getElementById('engineSelect').disabled = true;
 
@@ -548,6 +578,8 @@ function stopRecording() {
   btn.disabled = true;
   document.getElementById('recBtnLabel').textContent = 'ממתין...';
   document.getElementById('cancelBtn').style.display = 'none';
+  document.getElementById('pauseBtn').style.display = 'none';
+  document.getElementById('pauseBox').style.display = 'none';
   setFormatButtonsEnabled(false);
 
   mediaStream.getTracks().forEach(t => t.stop());
@@ -571,10 +603,39 @@ function cancelRecording() {
   if (mediaStream) mediaStream.getTracks().forEach(t => t.stop());
   segments = [];
   segChunks = [];
+  pauseInfo = null;
   document.getElementById('cancelBtn').style.display = 'none';
+  document.getElementById('pauseBtn').style.display = 'none';
+  document.getElementById('pauseBox').style.display = 'none';
   document.getElementById('timer').textContent = '00:00';
   setFormatButtonsEnabled(false);
   resetRecordButton();
+}
+
+// ---------- השהיה עם סימניה ----------
+let pauseInfo = null;
+function viewerAbsolutePage() {
+  const f = document.getElementById('pvFrame');
+  if (!f || !f.__pdfv) return '';
+  const first = parseInt(f.dataset.firstPage || '1', 10) || 1;
+  return first + f.__pdfv.currentPage() - 1;
+}
+function openPauseBox() {
+  document.getElementById('bookmarkPage').value = viewerAbsolutePage();
+  document.getElementById('pauseBox').style.display = 'block';
+}
+function confirmPause() {
+  pauseInfo = {
+    page: document.getElementById('bookmarkPage').value,
+    note: document.getElementById('bookmarkNote').value,
+  };
+  stopRecording();
+}
+function goToBookmark() {
+  const f = document.getElementById('pvFrame');
+  const start = {{ start_page|tojson }};
+  if (f && f.__pdfv && start) f.__pdfv.goPage(start);
+  else location.href = `/admin/dictate/${PAGE_ID}`;
 }
 
 async function uploadAllSegments() {
@@ -598,6 +659,12 @@ async function uploadAllSegments() {
   });
   fd.append('meta', JSON.stringify(meta));
   fd.append('engine', document.getElementById('engineSelect').value);
+  if (pauseInfo) {
+    fd.append('pause', '1');
+    fd.append('bookmark_page', pauseInfo.page || '');
+    fd.append('bookmark_note', pauseInfo.note || '');
+    document.getElementById('resultArea').innerHTML = '<div class="ds-state">⏳ שומר ומתמלל את מה שהוקרא עד עכשיו...</div>';
+  }
   try {
     const res = await fetch(`/admin/dictate/${PAGE_ID}/process`, { method: 'POST', body: fd });
     if (!res.ok) {
@@ -649,6 +716,14 @@ async function pollStatus() {
     return;
   }
   pollStarted = 0; pollEmpty = 0;
+  if (data.status === 'paused') {
+    document.getElementById('resultArea').innerHTML =
+      `<div class="ds-state">✅ נשמר והושהה. אפשר לסגור את הדף ולהמשיך מתי שרוצים - הדף נשאר בתור עם הסימניה.<br><br>
+       <a href="/admin/dictate" class="btn btn-ghost">← חזרה לתור</a> <a href="/admin/dictate/${PAGE_ID}" class="btn btn-ghost">המשך עכשיו</a></div>`;
+    document.getElementById('statusBadge').textContent = 'paused';
+    resetRecordButton();
+    return;
+  }
   currentContent = data.content;
   renderReview();
   document.getElementById('statusBadge').textContent = data.status;
@@ -824,7 +899,7 @@ async function unfreezeThis(btn) {
 }
 
 async function redo() {
-  if (!confirm('להתחיל הקלטה מחדש לדף הזה? התוצאה הנוכחית תימחק.')) return;
+  if (!confirm({{ (('להתחיל הקלטה מחדש לדף הזה? כל הטקסט יימחק - כולל ' ~ (page.dictation_sessions or 0) ~ ' ההקראות הקודמות שנשמרו בהשהיות.') if (page.dictation_sessions or 0) > 1 else 'להתחיל הקלטה מחדש לדף הזה? התוצאה הנוכחית תימחק.')|tojson }})) return;
   await fetch(`/admin/dictate/${PAGE_ID}/redo`, { method: 'POST' });
   location.reload();
 }

@@ -325,6 +325,11 @@ def _migrate_db():
         "ALTER TABLE manuscript_pages ADD COLUMN IF NOT EXISTS proof_cost FLOAT DEFAULT 0.0",
         "ALTER TABLE manuscript_pages ADD COLUMN IF NOT EXISTS proof_final_file_data BYTEA",
         "ALTER TABLE manuscript_pages ADD COLUMN IF NOT EXISTS proof_final_filename VARCHAR(255)",
+        # השהיית הקראה + סימניה (routes/dictate.py - status='paused')
+        "ALTER TABLE manuscript_pages ADD COLUMN IF NOT EXISTS bookmark_page INTEGER",
+        "ALTER TABLE manuscript_pages ADD COLUMN IF NOT EXISTS bookmark_note TEXT",
+        "ALTER TABLE manuscript_pages ADD COLUMN IF NOT EXISTS paused_at TIMESTAMP",
+        "ALTER TABLE manuscript_pages ADD COLUMN IF NOT EXISTS dictation_sessions INTEGER DEFAULT 0",
         "CREATE INDEX IF NOT EXISTS ix_manuscript_pages_proof_status ON manuscript_pages (proof_status)",
         # עורך הגהה מובנה בדפדפן (עיצוב מלא/חיפוש-החלפה/בדיקת איות) - ראה
         # models.ManuscriptPage.proof_edited_content ו-routes/dictate.py.proof_save_edited

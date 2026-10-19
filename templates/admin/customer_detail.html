@@ -332,6 +332,7 @@ function confirmOcrDelete() {
           {% elif m.status == 'error' %}<span class="badge badge-red">שגיאה</span>
           {% elif m.status == 'processing' %}<span class="badge badge-amber">מתמלל...</span>
           {% elif m.status == 'review' %}<span class="badge badge-amber">ממתין לאישור</span>
+          {% elif m.status == 'paused' %}<span class="badge badge-blue">⏸ מושהה{% if m.bookmark_page %} · עמוד {{ m.bookmark_page }}{% endif %}</span>
           {% elif m.status == 'recording' %}<span class="badge badge-blue">בהקלטה</span>
           {% else %}<span class="badge badge-gray">ממתין</span>{% endif %}
         </td>

@@ -41,6 +41,7 @@
         if (f && f.__pdfv) f.__pdfv.load(d.uri);
         else if (f) f.src = d.uri + (nav.dataset.hash || '');
         cur = d.part; range.textContent = d.first_page + '–' + d.last_page; msg.textContent = '';
+        if (f) f.dataset.firstPage = d.first_page;   // לחישוב מספר העמוד בקובץ כולו (סימניה)
       })
       .catch(function(){ msg.textContent = 'שגיאה בטעינת החלק'; })
       .then(function(){ busy = false; refresh(); });

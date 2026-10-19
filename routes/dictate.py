@@ -91,7 +91,7 @@ os.makedirs(MANUSCRIPT_DIR, exist_ok=True)
 DICTATION_AUDIO_DIR = os.environ.get('DICTATION_AUDIO_DIR', 'dictation_audio')
 os.makedirs(DICTATION_AUDIO_DIR, exist_ok=True)
 
-OPEN_STATUSES = ('pending', 'recording', 'processing', 'review', 'error')
+OPEN_STATUSES = ('pending', 'recording', 'processing', 'review', 'error', 'paused')
 # סטטוסים שבהם הלקוח "חסום": קיבל מייל שדף שלו ממתין לתשלום / שאין לו יתרה
 # מספקת. דפים נוספים שלו שעוד לא התחילו (pending/recording) לא מוצגים בתור
 # הראשי אלא בלשונית "מוקפאים", ויחזרו לתור (לפי תאריך ההגעה המקורי) ברגע
@@ -339,7 +339,44 @@ def _build_content_from_segments(segments):
 # --------------------------------------------------------------------------
 # worker ברקע: ממיר+מתמלל כל סגמנט (במקביל, עד 6 בו-זמנית), מרכיב לפסקאות, שומר
 # --------------------------------------------------------------------------
-def _dictation_worker(app, page_id, segment_files, segment_meta, engine=None):
+def _content_tail(content, n=220):
+    """המילים האחרונות שהוקראו - מוצג כסימניה טבעית ("עצרתם כאן")."""
+    text = ' '.join(''.join(r.get('text', '') for r in p.get('runs', [])) for p in (content or []))
+    text = ' '.join(text.split())
+    return ('…' + text[-n:].split(' ', 1)[-1]) if len(text) > n else text
+
+
+def _merge_content(base, new, new_starts_paragraph):
+    """מחבר תוכן של הקראה חדשה אחרי תוכן שכבר נשמר (המשך אחרי השהיה). אם ההקראה
+    החדשה לא התחילה ב"שורה חדשה" - היא ממשיכה את הפסקה האחרונה (השהיה באמצע משפט)."""
+    import copy
+    base = copy.deepcopy(base or [])
+    new = copy.deepcopy(new or [])
+    if not base:
+        return new
+    if not new:
+        return base
+    last, first = base[-1], new[0]
+    if new_starts_paragraph or last.get('heading') or first.get('heading') or not first.get('runs') or not last.get('runs'):
+        return base + new
+    runs = first['runs']
+    t = runs[0]['text']
+    if t and not t[0] in '.,:;?!)]' and not last['runs'][-1]['text'].endswith(' '):
+        runs[0]['text'] = ' ' + t
+    for r in runs:
+        lr = last['runs'][-1]
+        if lr.get('bold') == r.get('bold') and lr.get('underline') == r.get('underline'):
+            lr['text'] += r['text']
+        else:
+            last['runs'].append(r)
+    return base + new[1:]
+
+
+def _dictation_worker(app, page_id, segment_files, segment_meta, engine=None, base_content=None,
+                      pause=None):
+    """base_content: תוכן שכבר נשמר בהקראה קודמת (המשך אחרי השהיה) - התוכן החדש
+       מתווסף אחריו. pause: None = הקראה רגילה (בסוף - 'review'); dict
+       {'page': n, 'note': '...'} = השהיה: שומרים את הכל וחוזרים ל-'paused' עם סימניה."""
     """segment_files: נתיבים לקבצי אודיו זמניים, לפי סדר ההקלטה - אך ורק
        עבור פריטי meta מסוג 'audio' (ראו process() למטה); פריטי 'literal'
        (סימני פיסוק שהוכנסו בלחיצת כפתור - ראו PUNCTUATION_BUTTONS בסטודיו)
@@ -423,6 +460,9 @@ def _dictation_worker(app, page_id, segment_files, segment_meta, engine=None):
                 segments.append(dict(meta, text=text))
 
             content = _build_content_from_segments(segments)
+            if base_content:
+                starts_par = bool(segment_meta and segment_meta[0].get('new_paragraph'))
+                content = _merge_content(base_content, content, starts_par)
 
             if not content:
                 page.status = 'error'
@@ -431,8 +471,15 @@ def _dictation_worker(app, page_id, segment_files, segment_meta, engine=None):
                 return
 
             page.content = content
-            page.status = 'review'
+            page.dictation_sessions = (page.dictation_sessions or 0) + 1
             page.error_message = None
+            if pause is not None:
+                page.status = 'paused'
+                page.bookmark_page = pause.get('page')
+                page.bookmark_note = pause.get('note')
+                page.paused_at = datetime.utcnow()
+            else:
+                page.status = 'review'
             db.session.commit()
             log.info(
                 f"dictation processed: page={page_id}, engine={engine}, paragraphs={len(content)}, "
@@ -440,8 +487,15 @@ def _dictation_worker(app, page_id, segment_files, segment_meta, engine=None):
             )
         except Exception as e:
             log.error(f"dictation worker error (page={page_id}): {e}", exc_info=True)
-            page.status = 'error'
-            page.error_message = str(e)
+            db.session.rollback()
+            if base_content:
+                # לא מאבדים את מה שכבר הוקרא בפעמים הקודמות - חוזרים להשהיה עם הודעה
+                page.status = 'paused'
+                page.content = base_content
+                page.error_message = f'ההקראה האחרונה לא תומללה ({e}) - מה שנשמר קודם לא נפגע, אפשר להקליט שוב מהסימניה'
+            else:
+                page.status = 'error'
+                page.error_message = str(e)
             db.session.commit()
         finally:
             for path in segment_files:
@@ -1623,7 +1677,19 @@ def studio(page_id):
         page.claimed_by = getattr(current_user, 'username', 'admin')
         page.claimed_at = datetime.utcnow()
         db.session.commit()
-    pv = _manuscript_preview(page, request.args.get('part', 1, type=int))
+    # דף מושהה: נפתח ישר בחלק ובעמוד של הסימניה
+    start_page = None
+    req_part = request.args.get('part', type=int)
+    if page.status == 'paused' and page.bookmark_page and not req_part:
+        pv = _manuscript_preview(page, 1)
+        per = pv.get('per_part') or PREVIEW_MAX_PAGES
+        part = (page.bookmark_page - 1) // per + 1
+        if part != 1:
+            pv = _manuscript_preview(page, part)
+        if pv.get('first_page'):
+            start_page = page.bookmark_page - pv['first_page'] + 1
+    else:
+        pv = _manuscript_preview(page, req_part or 1)
     _acct = _manuscript_billing_account(page.customer)
     acct_balance = float(getattr(_acct, 'balance', 0) or 0) if _acct is not None else None
     acct_is_institution = bool(_acct is not None and _acct is not page.customer)
@@ -1641,6 +1707,9 @@ def studio(page_id):
         manuscript_is_pdf=pv['is_pdf'],
         pv=pv,
         pv_url=url_for('dictate.studio_preview_part', page_id=page.id),
+        start_page=start_page,
+        paused_chars=_manuscript_char_count(page.content) if page.status == 'paused' else 0,
+        paused_tail=_content_tail(page.content) if page.status == 'paused' else '',
     )
 
 
@@ -1746,13 +1815,22 @@ def process(page_id):
         f.save(path)
         segment_paths.append(path)
 
+    # השהיה (שמירת מה שהוקרא עד עכשיו + סימניה) / המשך אחרי השהיה (הוספה לתוכן הקיים)
+    pause = None
+    if request.form.get('pause') == '1':
+        bp = request.form.get('bookmark_page', type=int)
+        pause = {'page': bp if bp and bp > 0 else None,
+                 'note': (request.form.get('bookmark_note') or '').strip()[:500] or None}
+    base_content = page.content if page.status == 'paused' and page.content else None
+
     page.status = 'processing'
     page.engine = engine
     page.claimed_by = getattr(current_user, 'username', 'admin')
     db.session.commit()
 
     app_obj = current_app._get_current_object()
-    t = threading.Thread(target=_dictation_worker, args=(app_obj, page_id, segment_paths, segment_meta, engine), daemon=True)
+    t = threading.Thread(target=_dictation_worker, args=(app_obj, page_id, segment_paths, segment_meta, engine),
+                         kwargs={'base_content': base_content, 'pause': pause}, daemon=True)
     t.start()
 
     return jsonify({'status': 'processing', 'engine': engine})
@@ -1819,6 +1897,10 @@ def redo(page_id):
     page.error_message = None
     page.claimed_by = None
     page.claimed_at = None
+    page.bookmark_page = None
+    page.bookmark_note = None
+    page.paused_at = None
+    page.dictation_sessions = 0
     db.session.commit()
     return jsonify({'status': 'pending'})
 

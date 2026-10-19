@@ -253,6 +253,13 @@ class ManuscriptPage(db.Model):
     claimed_at = db.Column(db.DateTime, nullable=True)
     error_message = db.Column(db.Text, nullable=True)
     sent_at = db.Column(db.DateTime, nullable=True)
+    # השהיית הקראה ארוכה (status='paused'): מה שהוקרא עד עכשיו כבר תומלל ושמור
+    # ב-content, והסימניה מראה מאיפה להמשיך. בהמשך ההקראה הטקסט החדש מתווסף אחרי
+    # הקיים (routes/dictate.py._merge_content).
+    bookmark_page = db.Column(db.Integer, nullable=True)      # מספר העמוד בקובץ כולו (מ-1)
+    bookmark_note = db.Column(db.Text, nullable=True)         # הערה חופשית, למשל "באמצע הפסקה השנייה"
+    paused_at = db.Column(db.DateTime, nullable=True)
+    dictation_sessions = db.Column(db.Integer, default=0)     # כמה הקראות נפרדות חוברו לדף הזה
     sent_to = db.Column(db.String(255), nullable=True)
     # ערוץ המסירה בפועל של ה-Word המוכן: 'email' (ל-sent_to, כתובת מייל) או
     # 'fax' (ל-sent_to, מספר טלפון) - נבחר אוטומטית ב-routes/dictate.py.send():

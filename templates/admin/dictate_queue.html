@@ -178,6 +178,7 @@ async function sendFree(id, btn) {
           {% elif p.status == 'recording' %}<span class="badge badge-blue">בהקלטה</span>
           {% elif p.status == 'processing' %}<span class="badge badge-amber">מתמלל...</span>
           {% elif p.status == 'review' %}<span class="badge badge-amber">ממתין לאישור</span>
+          {% elif p.status == 'paused' %}<span class="badge badge-blue">⏸ מושהה</span>{% if p.bookmark_page %} <span style="color:#8892b0;font-size:11.5px">סימניה: עמוד {{ p.bookmark_page }}{% if p.bookmark_note %} · {{ p.bookmark_note[:40] }}{% endif %}</span>{% endif %}
           {% elif p.status == 'pending_payment' %}<span class="badge badge-amber">💳 ממתין לתשלום</span>{% if p.due_cost %} <span style="color:#8892b0;font-size:11.5px">₪{{ "%.2f"|format(p.due_cost) }}</span>{% endif %}
           {% elif p.status == 'awaiting_topup' %}<span class="badge badge-gray">❄️ ממתין לטעינה</span> <span style="color:#8892b0;font-size:11.5px">נשלחה ללקוח הודעה - העיבוד לא התחיל</span>
           {% elif p.frozen_note %}<span class="badge badge-gray">❄️ מוקפא</span> <span style="color:#8892b0;font-size:11.5px">{{ p.frozen_note }}</span>

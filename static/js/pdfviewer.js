@@ -379,6 +379,11 @@
             pgInput.value = '1'; pgTotal.textContent = '/ ' + doc.numPages;
             scroll.scrollTop = 0;
             layout();
+            // פתיחה בעמוד מסוים (למשל סימניה של הקראה מושהית) - רק בטעינה הראשונה
+            if (opts.startPage && !state.startDone) {
+              state.startDone = true;
+              setTimeout(function () { goPage(opts.startPage); }, 60);
+            }
           });
         }).catch(function (err) {
           if (myLoad !== state.loadId) return;
@@ -400,7 +405,8 @@
       var b = scroll.querySelector('.pdfv-retry'); if (b) b.addEventListener('click', function () { load(uri); });
     }
 
-    var api = { load: load, rotate: rotate, el: el };
+    var api = { load: load, rotate: rotate, el: el, goPage: goPage,
+                currentPage: function () { return state.current || 1; } };
     el.__pdfv = api;
     if (opts.uri) load(opts.uri); else message('⚠ הקובץ אינו זמין');
     return api;
