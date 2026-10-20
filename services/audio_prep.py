@@ -202,6 +202,45 @@ def iter_wav_chunks(path, chunk_seconds=300):
             yield buf.getvalue()
 
 
+def iter_wav_chunks_at_silence(path, max_seconds=600, search_seconds=120, window_seconds=0.2):
+    """כמו iter_wav_chunks, אבל כל חיתוך נעשה ברגע השקט ביותר שבתוך search_seconds
+    האחרונות שלפני max_seconds (למשל בין דקה 8 לדקה 10) - כדי לא לחתוך באמצע מילה.
+    כל חלק לכל היותר max_seconds. נקרא מהדיסק חלק-חלק (זיכרון קבוע).
+    מחזיר bytes של WAV לכל חלק. מניח PCM 16 ביט (כמו הפלט של prepare_wav)."""
+    import numpy as np
+    with wave.open(path, 'rb') as w:
+        ch, sw, rate, total = w.getnchannels(), w.getsampwidth(), w.getframerate(), w.getnframes()
+        max_frames = int(rate * max_seconds)
+        win = max(1, int(rate * window_seconds))
+        pos = 0
+        while pos < total:
+            w.setpos(pos)
+            data = w.readframes(max_frames)
+            n = len(data) // (sw * ch)
+            if not n:
+                break
+            cut = n
+            if pos + n < total and sw == 2:
+                # מחפשים את החלון השקט ביותר בקטע החיפוש שבסוף החלק
+                samples = np.frombuffer(data, dtype='<i2')
+                if ch > 1:
+                    samples = samples[::ch]
+                lo = max(0, n - int(rate * search_seconds))
+                region = samples[lo:lo + ((n - lo) // win) * win].astype(np.float32)
+                if region.size >= win:
+                    rms = np.sqrt((region.reshape(-1, win) ** 2).mean(axis=1))
+                    cut = lo + int(rms.argmin()) * win + win // 2
+            chunk = data[:cut * sw * ch]
+            buf = io.BytesIO()
+            with wave.open(buf, 'wb') as out:
+                out.setnchannels(ch)
+                out.setsampwidth(sw)
+                out.setframerate(rate)
+                out.writeframes(chunk)
+            yield buf.getvalue()
+            pos += cut
+
+
 def chunk_count(path, chunk_seconds=300):
     info = wav_info(path)
     if not info:

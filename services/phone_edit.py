@@ -32,6 +32,8 @@ log = logging.getLogger(__name__)
 
 DEFAULT_ALLOWED = '0527134491'
 MAX_SEGMENTS = 400
+CHUNK_SECONDS = 600         # 10 דקות = כ-19MB ב-WAV 16kHz מונו, מתחת למגבלת 25MB של OpenAI
+CHUNK_SEARCH_SECONDS = 120  # החיתוך ברגע השקט ביותר בשתי הדקות האחרונות של כל חלק
 
 
 def allowed_phone(phone):
@@ -71,8 +73,14 @@ def _transcribe_audio(rec_url, client, keep_path=None):
             shutil.copyfile(prepared[0], keep_path)
         if prepared[2] < 1:
             return '', 0
-        with open(prepared[0], 'rb') as fh:
-            return _transcribe_segment_openai(fh.read(), client), prepared[2]
+        # OpenAI מקבל עד 25MB לבקשה. WAV של 16kHz מונו = כ-1.9MB לדקה, ולכן קטע ארוך
+        # (למשל שעה בלי אף לחיצה) נשלח בחלקים של עד 10 דקות, והטקסט מחובר לפי הסדר.
+        # כל חיתוך נעשה ברגע השקט ביותר שבין דקה 8 לדקה 10 של החלק - לא באמצע מילה.
+        # בלי זה OpenAI מחזיר 400 "audio file might be corrupted" והקטע יוצא ריק.
+        texts = [_transcribe_segment_openai(chunk, client)
+                 for chunk in audio_prep.iter_wav_chunks_at_silence(prepared[0], max_seconds=CHUNK_SECONDS,
+                                                                    search_seconds=CHUNK_SEARCH_SECONDS)]
+        return ' '.join(t for t in texts if t), prepared[2]
     except Exception as e:
         log.warning(f"phone_edit: קטע לא תומלל ({rec_url[-60:]}): {e}")
         return '', 0
