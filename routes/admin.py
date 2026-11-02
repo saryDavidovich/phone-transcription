@@ -212,6 +212,34 @@ def logout():
     flask_session.clear()
     return redirect(url_for('admin.login'))
 
+@admin_bp.route('/live-calls')
+@login_required
+def live_calls():
+    """לוח חי בדשבורד: השיחות שעל הקו עכשיו, משרת ה-IVR (/internal/live-calls).
+    נקרא מהדפדפן כל כמה שניות - רק כשהדשבורד פתוח וגלוי."""
+    import requests
+    ivr_url = os.environ.get('NODE_IVR_URL', '').rstrip('/')
+    secret = os.environ.get('INTERNAL_PROXY_SECRET', '')
+    if not (ivr_url and secret):
+        return jsonify({'ok': False, 'error': 'NODE_IVR_URL / INTERNAL_PROXY_SECRET לא מוגדרים'})
+    try:
+        r = requests.get(f'{ivr_url}/internal/live-calls', headers={'X-Internal-Secret': secret}, timeout=5)
+        r.raise_for_status()
+        calls = r.json().get('calls', [])
+    except Exception as e:
+        return jsonify({'ok': False, 'error': f'שרת ה-IVR לא ענה ({type(e).__name__})'})
+    phones = {c.get('phone') for c in calls if c.get('phone')}
+    by_phone = {}
+    if phones:
+        for cu in Customer.query.filter(Customer.phone.in_(phones)).all():
+            by_phone[cu.phone] = cu
+    for c in calls:
+        cu = by_phone.get(c.get('phone'))
+        c['name'] = (cu.name or '') if cu else ''
+        c['customer_id'] = cu.id if cu else None
+    return jsonify({'ok': True, 'calls': calls})
+
+
 @admin_bp.route('/')
 @admin_bp.route('/dashboard')
 @login_required

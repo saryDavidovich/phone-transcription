@@ -3,6 +3,53 @@
 {% block page_title %}דשבורד{% endblock %}
 {% block content %}
 
+<!-- לוח חי: מי על הקו עכשיו ובאיזו שלוחה (מתעדכן כל 3 שניות, רק כשהדף גלוי) -->
+<div class="table-card" style="margin-bottom:20px">
+  <div class="table-header">
+    <span class="table-title"><span id="liveDot" style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#8892b0;margin-left:6px"></span>על הקו עכשיו</span>
+    <span id="liveCount" style="color:#8892b0;font-size:13px">טוען...</span>
+  </div>
+  <div id="liveBody" style="padding:6px 16px 14px"></div>
+</div>
+<script>
+(function () {
+  const body = document.getElementById('liveBody'), cnt = document.getElementById('liveCount'),
+        dot = document.getElementById('liveDot');
+  const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const dur = s => { s = Math.max(0, s|0); const m = Math.floor(s / 60); return m + ':' + String(s % 60).padStart(2, '0'); };
+  const CUST_URL = '{{ url_for("admin.customer_detail", id=0) }}';
+  let timer = null, busy = false;
+  async function tick() {
+    if (busy || document.hidden) return;
+    busy = true;
+    try {
+      const r = await fetch('{{ url_for("admin.live_calls") }}', {cache: 'no-store'});
+      const d = await r.json();
+      if (!d.ok) { dot.style.background = '#ef4444'; cnt.textContent = d.error || 'שגיאה'; return; }
+      dot.style.background = d.calls.length ? '#10b981' : '#8892b0';
+      cnt.textContent = d.calls.length ? d.calls.length + ' שיחות פעילות' : 'אין שיחות כרגע';
+      if (!d.calls.length) { body.innerHTML = '<div style="color:#8892b0;padding:8px 0">אף אחד לא על הקו</div>'; return; }
+      body.innerHTML = '<table style="width:100%;border-collapse:collapse;font-size:14px"><thead><tr style="color:#8892b0;text-align:right">'
+        + '<th style="padding:6px">מתקשר</th><th style="padding:6px">שלוחה / שלב</th><th style="padding:6px">בשלב הזה</th><th style="padding:6px">משך השיחה</th></tr></thead><tbody>'
+        + d.calls.map(c => {
+            const who = c.customer_id
+              ? `<a href="${CUST_URL.replace('/0', '/' + c.customer_id)}" style="color:var(--accent)">${esc(c.name || c.phone)}</a> <span style="color:#8892b0">${esc(c.name ? c.phone : '')}</span>`
+              : `${esc(c.phone)} <span style="color:#8892b0">(לא רשום)</span>`;
+            const idle = c.idle_seconds > 90 ? ` <span style="color:#8892b0" title="לא התקבלה פעולה מהמתקשר">· שקט ${dur(c.idle_seconds)}</span>` : '';
+            return `<tr style="border-top:1px solid rgba(136,146,176,.15)"><td style="padding:7px 6px">${who}</td>`
+              + `<td style="padding:7px 6px;font-weight:700">${esc(c.stage)}${idle}</td>`
+              + `<td style="padding:7px 6px">${dur(c.stage_seconds)}</td><td style="padding:7px 6px">${dur(c.seconds)}</td></tr>`;
+          }).join('') + '</tbody></table>';
+    } catch (e) {
+      dot.style.background = '#ef4444'; cnt.textContent = 'אין חיבור';
+    } finally { busy = false; }
+  }
+  tick();
+  timer = setInterval(tick, 3000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) tick(); });
+})();
+</script>
+
 <div class="stats-grid">
   <div class="stat-card">
     <div class="stat-icon" style="background:rgba(79,110,247,0.15)">👥</div>
