@@ -580,6 +580,129 @@ def _download_gdrive_file(file_id, dest_dir):
         return None, None, None
 
 
+# --- ג'מבו מייל (jumbomail.me) ---
+# הלקוח שולח קבצים דרך ג'מבו מייל לכתובת המערכת. המייל מגיע מכתובת של ג'מבו,
+# ובגופו קישור להעברה. מה-API הציבורי של ג'מבו (אותו API שהדף שלהם משתמש בו,
+# בלי התחברות) מקבלים: נושא ההעברה (שבו הלקוח כותב טלפון/מקצועי/שפה כרגיל),
+# כתובת המייל של השולח, ורשימת הקבצים - ומורידים קובץ דרך קישור הורדה חתום.
+_JUMBO_LINK_RE = re.compile(r'https?://(?:[\w-]+\.)?jumbomail\.me/[^\s<>"\'\)]+', re.IGNORECASE)
+_JUMBO_GALLERY_RE = re.compile(r'/gallery/([0-9A-Fa-f]{16,})', re.IGNORECASE)
+_JUMBO_API = 'https://api.jumbomail.me'
+_JUMBO_HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Accept': '*/*',
+}
+
+
+def _jumbo_find_link(*texts):
+    """קישור ג'מבו מייל ראשון שנמצא (בטקסט או ב-HTML הגולמי, כולל href), או None."""
+    import html as _html
+    for t in texts:
+        m = _JUMBO_LINK_RE.search(_html.unescape(t or ''))
+        if m:
+            link = m.group(0)
+            # לא קישורים כלליים של האתר (לוגו/תנאי שימוש) - רק קישור להעברה
+            if re.search(r'/(j|gallery|l)/', link, re.IGNORECASE):
+                return link
+    return None
+
+
+def _jumbo_post(path, payload, timeout=60):
+    import requests
+    r = requests.post(f'{_JUMBO_API}/{path}', json=payload, headers=_JUMBO_HEADERS, timeout=timeout)
+    r.raise_for_status()
+    return r.json()
+
+
+def _jumbo_resolve(link):
+    """מקישור העברה -> dict: mail_id, uid, subject, sender, files [(id, שם, גודל)].
+    None בכשלון (קישור פג תוקף / נמחק / שינוי ב-API של ג'מבו)."""
+    import requests
+    from urllib.parse import urlparse, parse_qs
+    try:
+        m = _JUMBO_GALLERY_RE.search(link)
+        final = link
+        if not m:
+            r = requests.get(link, headers=_JUMBO_HEADERS, timeout=30, allow_redirects=True)
+            final = r.url
+            m = _JUMBO_GALLERY_RE.search(final)
+        if not m:
+            log.warning(f"jumbomail: לא נמצא מזהה העברה בקישור {link[:80]} (סופי: {final[:80]})")
+            return None
+        mail_id = m.group(1)
+        uid = (parse_qs(urlparse(final).query).get('uid') or [None])[0]
+        if not uid:
+            um = re.search(r'/u/([0-9A-Fa-f]{16,})', link)
+            uid = um.group(1) if um else None
+
+        info = _jumbo_post('Mails/ReactGetMailInfo', {'encryptedMailId': mail_id, 'isCollection': False})
+        meta = (info or {}).get('MetaData') or {}
+        files_resp = _jumbo_post('Mails/ReactGetMailFiles', {'encryptedMailId': mail_id, 'page': 1,
+                                                             'perPage': 30, 'sortAsc': True})
+        files, sender = [], None
+        for fid, f in ((files_resp or {}).get('files') or {}).items():
+            files.append((str(fid), f.get('Name') or f'jumbo_{fid}', f.get('Size') or 0))
+            sender = sender or (f.get('contributorName') or '').strip().lower() or None
+        if not sender:
+            sender = (((info or {}).get('Sender') or {}).get('email') or '').strip().lower() or None
+        result = {'mail_id': mail_id, 'uid': uid, 'subject': (meta.get('subjectText') or '').strip(),
+                  'sender': sender if sender and '@' in sender else None, 'files': files}
+        log.info(f"jumbomail: העברה {mail_id[:12]}... נושא={result['subject']!r} שולח={result['sender']!r} "
+                 f"קבצים={[n for _, n, _ in files]}")
+        return result
+    except Exception as e:
+        log.error(f"jumbomail: כשלון בקריאת ההעברה מהקישור {link[:80]}: {e}")
+        return None
+
+
+def _jumbo_pick_file(info):
+    """הקובץ הראשון בהעברה שהוא שמע/וידאו או תמונה/PDF - (id, שם) או (None, None)."""
+    for fid, name, _size in (info or {}).get('files') or []:
+        ext = os.path.splitext(name)[1].lstrip('.').lower()
+        if ext in AUDIO_VIDEO_EXTENSIONS or ext in IMAGE_EXTENSIONS:
+            return fid, name
+    return None, None
+
+
+def _download_jumbo_file(info, file_id, original_name, dest_dir):
+    """מוריד קובץ אחד מההעברה. מחזיר (filepath, original_filename, dest_filename)
+    או (None, None, None) בכשלון - כמו _download_gdrive_file."""
+    import requests
+    try:
+        link = _jumbo_post('Mails/ReactGetDownloadLink', {
+            'folderPathId': None, 'encryptedMailId': info['mail_id'], 'fileList': str(file_id),
+            'downloadType': 'multi', 'password': None, 'isCollection': False, 'culture': 'he',
+            'isProxySuccess': True, 'uid': info.get('uid'),
+        })
+        if isinstance(link, dict):
+            link = link.get('data')
+        if not isinstance(link, str) or not link.startswith('http'):
+            log.error(f"jumbomail: לא התקבל קישור הורדה (תשובה: {str(link)[:200]})")
+            return None, None, None
+        ext = os.path.splitext(original_name)[1].lstrip('.').lower()
+        if ext not in AUDIO_VIDEO_EXTENSIONS and ext not in IMAGE_EXTENSIONS:
+            ext = 'mp3'   # אבטחה: סיומת מדיה מוכרת בלבד
+        dest_filename = f"{uuid.uuid4().hex}.{ext}"
+        dest_path = os.path.join(dest_dir, dest_filename)
+        # הקישור מפנה לכתובת CDN חתומה. requests/urllib3 "מתקנים" בה קידוד
+        # (%3b -> %3B) והחתימה נפסלת (403) - לכן את הכתובת החתומה מורידים עם
+        # urllib.request, ששולח אותה בדיוק כפי שהתקבלה.
+        import urllib.request
+        r0 = requests.get(link, headers=_JUMBO_HEADERS, timeout=60, allow_redirects=False)
+        cdn_url = r0.headers.get('Location') if r0.status_code in (301, 302, 303, 307, 308) else link
+        with urllib.request.urlopen(urllib.request.Request(cdn_url, headers=_JUMBO_HEADERS), timeout=300) as r:
+            if 'text/html' in (r.headers.get('Content-Type') or ''):
+                log.error("jumbomail: התקבל דף HTML במקום קובץ")
+                return None, None, None
+            with open(dest_path, 'wb') as f:
+                shutil.copyfileobj(r, f, 1024 * 1024)
+        log.info(f"jumbomail: הורד {original_name!r} ({os.path.getsize(dest_path)} bytes) -> {dest_filename}")
+        return dest_path, original_name, dest_filename
+    except Exception as e:
+        log.error(f"jumbomail: הורדה נכשלה ({original_name!r}): {e}")
+        return None, None, None
+
+
 def _estimate_duration_seconds(filepath):
     """מנסה לחשב משך אודיו (בשניות) ללא תלות בפורמט, לצורך חיוב התחלתי."""
     try:
@@ -1566,6 +1689,21 @@ def email_inbound():
         with app.app_context():
             return _handle_incoming_fax(sender_email, subject, db)
 
+    # העברה מג'מבו מייל (בלי קובץ מצורף, עם קישור להעברה): הנושא שהלקוח כתב
+    # (טלפון / מקצועי / רגיל / שפה - כמו בכל מייל) וכתובת השולח נלקחים מההעברה
+    # עצמה, כי המייל מגיע מכתובת של ג'מבו ולא מהלקוח. מכאן והלאה - טיפול רגיל.
+    jumbo_info = None
+    if not attachment_names:
+        jumbo_link = _jumbo_find_link(fax_check_body_text, request.form.get('html', ''))
+        if jumbo_link:
+            jumbo_info = _jumbo_resolve(jumbo_link)
+            if jumbo_info:
+                if not _parse_subject(subject) and _parse_subject(jumbo_info['subject']):
+                    subject = jumbo_info['subject']
+                if jumbo_info['sender'] and ('jumbomail' in sender_email or not sender_email):
+                    sender_email = jumbo_info['sender']
+                log.info(f"email-inbound: העברת ג'מבו מייל - נושא={subject!r} שולח={sender_email!r}")
+
     # תגובת הגהה - הלקוח שלח בחזרה קובץ Word עם תיקונים משלו, בעקבות הכפתור
     # שמופיע במייל ההקראה (routes/dictate.py._proofing_mailto_link). נושא
     # "הגהה {טלפון} {page_id}" - נבדק לפני _parse_subject הרגיל כי הפורמט שונה
@@ -1748,7 +1886,27 @@ def email_inbound():
         attached_file, file_type = _pick_file()
         gdrive_filepath = None  # אם הורדנו מ-Drive - לניקוי בשגיאה
 
-        if attached_file is None:
+        if attached_file is None and jumbo_info:
+            # העברה מג'מבו מייל - הקובץ הראשון שהוא שמע/וידאו או תמונה/PDF
+            jfid, jname = _jumbo_pick_file(jumbo_info)
+            filepath = None
+            if jfid:
+                filepath, original_filename, filename = _download_jumbo_file(
+                    jumbo_info, jfid, jname, RECORDINGS_EMAIL_DIR)
+            if not filepath:
+                _send_guidance_email(sender_email, 'no_attachment', phone=phone)
+                return jsonify({'status': 'rejected', 'reason': 'jumbo_download_failed'}), 200
+            others = len(jumbo_info['files']) - 1
+            if others > 0:
+                log.warning(f"email-inbound: בהעברת ג'מבו מייל יש עוד {others} קבצים - מתומלל רק {jname!r}")
+            gdrive_filepath = filepath   # לניקוי בשגיאה, כמו קובץ מ-Drive
+            jext = os.path.splitext(original_filename or '')[1].lstrip('.').lower()
+            file_type = 'image' if jext in IMAGE_EXTENSIONS else 'audio'
+            base_url = os.environ.get('APP_BASE_URL', '').rstrip('/')
+            rec_url = f"{base_url}/api/recordings-email/{filename}"
+            duration_seconds = _estimate_duration_seconds(filepath) if file_type == 'audio' else 0
+
+        elif attached_file is None:
             # אין קובץ מצורף - נבדוק אם יש קישור Google Drive בגוף המייל
             body_text = request.form.get('text', '') or _strip_html(request.form.get('html', ''))
             file_id = _extract_gdrive_file_id(body_text)
