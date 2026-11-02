@@ -240,6 +240,28 @@ def live_calls():
     return jsonify({'ok': True, 'calls': calls})
 
 
+@admin_bp.route('/live-calls/action', methods=['POST'])
+@login_required
+def live_call_action():
+    """העברת מתקשר מהלוח החי: לתפריט / לאפשרות בתפריט הראשי / לשלוחה בימות / ניתוק."""
+    import requests
+    ivr_url = os.environ.get('NODE_IVR_URL', '').rstrip('/')
+    secret = os.environ.get('INTERNAL_PROXY_SECRET', '')
+    if not (ivr_url and secret):
+        return jsonify({'ok': False, 'error': 'NODE_IVR_URL / INTERNAL_PROXY_SECRET לא מוגדרים'})
+    data = request.get_json(silent=True) or {}
+    payload = {'id': str(data.get('id', '')), 'type': str(data.get('type', '')),
+               'target': str(data.get('target', ''))[:40]}
+    try:
+        r = requests.post(f'{ivr_url}/internal/live-action', json=payload,
+                          headers={'X-Internal-Secret': secret}, timeout=25)
+        out = r.json()
+    except Exception as e:
+        return jsonify({'ok': False, 'error': f'שרת ה-IVR לא ענה ({type(e).__name__})'})
+    logging.getLogger(__name__).info(f"live-call action by {getattr(current_user, 'username', '?')}: {payload} -> {out}")
+    return jsonify(out)
+
+
 @admin_bp.route('/')
 @admin_bp.route('/dashboard')
 @login_required

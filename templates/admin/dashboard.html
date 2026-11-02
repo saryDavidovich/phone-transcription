@@ -3,24 +3,82 @@
 {% block page_title %}דשבורד{% endblock %}
 {% block content %}
 
-<!-- לוח חי: מי על הקו עכשיו ובאיזו שלוחה (מתעדכן כל 3 שניות, רק כשהדף גלוי) -->
-<div class="table-card" style="margin-bottom:20px">
+<!-- לוח חי: מי על הקו עכשיו, באיזו שלוחה ותת-שלוחה, והעברה לשלוחה אחרת (מתעדכן כל 3 שניות, רק כשהדף גלוי) -->
+<style>
+  .lv-act { position:relative; display:inline-block }
+  .lv-btn { background:rgba(79,110,247,.15); color:var(--accent); border:1px solid rgba(79,110,247,.4); border-radius:8px; padding:5px 10px; font-size:13px; cursor:pointer; white-space:nowrap }
+  .lv-hang { background:rgba(239,68,68,.12); color:#ef4444; border-color:rgba(239,68,68,.45) }
+  .lv-btn[disabled] { opacity:.45; cursor:not-allowed }
+  .lv-menu { display:none; position:absolute; left:0; top:100%; z-index:50; min-width:230px; background:#0d1b2a; border:1px solid rgba(136,146,176,.3); border-radius:10px; padding:6px; box-shadow:0 8px 24px rgba(0,0,0,.45) }
+  .lv-act:hover .lv-menu, .lv-act:focus-within .lv-menu { display:block }
+  .lv-act:has(.lv-btn[disabled]) .lv-menu { display:none }
+  .lv-menu button { display:block; width:100%; text-align:right; background:none; border:0; color:inherit; padding:6px 8px; border-radius:6px; font-size:13px; cursor:pointer }
+  .lv-menu button:hover { background:rgba(79,110,247,.18) }
+  .lv-menu .lv-sep { border-top:1px solid rgba(136,146,176,.2); margin:5px 0 }
+  .lv-menu .lv-folder { display:flex; gap:6px; padding:4px 8px }
+  .lv-menu .lv-folder input { flex:1; min-width:0; background:#112240; border:1px solid rgba(136,146,176,.3); border-radius:6px; color:inherit; padding:4px 6px; font-size:13px; direction:ltr }
+  .lv-menu .lv-folder button { width:auto; background:rgba(79,110,247,.2) }
+  .lv-path { display:inline-block; background:rgba(16,185,129,.14); color:#10b981; border-radius:6px; padding:1px 7px; font-weight:700; margin-left:6px; direction:ltr }
+  .lv-sub { color:#8892b0; font-size:12.5px; font-weight:400; margin-top:3px }
+</style>
+<div class="table-card" style="margin-bottom:20px;overflow:visible">
   <div class="table-header">
     <span class="table-title"><span id="liveDot" style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#8892b0;margin-left:6px"></span>על הקו עכשיו</span>
     <span id="liveCount" style="color:#8892b0;font-size:13px">טוען...</span>
   </div>
   <div id="liveBody" style="padding:6px 16px 14px"></div>
+  <div id="liveMsg" style="display:none;margin:0 16px 12px;padding:8px 12px;border-radius:8px;font-size:13px"></div>
 </div>
 <script>
 (function () {
   const body = document.getElementById('liveBody'), cnt = document.getElementById('liveCount'),
-        dot = document.getElementById('liveDot');
+        dot = document.getElementById('liveDot'), msgEl = document.getElementById('liveMsg');
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const dur = s => { s = Math.max(0, s|0); const m = Math.floor(s / 60); return m + ':' + String(s % 60).padStart(2, '0'); };
   const CUST_URL = '{{ url_for("admin.customer_detail", id=0) }}';
-  let timer = null, busy = false;
+  const ACTION_URL = '{{ url_for("admin.live_call_action") }}';
+  const MENU = [['', 'תפריט ראשי'], ['1', 'הקלטה לתמלול'], ['2', 'אפשרויות (ארנק, פרטים, מחירון)'], ['3', 'הסבר על המערכת'],
+                ['4', 'הקלטה מהירה'], ['5', 'הוראות שליחה במייל'], ['6', 'כתב יד'], ['7', 'כניסה עם מספר תלמיד'],
+                ['8', 'היסטוריית מסמכים'], ['9', 'הודעה למנהל']];
+  let busy = false;
+
+  function showMsg(text, ok) {
+    msgEl.style.display = 'block';
+    msgEl.style.background = ok ? 'rgba(16,185,129,.15)' : 'rgba(239,68,68,.15)';
+    msgEl.style.color = ok ? '#10b981' : '#ef4444';
+    msgEl.textContent = text;
+    clearTimeout(showMsg.t); showMsg.t = setTimeout(() => { msgEl.style.display = 'none'; }, 8000);
+  }
+
+  async function act(id, type, target, label) {
+    if (type === 'hangup' && !confirm('לנתק את השיחה?')) return;
+    document.activeElement && document.activeElement.blur();
+    try {
+      const r = await fetch(ACTION_URL, {method: 'POST', headers: {'Content-Type': 'application/json'},
+                                         body: JSON.stringify({id, type, target})});
+      const d = await r.json();
+      if (!d.ok) return showMsg(d.error || 'ההעברה נכשלה', false);
+      showMsg(d.immediate ? `המתקשר הועבר: ${label}` : `ההעברה (${label}) תתבצע בהקשה הבאה של המתקשר`, true);
+      tick();
+    } catch (e) { showMsg('אין חיבור לשרת', false); }
+  }
+  window.__lvAct = act;
+
+  function actionCell(c) {
+    const dis = !c.can_transfer;
+    const items = MENU.map(([d, l]) => `<button type="button" onclick="__lvAct('${esc(c.id)}','menu','${d}','${esc((d ? d + ' · ' : '') + l)}')">${d ? d + ' · ' : ''}${esc(l)}</button>`).join('');
+    return `<div class="lv-act"><button type="button" class="lv-btn" ${dis ? 'disabled title="המתקשר באמצע הקלטה - אי אפשר להעביר עכשיו"' : ''}>${c.pending ? 'ממתין להעברה…' : 'העבר ▾'}</button>`
+      + `<div class="lv-menu">${items}<div class="lv-sep"></div>`
+      + `<div class="lv-folder"><input placeholder="שלוחה בימות, למשל /5" id="lvf-${esc(c.id)}">`
+      + `<button type="button" onclick="(function(){const v=document.getElementById('lvf-${esc(c.id)}').value.trim(); if(v) __lvAct('${esc(c.id)}','folder',v,'שלוחה '+v)})()">העבר</button></div>`
+      + `<div class="lv-sep"></div><button type="button" style="color:#ef4444" onclick="__lvAct('${esc(c.id)}','hangup','','ניתוק')">ניתוק השיחה</button></div></div>`
+      + ` <button type="button" class="lv-btn lv-hang" ${dis ? 'disabled title="המתקשר באמצע הקלטה - אי אפשר לנתק עכשיו"' : 'title="ניתוק השיחה"'} onclick="__lvAct('${esc(c.id)}','hangup','','ניתוק')">✕ נתק</button>`;
+  }
+
   async function tick() {
     if (busy || document.hidden) return;
+    // בזמן שתפריט ההעברה פתוח (ריחוף/הקלדה) לא מרעננים, כדי שלא ייסגר מתחת לעכבר
+    if (body.querySelector('.lv-act:hover, .lv-act:focus-within')) return;
     busy = true;
     try {
       const r = await fetch('{{ url_for("admin.live_calls") }}', {cache: 'no-store'});
@@ -28,24 +86,30 @@
       if (!d.ok) { dot.style.background = '#ef4444'; cnt.textContent = d.error || 'שגיאה'; return; }
       dot.style.background = d.calls.length ? '#10b981' : '#8892b0';
       cnt.textContent = d.calls.length ? d.calls.length + ' שיחות פעילות' : 'אין שיחות כרגע';
+      if (body.querySelector('.lv-act:hover, .lv-act:focus-within')) return;
       if (!d.calls.length) { body.innerHTML = '<div style="color:#8892b0;padding:8px 0">אף אחד לא על הקו</div>'; return; }
       body.innerHTML = '<table style="width:100%;border-collapse:collapse;font-size:14px"><thead><tr style="color:#8892b0;text-align:right">'
-        + '<th style="padding:6px">מתקשר</th><th style="padding:6px">שלוחה / שלב</th><th style="padding:6px">בשלב הזה</th><th style="padding:6px">משך השיחה</th></tr></thead><tbody>'
+        + '<th style="padding:6px">מתקשר</th><th style="padding:6px">שלוחה / שלב</th><th style="padding:6px">בשלב הזה</th><th style="padding:6px">משך השיחה</th><th style="padding:6px"></th></tr></thead><tbody>'
         + d.calls.map(c => {
             const who = c.customer_id
               ? `<a href="${CUST_URL.replace('/0', '/' + c.customer_id)}" style="color:var(--accent)">${esc(c.name || c.phone)}</a> <span style="color:#8892b0">${esc(c.name ? c.phone : '')}</span>`
               : `${esc(c.phone)} <span style="color:#8892b0">(לא רשום)</span>`;
-            const idle = c.idle_seconds > 90 ? ` <span style="color:#8892b0" title="לא התקבלה פעולה מהמתקשר">· שקט ${dur(c.idle_seconds)}</span>` : '';
-            return `<tr style="border-top:1px solid rgba(136,146,176,.15)"><td style="padding:7px 6px">${who}</td>`
-              + `<td style="padding:7px 6px;font-weight:700">${esc(c.stage)}${idle}</td>`
-              + `<td style="padding:7px 6px">${dur(c.stage_seconds)}</td><td style="padding:7px 6px">${dur(c.seconds)}</td></tr>`;
+            const idle = c.idle_seconds > 90 && !c.recording ? ` <span style="color:#8892b0;font-weight:400" title="לא התקבלה פעולה מהמתקשר">· שקט ${dur(c.idle_seconds)}</span>` : '';
+            const path = (c.keys && c.keys.length) ? `<span class="lv-path" title="המקשים שהמתקשר הקיש מהתפריט הראשי">${esc(c.keys.join(' › '))}</span>` : '';
+            const rec = c.recording ? ' <span style="color:#ef4444">● מקליט</span>' : '';
+            const sub = c.sub_num !== null && c.sub_num !== undefined
+              ? `<div class="lv-sub">הודעה ${String(c.sub_num).padStart(3, '0')}${c.sub ? ': ' + esc(c.sub) : ''}</div>` : '';
+            return `<tr style="border-top:1px solid rgba(136,146,176,.15);vertical-align:top"><td style="padding:7px 6px">${who}</td>`
+              + `<td style="padding:7px 6px;font-weight:700">${path}${esc(c.stage)}${rec}${idle}${sub}</td>`
+              + `<td style="padding:7px 6px">${dur(c.stage_seconds)}</td><td style="padding:7px 6px">${dur(c.seconds)}</td>`
+              + `<td style="padding:7px 6px;text-align:left;white-space:nowrap">${actionCell(c)}</td></tr>`;
           }).join('') + '</tbody></table>';
     } catch (e) {
       dot.style.background = '#ef4444'; cnt.textContent = 'אין חיבור';
     } finally { busy = false; }
   }
   tick();
-  timer = setInterval(tick, 3000);
+  setInterval(tick, 3000);
   document.addEventListener('visibilitychange', () => { if (!document.hidden) tick(); });
 })();
 </script>
