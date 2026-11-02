@@ -206,6 +206,7 @@ textarea.form-input { resize:vertical; min-height:80px; }
   <nav class="sidebar-nav">
     <a href="/admin/dashboard" class="nav-item {% if request.endpoint == 'admin.dashboard' %}active{% endif %}">
       <span class="nav-icon">📊</span> דשבורד
+      <span id="liveNavBadge" title="שיחות פעילות עכשיו" style="display:none;margin-right:auto;min-width:20px;height:20px;padding:0 6px;border-radius:10px;background:#10b981;color:#fff;font-size:12px;font-weight:700;line-height:20px;text-align:center"></span>
     </a>
     <a href="/admin/customers" class="nav-item {% if request.endpoint in ['admin.customers','admin.customer_detail'] %}active{% endif %}">
       <span class="nav-icon">👥</span> לקוחות
@@ -301,6 +302,27 @@ function updateThemeIcon() {
   document.getElementById('themeToggleBtn').textContent = isLight ? '☀️' : '🌙';
 }
 updateThemeIcon();
+
+// עיגול ירוק ליד "דשבורד" בכל עמודי הניהול: מספר השיחות החיות עכשיו.
+// מתעדכן כל 10 שניות, רק כשהלשונית גלויה (כשהיא ברקע - אין שום פנייה לשרת).
+(function () {
+  const b = document.getElementById('liveNavBadge');
+  if (!b) return;
+  let busy = false;
+  async function upd() {
+    if (busy || document.hidden) return;
+    busy = true;
+    try {
+      const r = await fetch('{{ url_for("admin.live_count") }}', {cache: 'no-store'});
+      const d = await r.json();
+      if (d.ok && d.count > 0) { b.textContent = d.count; b.style.display = 'inline-block'; }
+      else b.style.display = 'none';
+    } catch (e) { b.style.display = 'none'; } finally { busy = false; }
+  }
+  upd();
+  setInterval(upd, 10000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) upd(); });
+})();
 </script>
 
 </body>

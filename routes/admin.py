@@ -240,6 +240,22 @@ def live_calls():
     return jsonify({'ok': True, 'calls': calls})
 
 
+@admin_bp.route('/live-count')
+@login_required
+def live_count():
+    """מספר השיחות החיות בלבד - לעיגול ליד "דשבורד" בתפריט הצד (כל 10 שניות)."""
+    import requests
+    ivr_url = os.environ.get('NODE_IVR_URL', '').rstrip('/')
+    secret = os.environ.get('INTERNAL_PROXY_SECRET', '')
+    if not (ivr_url and secret):
+        return jsonify({'ok': False})
+    try:
+        r = requests.get(f'{ivr_url}/internal/live-calls', headers={'X-Internal-Secret': secret}, timeout=4)
+        return jsonify({'ok': True, 'count': len(r.json().get('calls', []))})
+    except Exception:
+        return jsonify({'ok': False})
+
+
 @admin_bp.route('/live-calls/action', methods=['POST'])
 @login_required
 def live_call_action():

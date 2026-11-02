@@ -1808,6 +1808,10 @@ def email_inbound():
 
     parsed = _parse_subject(subject)
     if not parsed:
+        # יש קובץ? (מצורף, או קישור Drive / ג'מבו מייל) - קובע איזה מענה אוטומטי יישלח
+        inbox_has_file = bool(attachment_names or jumbo_info or
+                              _extract_gdrive_file_id(fax_check_body_text) or
+                              _extract_gdrive_file_id(request.form.get('html', '')))
         raw_text = request.form.get('text') or ''
         raw_html = request.form.get('html') or ''
         body_text = _clean_text(raw_text.strip() or _strip_html(raw_html))
@@ -1829,10 +1833,17 @@ def email_inbound():
                     db.session.flush()
                 msg = CustomerMessage(thread_id=thread.id, customer_id=matched_customer.id,
                                        direction='in', body=body_text, is_read=False)
+                # מענה אוטומטי בלי קובץ - לא יותר מפעם ב-12 שעות לאותו לקוח (התכתבות שוטפת)
+                from datetime import datetime as _dt, timedelta as _td
+                recent_in = CustomerMessage.query.filter(
+                    CustomerMessage.customer_id == matched_customer.id, CustomerMessage.direction == 'in',
+                    CustomerMessage.created_at >= _dt.utcnow() - _td(hours=12)).count()
                 db.session.add(msg)
                 db.session.commit()
                 _save_message_attachments(db, customer_message_id=msg.id)
                 log.info(f"email-inbound: הודעה כללית שויכה ללקוח {matched_customer.phone} (thread_id={thread.id})")
+                if not _is_auto_generated(sender_email, raw_headers) and (inbox_has_file or not recent_in):
+                    _send_inbox_autoreply(sender_email, inbox_has_file, phone=matched_customer.phone)
                 return jsonify({'status': 'ok', 'reason': 'matched_to_customer_inbox'}), 200
 
             # אין שום זיהוי לקוח - לתיבה הכללית. אם זו תגובה לשרשור קיים (לפי
@@ -1852,12 +1863,18 @@ def email_inbound():
                 db.session.add(thread)
                 db.session.flush()
 
+            from datetime import datetime as _dt, timedelta as _td
+            recent_in = InboxMessage.query.join(GeneralInboxMessage, InboxMessage.thread_id == GeneralInboxMessage.id).filter(
+                GeneralInboxMessage.from_email == sender_email, InboxMessage.direction == 'in',
+                InboxMessage.created_at >= _dt.utcnow() - _td(hours=12)).count()
             inbox_msg = InboxMessage(thread_id=thread.id, direction='in', body=body_text)
             thread.is_read = False
             db.session.add(inbox_msg)
             db.session.commit()
             _save_message_attachments(db, inbox_message_id=inbox_msg.id)
             log.warning(f"email-inbound: הודעה ללא זיהוי לקוח מאת {sender_email} - נשמרה בתיבה הכללית (thread_id={thread.id})")
+            if not _is_auto_generated(sender_email, raw_headers) and (inbox_has_file or not recent_in):
+                _send_inbox_autoreply(sender_email, inbox_has_file)
 
         return jsonify({'status': 'ok', 'reason': 'saved_to_general_inbox'}), 200
 
@@ -2143,6 +2160,61 @@ def _send_guidance_email(to_email, reason, phone=''):
         log.info(f"Guidance email sent to {to_email} (reason: {reason})")
     except Exception as e:
         log.error(f"Failed to send guidance email to {to_email}: {e}")
+
+
+_NO_REPLY_SENDER_RE = re.compile(r'(^|[._-])(no-?reply|do-?not-?reply|mailer-daemon|postmaster|bounces?)([._+-]|@)', re.IGNORECASE)
+
+
+def _is_auto_generated(sender_email, raw_headers):
+    """מייל אוטומטי (מענה אוטומטי / החזרה / רשימת תפוצה / noreply) - לא עונים לו,
+    כדי שלא ייווצרו לולאות של מענים אוטומטיים בין שתי מערכות."""
+    if not sender_email or _is_system_inbound_address(sender_email) or _NO_REPLY_SENDER_RE.search(sender_email):
+        return True
+    h = raw_headers or ''
+
+    def hdr(name):
+        m = re.search(rf'^{name}\s*:\s*(.*)$', h, re.IGNORECASE | re.MULTILINE)
+        return m.group(1).strip() if m else ''
+    auto = hdr('Auto-Submitted')
+    if auto and auto.lower() != 'no':
+        return True
+    if re.search(r'^(X-Autoreply|X-Autorespond|X-Auto-Response-Suppress|List-Id|List-Unsubscribe)\s*:', h,
+                 re.IGNORECASE | re.MULTILINE):
+        return True
+    prec = hdr('Precedence').lower()
+    return prec in ('bulk', 'junk', 'list', 'auto_reply')
+
+
+def _send_inbox_autoreply(to_email, has_file, phone=None):
+    """מענה אוטומטי למייל שנכנס לשירות הלקוחות (בלי טלפון תקין בנושא):
+    עם קובץ - הסבר איך לשלוח לתמלול; בלי קובץ - אישור שהפנייה התקבלה."""
+    from services import email_layout as L
+    if has_file:
+        head = 'הקובץ התקבל בשירות הלקוחות'
+        body = ('המייל והקובץ המצורף התקבלו והועברו לשירות הלקוחות.\n\n'
+                'כדי שהקובץ יתומלל אוטומטית, יש לשלוח אותו שוב כאשר בשורת הנושא כתוב '
+                'רק מספר הטלפון הרשום במערכת, למשל:\n'
+                '0501234567\n\n'
+                'לתמלול מקצועי מוסיפים אחרי המספר את המילה "מקצועי", למשל:\n'
+                '0501234567 מקצועי\n\n'
+                'שימו לב: יש לשלוח מכתובת המייל הרשומה במערכת עבור אותו מספר טלפון.')
+        subject = 'תמלול פון - כך שולחים קובץ לתמלול'
+    else:
+        head = 'פנייתך התקבלה'
+        body = ('תודה על פנייתך.\n'
+                'ההודעה התקבלה בשירות הלקוחות ותטופל בהקדם האפשרי.\n'
+                'התשובה תישלח לכתובת מייל זו.')
+        subject = 'תמלול פון - פנייתך התקבלה'
+    html = L.wrap(L.title(head) + L.text_block(body) + L.signature(), phone=phone)
+    try:
+        import sendgrid
+        from sendgrid.helpers.mail import Mail, Email
+        sg = sendgrid.SendGridAPIClient(api_key=os.environ.get('SENDGRID_API_KEY'))
+        sg.send(Mail(from_email=Email(os.environ.get('SENDGRID_FROM_EMAIL', os.environ.get('GMAIL_USER', '')), 'תמלול פון'),
+                     to_emails=to_email, subject=subject, html_content=html))
+        log.info(f"email-inbound: מענה אוטומטי לשירות לקוחות נשלח ל-{to_email} (has_file={has_file})")
+    except Exception as e:
+        log.error(f"email-inbound: מענה אוטומטי ל-{to_email} נכשל: {e}")
 
 
 @email_bp.route('/send-email-instructions', methods=['POST'])
