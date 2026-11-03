@@ -108,9 +108,17 @@
       dot.style.background = '#ef4444'; cnt.textContent = 'אין חיבור';
     } finally { busy = false; }
   }
+  // רענון פנימי: הסקריפט רץ שוב בכל כניסה לדשבורד - מבטלים את הטיימר הקודם,
+  // והטיימר עוצר את עצמו כשיוצאים מהדשבורד (הלוח כבר לא בעמוד).
+  if (window.__liveDash) { clearInterval(window.__liveDash.timer); document.removeEventListener('visibilitychange', window.__liveDash.vis); }
+  const vis = () => { if (!document.hidden) tick(); };
+  const timer = setInterval(() => {
+    if (!document.body.contains(body)) { clearInterval(timer); document.removeEventListener('visibilitychange', vis); window.__liveDash = null; return; }
+    tick();
+  }, 3000);
+  window.__liveDash = {timer, vis};
+  document.addEventListener('visibilitychange', vis);
   tick();
-  setInterval(tick, 3000);
-  document.addEventListener('visibilitychange', () => { if (!document.hidden) tick(); });
 })();
 </script>
 

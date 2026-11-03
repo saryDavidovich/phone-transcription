@@ -15,6 +15,19 @@
   if (saved === 'light') document.documentElement.setAttribute('data-theme', 'light');
 })();
 </script>
+{# רענונים פנימיים (Turbo Drive): מעבר בין עמודי הניהול בלי טעינה מלאה של הדף.
+   - רק קישורים תחת /admin; טפסים נשלחים כרגיל (form mode off).
+   - בלי טעינה מוקדמת בריחוף (prefetch) - שקישור כמו "יציאה" לא יופעל מעצמו.
+   - עמוד שצריך טעינה מלאה (אולפן הקראה וכו') מגדיר turbo_meta=reload.
+   - קישורי הורדה מסומנים data-turbo=false אוטומטית (סקריפט בתחתית). #}
+{% block turbo_meta %}{% endblock %}
+<meta name="turbo-prefetch" content="false">
+<meta name="turbo-root" content="/admin">
+<script src="/static/vendor/turbo/turbo-8.0.13.js"></script>
+<script>
+  try { Turbo.config ? (Turbo.config.forms.mode = 'off') : Turbo.setFormMode('off'); } catch (e) {}
+  try { Turbo.setProgressBarDelay(80); } catch (e) {}
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
@@ -305,23 +318,64 @@ updateThemeIcon();
 
 // עיגול ירוק ליד "דשבורד" בכל עמודי הניהול: מספר השיחות החיות עכשיו.
 // מתעדכן כל 10 שניות, רק כשהלשונית גלויה (כשהיא ברקע - אין שום פנייה לשרת).
+// עם רענונים פנימיים הסקריפט הזה רץ שוב בכל מעבר עמוד - לכן הטיימר נוצר פעם אחת
+// בלבד (window.__liveNav), והעיגול נמצא מחדש בכל עדכון.
 (function () {
-  const b = document.getElementById('liveNavBadge');
-  if (!b) return;
-  let busy = false;
+  const show = (n) => {
+    const b = document.getElementById('liveNavBadge');
+    if (!b) return;
+    if (n > 0) { b.textContent = n; b.style.display = 'inline-block'; } else b.style.display = 'none';
+  };
+  if (window.__liveNav) { show(window.__liveNav.count); return; }
+  const st = window.__liveNav = {count: 0, busy: false};
   async function upd() {
-    if (busy || document.hidden) return;
-    busy = true;
+    if (st.busy || document.hidden) return;
+    st.busy = true;
     try {
       const r = await fetch('{{ url_for("admin.live_count") }}', {cache: 'no-store'});
       const d = await r.json();
-      if (d.ok && d.count > 0) { b.textContent = d.count; b.style.display = 'inline-block'; }
-      else b.style.display = 'none';
-    } catch (e) { b.style.display = 'none'; } finally { busy = false; }
+      st.count = d.ok ? (d.count || 0) : 0;
+    } catch (e) { st.count = 0; } finally { st.busy = false; show(st.count); }
   }
   upd();
   setInterval(upd, 10000);
   document.addEventListener('visibilitychange', () => { if (!document.hidden) upd(); });
+})();
+
+// שורות בטבלאות שנפתחות בלחיצה (onclick="location='/admin/...'") - גם הן ברענון פנימי.
+// לחיצה עם Ctrl/Cmd פותחת בלשונית חדשה. כפתורים/קישורים/שדות בתוך השורה לא מושפעים.
+// עמודים כבדים עם סקריפטים משלהם (אולפן הקראה/הגהה, שיוך פקס, מצב תחזוקה) - טעינה מלאה רגילה
+window.__fullReloadPath = /^\/admin\/(dictate\/(\d+|proof\/\d+|fax\/\d+)(\/|\?|$)|maintenance(\?|$))/;
+if (!window.__rowClickHooked) {
+  window.__rowClickHooked = true;
+  document.addEventListener('click', (e) => {
+    if (e.button !== 0 || !window.Turbo) return;
+    if (e.target.closest('a, button, input, select, textarea, label, summary')) return;
+    const el = e.target.closest('[onclick]');
+    if (!el) return;
+    const m = (el.getAttribute('onclick') || '').match(/^\s*location(?:\.href)?\s*=\s*['"](\/admin\/[^'"]*)['"]\s*;?\s*$/);
+    if (!m || window.__fullReloadPath.test(m[1])) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.ctrlKey || e.metaKey) window.open(m[1], '_blank');
+    else Turbo.visit(m[1]);
+  }, true);
+}
+
+// קישורי הורדה (קבצים) - בלי רענון פנימי, כדי שהקובץ ירד ישירות ולא פעמיים
+(function () {
+  const DL = /(download|\/excel|export|attachment|\/audio|\/file|\.(xlsx|docx|pdf|zip|csv|wav|mp3)(\?|$))/i;
+  function mark() {
+    document.querySelectorAll('a[href]').forEach((a) => {
+      const h = a.getAttribute('href') || '';
+      if (a.hasAttribute('download') || DL.test(h) || window.__fullReloadPath.test(h)) a.setAttribute('data-turbo', 'false');
+    });
+  }
+  mark();
+  if (!window.__dlMarkHooked) {
+    window.__dlMarkHooked = true;
+    document.addEventListener('turbo:load', mark);
+  }
 })();
 </script>
 
