@@ -789,7 +789,17 @@ def send_recordings(id):
         try:
             from routes.recording_proxy import recording_download_url
             rec_url = recording_download_url(rec.id)
-            if send_method == 'email':
+            if rec.transcription_tier == 'excel' and rec.excel_file:
+                # טבלת אקסל - שולחים את הטבלה עצמה (מייל: קובץ אקסל, פקס: הטבלה כ-PDF), לא תמלול
+                from services import excel_tables as X
+                title = _excel_template_name(rec) or 'טבלה'
+                if send_method == 'email':
+                    X.send_excel_email(send_to, customer, title, rec.excel_file, 0, 0, (rec.duration_seconds or 0) // 60)
+                else:
+                    res = X.send_excel_fax(send_to, rec.excel_file, f'table_resend_{rec.id}.pdf')
+                    if not res.get('ok'):
+                        raise RuntimeError(res.get('error') or 'שליחת הפקס נכשלה')
+            elif send_method == 'email':
                 _send_email(send_to, rec.transcript, customer, rec_url, rec.duration_seconds, source_filename=rec.source_filename, is_premium=(rec.transcription_tier == 'premium'))
             else:
                 _send_fax(send_to, rec.transcript, customer, rec.duration_seconds)
@@ -981,7 +991,28 @@ def recording_detail(id):
         rt_balance=float(customer.balance or 0) if customer else 0.0,
         rt_prior_charge=_recording_prior_net_charge(recording),
         rt_in_progress=recording.status in ('recording', 'processing', 'transcribing', 'alefbot_pending', 'queued'),
+        excel_template_name=_excel_template_name(recording),
     )
+
+
+def _excel_template_name(recording):
+    if recording.transcription_tier != 'excel' or not recording.excel_template_id:
+        return None
+    from models import ExcelTemplate
+    t = ExcelTemplate.query.get(recording.excel_template_id)
+    return (t.name or 'ללא שם') if t else '(התבנית נמחקה)'
+
+
+@admin_bp.route('/recordings/<int:id>/excel')
+@login_required
+def recording_excel_download(id):
+    from services.excel_tables import safe_filename
+    rec = Recording.query.get_or_404(id)
+    if not rec.excel_file:
+        return 'אין טבלה להקלטה הזו', 404
+    return send_file(io.BytesIO(rec.excel_file), as_attachment=True,
+                     download_name=f'{safe_filename(_excel_template_name(rec) or "טבלה")}.xlsx',
+                     mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
 
 def _recording_source_available(rec):
@@ -2299,6 +2330,38 @@ def toggle_institution_block(inst_id):
     db.session.commit()
     flash('המוסד נחסם' if inst.is_blocked else 'החסימה בוטלה')
     return redirect(url_for('admin.institution_detail', inst_id=inst.id))
+
+
+@admin_bp.route('/institutions/<int:inst_id>/delete', methods=['POST'])
+@login_required
+def delete_institution(inst_id):
+    """מחיקת מוסד. התלמידים לא נמחקים - הם מנותקים מהמוסד והופכים ללקוחות רגילים
+    (בדיוק כמו "הורדת תלמיד" בממשק המוסד), עם היתרה וההיסטוריה שלהם. נמחקים:
+    המוסד, יומן החיובים שלו, התמלולים שהעלה בעצמו ובקשות קישור תלמידים.
+    יתרת המוסד עצמו (Institution.balance) אובדת - לכן נדרש להקליד את שם המוסד."""
+    from models import Institution, InstitutionChargeLog, InstitutionUpload, StudentLinkRequest
+    inst = Institution.query.get_or_404(inst_id)
+    if (request.form.get('confirm_name') or '').strip() != (inst.name or '').strip():
+        flash('המוסד לא נמחק - שם המוסד שהוקלד לא תואם')
+        return redirect(url_for('admin.institution_detail', inst_id=inst.id))
+    name, balance = inst.name, float(inst.balance or 0)
+    students = Customer.query.filter_by(institution_id=inst.id).all()
+    for st in students:
+        st.institution_id = None
+        st.student_number = None
+        st.self_funded = 0.0
+        st.is_institution_self = False
+    InstitutionChargeLog.query.filter_by(institution_id=inst.id).delete()
+    InstitutionUpload.query.filter_by(institution_id=inst.id).delete()
+    StudentLinkRequest.query.filter_by(institution_id=inst.id).delete()
+    db.session.delete(inst)
+    db.session.commit()
+    logging.getLogger(__name__).warning(
+        f'institution {inst_id} "{name}" deleted by {getattr(current_user, "username", "?")}: '
+        f'{len(students)} students unlinked, institution balance {balance:.2f} discarded')
+    flash(f'המוסד "{name}" נמחק. {len(students)} תלמידים הפכו ללקוחות רגילים (עם היתרה שלהם)'
+          + (f'. יתרת המוסד (₪{balance:.2f}) נמחקה' if balance else ''))
+    return redirect(url_for('admin.institutions'))
 
 
 @admin_bp.route('/institutions/<int:inst_id>/regenerate-code', methods=['POST'])

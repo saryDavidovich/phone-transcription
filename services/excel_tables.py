@@ -342,9 +342,14 @@ def send_excel_email(to, customer, title, xlsx_bytes, rows_total, rows_new, minu
     import sendgrid
     from sendgrid.helpers.mail import Mail, Attachment, FileContent, FileName, FileType, Disposition, Email
     first = (customer.name or '').split()[0] if customer is not None and getattr(customer, 'name', None) else ''
-    added = f'נוספו {rows_new} שורות' if rows_new != rows_total else f'{rows_total} שורות'
+    if not rows_total:      # שליחה חוזרת - לא ידוע כמה שורות
+        added = 'שליחה חוזרת'
+        rows_total_txt = ''
+    else:
+        added = f'נוספו {rows_new} שורות' if rows_new != rows_total else f'{rows_total} שורות'
+        rows_total_txt = f' · סה"כ בטבלה {rows_total} שורות'
     card = (L.title(f'שלום {_esc(first)}, הטבלה מוכנה' if first else 'הטבלה מוכנה')
-            + L.meta(f'{_esc(title)} · {added} · סה"כ בטבלה {rows_total} שורות')
+            + L.meta(f'{_esc(title)} · {added}{rows_total_txt}')
             + L.text_block('קובץ האקסל מצורף למייל.\n'
                            'תאים בצהוב - ערך שלא נשמע בבירור, כדאי לבדוק. '
                            'תאים באדום בהיר - פרט שלא נאמר בהקלטה.\n'

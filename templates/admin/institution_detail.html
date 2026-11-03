@@ -38,6 +38,19 @@
     <form method="post" action="{{ url_for('admin.toggle_institution_block', inst_id=inst.id) }}">
       <button type="submit" class="btn {{ 'btn-primary' if inst.is_blocked else 'btn-danger' }}">{{ 'ביטול חסימה' if inst.is_blocked else 'חסימת מוסד' }}</button>
     </form>
+    <details style="margin-top:14px">
+      <summary style="cursor:pointer;color:#ef4444;font-size:13px">🗑 מחיקת המוסד</summary>
+      <div style="font-size:12.5px;color:#8892b0;margin:8px 0;line-height:1.7">
+        {{ students|length }} תלמידים ינותקו מהמוסד ויהפכו ללקוחות רגילים, עם היתרה וההיסטוריה שלהם.<br>
+        {% if inst.balance %}<b style="color:#ef4444">יתרת המוסד (₪{{ "%.2f"|format(inst.balance) }}) תימחק.</b><br>{% endif %}
+        לאישור, הקלידו את שם המוסד בדיוק: <b>{{ inst.name }}</b>
+      </div>
+      <form method="post" action="{{ url_for('admin.delete_institution', inst_id=inst.id) }}"
+            onsubmit="return confirm('למחוק את המוסד לצמיתות? אי אפשר לבטל.')" style="display:flex;gap:8px">
+        <input class="form-input" name="confirm_name" placeholder="שם המוסד" autocomplete="off" required>
+        <button type="submit" class="btn btn-danger">מחיקה</button>
+      </form>
+    </details>
   </div>
 </div>
 

@@ -186,6 +186,7 @@
         <td onclick="location='/admin/recordings/{{rec.id}}'" style="cursor:pointer">₪{{ "%.2f"|format(rec.cost) }}</td>
         <td onclick="location='/admin/recordings/{{rec.id}}'" style="cursor:pointer">{{ rec.delivered_to or '—' }}</td>
         <td onclick="location='/admin/recordings/{{rec.id}}'" style="cursor:pointer">
+          {% if rec.transcription_tier == 'excel' %}<span class="badge badge-blue" title="טבלת אקסל מהקלטה">📊 אקסל</span> {% endif %}
           {% if rec.status == 'delivered' %}<span class="badge badge-green">נשלח</span>
           {% elif rec.status == 'pending_payment' %}<span class="badge badge-amber">ממתין לתשלום</span>
           {% elif rec.status == 'error' %}<span class="badge badge-red">שגיאה</span>

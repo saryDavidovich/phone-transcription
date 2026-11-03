@@ -42,10 +42,23 @@ function downloadFile(url, filename) {
     <div style="font-size:18px;font-weight:700;color:#ef4444">₪{{ "%.2f"|format(recording.cost) }}</div>
   </div>
 </div>
+{% if recording.transcription_tier == 'excel' %}
+<div class="card" style="margin-bottom:20px">
+  <div style="font-size:14px;font-weight:600;margin-bottom:6px">📊 טבלת אקסל מהקלטה</div>
+  <div style="color:#8892b0;font-size:13px;margin-bottom:10px">
+    תבנית: <b>{{ excel_template_name or '—' }}</b> · מצב: <b>{{ 'המשך טבלה קיימת' if recording.excel_mode == 'continue' else 'טבלה חדשה' }}</b>
+  </div>
+  {% if recording.excel_file %}
+  <a class="btn btn-primary" style="font-size:13px" href="{{ url_for('admin.recording_excel_download', id=recording.id) }}">⬇ הורדת הטבלה שנשלחה ללקוח</a>
+  {% else %}
+  <span style="color:#8892b0;font-size:13px">הטבלה עוד לא נבנתה</span>
+  {% endif %}
+</div>
+{% endif %}
 <div class="card" style="margin-bottom:20px">
   <div style="font-size:14px;font-weight:600;margin-bottom:6px">🔁 שליחה חוזרת לתמלול</div>
   <div style="color:#8892b0;font-size:13px;margin-bottom:12px">
-    סטטוס נוכחי: <b>{{ recording.status }}</b> · סוג תמלול שנשמר: <b>{{ 'מקצועי' if recording.transcription_tier == 'premium' else 'רגיל' }}</b>
+    סטטוס נוכחי: <b>{{ recording.status }}</b> · סוג תמלול שנשמר: <b>{{ 'מקצועי' if recording.transcription_tier == 'premium' else ('טבלת אקסל' if recording.transcription_tier == 'excel' else 'רגיל') }}</b>
     · יתרת הלקוח: <b>₪{{ "%.2f"|format(rt_balance) }}</b> · יחידות חיוב (20 דק׳): <b>{{ rt_units }}</b>
   </div>
   {% if rt_in_progress %}
