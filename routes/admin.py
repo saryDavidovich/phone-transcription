@@ -584,6 +584,39 @@ def _excel_templates_for(customer):
         return []
 
 
+@admin_bp.route('/customers/<int:id>/cost-report')
+@login_required
+def customer_cost_report(id):
+    """הורדת דוח עלויות (Excel) - ?from=YYYY-MM-DD&to=YYYY-MM-DD, ריק = מההתחלה / עד היום."""
+    from services import cost_report as CR
+    customer = Customer.query.get_or_404(id)
+    f, t = request.args.get('from') or None, request.args.get('to') or None
+    data, _totals = CR.build_xlsx(customer, CR.load_transactions(id, f, t), f, t)
+    return send_file(io.BytesIO(data), as_attachment=True, download_name=CR.filename(customer),
+                     mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+
+
+@admin_bp.route('/customers/<int:id>/cost-report/email', methods=['POST'])
+@login_required
+def customer_cost_report_email(id):
+    from services import cost_report as CR
+    customer = Customer.query.get_or_404(id)
+    to = (request.form.get('to_email') or customer.email or '').strip()
+    if not to or '@' not in to:
+        flash('אין ללקוח כתובת מייל - הדוח לא נשלח')
+        return redirect(url_for('admin.customer_detail', id=id) + '#cost-report')
+    f, t = request.form.get('from') or None, request.form.get('to') or None
+    txns = CR.load_transactions(id, f, t)
+    data, totals = CR.build_xlsx(customer, txns, f, t)
+    try:
+        CR.send_email(to, customer, data, totals, CR.period_label(txns, f, t))
+        flash(f'דוח העלויות נשלח ל-{to}')
+    except Exception as e:
+        logging.getLogger(__name__).error(f'cost report email failed (customer {id}): {e}')
+        flash(f'שליחת הדוח נכשלה: {e}')
+    return redirect(url_for('admin.customer_detail', id=id) + '#cost-report')
+
+
 @admin_bp.route('/customers/<int:id>/excel/<int:tid>')
 @login_required
 def customer_excel_download(id, tid):

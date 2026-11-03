@@ -2130,14 +2130,14 @@ def _manuscript_send_core(page, form_email='', free=False, notify_if_held=True):
                 customer_id=customer.id,
                 amount=-cost,
                 type='manuscript_dictation',
-                description=f'הקראת כתב יד - {page.original_filename}' + (' (חויב מיתרת המוסד)' if billing_account is not customer else ''),
+                description=f'קלדנות דיגיטלית - {page.original_filename}' + (' (חויב מיתרת המוסד)' if billing_account is not customer else ''),
             ))
         elif free and not already_sent and customer:
             db.session.add(Transaction(
                 customer_id=customer.id,
                 amount=0.0,
                 type='manuscript_free',
-                description=f'הקראת כתב יד - {page.original_filename} (נשלח ללא חיוב ע"י נציג, עלות רגילה ₪{full_cost:.2f})',
+                description=f'קלדנות דיגיטלית - {page.original_filename} (נשלח ללא חיוב ע"י נציג, עלות רגילה ₪{full_cost:.2f})',
             ))
         if not already_sent:
             page.char_count = char_count
