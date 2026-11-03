@@ -17,11 +17,12 @@
 </script>
 {# רענונים פנימיים (Turbo Drive): מעבר בין עמודי הניהול בלי טעינה מלאה של הדף.
    - רק קישורים תחת /admin; טפסים נשלחים כרגיל (form mode off).
-   - בלי טעינה מוקדמת בריחוף (prefetch) - שקישור כמו "יציאה" לא יופעל מעצמו.
+   - טעינה מוקדמת בריחוף (prefetch): העמוד מתחיל להיטען כבר כשהעכבר על הקישור/השורה.
+     קישור "יציאה" והורדות מוחרגים; בשרת, בקשת prefetch לא מסמנת הודעות כנקראו.
    - עמוד שצריך טעינה מלאה (אולפן הקראה וכו') מגדיר turbo_meta=reload.
    - קישורי הורדה מסומנים data-turbo=false אוטומטית (סקריפט בתחתית). #}
 {% block turbo_meta %}{% endblock %}
-<meta name="turbo-prefetch" content="false">
+<meta name="turbo-prefetch-cache-time" content="15000">
 <meta name="turbo-root" content="/admin">
 <script src="/static/vendor/turbo/turbo-8.0.13.js"></script>
 <script>
@@ -362,6 +363,30 @@ if (!window.__rowClickHooked) {
   }, true);
 }
 
+// טעינה מוקדמת גם לשורות בטבלאות: כשהעכבר עובר על שורה, Turbo מתחיל להביא את העמוד
+// (דרך קישור נסתר - אותו מנגנון של ריחוף על קישור), כך שהלחיצה כמעט מיידית.
+if (!window.__rowPrefetchHooked) {
+  window.__rowPrefetchHooked = true;
+  let hoverTimer = null, lastUrl = null;
+  document.addEventListener('mouseover', (e) => {
+    if (!window.Turbo) return;
+    const el = e.target.closest && e.target.closest('[onclick]');
+    if (!el) return;
+    const m = (el.getAttribute('onclick') || '').match(/^\s*location(?:\.href)?\s*=\s*['"](\/admin\/[^'"]*)['"]\s*;?\s*$/);
+    if (!m || m[1] === lastUrl || window.__fullReloadPath.test(m[1])) return;
+    clearTimeout(hoverTimer);
+    hoverTimer = setTimeout(() => {
+      lastUrl = m[1];
+      const a = document.createElement('a');
+      a.href = m[1]; a.style.display = 'none';
+      document.body.appendChild(a);
+      a.dispatchEvent(new MouseEvent('mouseenter', {bubbles: false}));
+      setTimeout(() => a.remove(), 1000);
+      setTimeout(() => { if (lastUrl === m[1]) lastUrl = null; }, 15000);
+    }, 60);
+  }, {passive: true});
+}
+
 // קישורי הורדה (קבצים) - בלי רענון פנימי, כדי שהקובץ ירד ישירות ולא פעמיים
 (function () {
   const DL = /(download|\/excel|export|attachment|\/audio|\/file|\.(xlsx|docx|pdf|zip|csv|wav|mp3)(\?|$))/i;
@@ -369,6 +394,7 @@ if (!window.__rowClickHooked) {
     document.querySelectorAll('a[href]').forEach((a) => {
       const h = a.getAttribute('href') || '';
       if (a.hasAttribute('download') || DL.test(h) || window.__fullReloadPath.test(h)) a.setAttribute('data-turbo', 'false');
+      if (/\/logout|\/login/.test(h)) a.setAttribute('data-turbo-prefetch', 'false');
     });
   }
   mark();

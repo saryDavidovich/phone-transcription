@@ -116,6 +116,8 @@ def create_app():
         fax_dir = os.path.join(app.root_path, 'static', 'fax_tmp')
         return send_from_directory(fax_dir, filename)
     
+    _install_request_timing(app)
+
     with app.app_context():
         db.create_all()
         _migrate_db()
@@ -162,6 +164,41 @@ def create_app():
 
     logging.basicConfig(level=logging.INFO)
     return app
+
+def _install_request_timing(app):
+    """מדידת מהירות לעמודי הניהול: כותרת Server-Timing (רואים בכלי המפתחים של הדפדפן)
+    ושורה ביומן לכל עמוד שלקח יותר מ-0.4 שניות - כמה זמן ובכמה שאילתות למסד הנתונים."""
+    import time
+    from flask import g, request
+    from sqlalchemy import event
+
+    with app.app_context():
+        engine = db.engine
+
+    @event.listens_for(engine, 'before_cursor_execute')
+    def _count_query(conn, cursor, statement, parameters, context, executemany):
+        try:
+            g._q_count = getattr(g, '_q_count', 0) + 1
+        except RuntimeError:      # מחוץ לבקשה (תהליכי רקע)
+            pass
+
+    @app.before_request
+    def _t_start():
+        g._t0 = time.perf_counter()
+        g._q_count = 0
+
+    @app.after_request
+    def _t_end(resp):
+        try:
+            ms = (time.perf_counter() - g._t0) * 1000
+            q = getattr(g, '_q_count', 0)
+            resp.headers['Server-Timing'] = f'app;dur={ms:.0f};desc="{q} queries"'
+            if request.path.startswith('/admin') and ms > 400:
+                logging.getLogger('timing').warning(f'SLOW {ms / 1000:.2f}s {q} queries {request.method} {request.path}')
+        except Exception:
+            pass
+        return resp
+
 
 def _migrate_db():
     statements = [
@@ -334,6 +371,15 @@ def _migrate_db():
         "ALTER TABLE recordings ADD COLUMN IF NOT EXISTS excel_template_id INTEGER",
         "ALTER TABLE recordings ADD COLUMN IF NOT EXISTS excel_mode VARCHAR(10)",
         "ALTER TABLE recordings ADD COLUMN IF NOT EXISTS excel_file BYTEA",
+        # מהירות הממשק: אינדקסים לשאילתות של הדשבורד והרשימות (מיון/סינון לפי תאריך וסטטוס)
+        "CREATE INDEX IF NOT EXISTS ix_recordings_created_at ON recordings (created_at)",
+        "CREATE INDEX IF NOT EXISTS ix_recordings_status ON recordings (status)",
+        "CREATE INDEX IF NOT EXISTS ix_transactions_created_at ON transactions (created_at)",
+        "CREATE INDEX IF NOT EXISTS ix_transactions_type_customer ON transactions (type, customer_id)",
+        "CREATE INDEX IF NOT EXISTS ix_ocr_results_created_at ON ocr_results (created_at)",
+        "CREATE INDEX IF NOT EXISTS ix_ocr_results_status ON ocr_results (status)",
+        "CREATE INDEX IF NOT EXISTS ix_customers_created_at ON customers (created_at)",
+        "CREATE INDEX IF NOT EXISTS ix_customer_messages_unread ON customer_messages (direction, is_read)",
         "CREATE INDEX IF NOT EXISTS ix_manuscript_pages_proof_status ON manuscript_pages (proof_status)",
         # עורך הגהה מובנה בדפדפן (עיצוב מלא/חיפוש-החלפה/בדיקת איות) - ראה
         # models.ManuscriptPage.proof_edited_content ו-routes/dictate.py.proof_save_edited

@@ -324,7 +324,7 @@ def dashboard():
     }
 
     # חיובי ארנקות היום — לפי סוג, ערוץ, ושיטת שליחה
-    today_debits = Recording.query.filter(
+    today_debits = Recording.query.options(*_light(Recording)).filter(
         Recording.created_at >= today_start,
         Recording.status == 'delivered',
         Recording.cost > 0
@@ -332,7 +332,7 @@ def dashboard():
 
     # סטטיסטיקות OCR היום
     from models import OcrResult
-    today_ocr = OcrResult.query.filter(
+    today_ocr = OcrResult.query.options(*_light(OcrResult)).filter(
         OcrResult.created_at >= today_start,
         OcrResult.status == 'completed'
     ).all()
@@ -362,8 +362,11 @@ def dashboard():
         'sent_fax_count': sum(1 for r in today_debits if r.delivery_method == 'fax'),
     }
 
-    recent_recordings = Recording.query.order_by(Recording.created_at.desc()).limit(10).all()
-    recent_transactions = Transaction.query.order_by(Transaction.created_at.desc()).limit(10).all()
+    from sqlalchemy.orm import joinedload
+    recent_recordings = Recording.query.options(*_light(Recording), joinedload(Recording.customer)) \
+        .order_by(Recording.created_at.desc()).limit(10).all()
+    recent_transactions = Transaction.query.options(joinedload(Transaction.customer)) \
+        .order_by(Transaction.created_at.desc()).limit(10).all()
 
     pending_stats = {
         'recordings': Recording.query.filter_by(status='pending_payment').count(),
@@ -549,6 +552,20 @@ def export_customers_excel():
         download_name=f'customers_{datetime.now().strftime("%Y%m%d")}.xlsx'
     )
 
+def _light(model, keep=()):
+    """אפשרויות שאילתה שלא טוענות עמודות כבדות (קבצים, JSON, טקסט ארוך) - לעמודי רשימה.
+    העמודה נטענת רק אם ניגשים אליה בפועל (שאילתה קטנה נוספת), כך ששום דבר לא נשבר."""
+    from sqlalchemy.orm import defer
+    from sqlalchemy import LargeBinary, Text, JSON
+    opts = []
+    for col in model.__table__.columns:
+        if col.key in keep:
+            continue
+        if isinstance(col.type, (LargeBinary, Text, JSON)) or col.type.__class__.__name__ in ('JSONB',):
+            opts.append(defer(getattr(model, col.key)))
+    return opts
+
+
 def _excel_templates_for(customer):
     """תבניות אקסל של הלקוח לתצוגה בכרטיס (שלוחה 1 ← 3)."""
     try:
@@ -583,21 +600,23 @@ def customer_excel_download(id, tid):
 def customer_detail(id):
     from models import OcrResult, ConversationThread, ManuscriptPage, ProofingRound, Institution
     customer = Customer.query.get_or_404(id)
-    recordings = Recording.query.filter_by(customer_id=id).order_by(Recording.created_at.desc()).all()
+    # בלי עמודות כבדות (קבצים/תמלולים/JSON) - העמוד מציג רק נתוני רשימה
+    recordings = Recording.query.options(*_light(Recording)).filter_by(customer_id=id).order_by(Recording.created_at.desc()).all()
     transactions = Transaction.query.filter_by(customer_id=id).order_by(Transaction.created_at.desc()).all()
-    ocr_results = OcrResult.query.filter_by(customer_id=id).order_by(OcrResult.created_at.desc()).all()
-    manuscript_pages = ManuscriptPage.query.filter_by(customer_id=id).order_by(ManuscriptPage.created_at.desc()).all()
+    ocr_results = OcrResult.query.options(*_light(OcrResult)).filter_by(customer_id=id).order_by(OcrResult.created_at.desc()).all()
+    manuscript_pages = ManuscriptPage.query.options(*_light(ManuscriptPage)).filter_by(customer_id=id).order_by(ManuscriptPage.created_at.desc()).all()
     # כל סבבי ההגהה ששייכים לכל כתבי-היד של הלקוח הזה (יכול להיות כמה סבבים
     # על אותו כתב-יד - ראה models.ProofingRound) - כל שורה מסמנת בבירור
     # לאיזה הקראה מקורית היא שייכת (r.manuscript_page), כדי להבדיל בפרופיל
     # הלקוח בין עלות ההקראה הראשונית לבין עלות ההגהה.
-    proofing_rounds = (ProofingRound.query.join(ManuscriptPage)
+    proofing_rounds = (ProofingRound.query.options(*_light(ProofingRound)).join(ManuscriptPage)
                         .filter(ManuscriptPage.customer_id == id)
                         .order_by(ProofingRound.requested_at.desc()).all())
     threads = ConversationThread.query.filter_by(customer_id=id).order_by(ConversationThread.created_at.desc()).all()
     # צפייה בעמוד מסמנת הודעות נכנסות כ"נקראו" בכל השיחות - כדי שהתראה בעמוד הודעות למנהל תיעלם
     unread = [m for t in threads for m in t.messages if m.direction == 'in' and not m.is_read]
-    if unread:
+    # טעינה מוקדמת בריחוף (Turbo prefetch) - הלקוח עוד לא נפתח בפועל, לא מסמנים כנקרא
+    if unread and request.headers.get('X-Sec-Purpose') != 'prefetch':
         for m in unread:
             m.is_read = True
         db.session.commit()
@@ -951,7 +970,9 @@ def admin_send_handwriting_instructions(id):
 @login_required
 def recordings():
     page = request.args.get('page', 1, type=int)
-    recordings = Recording.query.order_by(Recording.created_at.desc()).paginate(page=page, per_page=50)
+    from sqlalchemy.orm import joinedload
+    recordings = Recording.query.options(*_light(Recording), joinedload(Recording.customer)) \
+        .order_by(Recording.created_at.desc()).paginate(page=page, per_page=50)
     return render_template('admin/recordings.html', recordings=recordings, timedelta=timedelta)
 
 @admin_bp.route('/recordings/bulk-delete', methods=['POST'])
@@ -1736,7 +1757,8 @@ def ocr_list():
     page = request.args.get('page', 1, type=int)
     search = request.args.get('q', '')
 
-    query = OcrResult.query.order_by(OcrResult.created_at.desc())
+    from sqlalchemy.orm import joinedload
+    query = OcrResult.query.options(*_light(OcrResult), joinedload(OcrResult.customer)).order_by(OcrResult.created_at.desc())
     if search:
         query = query.join(Customer).filter(
             Customer.phone.contains(search) | OcrResult.original_filename.contains(search)
@@ -2066,7 +2088,7 @@ def general_inbox():
 def inbox_thread_detail(id):
     from models import GeneralInboxMessage
     thread = GeneralInboxMessage.query.get_or_404(id)
-    if not thread.is_read:
+    if not thread.is_read and request.headers.get('X-Sec-Purpose') != 'prefetch':
         thread.is_read = True
         db.session.commit()
     return render_template('admin/inbox_thread.html', thread=thread,
