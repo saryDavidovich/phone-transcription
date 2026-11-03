@@ -17,16 +17,19 @@ admin_bp = Blueprint('admin', __name__)
 def inject_new_messages_count():
     from models import ManagerMessage, CustomerMessage, GeneralInboxMessage
     try:
-        from sqlalchemy import or_, and_
-        count = ManagerMessage.query.filter(
+        from sqlalchemy import or_, and_, select
+        # שלוש הספירות בשאילתה אחת (רצה בכל עמוד - כל פנייה למסד הנתונים עולה זמן)
+        mm = select(func.count()).select_from(ManagerMessage).where(
             ManagerMessage.status == 'new',
             or_(
                 and_(ManagerMessage.rec_url.isnot(None), ManagerMessage.rec_url != ''),
                 ManagerMessage.source != 'ivr',
-            )
-        ).count()
-        count += CustomerMessage.query.filter_by(direction='in', is_read=False).count()
-        count += GeneralInboxMessage.query.filter_by(is_read=False).count()
+            )).scalar_subquery()
+        cm = select(func.count()).select_from(CustomerMessage).where(
+            CustomerMessage.direction == 'in', CustomerMessage.is_read.is_(False)).scalar_subquery()
+        gi = select(func.count()).select_from(GeneralInboxMessage).where(
+            GeneralInboxMessage.is_read.is_(False)).scalar_subquery()
+        count = int(db.session.execute(select(mm + cm + gi)).scalar() or 0)
     except Exception:
         count = 0
     return {'new_messages_count': count}
@@ -601,8 +604,15 @@ def customer_detail(id):
     from models import OcrResult, ConversationThread, ManuscriptPage, ProofingRound, Institution
     customer = Customer.query.get_or_404(id)
     # בלי עמודות כבדות (קבצים/תמלולים/JSON) - העמוד מציג רק נתוני רשימה
-    recordings = Recording.query.options(*_light(Recording)).filter_by(customer_id=id).order_by(Recording.created_at.desc()).all()
-    transactions = Transaction.query.filter_by(customer_id=id).order_by(Transaction.created_at.desc()).all()
+    # לקוח עם אלפי הקלטות/עסקאות - מציגים את האחרונות בלבד (מהירות), עם "הצג הכל"
+    show_all = request.args.get('all') == '1'
+    LIST_LIMIT = None if show_all else 150
+    rec_q = Recording.query.options(*_light(Recording)).filter_by(customer_id=id).order_by(Recording.created_at.desc())
+    txn_q = Transaction.query.filter_by(customer_id=id).order_by(Transaction.created_at.desc())
+    recordings = rec_q.limit(LIST_LIMIT).all() if LIST_LIMIT else rec_q.all()
+    transactions = txn_q.limit(LIST_LIMIT).all() if LIST_LIMIT else txn_q.all()
+    recordings_total = Recording.query.filter_by(customer_id=id).count() if LIST_LIMIT and len(recordings) >= LIST_LIMIT else len(recordings)
+    transactions_total = Transaction.query.filter_by(customer_id=id).count() if LIST_LIMIT and len(transactions) >= LIST_LIMIT else len(transactions)
     ocr_results = OcrResult.query.options(*_light(OcrResult)).filter_by(customer_id=id).order_by(OcrResult.created_at.desc()).all()
     manuscript_pages = ManuscriptPage.query.options(*_light(ManuscriptPage)).filter_by(customer_id=id).order_by(ManuscriptPage.created_at.desc()).all()
     # כל סבבי ההגהה ששייכים לכל כתבי-היד של הלקוח הזה (יכול להיות כמה סבבים
@@ -625,6 +635,7 @@ def customer_detail(id):
         ocr_results=ocr_results, manuscript_pages=manuscript_pages, proofing_rounds=proofing_rounds,
         threads=threads, timedelta=timedelta,
         excel_templates=_excel_templates_for(customer),
+        recordings_total=recordings_total, transactions_total=transactions_total,
         msg_attachments=_attachments_for('customer_message_id', [m.id for t in threads for m in t.messages]),
         all_institutions=Institution.query.order_by(Institution.name).all())
 

@@ -16,7 +16,7 @@
 })();
 </script>
 {# רענונים פנימיים (Turbo Drive): מעבר בין עמודי הניהול בלי טעינה מלאה של הדף.
-   - רק קישורים תחת /admin; טפסים נשלחים כרגיל (form mode off).
+   - רק קישורים תחת /admin; טופסי חיפוש (GET) ברענון פנימי, טופסי שמירה (POST) נשלחים כרגיל.
    - טעינה מוקדמת בריחוף (prefetch): העמוד מתחיל להיטען כבר כשהעכבר על הקישור/השורה.
      קישור "יציאה" והורדות מוחרגים; בשרת, בקשת prefetch לא מסמנת הודעות כנקראו.
    - עמוד שצריך טעינה מלאה (אולפן הקראה וכו') מגדיר turbo_meta=reload.
@@ -26,7 +26,9 @@
 <meta name="turbo-root" content="/admin">
 <script src="/static/vendor/turbo/turbo-8.0.13.js"></script>
 <script>
-  try { Turbo.config ? (Turbo.config.forms.mode = 'off') : Turbo.setFormMode('off'); } catch (e) {}
+  // טפסים: רק טופס שמסומן data-turbo="true" עובר ברענון פנימי (טופסי חיפוש/סינון - GET);
+  // כל טופס ששומר/מוחק (POST) נשלח כרגיל, כמו תמיד.
+  try { Turbo.config ? (Turbo.config.forms.mode = 'optin') : Turbo.setFormMode('optin'); } catch (e) {}
   try { Turbo.setProgressBarDelay(80); } catch (e) {}
 </script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -395,6 +397,11 @@ if (!window.__rowPrefetchHooked) {
       const h = a.getAttribute('href') || '';
       if (a.hasAttribute('download') || DL.test(h) || window.__fullReloadPath.test(h)) a.setAttribute('data-turbo', 'false');
       if (/\/logout|\/login/.test(h)) a.setAttribute('data-turbo-prefetch', 'false');
+    });
+    document.querySelectorAll('form').forEach((f) => {
+      const m = (f.getAttribute('method') || 'get').toLowerCase();
+      const act = f.getAttribute('action') || location.pathname;
+      if (m === 'get' && !f.hasAttribute('data-turbo') && !DL.test(act) && !window.__fullReloadPath.test(act)) f.setAttribute('data-turbo', 'true');
     });
   }
   mark();

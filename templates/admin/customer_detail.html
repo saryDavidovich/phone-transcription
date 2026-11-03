@@ -170,7 +170,8 @@
 </div>
 
 <div style="margin-top:20px" class="table-card">
-  <div class="table-header"><span class="table-title">🎧 הקלטות</span></div>
+  <div class="table-header"><span class="table-title">🎧 הקלטות</span>
+    {% if recordings_total > recordings|length %}<a href="?all=1" style="font-size:13px;color:var(--accent)">מוצגות {{ recordings|length }} האחרונות מתוך {{ recordings_total }} · הצג הכל</a>{% endif %}</div>
   <table>
     <thead><tr>
       <th><input type="checkbox" id="selectAllRec" onclick="toggleAllRec(this)"></th>
@@ -401,7 +402,8 @@ function confirmOcrDelete() {
 </div>
 
 <div style="margin-top:20px" class="table-card">
-  <div class="table-header"><span class="table-title">💳 עסקאות</span></div>
+  <div class="table-header"><span class="table-title">💳 עסקאות</span>
+    {% if transactions_total > transactions|length %}<a href="?all=1" style="font-size:13px;color:var(--accent)">מוצגות {{ transactions|length }} האחרונות מתוך {{ transactions_total }} · הצג הכל</a>{% endif %}</div>
   <table>
     <thead><tr><th>תאריך</th><th>סכום</th><th>סוג</th><th>תיאור</th></tr></thead>
     <tbody>

@@ -4,9 +4,9 @@
 {% block content %}
 
 <div class="search-bar">
-  <form method="GET" style="display:flex;gap:8px;width:100%;flex-wrap:wrap;align-items:center">
-    <input class="form-input" name="q" value="{{ search }}" placeholder="חיפוש לפי טלפון, שם או מייל..." style="flex:1;min-width:200px">
-    <select name="sort" onchange="this.form.submit()" style="padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);color:var(--text)">
+  <form method="GET" id="custSearchForm" data-turbo-action="replace" style="display:flex;gap:8px;width:100%;flex-wrap:wrap;align-items:center">
+    <input class="form-input" id="custSearchInput" data-turbo-permanent name="q" value="{{ search }}" placeholder="חיפוש לפי טלפון, שם או מייל..." autocomplete="off" style="flex:1;min-width:200px">
+    <select name="sort" onchange="this.form.requestSubmit ? this.form.requestSubmit() : this.form.submit()" style="padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);color:var(--text)">
       <option value="" {% if not current_sort %}selected{% endif %}>מיון: ברירת מחדל (הצטרפות)</option>
       <option value="contact" {% if current_sort=='contact' %}selected{% endif %}>מעודכן מייל/פקס</option>
       <option value="ever_loaded" {% if current_sort=='ever_loaded' %}selected{% endif %}>מי שהטעין בעבר</option>
@@ -17,6 +17,23 @@
     <button class="btn btn-primary" type="submit">🔍 חפש</button>
   </form>
 </div>
+<script>
+// חיפוש תוך כדי הקלדה: אחרי הפסקה קצרה בהקלדה הרשימה מתעדכנת (רענון פנימי, השדה נשאר
+// פעיל עם הסמן - data-turbo-permanent). Enter / "חפש" עובדים כרגיל.
+(function () {
+  const inp = document.getElementById('custSearchInput');
+  if (!inp || inp.__live) return;
+  inp.__live = true;
+  let t = null;
+  inp.addEventListener('input', () => {
+    clearTimeout(t);
+    t = setTimeout(() => {
+      const f = document.getElementById('custSearchForm');
+      if (f && f.requestSubmit) f.requestSubmit();
+    }, 350);
+  });
+})();
+</script>
 
 <!-- סינון לפי פעילות -->
 <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">

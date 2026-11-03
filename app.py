@@ -117,6 +117,7 @@ def create_app():
         return send_from_directory(fax_dir, filename)
     
     _install_request_timing(app)
+    _install_gzip(app)
 
     with app.app_context():
         db.create_all()
@@ -195,6 +196,34 @@ def _install_request_timing(app):
             resp.headers['Server-Timing'] = f'app;dur={ms:.0f};desc="{q} queries"'
             if request.path.startswith('/admin') and ms > 400:
                 logging.getLogger('timing').warning(f'SLOW {ms / 1000:.2f}s {q} queries {request.method} {request.path}')
+        except Exception:
+            pass
+        return resp
+
+
+def _install_gzip(app):
+    """דחיסת gzip לעמודים ולתשובות JSON (רק כשהדפדפן מבקש) - עמוד ניהול גדול יורד
+    פי 5-10 קטן יותר, מה שמורגש בעיקר בכרטיס לקוח ובטבלאות ארוכות."""
+    import gzip
+    from flask import request
+
+    @app.after_request
+    def _gzip_response(resp):
+        try:
+            if (resp.direct_passthrough or resp.is_streamed or not (200 <= resp.status_code < 300)
+                    or 'Content-Encoding' in resp.headers
+                    or 'gzip' not in (request.headers.get('Accept-Encoding') or '')):
+                return resp
+            mt = resp.mimetype or ''
+            if not (mt.startswith('text/') or mt in ('application/json', 'application/javascript')):
+                return resp
+            data = resp.get_data()
+            if len(data) < 1500:
+                return resp
+            resp.set_data(gzip.compress(data, 5))
+            resp.headers['Content-Encoding'] = 'gzip'
+            vary = resp.headers.get('Vary')
+            resp.headers['Vary'] = f'{vary}, Accept-Encoding' if vary else 'Accept-Encoding'
         except Exception:
             pass
         return resp
