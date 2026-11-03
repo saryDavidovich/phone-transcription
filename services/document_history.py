@@ -55,7 +55,7 @@ def list_documents(customer):
     from sqlalchemy.orm import defer
     from models import Recording, OcrResult, ManuscriptPage
     docs = []
-    recs = (Recording.query.options(defer(Recording.file_data))
+    recs = (Recording.query.options(defer(Recording.file_data), defer(Recording.excel_file))
             .filter(Recording.customer_id == customer.id,
                     Recording.status.in_(('delivered', 'transcribed')),
                     Recording.transcript.isnot(None), Recording.transcript != '')
@@ -159,6 +159,17 @@ def _do_send(customer, doc_type, doc, via, to):
     """שולח בפועל. מחזיר (ok, error)."""
     from services import transcribe as T
     name = customer.name or customer.phone or ''
+    if doc_type == 'recording' and doc.transcription_tier == 'excel' and doc.excel_file:
+        from services import excel_tables as X
+        from models import ExcelTemplate
+        t = ExcelTemplate.query.get(doc.excel_template_id) if doc.excel_template_id else None
+        title = (t.name if t and t.name else None) or 'טבלה'
+        if via == 'email':
+            n = len(X.template_rows(t)) if t else 0
+            X.send_excel_email(to, customer, title, doc.excel_file, n, n, (doc.duration_seconds or 0) // 60)
+            return True, ''
+        res = X.send_excel_fax(to, doc.excel_file, f'table_resend_{doc.id}.pdf')
+        return bool(res.get('ok')), res.get('error') or ''
     if doc_type == 'recording':
         secs = doc.duration_seconds or 0
         if via == 'email':

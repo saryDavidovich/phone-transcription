@@ -205,6 +205,8 @@ def transcribe():
     transcription_tier = data.get('transcription_tier', 'basic')
     language = data.get('language', 'he')
     output_language = data.get('output_language', 'he')
+    excel_template_id = data.get('excel_template_id')
+    excel_mode = 'continue' if data.get('excel_mode') == 'continue' else 'new'
 
     customer = find_customer_by_phone(phone)
     if not customer:
@@ -256,6 +258,12 @@ def transcribe():
         language=language,
         output_language=output_language,
     )
+    if transcription_tier == 'excel':
+        try:
+            rec.excel_template_id = int(excel_template_id)
+        except (TypeError, ValueError):
+            rec.excel_template_id = None
+        rec.excel_mode = excel_mode
     db.session.add(rec)
     db.session.commit()
 
@@ -443,6 +451,110 @@ def reserve_manager_message():
     db.session.commit()
     return jsonify({'id': msg.id})
 
+# ---------------------------------------------------------------------------
+# טבלאות אקסל מהקלטה - תבניות (נקרא מה-IVR, שלוחה 1 ← 3). ראה services/excel_tables.py
+# ---------------------------------------------------------------------------
+
+def _excel_template_dict(t, idx):
+    from services.excel_tables import template_columns, template_rows
+    return {'id': t.id, 'idx': idx, 'name': t.name or '', 'name_audio': t.name_audio or '',
+            'columns': template_columns(t), 'rows_count': len(template_rows(t))}
+
+
+def _excel_customer_templates(customer):
+    from models import ExcelTemplate
+    return ExcelTemplate.query.filter_by(customer_id=customer.id).order_by(ExcelTemplate.id).all()
+
+
+@api_bp.route('/excel/templates/<phone>', methods=['GET'])
+def excel_templates(phone):
+    customer = find_customer_by_phone(phone)
+    if not customer:
+        return jsonify({'templates': []})
+    ts = _excel_customer_templates(customer)
+    return jsonify({'templates': [_excel_template_dict(t, i + 1) for i, t in enumerate(ts)]})
+
+
+@api_bp.route('/excel/columns', methods=['POST'])
+def excel_parse_columns():
+    """הקלטת רשימת העמודות -> רשימה. לא שומר - ה-IVR מקריא ללקוח ומבקש אישור."""
+    from services.excel_tables import parse_columns_from_audio
+    rec_url = (request.get_json(silent=True) or {}).get('rec_url')
+    if not rec_url:
+        return jsonify({'columns': []}), 400
+    try:
+        return jsonify({'columns': parse_columns_from_audio(rec_url)})
+    except Exception as e:
+        current_app.logger.error(f'excel columns parse failed: {e}')
+        return jsonify({'columns': [], 'error': str(e)[:200]}), 500
+
+
+@api_bp.route('/excel/template/save', methods=['POST'])
+def excel_template_save():
+    """יצירה (בלי template_id) או עריכה של תבנית. השם מתומלל ברקע (לממשק בלבד)."""
+    import json as _json
+    import threading
+    from models import ExcelTemplate
+    from services.excel_tables import MAX_TEMPLATES, MAX_COLUMNS
+    data = request.get_json(silent=True) or {}
+    customer = find_customer_by_phone(data.get('phone', ''))
+    if not customer:
+        return jsonify({'ok': False, 'error': 'customer not found'}), 404
+    cols = [str(c).strip()[:60] for c in (data.get('columns') or []) if str(c).strip()][:MAX_COLUMNS]
+    if not cols:
+        return jsonify({'ok': False, 'error': 'no columns'}), 400
+    t = None
+    if data.get('template_id'):
+        t = ExcelTemplate.query.get(int(data['template_id']))
+        if not t or t.customer_id != customer.id:
+            return jsonify({'ok': False, 'error': 'not found'}), 404
+    else:
+        if len(_excel_customer_templates(customer)) >= MAX_TEMPLATES:
+            return jsonify({'ok': False, 'error': 'limit'}), 409
+        t = ExcelTemplate(customer_id=customer.id)
+        db.session.add(t)
+    if data.get('name_audio'):
+        t.name_audio = str(data['name_audio'])[:300]
+    t.columns_json = _json.dumps(cols, ensure_ascii=False)
+    t.updated_at = datetime.utcnow()
+    db.session.commit()
+
+    name_url = data.get('name_rec_url')
+    if name_url:
+        tid = t.id
+        app_obj = current_app._get_current_object()
+
+        def _name_bg():
+            from services.excel_tables import transcribe_name
+            with app_obj.app_context():
+                try:
+                    name = transcribe_name(name_url)
+                    tt = ExcelTemplate.query.get(tid)
+                    if tt and name:
+                        tt.name = name
+                        db.session.commit()
+                except Exception as e:
+                    app_obj.logger.error(f'excel template name transcribe failed: {e}')
+        threading.Thread(target=_name_bg, daemon=True).start()
+
+    ts = _excel_customer_templates(customer)
+    idx = next((i + 1 for i, x in enumerate(ts) if x.id == t.id), 0)
+    return jsonify({'ok': True, 'template': _excel_template_dict(t, idx)})
+
+
+@api_bp.route('/excel/template/delete', methods=['POST'])
+def excel_template_delete():
+    from models import ExcelTemplate
+    data = request.get_json(silent=True) or {}
+    customer = find_customer_by_phone(data.get('phone', ''))
+    t = ExcelTemplate.query.get(int(data.get('template_id') or 0))
+    if not customer or not t or t.customer_id != customer.id:
+        return jsonify({'ok': False}), 404
+    db.session.delete(t)
+    db.session.commit()
+    return jsonify({'ok': True})
+
+
 @api_bp.route('/settings', methods=['GET'])
 def get_public_settings():
     """מחזיר הגדרות מחיר ציבוריות ל-IVR"""
@@ -451,6 +563,7 @@ def get_public_settings():
         'price_per_20min_basic': get_setting('price_per_20min_basic', '0.90'),
         'price_per_20min_premium': get_setting('price_per_20min_premium', '1.90'),
         'price_per_20min_video': get_setting('price_per_20min_video', '1.50'),
+        'price_per_20min_excel': get_setting('price_per_20min_excel', '1.50'),
         'price_per_1000_chars_ocr': get_setting('price_per_1000_chars_ocr', '0.10'),
         'min_balance': get_setting('min_balance', '5'),
     }

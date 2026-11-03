@@ -549,6 +549,35 @@ def export_customers_excel():
         download_name=f'customers_{datetime.now().strftime("%Y%m%d")}.xlsx'
     )
 
+def _excel_templates_for(customer):
+    """תבניות אקסל של הלקוח לתצוגה בכרטיס (שלוחה 1 ← 3)."""
+    try:
+        from models import ExcelTemplate
+        from services.excel_tables import template_columns, template_rows
+        out = []
+        for t in ExcelTemplate.query.filter_by(customer_id=customer.id).order_by(ExcelTemplate.id).all():
+            out.append({'id': t.id, 'name': t.name or '(השם עוד לא תומלל)', 'columns': template_columns(t),
+                        'rows': len(template_rows(t)), 'updated': t.rows_updated_at or t.updated_at})
+        return out
+    except Exception as e:
+        logging.getLogger(__name__).error(f'excel templates for customer {customer.id}: {e}')
+        return []
+
+
+@admin_bp.route('/customers/<int:id>/excel/<int:tid>')
+@login_required
+def customer_excel_download(id, tid):
+    """הורדת הטבלה המצטברת הנוכחית של תבנית (כמו שהלקוח יקבל בהקלטה הבאה ב"המשך")."""
+    from models import ExcelTemplate
+    from services import excel_tables as X
+    t = ExcelTemplate.query.get_or_404(tid)
+    if t.customer_id != id:
+        return 'not found', 404
+    data = X.build_xlsx(t.name or 'טבלה', X.template_columns(t), X.template_rows(t))
+    return send_file(io.BytesIO(data), as_attachment=True, download_name=f'{X.safe_filename(t.name)}.xlsx',
+                     mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+
+
 @admin_bp.route('/customers/<int:id>')
 @login_required
 def customer_detail(id):
@@ -576,6 +605,7 @@ def customer_detail(id):
         customer=customer, recordings=recordings, transactions=transactions,
         ocr_results=ocr_results, manuscript_pages=manuscript_pages, proofing_rounds=proofing_rounds,
         threads=threads, timedelta=timedelta,
+        excel_templates=_excel_templates_for(customer),
         msg_attachments=_attachments_for('customer_message_id', [m.id for t in threads for m in t.messages]),
         all_institutions=Institution.query.order_by(Institution.name).all())
 
@@ -1202,6 +1232,7 @@ def settings():
         set_setting('price_per_20min_basic', request.form.get('price_per_20min_basic', '0.90'))
         set_setting('price_per_20min_premium', request.form.get('price_per_20min_premium', '1.90'))
         set_setting('price_per_20min_video', request.form.get('price_per_20min_video', '1.50'))
+        set_setting('price_per_20min_excel', request.form.get('price_per_20min_excel', '1.50'))
         set_setting('price_per_1000_chars_ocr', request.form.get('price_per_1000_chars_ocr', '0.10'))
         set_setting('ocr_engine', request.form.get('ocr_engine', 'gemini'))
         set_setting('manuscript_char_unit_size', request.form.get('manuscript_char_unit_size', '1000'))
@@ -1232,6 +1263,7 @@ def settings():
         'price_per_20min_basic': get_setting('price_per_20min_basic', '0.90'),
         'price_per_20min_premium': get_setting('price_per_20min_premium', '1.90'),
         'price_per_20min_video': get_setting('price_per_20min_video', '1.50'),
+        'price_per_20min_excel': get_setting('price_per_20min_excel', '1.50'),
         'price_per_1000_chars_ocr': get_setting('price_per_1000_chars_ocr', '0.10'),
         'ocr_engine': get_setting('ocr_engine', 'gemini'),
         'manuscript_char_unit_size': get_setting('manuscript_char_unit_size', '1000'),

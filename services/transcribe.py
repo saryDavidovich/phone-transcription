@@ -118,6 +118,12 @@ def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, durat
 
             tier = transcription_tier
 
+            # טבלת אקסל מהקלטה - עיבוד נפרד (services/excel_tables.py)
+            if tier == 'excel':
+                from services.excel_tables import process_excel_recording
+                process_excel_recording(call_id, rec_url, customer_id, delivery_method, delivered_to, duration_seconds)
+                return
+
             if tier == 'premium':
                 log.info(f"Using AlefBot for customer {customer_id}")
 
@@ -420,7 +426,8 @@ def process_pending_recordings(customer_id):
             log.info(f"process_pending_recordings: processing rec {rec.id} for customer {customer_id}")
 
             # אם יש כבר טרנסקריפט שמור — לא לתמלל שוב, רק לחייב ולשלוח
-            if rec.transcript:
+            # (טבלת אקסל תמיד עוברת עיבוד מלא - היא לא נשמרת כטקסט בהמתנה)
+            if rec.transcript and rec.transcription_tier != 'excel':
                 log.info(f"process_pending_recordings: transcript already exists, charging and sending")
                 customer.balance -= cost
                 from models import Transaction

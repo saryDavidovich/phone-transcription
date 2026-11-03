@@ -168,7 +168,27 @@ class Recording(db.Model):
     # תאבד את הקובץ בדיוק כמו הבאג שתיקנו בעבר בכתבי היד. נשמר רק כשבאמת
     # נכנסים לתור (לא לכל הקלטה) כדי לא לנפח את הטבלה סתם.
     file_data = db.Column(db.LargeBinary, nullable=True)
+    # טבלת אקסל מהקלטה (transcription_tier='excel', ראה services/excel_tables.py)
+    excel_template_id = db.Column(db.Integer, nullable=True)
+    excel_mode = db.Column(db.String(10), nullable=True)      # 'new' / 'continue'
+    excel_file = db.Column(db.LargeBinary, nullable=True)     # הקובץ שנשלח - לשליחה חוזרת בשלוחה 8
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class ExcelTemplate(db.Model):
+    """תבנית טבלה של לקוח (שלוחה 1 ← 3 בטלפון): שם מוקלט בקול הלקוח + רשימת עמודות.
+    rows - השורות שהצטברו עד עכשיו (להמשך הטבלה בהקלטה הבאה), JSON: [{עמודה: ערך}]."""
+    __tablename__ = 'excel_templates'
+    id = db.Column(db.Integer, primary_key=True)
+    customer_id = db.Column(db.Integer, db.ForeignKey('customers.id'), nullable=False, index=True)
+    name = db.Column(db.String(200), nullable=True)           # תמלול של השם (לממשק ולשם הקובץ)
+    name_audio = db.Column(db.String(300), nullable=True)     # נתיב ההקלטה בימות (בלי סיומת) - מושמע בתפריט
+    columns_json = db.Column(db.Text, nullable=False, default='[]')
+    rows_json = db.Column(db.Text, nullable=False, default='[]')
+    rows_updated_at = db.Column(db.DateTime, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow)
+
 
 class Transaction(db.Model):
     __tablename__ = 'transactions'

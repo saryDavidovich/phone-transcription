@@ -330,6 +330,10 @@ def _migrate_db():
         "ALTER TABLE manuscript_pages ADD COLUMN IF NOT EXISTS bookmark_note TEXT",
         "ALTER TABLE manuscript_pages ADD COLUMN IF NOT EXISTS paused_at TIMESTAMP",
         "ALTER TABLE manuscript_pages ADD COLUMN IF NOT EXISTS dictation_sessions INTEGER DEFAULT 0",
+        # טבלאות אקסל מהקלטה (services/excel_tables.py)
+        "ALTER TABLE recordings ADD COLUMN IF NOT EXISTS excel_template_id INTEGER",
+        "ALTER TABLE recordings ADD COLUMN IF NOT EXISTS excel_mode VARCHAR(10)",
+        "ALTER TABLE recordings ADD COLUMN IF NOT EXISTS excel_file BYTEA",
         "CREATE INDEX IF NOT EXISTS ix_manuscript_pages_proof_status ON manuscript_pages (proof_status)",
         # עורך הגהה מובנה בדפדפן (עיצוב מלא/חיפוש-החלפה/בדיקת איות) - ראה
         # models.ManuscriptPage.proof_edited_content ו-routes/dictate.py.proof_save_edited

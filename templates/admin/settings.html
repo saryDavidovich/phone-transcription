@@ -22,6 +22,11 @@
         <div style="font-size:11px;color:#4a5568;margin-top:4px">קבצי MP4, MOV וכו' — Gemini מחייב פי ~2.8 מאודיו</div>
       </div>
       <div class="form-group">
+        <label class="form-label">מחיר טבלת אקסל מהקלטה ל-20 דקות (₪)</label>
+        <input class="form-input" name="price_per_20min_excel" type="number" step="0.01" value="{{ settings.price_per_20min_excel }}">
+        <div style="font-size:11px;color:#4a5568;margin-top:4px">שלוחה 1 ← 3 בטלפון: הקלטה שהופכת לטבלה לפי תבנית העמודות של הלקוח. החיוב רק אחרי שהטבלה נשלחה</div>
+      </div>
+      <div class="form-group">
         <label class="form-label">טוקן ימות המשיח (לקריאת דוח סליקות)</label>
         <input class="form-input" name="yemot_token" type="text" value="{{ settings.yemot_token }}" placeholder="033131795:סיסמה">
         <div style="font-size:11px;color:#4a5568;margin-top:4px">פורמט: מספר_מערכת:סיסמה — נדרש לעדכון יתרה אוטומטי אחרי סליקה</div>
