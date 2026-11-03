@@ -420,6 +420,18 @@ def _find_customer_by_phone_anywhere(text, sender_email):
     return None
 
 
+def _find_customer_by_email(sender_email):
+    """לקוח שכתובת המייל הרשומה שלו היא כתובת השולח - רק אם יש בדיוק לקוח אחד כזה.
+    משמש לתשובות להודעה תפוצתית (אין טלפון בנושא): התשובה נכנסת להתכתבות של הלקוח."""
+    e = (sender_email or '').strip().lower()
+    if not e or '@' not in e or _is_system_inbound_address(e):
+        return None
+    from models import Customer
+    from sqlalchemy import func
+    rows = Customer.query.filter(func.lower(func.trim(Customer.email)) == e).limit(2).all()
+    return rows[0] if len(rows) == 1 else None
+
+
 _STYLE_SCRIPT_RE = re.compile(r'<(style|script)[^>]*>.*?</\1>', re.IGNORECASE | re.DOTALL)
 _TAG_RE = re.compile(r'<[^>]+>')
 _WHITESPACE_RE = re.compile(r'\s+')
@@ -1823,7 +1835,8 @@ def email_inbound():
             # לא בפורמט בקשת תמלול, ולא תגובת שיחה - אבל אולי עדיין יש בנושא
             # מספר טלפון שמזהה לקוח קיים (למשל פנייה כללית/שאלה, לא בקשה
             # לתמלול קובץ) - במקרה כזה זה נכנס לתוך ההתכתבות שלו, לא נזרק.
-            matched_customer = _find_customer_by_phone_anywhere(subject, sender_email)
+            matched_customer = _find_customer_by_phone_anywhere(subject, sender_email) or \
+                _find_customer_by_email(sender_email)
             if matched_customer:
                 thread = ConversationThread.query.filter_by(customer_id=matched_customer.id) \
                     .order_by(ConversationThread.created_at.desc()).first()

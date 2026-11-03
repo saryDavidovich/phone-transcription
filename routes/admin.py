@@ -1976,17 +1976,22 @@ def _broadcast_recipient_emails():
 
 
 def _broadcast_email_html(subject, body):
-    """HTML פשוט לפי אותו מיתוג שכבר קיים בהודעות ללקוח (_send_customer_conversation_email) -
-    כותרת, תוכן (עם ירידות שורה), וחתימה קבועה."""
+    """המייל המלא - אותה פונקציה משמשת לתצוגה המקדימה בעמוד, לשליחת הניסיון ולשליחה לכולם,
+    כך שמה שרואים בצד הוא בדיוק מה שיישלח. התוכן מהעורך המעוצב (HTML מנוקה, ראה
+    services/rich_email.py) או טקסט רגיל."""
     from markupsafe import escape
     from services import email_layout as L
-    card = L.title(str(escape(subject))) + L.text_block(body) + L.signature()
+    from services.rich_email import body_block
+    card = L.title(str(escape(subject))) + body_block(body) + L.signature(can_reply=True)
     return L.wrap(card)
 
 
 def _send_broadcast_email(to_email, subject, html):
+    """Reply-To = כתובת הקליטה של המערכת: תשובה של לקוח נכנסת לממשק (להתכתבות של הלקוח
+    לפי כתובת המייל שלו, או לתיבה הכללית) - לא הולכת לאיבוד."""
     import sendgrid
-    from sendgrid.helpers.mail import Mail, Email
+    from sendgrid.helpers.mail import Mail, Email, ReplyTo
+    from routes.email_inbound import TRANSCRIBE_INBOUND_EMAIL
     sg = sendgrid.SendGridAPIClient(api_key=os.environ.get('SENDGRID_API_KEY'))
     message = Mail(
         from_email=Email(os.environ.get('SENDGRID_FROM_EMAIL', os.environ.get('GMAIL_USER', '')), 'תמלול פון'),
@@ -1994,6 +1999,7 @@ def _send_broadcast_email(to_email, subject, html):
         subject=subject,
         html_content=html,
     )
+    message.reply_to = ReplyTo(TRANSCRIBE_INBOUND_EMAIL, 'תמלול פון')
     sg.send(message)
 
 
@@ -2023,16 +2029,29 @@ def broadcast_message():
     )
 
 
+@admin_bp.route('/broadcast/preview', methods=['POST'])
+@login_required
+def broadcast_preview():
+    """תצוגה מקדימה חיה בצד העורך - בדיוק ה-HTML שיישלח."""
+    subject = (request.form.get('subject') or '').strip() or '(בלי נושא)'
+    body = request.form.get('body') or ''
+    resp = make_response(_broadcast_email_html(subject, body))
+    resp.headers['Content-Type'] = 'text/html; charset=utf-8'
+    resp.headers['Cache-Control'] = 'no-store'
+    return resp
+
+
 @admin_bp.route('/broadcast/test', methods=['POST'])
 @login_required
 def broadcast_test():
+    from services.rich_email import plain_text
     subject = (request.form.get('subject') or '').strip()
     body = (request.form.get('body') or '').strip()
     test_email = (request.form.get('test_email') or '').strip()
     recipient_count = len(_broadcast_recipient_emails())
 
     result = None
-    if not subject or not body:
+    if not subject or not plain_text(body):
         result = {'ok': False, 'text': 'יש למלא נושא ותוכן לפני שליחת ניסיון.'}
     elif not test_email:
         result = {'ok': False, 'text': 'יש להזין כתובת מייל לבדיקה.'}
@@ -2056,12 +2075,13 @@ def broadcast_test():
 @login_required
 def broadcast_send():
     import threading
+    from services.rich_email import plain_text
     subject = (request.form.get('subject') or '').strip()
     body = (request.form.get('body') or '').strip()
     recipient_emails = _broadcast_recipient_emails()
 
     result = None
-    if not subject or not body:
+    if not subject or not plain_text(body):
         result = {'ok': False, 'text': 'יש למלא נושא ותוכן.'}
     elif not recipient_emails:
         result = {'ok': False, 'text': 'אין כרגע אף לקוח עם מייל פעיל לשלוח אליו.'}

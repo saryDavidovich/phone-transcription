@@ -3,12 +3,31 @@
 {% block page_title %}📣 הודעה תפוצתית{% endblock %}
 
 {% block content %}
+<style>
+  .bc-wrap { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:20px; align-items:start }
+  @media (max-width:1100px) { .bc-wrap { grid-template-columns:1fr } }
+  .bc-tools { display:flex; flex-wrap:wrap; gap:4px; padding:6px; border:1px solid var(--border); border-bottom:0; border-radius:10px 10px 0 0; background:var(--surface2) }
+  .bc-tools button, .bc-tools select { background:var(--surface); color:var(--text); border:1px solid var(--border); border-radius:6px; padding:4px 9px; font-size:13px; cursor:pointer; min-width:32px }
+  .bc-tools button:hover { border-color:var(--accent) }
+  .bc-tools .sep { width:1px; background:var(--border); margin:0 3px }
+  .bc-tools label.clr { display:inline-flex; align-items:center; gap:3px; font-size:13px; border:1px solid var(--border); border-radius:6px; padding:2px 6px; background:var(--surface); cursor:pointer }
+  .bc-tools input[type=color] { width:22px; height:20px; border:0; padding:0; background:none; cursor:pointer }
+  #bcEditor { min-height:260px; max-height:520px; overflow:auto; padding:14px; border:1px solid var(--border); border-radius:0 0 10px 10px; background:#fff; color:#0b1f3a; line-height:1.85; font-size:16px; direction:rtl; text-align:right; outline:none }
+  #bcEditor:empty:before { content:attr(data-ph); color:#8892b0 }
+  #bcEditor a { color:#0a58ca }
+  .bc-prev-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px }
+  .bc-prev-head .tabs button { background:var(--surface2); color:var(--text2); border:1px solid var(--border); border-radius:6px; padding:3px 10px; font-size:12px; cursor:pointer }
+  .bc-prev-head .tabs button.on { color:var(--accent); border-color:var(--accent) }
+  #bcFrameBox { border:1px solid var(--border); border-radius:12px; overflow:hidden; background:#eef4fb; margin:0 auto; transition:max-width .2s }
+  #bcFrame { width:100%; height:640px; border:0; display:block; background:#eef4fb }
+</style>
+
 <div class="card" style="margin-bottom:20px">
   <p style="color:var(--text2);font-size:13px;line-height:1.7;margin:0">
     ההודעה תישלח לכל הלקוחות עם כתובת מייל רשומה (כל כתובת פעם אחת בלבד) - כרגע
     <strong style="color:var(--text)">{{ recipient_count }}</strong> כתובות.
-    אפשר לשלוח קודם ניסיון לכתובת אחת כדי לראות בדיוק איך זה ייראה - שליחת הניסיון
-    לא מוחקת את מה שכתבתם, אפשר להמשיך לערוך אחריה.
+    בצד רואים בדיוק איך המייל ייראה, תוך כדי הכתיבה. לקוח שעונה למייל - התשובה נכנסת לממשק
+    (להתכתבות שלו, או לתיבה הכללית אם המייל שלו לא רשום).
   </p>
 </div>
 
@@ -18,32 +37,163 @@
 </div>
 {% endif %}
 
-<div class="card">
-  <form method="POST" id="broadcastForm">
-    <div class="form-group">
-      <label class="form-label">נושא ההודעה (יופיע כנושא המייל)</label>
-      <input class="form-input" type="text" name="subject" value="{{ subject }}" required>
-    </div>
+<div class="bc-wrap">
+  <div class="card">
+    <form method="POST" id="broadcastForm" onsubmit="return bcBeforeSubmit(event)">
+      <div class="form-group">
+        <label class="form-label">נושא ההודעה (יופיע כנושא המייל)</label>
+        <input class="form-input" type="text" name="subject" id="bcSubject" value="{{ subject }}" required autocomplete="off">
+      </div>
 
-    <div class="form-group">
-      <label class="form-label">תוכן ההודעה</label>
-      <textarea class="form-input" name="body" rows="10" required>{{ body }}</textarea>
-    </div>
+      <div class="form-group">
+        <label class="form-label">תוכן ההודעה</label>
+        <div class="bc-tools" id="bcTools">
+          <button type="button" data-cmd="bold" title="מודגש"><b>B</b></button>
+          <button type="button" data-cmd="italic" title="נטוי"><i>I</i></button>
+          <button type="button" data-cmd="underline" title="קו תחתון"><u>U</u></button>
+          <select id="bcSize" title="גודל טקסט">
+            <option value="">גודל</option><option value="2">קטן</option><option value="3">רגיל</option>
+            <option value="4">בינוני</option><option value="5">גדול</option><option value="6">גדול מאוד</option>
+          </select>
+          <button type="button" data-block="h2" title="כותרת">כותרת</button>
+          <button type="button" data-block="h3" title="כותרת משנה">כותרת משנה</button>
+          <button type="button" data-block="p" title="טקסט רגיל">רגיל</button>
+          <span class="sep"></span>
+          <label class="clr" title="צבע טקסט">A <input type="color" id="bcColor" value="#0a58ca"></label>
+          <label class="clr" title="צבע רקע (הדגשה)">▮ <input type="color" id="bcHilite" value="#fff2a8"></label>
+          <span class="sep"></span>
+          <button type="button" data-cmd="insertUnorderedList" title="רשימת תבליטים">• רשימה</button>
+          <button type="button" data-cmd="insertOrderedList" title="רשימה ממוספרת">1. רשימה</button>
+          <button type="button" data-cmd="justifyRight" title="יישור לימין">⇥</button>
+          <button type="button" data-cmd="justifyCenter" title="מרכוז">≡</button>
+          <span class="sep"></span>
+          <button type="button" id="bcLink" title="קישור">🔗 קישור</button>
+          <button type="button" id="bcButton" title="כפתור צהוב עם קישור">▭ כפתור</button>
+          <button type="button" data-cmd="insertHorizontalRule" title="קו מפריד">―</button>
+          <button type="button" data-cmd="removeFormat" title="ניקוי עיצוב">✕ עיצוב</button>
+          <button type="button" data-cmd="undo" title="ביטול">↶</button>
+          <button type="button" data-cmd="redo" title="חזרה">↷</button>
+        </div>
+        <div id="bcEditor" contenteditable="true" data-ph="כתבו כאן את ההודעה..."></div>
+        <input type="hidden" name="body" id="bcBody">
+        <textarea id="bcInitial" hidden>{{ body }}</textarea>
+      </div>
 
-    <div class="form-group">
-      <label class="form-label">שליחת ניסיון - כתובת מייל לבדיקה (לא נשלח לאף לקוח אחר, רק לכתובת הזו)</label>
-      <input class="form-input" type="email" name="test_email" value="{{ test_email }}" placeholder="you@example.com">
-    </div>
+      <div class="form-group">
+        <label class="form-label">שליחת ניסיון - כתובת מייל לבדיקה (לא נשלח לאף לקוח אחר, רק לכתובת הזו)</label>
+        <input class="form-input" type="email" name="test_email" value="{{ test_email }}" placeholder="you@example.com">
+      </div>
 
-    <div style="display:flex;gap:10px;margin-top:8px">
-      <button class="btn btn-ghost" type="submit" formaction="/admin/broadcast/test">שלח ניסיון לכתובת שלמעלה</button>
-      <button
-        class="btn btn-danger"
-        type="submit"
-        formaction="/admin/broadcast/send"
-        onclick="return confirm('לשלוח את ההודעה בפועל לכל {{ recipient_count }} הלקוחות עם מייל? פעולה זו לא הפיכה.');"
-      >שלח לכולם ({{ recipient_count }} לקוחות)</button>
+      <div style="display:flex;gap:10px;margin-top:8px;flex-wrap:wrap">
+        <button class="btn btn-ghost" type="submit" formaction="/admin/broadcast/test">שלח ניסיון לכתובת שלמעלה</button>
+        <button class="btn btn-danger" type="submit" formaction="/admin/broadcast/send" data-all="1">שלח לכולם ({{ recipient_count }} לקוחות)</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="card" style="position:sticky;top:12px">
+    <div class="bc-prev-head">
+      <div style="font-weight:700">👁 כך זה ייראה במייל</div>
+      <div class="tabs"><button type="button" class="on" data-w="100%">מחשב</button> <button type="button" data-w="390px">טלפון</button></div>
     </div>
-  </form>
+    <div id="bcFrameBox"><iframe id="bcFrame" title="תצוגה מקדימה של המייל" sandbox="allow-same-origin"></iframe></div>
+  </div>
 </div>
+
+<script>
+(function () {
+  const ed = document.getElementById('bcEditor');
+  if (!ed || ed.__bc) return;
+  ed.__bc = true;
+  const form = document.getElementById('broadcastForm');
+  const bodyIn = document.getElementById('bcBody');
+  const subj = document.getElementById('bcSubject');
+  const frame = document.getElementById('bcFrame');
+  const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+  // תוכן קיים (אחרי שליחת ניסיון): HTML מהעורך, או טקסט רגיל ישן -> פסקאות
+  const init = document.getElementById('bcInitial').value || '';
+  ed.innerHTML = /<\s*(b|strong|i|em|u|br|p|div|span|h2|h3|ul|ol|li|a|font|hr|blockquote)\b/i.test(init)
+    ? init : init.split('\n').map(l => l.trim() ? esc(l) : '').join('<br>');
+
+  try { document.execCommand('styleWithCSS', false, true); } catch (e) {}
+  const exec = (cmd, val) => { ed.focus(); document.execCommand(cmd, false, val); sync(); };
+
+  document.querySelectorAll('#bcTools [data-cmd]').forEach(b =>
+    b.addEventListener('mousedown', e => { e.preventDefault(); exec(b.dataset.cmd); }));
+  document.querySelectorAll('#bcTools [data-block]').forEach(b =>
+    b.addEventListener('mousedown', e => { e.preventDefault(); exec('formatBlock', b.dataset.block); }));
+  document.getElementById('bcSize').addEventListener('change', e => {
+    if (e.target.value) exec('fontSize', e.target.value); e.target.value = '';
+  });
+  // צבע: שומרים את הסימון לפני שבוחר הצבעים לוקח את הפוקוס
+  let saved = null;
+  const save = () => { const s = window.getSelection(); if (s.rangeCount && ed.contains(s.anchorNode)) saved = s.getRangeAt(0).cloneRange(); };
+  const restore = () => { if (saved) { const s = window.getSelection(); s.removeAllRanges(); s.addRange(saved); } };
+  window.__bcSave = save;   // מאזין יחיד לכל הביקורים בעמוד (רענון פנימי)
+  if (!window.__bcSelHooked) { window.__bcSelHooked = true; document.addEventListener('selectionchange', () => window.__bcSave && window.__bcSave()); }
+  document.getElementById('bcColor').addEventListener('input', e => { restore(); exec('foreColor', e.target.value); });
+  document.getElementById('bcHilite').addEventListener('input', e => { restore(); exec('hiliteColor', e.target.value); });
+  const askUrl = () => {
+    let u = prompt('כתובת הקישור (למשל https://...)', 'https://');
+    if (!u || u === 'https://') return null;
+    if (!/^(https?:\/\/|mailto:|tel:)/i.test(u)) u = 'https://' + u;
+    return u;
+  };
+  document.getElementById('bcLink').addEventListener('mousedown', e => {
+    e.preventDefault(); save(); const u = askUrl(); if (!u) return; restore();
+    const sel = window.getSelection();
+    if (sel && !sel.isCollapsed) exec('createLink', u);
+    else exec('insertHTML', `<a href="${esc(u)}">${esc(u)}</a>&nbsp;`);
+  });
+  document.getElementById('bcButton').addEventListener('mousedown', e => {
+    e.preventDefault(); save();
+    const label = prompt('הטקסט על הכפתור', 'לפרטים נוספים'); if (!label) return;
+    const u = askUrl(); if (!u) return; restore();
+    // הכנסה ישירה ל-DOM (insertHTML של הדפדפן מפרק את הבלוק הממורכז)
+    const box = document.createElement('div');
+    box.style.textAlign = 'center';
+    box.innerHTML = `<a href="${esc(u)}" style="display:inline-block;background:#ffcc00;color:#0b1f3a;text-decoration:none;font-weight:bold;padding:12px 28px;border-radius:30px">${esc(label)}</a>`;
+    const after = document.createElement('div'); after.innerHTML = '<br>';
+    const sel = window.getSelection();
+    let block = sel.rangeCount && ed.contains(sel.anchorNode) ? sel.anchorNode : null;
+    while (block && block.parentNode !== ed) block = block.parentNode;
+    if (block && block !== ed) { ed.insertBefore(after, block.nextSibling); ed.insertBefore(box, after); }
+    else { ed.appendChild(box); ed.appendChild(after); }
+    const r = document.createRange(); r.setStart(after, 0); r.collapse(true); sel.removeAllRanges(); sel.addRange(r);
+    ed.focus(); sync();
+  });
+
+  // תצוגה מקדימה: אותו HTML בדיוק שיישלח (נבנה בשרת), מתעדכן תוך כדי כתיבה
+  let timer = null, busy = false, again = false;
+  async function preview() {
+    if (busy) { again = true; return; }
+    busy = true;
+    try {
+      const fd = new FormData(); fd.append('subject', subj.value); fd.append('body', ed.innerHTML);
+      const r = await fetch('{{ url_for("admin.broadcast_preview") }}', {method: 'POST', body: fd});
+      const html = await r.text();
+      const y = frame.contentWindow ? frame.contentWindow.scrollY : 0;
+      frame.srcdoc = html;
+      frame.onload = () => { try { frame.contentWindow.scrollTo(0, y); } catch (e) {} };
+    } catch (e) {} finally { busy = false; if (again) { again = false; preview(); } }
+  }
+  function sync() { bodyIn.value = ed.innerHTML; clearTimeout(timer); timer = setTimeout(preview, 350); }
+  ed.addEventListener('input', sync);
+  subj.addEventListener('input', sync);
+  document.querySelectorAll('.bc-prev-head .tabs button').forEach(b => b.addEventListener('click', () => {
+    document.querySelectorAll('.bc-prev-head .tabs button').forEach(x => x.classList.remove('on'));
+    b.classList.add('on'); document.getElementById('bcFrameBox').style.maxWidth = b.dataset.w;
+  }));
+  sync();
+
+  window.bcBeforeSubmit = function (e) {
+    bodyIn.value = ed.innerHTML;
+    if (!ed.innerText.trim()) { alert('יש לכתוב תוכן להודעה'); return false; }
+    const btn = e.submitter;
+    if (btn && btn.dataset.all) return confirm('לשלוח את ההודעה בפועל לכל {{ recipient_count }} הלקוחות עם מייל? פעולה זו לא הפיכה.');
+    return true;
+  };
+})();
+</script>
 {% endblock %}
