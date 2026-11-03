@@ -50,40 +50,54 @@ def _download(url):
     return r.content
 
 
-def parse_columns_from_audio(rec_url):
-    """הקלטת "1 שם, 2 טלפון, 3 כתובת..." -> ['שם', 'טלפון', 'כתובת']."""
-    from google.genai import types as gtypes
-    audio = _download(rec_url)
-    prompt = ('המשתמש מקריא רשימת שמות של עמודות לטבלת אקסל, בדרך כלל עם מספר לפני כל עמודה '
-              '(למשל: "1 שם, 2 טלפון, 3 כתובת, 4 סכום"). החזר את שמות העמודות בלבד, לפי הסדר, '
-              'בעברית ובכתיב תקני, בלי המספרים. אל תוסיף עמודות שלא נאמרו. '
-              'אם לא נאמרו עמודות בכלל - החזר רשימה ריקה.')
-    resp = _client().models.generate_content(
-        model=GEMINI_MODEL,
-        contents=[prompt, gtypes.Part.from_bytes(data=audio, mime_type='audio/wav')],
-        config=gtypes.GenerateContentConfig(
-            response_mime_type='application/json',
-            response_schema={'type': 'ARRAY', 'items': {'type': 'STRING'}},
-            thinking_config=gtypes.ThinkingConfig(thinking_budget=0),
-        ),
-    )
-    try:
-        cols = json.loads(resp.text or '[]')
-    except Exception:
-        cols = []
+def _clean_columns(items):
     out = []
-    for c in cols if isinstance(cols, list) else []:
-        c = re.sub(r'\s+', ' ', str(c)).strip(' .,:;-')[:60]
+    for c in items:
+        c = re.sub(r'^\s*(\d+|[א-י]\'?)\s*[.):\-–]?\s*', '', str(c))      # מספר / אות בתחילת השורה
+        c = re.sub(r'\s+', ' ', c).strip(' .,:;-–"\'*•')[:60]
         if c and c not in out:
             out.append(c)
     return out[:MAX_COLUMNS]
+
+
+def parse_columns_from_audio(rec_url):
+    """הקלטת "1 שם, 2 טלפון, 3 כתובת..." -> ['שם', 'טלפון', 'כתובת'].
+    טקסט פשוט, עמודה בכל שורה (כמו שאר הקריאות הקצרות לגימיני במערכת) - בלי JSON."""
+    from google.genai import types as gtypes
+    audio = _download(rec_url)
+    log.info(f'excel columns: audio {len(audio)} bytes, starts with {audio[:4]!r}')
+    if len(audio) < 1000 or audio[:4] != b'RIFF':
+        log.error(f'excel columns: the recording did not download as WAV: {audio[:200]!r}')
+        return []
+    prompt = ('המשתמש מקריא רשימת שמות של עמודות לטבלת אקסל, בדרך כלל עם מספר לפני כל עמודה '
+              '(למשל: "אחת שם, שתיים טלפון, שלוש כתובת, ארבע סכום").\n'
+              'החזר את שמות העמודות בלבד, לפי הסדר, כל עמודה בשורה נפרדת, בעברית ובכתיב תקני, '
+              'בלי המספרים ובלי שום טקסט נוסף. אל תוסיף עמודות שלא נאמרו.\n'
+              'אם לא נאמרו שמות עמודות בכלל - החזר את המילה: ריק')
+    # הלקוח חייב להישמר במשתנה: אובייקט זמני נסגר לפני שהבקשה נשלחת
+    # ("Cannot send a request, as the client has been closed")
+    client = _client()
+    resp = client.models.generate_content(
+        model=GEMINI_MODEL,
+        contents=[prompt, gtypes.Part.from_bytes(data=audio, mime_type='audio/wav')],
+        config=gtypes.GenerateContentConfig(thinking_config=gtypes.ThinkingConfig(thinking_budget=0)),
+    )
+    text = (resp.text or '').strip()
+    log.info(f'excel columns: gemini answered {text[:300]!r}')
+    if not text or text == 'ריק':
+        return []
+    lines = [x for x in re.split(r'[\n,،]+', text) if x.strip()]
+    return _clean_columns(lines)
 
 
 def transcribe_name(rec_url):
     """תמלול קצר של שם התבנית (לממשק הניהול ולשם הקובץ)."""
     from google.genai import types as gtypes
     audio = _download(rec_url)
-    resp = _client().models.generate_content(
+    # הלקוח חייב להישמר במשתנה: אובייקט זמני נסגר לפני שהבקשה נשלחת
+    # ("Cannot send a request, as the client has been closed")
+    client = _client()
+    resp = client.models.generate_content(
         model=GEMINI_MODEL,
         contents=['תמלל את המילים שנאמרו (שם של טבלה, מילה עד כמה מילים). החזר רק את הטקסט, בלי הסברים.',
                   gtypes.Part.from_bytes(data=audio, mime_type='audio/wav')],
@@ -120,7 +134,10 @@ def rows_from_transcript(transcript, columns):
 
 התמלול:
 {transcript}"""
-    resp = _client().models.generate_content(
+    # הלקוח חייב להישמר במשתנה: אובייקט זמני נסגר לפני שהבקשה נשלחת
+    # ("Cannot send a request, as the client has been closed")
+    client = _client()
+    resp = client.models.generate_content(
         model=GEMINI_MODEL,
         contents=[prompt],
         config=gtypes.GenerateContentConfig(
