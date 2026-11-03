@@ -1,5 +1,5 @@
 import logging
-from services.email_layout import wrap_existing as _email_wrap
+import re
 from flask import Blueprint, request, jsonify
 
 payment_bp = Blueprint('payment', __name__)
@@ -248,6 +248,12 @@ def nedarim_webhook():
         db.session.commit()
         log.info(f'Nedarim webhook: credited customer {customer.id} +{total_credit} (tx {tx_id})')
 
+        # עדכון כתובת מייל - רק כשהלקוח ביקש זאת במפורש בשדה ההערות ("עדכון מייל" וכו')
+        try:
+            _maybe_update_email_from_nedarim(customer, data, tx_id)
+        except Exception as e:
+            log.error(f'Nedarim webhook: email update failed (tx {tx_id}): {e}')
+
         from services.transcribe import process_pending_recordings
         from routes.email_inbound import process_pending_ocr
         import threading, time
@@ -264,13 +270,8 @@ def nedarim_webhook():
 
         threading.Thread(target=_delayed_process, args=(customer.id,), daemon=True).start()
 
-        if customer.email:
-            from routes.admin import get_setting
-            threading.Thread(
-                target=_issue_receipt_and_send,
-                args=(tx_id, customer.email, amount, bonus, total_credit, get_setting),
-                daemon=True,
-            ).start()
+        # קבלה: לא מפיקים ולא שולחים מכאן - נדרים פלוס מפיקים קבלה בעצמם, והלקוח
+        # יכול להוריד אותה בעמדות נדרים פלוס.
         return jsonify({'ok': True})
 
     # 3. אין בכלל מספר טלפון בעדכון (ולא נמצא גם מוסד לפי שם) - אין למי
@@ -290,6 +291,37 @@ def nedarim_webhook():
         log.exception('Nedarim webhook: failed to create unmatched-payment notice')
 
     return jsonify({'ok': True})
+
+
+# ביטויים בשדה ההערות בנדרים פלוס שמבקשים לעדכן את כתובת המייל במערכת לכתובת
+# שהוקלדה בשדה "מייל" באותו תשלום. בלי אחד מהם - המייל לא משתנה.
+_EMAIL_UPDATE_RE = re.compile(
+    r'(עדכו[ןנ]|עדכן|לעדכן|תעדכנו|תעדכן|נא\s*לעדכן|שינוי|לשנות|תשנו|החלפת|להחליף|מייל\s*חדש|כתובת\s*חדשה)'
+    r'[^\n]{0,15}?(מייל|מיל|אימייל|דוא"?ל|דואל|כתובת|email|mail)'
+    r'|(מייל|אימייל|email|mail)\s*(חדש|לעדכון|מעודכן)'
+    r'|update\s*(e-?mail|mail)',
+    re.IGNORECASE)
+_EMAIL_RE = re.compile(r'^[^@\s]+@[^@\s]+\.[A-Za-z]{2,}$')
+
+
+def _maybe_update_email_from_nedarim(customer, data, tx_id):
+    from app import db
+    comments = str(data.get('Comments') or data.get('Avour') or '').strip()
+    new_email = str(data.get('Mail') or data.get('Email') or '').strip().lower()
+    if not comments or not _EMAIL_UPDATE_RE.search(comments):
+        return False
+    if not _EMAIL_RE.match(new_email):
+        log.warning(f'Nedarim webhook: email update requested (tx {tx_id}) but Mail is missing/invalid: {new_email!r}')
+        return False
+    old_email = customer.email
+    if (old_email or '').strip().lower() == new_email:
+        return False
+    customer.email = new_email
+    db.session.commit()
+    log.info(f'Nedarim webhook: customer {customer.id} email updated by payment comment (tx {tx_id})')
+    from services.welcome_email import welcome_if_new
+    welcome_if_new(old_email, new_email, customer.name, customer.phone, customer.balance)
+    return True
 
 
 def _calculate_bonus_public(amount):
@@ -409,135 +441,6 @@ def nedarim_callback():
              f"logged only, balance NOT updated here (handled exclusively by nedarim_webhook)")
 
     return 'go_to_folder=/', 200, {'Content-Type': 'text/plain; charset=utf-8'}
-
-
-def _issue_receipt_and_send(approval, customer_email, amount, bonus, total_credit, get_setting):
-    """מפיק קבלה מנדרים פלוס ושולח למייל הלקוח."""
-    from app import app
-    with app.app_context():
-        _issue_receipt_and_send_inner(approval, customer_email, amount, bonus, total_credit, get_setting)
-
-
-def _issue_receipt_and_send_inner(approval, customer_email, amount, bonus, total_credit, get_setting):
-    """הלוגיקה הפנימית - רצה בתוך app_context."""
-    import requests as req
-
-    mosad = get_setting('nedarim_mosad_number', '')
-    api_password = get_setting('nedarim_api_password', '')
-    tamal_type = get_setting('nedarim_tamal_type', '400')
-
-    if not mosad or not api_password:
-        log.warning("Receipt: nedarim_mosad_number or nedarim_api_password not configured, sending email without receipt link")
-        _send_receipt_email(
-            to=customer_email,
-            amount=amount,
-            bonus=bonus,
-            total_credit=total_credit,
-            approval=approval,
-            receipt_url=None,
-        )
-        return
-
-    # שלב 1: הפקת קבלה
-    try:
-        resp = req.post(
-            'https://matara.pro/nedarimplus/Reports/Tamal3.aspx',
-            data={
-                'Action': 'TamalCreate',
-                'MosadNumber': mosad,
-                'ApiPassword': api_password,
-                'TransactionId': approval,
-                'TamalType': tamal_type,
-            },
-            timeout=15
-        )
-        result = resp.text.strip()
-        log.info(f"Receipt creation: TransactionId={approval}, result={result}")
-        if result != 'OK':
-            log.error(f"Receipt creation failed: {result}")
-            return
-    except Exception as e:
-        log.error(f"Receipt creation error: {e}")
-        return
-
-    # שלב 2: קבלת קישור לקבלה
-    receipt_url = None
-    try:
-        resp = req.post(
-            'https://matara.pro/nedarimplus/Reports/Tamal3.aspx',
-            data={
-                'Action': 'ShowInvoice',
-                'MosadNumber': mosad,
-                'ApiPassword': api_password,
-                'TransactionId': approval,
-            },
-            timeout=15
-        )
-        data = resp.json()
-        if data.get('Result') == 'OK':
-            receipt_url = data.get('Message', '')
-            log.info(f"Receipt URL: {receipt_url}")
-        else:
-            log.error(f"ShowInvoice failed: {data}")
-    except Exception as e:
-        log.error(f"ShowInvoice error: {e}")
-
-    # שלב 3: שליחת מייל ללקוח
-    _send_receipt_email(
-        to=customer_email,
-        amount=amount,
-        bonus=bonus,
-        total_credit=total_credit,
-        approval=approval,
-        receipt_url=receipt_url,
-    )
-
-
-def _send_receipt_email(to, amount, bonus, total_credit, approval, receipt_url):
-    """שולח מייל אישור טעינה עם קישור לקבלה."""
-    try:
-        import os
-        import sendgrid
-        from sendgrid.helpers.mail import Mail, Email
-
-        bonus_row = ''
-        if bonus > 0:
-            bonus_row = f'<tr><td style="padding:6px 0;color:#6b7280">בונוס מבצע</td><td style="padding:6px 0;text-align:left;color:#10b981"><b>+₪{bonus:.2f}</b></td></tr>'
-
-        receipt_btn = ''
-        if receipt_url:
-            receipt_btn = f'''
-<div style="text-align:center;margin:20px 0">
-  <a href="{receipt_url}" style="background:#1d4ed8;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:700">
-    📄 הצגת קבלה רשמית
-  </a>
-</div>'''
-
-        html = f'''<div dir="rtl" style="font-family:Arial,sans-serif;max-width:520px;margin:auto;background:#f9fafb;padding:24px;border-radius:12px">
-<div style="background:#fff;border-radius:10px;padding:24px;box-shadow:0 1px 4px rgba(0,0,0,0.08)">
-  <h2 style="color:#1d4ed8;margin:0 0 16px">✅ הארנק נטען בהצלחה</h2>
-  <table style="width:100%;border-top:1px solid #e5e7eb;margin-bottom:8px">
-    <tr><td style="padding:6px 0;color:#6b7280">סכום שנסלק</td><td style="padding:6px 0;text-align:left"><b>₪{amount:.2f}</b></td></tr>
-    {bonus_row}
-    <tr style="border-top:1px solid #e5e7eb"><td style="padding:8px 0;font-weight:700">סה"כ זוכה לארנק</td><td style="padding:8px 0;text-align:left;font-weight:700;color:#1d4ed8">₪{total_credit:.2f}</td></tr>
-  </table>
-  <div style="font-size:12px;color:#9ca3af;margin-bottom:16px">מספר אישור: {approval}</div>
-  {receipt_btn}
-</div>
-<div style="text-align:center;font-size:11px;color:#9ca3af;margin-top:12px">תמלול פון 03-3131795</div>
-</div>'''
-
-        sg = sendgrid.SendGridAPIClient(api_key=os.environ.get('SENDGRID_API_KEY'))
-        message = Mail(
-            from_email=Email(os.environ.get('SENDGRID_FROM_EMAIL', ''), 'תמלול פון'),
-            to_emails=to,
-            subject=f'הארנק נטען - ₪{total_credit:.2f} | תמלול פון',
-            html_content=_email_wrap(html, phone=None)
-        )
-        sg.send(message)
-        log.info(f"Receipt email sent to {to}")
-    except Exception as e:
-        log.error(f"Receipt email error: {e}")
 
 
 def _calculate_bonus(amount, get_setting):
