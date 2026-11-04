@@ -221,6 +221,31 @@ class CallSession(db.Model):
     step = db.Column(db.String(50), default='')
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+class DevRequest(db.Model):
+    """בקשת פיתוח (ממשק הניהול ← "בקשות פיתוח"): רעיונות ובקשות של לקוחות לפיתוח עתידי."""
+    __tablename__ = 'dev_requests'
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(300), nullable=False)
+    details = db.Column(db.Text, nullable=True)
+    requested_by = db.Column(db.String(200), nullable=True)    # שם/טלפון של מי שביקש
+    priority = db.Column(db.String(10), default='normal')      # low / normal / high
+    status = db.Column(db.String(20), default='new', index=True)  # new / planned / in_progress / done / rejected
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow)
+    done_at = db.Column(db.DateTime, nullable=True)
+
+
+class FeatureNote(db.Model):
+    """הסבר מוכן על פיתוח קיים - להעתקה ושליחה ללקוחות (ממשק הניהול ← "בקשות פיתוח")."""
+    __tablename__ = 'feature_notes'
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(200), nullable=False)
+    body = db.Column(db.Text, nullable=False, default='')
+    position = db.Column(db.Integer, default=0)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
 class ManagerMessage(db.Model):
     __tablename__ = 'manager_messages'
     id = db.Column(db.Integer, primary_key=True)

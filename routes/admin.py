@@ -2461,3 +2461,173 @@ def regenerate_institution_code(inst_id):
     db.session.commit()
     flash(f'קוד כניסה חדש למוסד: {inst.login_code}')
     return redirect(url_for('admin.institution_detail', inst_id=inst.id))
+
+
+# ==================== בקשות פיתוח + הסברים מוכנים על פיתוחים קיימים ====================
+# עמוד אחד עם שתי לשוניות: (1) בקשות שלקוחות ביקשו / רעיונות לפיתוח עתידי, עם סטטוס;
+# (2) הסברים קצרים מוכנים על השירותים הקיימים - להעתקה ושליחה ללקוחות (גם להודעה התפוצתית).
+
+DEV_STATUSES = [('new', 'חדש'), ('planned', 'מתוכנן'), ('in_progress', 'בעבודה'), ('done', 'בוצע'), ('rejected', 'לא יבוצע')]
+DEV_PRIORITIES = [('high', 'דחוף'), ('normal', 'רגיל'), ('low', 'נמוך')]
+
+_DEFAULT_FEATURES = [
+    ('⚡ מערכת מהירה', 'המעבר בין השלוחות בטלפון מהיר, בלי המתנות מיותרות.'),
+    ('🎯 תמלול מדויק', 'מנוע התמלול כותב שמות של רבנים, ספרים, מוסדות ומקומות בדיוק כפי שנאמרו.'),
+    ('📂 שלוחה 8 - המסמכים שלכם', 'בשלוחה 8 שומעים את רשימת המסמכים הקודמים (עד 200 אחרונים): תמלולים, כתבי יד וקלדנות דיגיטלית. '
+     'כל מסמך אפשר לקבל שוב - במייל ללא עלות, או בפקס.'),
+    ('🎙️ שליטה בהקלטה', 'בסיום ההקלטה אפשר לבחור: לשלוח לתמלול, להקליט מחדש, או להמשיך להקליט מהמקום שבו עצרתם.'),
+    ('🆓 הקלטה שנקטעה - בלי חיוב', 'הקלטה קצרה מ-6 שניות (למשל לחיצה בטעות) לא נשלחת לתמלול ולא מחויבת.'),
+    ('📧 שליחת קבצים במייל', 'אפשר לשלוח הקלטות גדולות במיוחד, קישור מ-Google Drive או מג\'מבו מייל במקום קובץ מצורף, '
+     'ולקלדנות דיגיטלית - כמה תמונות/PDF יחד או תיקייה דחוסה (ZIP), שיאוחדו למסמך אחד לפי סדר שמות הקבצים.'),
+    ('✉️ מיילים ברורים', 'עיצוב קריא לכל המיילים, קישור ישיר לטעינת הארנק בכל מייל, הסבר מיידי אם נשלח מייל בלי מספר טלפון בנושא, '
+     'ואפשר להשיב ישירות למיילים שלנו - התשובה מגיעה אלינו.'),
+    ('💳 עדכון מייל בטעינת ארנק', 'בטעינת ארנק בנדרים פלוס, כתבו בשדה ההערות "עדכון מייל" - והכתובת שהזנתם בתשלום תעודכן אצלנו אוטומטית.'),
+    ('📑 דוח עלויות', 'אפשר לבקש דוח עלויות: קובץ מסודר עם סיכום לפי סוג שירות ופירוט של כל התנועות לתקופה שתבחרו.'),
+]
+
+
+def _dev_seed_features():
+    """פעם אחת בלבד (גם אם אחר כך מוחקים הכל) - ממלא את ההסברים ההתחלתיים."""
+    from models import FeatureNote
+    if get_setting('feature_notes_seeded', '') == '1':
+        return
+    if FeatureNote.query.count() == 0:
+        for i, (t, b) in enumerate(_DEFAULT_FEATURES):
+            db.session.add(FeatureNote(title=t, body=b, position=i))
+        db.session.commit()
+    set_setting('feature_notes_seeded', '1')
+
+
+@admin_bp.route('/dev-requests')
+@login_required
+def dev_requests():
+    from models import DevRequest, FeatureNote
+    _dev_seed_features()
+    tab = request.args.get('tab', 'requests')
+    status = request.args.get('status', 'open')
+    q = DevRequest.query
+    if status == 'open':
+        q = q.filter(DevRequest.status.in_(('new', 'planned', 'in_progress')))
+    elif status in dict(DEV_STATUSES):
+        q = q.filter(DevRequest.status == status)
+    from sqlalchemy import case
+    prio_order = case({'high': 0, 'normal': 1, 'low': 2}, value=DevRequest.priority, else_=1)
+    reqs = q.order_by(prio_order, DevRequest.created_at.desc()).all()
+    counts = dict(db.session.query(DevRequest.status, func.count(DevRequest.id)).group_by(DevRequest.status).all())
+    counts['open'] = sum(counts.get(k, 0) for k in ('new', 'planned', 'in_progress'))
+    features = FeatureNote.query.order_by(FeatureNote.position, FeatureNote.id).all()
+    return render_template('admin/dev_requests.html', tab=tab, status=status, reqs=reqs, counts=counts,
+                           features=features, statuses=DEV_STATUSES, priorities=DEV_PRIORITIES)
+
+
+@admin_bp.route('/dev-requests/save', methods=['POST'])
+@login_required
+def dev_request_save():
+    from models import DevRequest
+    rid = request.form.get('id', type=int)
+    r = DevRequest.query.get_or_404(rid) if rid else DevRequest()
+    title = (request.form.get('title') or '').strip()
+    if not title:
+        flash('יש לכתוב כותרת לבקשה')
+        return redirect(url_for('admin.dev_requests'))
+    r.title = title[:300]
+    r.details = (request.form.get('details') or '').strip()
+    r.requested_by = (request.form.get('requested_by') or '').strip()[:200]
+    r.priority = request.form.get('priority') if request.form.get('priority') in dict(DEV_PRIORITIES) else 'normal'
+    new_status = request.form.get('status') or r.status or 'new'
+    if new_status in dict(DEV_STATUSES):
+        if new_status == 'done' and r.status != 'done':
+            r.done_at = datetime.utcnow()
+        r.status = new_status
+    r.updated_at = datetime.utcnow()
+    if not rid:
+        db.session.add(r)
+    db.session.commit()
+    flash('הבקשה נשמרה' if rid else 'הבקשה נוספה')
+    return redirect(url_for('admin.dev_requests', status=request.form.get('back_status', 'open')))
+
+
+@admin_bp.route('/dev-requests/<int:rid>/status', methods=['POST'])
+@login_required
+def dev_request_status(rid):
+    from models import DevRequest
+    r = DevRequest.query.get_or_404(rid)
+    st = request.form.get('status')
+    if st in dict(DEV_STATUSES):
+        if st == 'done' and r.status != 'done':
+            r.done_at = datetime.utcnow()
+        r.status = st
+        r.updated_at = datetime.utcnow()
+        db.session.commit()
+    return redirect(url_for('admin.dev_requests', status=request.form.get('back_status', 'open')))
+
+
+@admin_bp.route('/dev-requests/<int:rid>/delete', methods=['POST'])
+@login_required
+def dev_request_delete(rid):
+    from models import DevRequest
+    db.session.delete(DevRequest.query.get_or_404(rid))
+    db.session.commit()
+    flash('הבקשה נמחקה')
+    return redirect(url_for('admin.dev_requests', status=request.form.get('back_status', 'open')))
+
+
+@admin_bp.route('/dev-requests/<int:rid>/to-feature', methods=['POST'])
+@login_required
+def dev_request_to_feature(rid):
+    """בקשה שבוצעה -> הסבר מוכן ללקוחות (טיוטה מהכותרת והפירוט, לעריכה בלשונית ההסברים)."""
+    from models import DevRequest, FeatureNote
+    r = DevRequest.query.get_or_404(rid)
+    pos = (db.session.query(func.max(FeatureNote.position)).scalar() or 0) + 1
+    db.session.add(FeatureNote(title=r.title, body=r.details or '', position=pos))
+    if r.status != 'done':
+        r.status, r.done_at = 'done', datetime.utcnow()
+    db.session.commit()
+    flash('נוסף הסבר חדש בלשונית "פיתוחים קיימים" - כדאי לעבור על הניסוח לפני ששולחים ללקוחות')
+    return redirect(url_for('admin.dev_requests', tab='features'))
+
+
+@admin_bp.route('/dev-features/save', methods=['POST'])
+@login_required
+def dev_feature_save():
+    from models import FeatureNote
+    fid = request.form.get('id', type=int)
+    title = (request.form.get('title') or '').strip()
+    if not title:
+        flash('יש לכתוב כותרת')
+        return redirect(url_for('admin.dev_requests', tab='features'))
+    f = FeatureNote.query.get_or_404(fid) if fid else FeatureNote(
+        position=(db.session.query(func.max(FeatureNote.position)).scalar() or 0) + 1)
+    f.title = title[:200]
+    f.body = (request.form.get('body') or '').strip()
+    f.updated_at = datetime.utcnow()
+    if not fid:
+        db.session.add(f)
+    db.session.commit()
+    flash('ההסבר נשמר')
+    return redirect(url_for('admin.dev_requests', tab='features'))
+
+
+@admin_bp.route('/dev-features/<int:fid>/move', methods=['POST'])
+@login_required
+def dev_feature_move(fid):
+    from models import FeatureNote
+    items = FeatureNote.query.order_by(FeatureNote.position, FeatureNote.id).all()
+    idx = next((i for i, x in enumerate(items) if x.id == fid), None)
+    j = idx + (-1 if request.form.get('dir') == 'up' else 1) if idx is not None else None
+    if idx is not None and 0 <= j < len(items):
+        items[idx], items[j] = items[j], items[idx]
+        for i, x in enumerate(items):
+            x.position = i
+        db.session.commit()
+    return redirect(url_for('admin.dev_requests', tab='features'))
+
+
+@admin_bp.route('/dev-features/<int:fid>/delete', methods=['POST'])
+@login_required
+def dev_feature_delete(fid):
+    from models import FeatureNote
+    db.session.delete(FeatureNote.query.get_or_404(fid))
+    db.session.commit()
+    flash('ההסבר נמחק')
+    return redirect(url_for('admin.dev_requests', tab='features'))

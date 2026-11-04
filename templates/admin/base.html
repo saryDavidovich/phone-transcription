@@ -271,6 +271,9 @@ textarea.form-input { resize:vertical; min-height:80px; }
     <a href="/admin/broadcast" class="nav-item {% if request.endpoint in ['admin.broadcast_message','admin.broadcast_test','admin.broadcast_send'] %}active{% endif %}">
       <span class="nav-icon">📣</span> הודעה תפוצתית
     </a>
+    <a href="/admin/dev-requests" class="nav-item {% if request.endpoint and request.endpoint.startswith('admin.dev_') %}active{% endif %}">
+      <span class="nav-icon">🛠️</span> בקשות פיתוח
+    </a>
     <a href="/admin/inbox" class="nav-item {% if request.endpoint in ['admin.general_inbox'] %}active{% endif %}">
       <span class="nav-icon">📥</span> תיבה כללית
     </a>

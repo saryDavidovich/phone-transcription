@@ -1,0 +1,179 @@
+{% extends 'admin/base.html' %}
+{% block title %}בקשות פיתוח{% endblock %}
+{% block page_title %}🛠️ בקשות פיתוח{% endblock %}
+
+{% block content %}
+{% set st_names = dict(statuses) %}
+{% set pr_names = dict(priorities) %}
+<style>
+  .dv-tabs { display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap }
+  .dv-tabs a { padding:8px 16px; border-radius:10px; text-decoration:none; color:var(--text2); background:var(--surface2); border:1px solid var(--border); font-size:14px }
+  .dv-tabs a.on { color:var(--accent); border-color:var(--accent); font-weight:700 }
+  .dv-chips { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:12px }
+  .dv-chips a { font-size:12.5px; padding:4px 11px; border-radius:20px; text-decoration:none; color:var(--text2); border:1px solid var(--border) }
+  .dv-chips a.on { color:#fff; background:var(--accent); border-color:var(--accent) }
+  .dv-item { border:1px solid var(--border); border-radius:12px; padding:12px 14px; margin-bottom:10px; background:var(--surface) }
+  .dv-head { display:flex; gap:10px; align-items:center; flex-wrap:wrap }
+  .dv-title { font-weight:700; font-size:15px; flex:1; min-width:200px }
+  .dv-meta { font-size:12px; color:var(--text3, #8892b0); margin-top:4px }
+  .dv-details { white-space:pre-wrap; font-size:13.5px; color:var(--text2); margin-top:8px; line-height:1.7 }
+  .dv-pr-high { color:#ef4444; font-weight:700 }
+  .dv-feat { border:1px solid var(--border); border-radius:12px; padding:12px 14px; margin-bottom:10px; background:var(--surface) }
+  .dv-feat .t { font-weight:700; font-size:15px }
+  .dv-feat .b { white-space:pre-wrap; margin-top:6px; line-height:1.75; font-size:14px; color:var(--text2) }
+  .dv-feat .acts { display:flex; gap:6px; margin-top:10px; flex-wrap:wrap }
+  .dv-feat .acts button, .dv-item .acts button { font-size:12.5px; padding:4px 10px }
+  .dv-sel { padding:5px 8px; border-radius:8px; border:1px solid var(--border); background:var(--surface2); color:var(--text); font-size:13px }
+</style>
+
+<div class="dv-tabs">
+  <a href="{{ url_for('admin.dev_requests', tab='requests') }}" class="{{ 'on' if tab != 'features' }}">📝 בקשות ורעיונות ({{ counts.open or 0 }} פתוחות)</a>
+  <a href="{{ url_for('admin.dev_requests', tab='features') }}" class="{{ 'on' if tab == 'features' }}">✅ פיתוחים קיימים - הסברים ללקוחות ({{ features|length }})</a>
+</div>
+
+{% if tab != 'features' %}
+{# ---------------- בקשות ---------------- #}
+<div class="card" style="margin-bottom:16px">
+  <details {% if not reqs %}open{% endif %}>
+    <summary style="cursor:pointer;font-weight:700">➕ בקשה חדשה</summary>
+    <form method="POST" action="{{ url_for('admin.dev_request_save') }}" style="margin-top:12px">
+      <input type="hidden" name="back_status" value="{{ status }}">
+      <div class="form-group"><label class="form-label">מה ביקשו / הרעיון</label>
+        <input class="form-input" name="title" required maxlength="300" placeholder="למשל: אפשרות לקבל את התמלול גם בווטסאפ"></div>
+      <div class="form-group"><label class="form-label">פירוט (לא חובה)</label>
+        <textarea class="form-input" name="details" rows="3" placeholder="פרטים, דוגמאות, למה זה חשוב ללקוח..."></textarea></div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+        <div style="flex:1;min-width:200px"><label class="form-label">מי ביקש (לא חובה)</label>
+          <input class="form-input" name="requested_by" maxlength="200" placeholder="שם / טלפון"></div>
+        <div><label class="form-label">דחיפות</label>
+          <select class="dv-sel" name="priority">{% for k, v in priorities %}<option value="{{ k }}" {{ 'selected' if k == 'normal' }}>{{ v }}</option>{% endfor %}</select></div>
+        <button class="btn btn-primary" type="submit">הוספה</button>
+      </div>
+    </form>
+  </details>
+</div>
+
+<div class="dv-chips">
+  <a href="{{ url_for('admin.dev_requests', status='open') }}" class="{{ 'on' if status == 'open' }}">פתוחות ({{ counts.open or 0 }})</a>
+  {% for k, v in statuses %}
+  <a href="{{ url_for('admin.dev_requests', status=k) }}" class="{{ 'on' if status == k }}">{{ v }} ({{ counts.get(k, 0) }})</a>
+  {% endfor %}
+  <a href="{{ url_for('admin.dev_requests', status='all') }}" class="{{ 'on' if status == 'all' }}">הכל</a>
+</div>
+
+{% for r in reqs %}
+<div class="dv-item">
+  <div class="dv-head">
+    <div class="dv-title">{% if r.priority == 'high' %}<span class="dv-pr-high">● </span>{% endif %}{{ r.title }}</div>
+    <form method="POST" action="{{ url_for('admin.dev_request_status', rid=r.id) }}">
+      <input type="hidden" name="back_status" value="{{ status }}">
+      <select class="dv-sel" name="status" onchange="this.form.submit()">
+        {% for k, v in statuses %}<option value="{{ k }}" {{ 'selected' if r.status == k }}>{{ v }}</option>{% endfor %}
+      </select>
+    </form>
+  </div>
+  <div class="dv-meta">
+    {{ pr_names.get(r.priority, 'רגיל') }} · נוסף {{ r.created_at | il_time('%d/%m/%Y') }}
+    {% if r.requested_by %} · ביקש: {{ r.requested_by }}{% endif %}
+    {% if r.done_at %} · בוצע {{ r.done_at | il_time('%d/%m/%Y') }}{% endif %}
+  </div>
+  {% if r.details %}<div class="dv-details">{{ r.details }}</div>{% endif %}
+  <details style="margin-top:8px">
+    <summary style="cursor:pointer;font-size:12.5px;color:var(--accent)">עריכה / פעולות</summary>
+    <form method="POST" action="{{ url_for('admin.dev_request_save') }}" style="margin-top:10px">
+      <input type="hidden" name="id" value="{{ r.id }}"><input type="hidden" name="back_status" value="{{ status }}">
+      <input type="hidden" name="status" value="{{ r.status }}">
+      <div class="form-group"><input class="form-input" name="title" value="{{ r.title }}" required maxlength="300"></div>
+      <div class="form-group"><textarea class="form-input" name="details" rows="3">{{ r.details or '' }}</textarea></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center" class="acts">
+        <input class="form-input" name="requested_by" value="{{ r.requested_by or '' }}" placeholder="מי ביקש" style="max-width:220px">
+        <select class="dv-sel" name="priority">{% for k, v in priorities %}<option value="{{ k }}" {{ 'selected' if r.priority == k }}>{{ v }}</option>{% endfor %}</select>
+        <button class="btn btn-primary" type="submit">שמירה</button>
+      </div>
+    </form>
+    <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap" class="acts">
+      <form method="POST" action="{{ url_for('admin.dev_request_to_feature', rid=r.id) }}">
+        <button class="btn btn-ghost" type="submit" title="מסמן כבוצע ומוסיף הסבר ללשונית הפיתוחים הקיימים">✅ בוצע - הוסף להסברים ללקוחות</button>
+      </form>
+      <form method="POST" action="{{ url_for('admin.dev_request_delete', rid=r.id) }}" onsubmit="return confirm('למחוק את הבקשה?')">
+        <input type="hidden" name="back_status" value="{{ status }}">
+        <button class="btn btn-danger" type="submit">מחיקה</button>
+      </form>
+    </div>
+  </details>
+</div>
+{% else %}
+<div class="card" style="color:var(--text2)">אין בקשות {{ 'פתוחות' if status == 'open' else 'בסטטוס הזה' }}.</div>
+{% endfor %}
+
+{% else %}
+{# ---------------- פיתוחים קיימים ---------------- #}
+<div class="card" style="margin-bottom:16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+  <div style="flex:1;min-width:220px;font-size:13px;color:var(--text2);line-height:1.7">
+    הסברים קצרים על השירותים שכבר קיימים - להעתקה ושליחה ללקוחות. ההעתקה שומרת את הכותרות המודגשות,
+    כך שאפשר להדביק ישר בעורך של ההודעה התפוצתית.
+  </div>
+  <button class="btn btn-primary" type="button" onclick="dvCopyAll(this)">📋 העתקת הכל</button>
+</div>
+
+<div id="dvFeatures">
+{% for f in features %}
+<div class="dv-feat" data-title="{{ f.title }}" data-body="{{ f.body }}">
+  <div class="t">{{ f.title }}</div>
+  <div class="b">{{ f.body }}</div>
+  <div class="acts">
+    <button class="btn btn-ghost" type="button" onclick="dvCopyOne(this)">📋 העתקה</button>
+    <form method="POST" action="{{ url_for('admin.dev_feature_move', fid=f.id) }}" style="display:inline"><input type="hidden" name="dir" value="up"><button class="btn btn-ghost" type="submit" title="למעלה" {{ 'disabled' if loop.first }}>▲</button></form>
+    <form method="POST" action="{{ url_for('admin.dev_feature_move', fid=f.id) }}" style="display:inline"><input type="hidden" name="dir" value="down"><button class="btn btn-ghost" type="submit" title="למטה" {{ 'disabled' if loop.last }}>▼</button></form>
+    <details style="flex-basis:100%">
+      <summary style="cursor:pointer;font-size:12.5px;color:var(--accent)">עריכה</summary>
+      <form method="POST" action="{{ url_for('admin.dev_feature_save') }}" style="margin-top:8px">
+        <input type="hidden" name="id" value="{{ f.id }}">
+        <div class="form-group"><input class="form-input" name="title" value="{{ f.title }}" required maxlength="200"></div>
+        <div class="form-group"><textarea class="form-input" name="body" rows="4">{{ f.body }}</textarea></div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-primary" type="submit">שמירה</button>
+        </div>
+      </form>
+      <form method="POST" action="{{ url_for('admin.dev_feature_delete', fid=f.id) }}" onsubmit="return confirm('למחוק את ההסבר?')" style="margin-top:6px">
+        <button class="btn btn-danger" type="submit">מחיקה</button>
+      </form>
+    </details>
+  </div>
+</div>
+{% endfor %}
+</div>
+
+<div class="card">
+  <details>
+    <summary style="cursor:pointer;font-weight:700">➕ הסבר חדש</summary>
+    <form method="POST" action="{{ url_for('admin.dev_feature_save') }}" style="margin-top:12px">
+      <div class="form-group"><label class="form-label">כותרת (אפשר עם אמוג'י בהתחלה)</label>
+        <input class="form-input" name="title" required maxlength="200" placeholder="למשל: 📲 קבלת תמלול בווטסאפ"></div>
+      <div class="form-group"><label class="form-label">הסבר ללקוח</label>
+        <textarea class="form-input" name="body" rows="4"></textarea></div>
+      <button class="btn btn-primary" type="submit">הוספה</button>
+    </form>
+  </details>
+</div>
+
+<script>
+(function () {
+  const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  async function copy(items, btn) {
+    const text = items.map(([t, b]) => `${t}\n${b}`).join('\n\n');
+    const html = items.map(([t, b]) => `<p><b>${esc(t)}</b><br>${esc(b).replace(/\n/g, '<br>')}</p>`).join('');
+    try {
+      if (window.ClipboardItem) {
+        await navigator.clipboard.write([new ClipboardItem({
+          'text/html': new Blob([html], {type: 'text/html'}), 'text/plain': new Blob([text], {type: 'text/plain'})})]);
+      } else { await navigator.clipboard.writeText(text); }
+      const old = btn.textContent; btn.textContent = '✓ הועתק'; setTimeout(() => btn.textContent = old, 1500);
+    } catch (e) { prompt('העתיקו את הטקסט:', text); }
+  }
+  window.dvCopyOne = btn => { const el = btn.closest('.dv-feat'); copy([[el.dataset.title, el.dataset.body]], btn); };
+  window.dvCopyAll = btn => copy([...document.querySelectorAll('#dvFeatures .dv-feat')].map(el => [el.dataset.title, el.dataset.body]), btn);
+})();
+</script>
+{% endif %}
+{% endblock %}
