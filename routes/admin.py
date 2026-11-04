@@ -1609,13 +1609,23 @@ def manager_messages():
     if status_filter:
         query = query.filter_by(status=status_filter)
     messages = query.order_by(ManagerMessage.created_at.desc()).all()
+    # טלפון -> מספר לקוח (גם טלפון נוסף של לקוח), כדי שהטלפון יהיה קישור לכרטיס הלקוח
+    from models import CustomerPhone
+    phones = {m.phone for m in messages if m.phone}
+    customer_ids = {}
+    if phones:
+        for row in CustomerPhone.query.filter(CustomerPhone.phone.in_(phones)).with_entities(
+                CustomerPhone.phone, CustomerPhone.customer_id):
+            customer_ids[row[0]] = row[1]
+        for row in Customer.query.filter(Customer.phone.in_(phones)).with_entities(Customer.phone, Customer.id):
+            customer_ids[row[0]] = row[1]
     unread_replies = CustomerMessage.query.filter_by(direction='in', is_read=False) \
         .order_by(CustomerMessage.created_at.desc()).all()
     from models import GeneralInboxMessage
     unread_inbox_count = GeneralInboxMessage.query.filter_by(is_read=False).count()
     return render_template('admin/manager_messages.html', messages=messages,
         status_filter=status_filter, timedelta=timedelta, unread_replies=unread_replies,
-        unread_inbox_count=unread_inbox_count)
+        unread_inbox_count=unread_inbox_count, customer_ids=customer_ids)
 
 
 @admin_bp.route('/messages/<int:id>/play')
@@ -1630,7 +1640,7 @@ def play_manager_message(id):
         r.raise_for_status()
         return send_file(
             io.BytesIO(r.content),
-            mimetype='application/octet-stream',
+            mimetype='audio/wav',
             as_attachment=False,
             download_name='message.wav'
         )
@@ -1648,6 +1658,33 @@ def update_message_status(id):
     return_filter = request.form.get('return_filter', '')
     return redirect(url_for('admin.manager_messages', status=return_filter) if return_filter
                      else url_for('admin.manager_messages'))
+
+
+@admin_bp.route('/messages/<int:id>/set-email', methods=['POST'])
+@login_required
+def message_set_email(id):
+    """בקשה לעדכון מייל (הודעה שהלקוח השאיר בטלפון): הנציג מקליד את המייל ששמע,
+    והוא נשמר ללקוח של אותו טלפון (ושיטת השליחה עוברת למייל), וההודעה מסומנת "טופל"."""
+    import re
+    from services.customer_phones import find_customer_by_phone
+    msg = ManagerMessage.query.get_or_404(id)
+    back = redirect(url_for('admin.manager_messages', status=request.form.get('return_filter') or None))
+    email = (request.form.get('email') or '').strip().lower()
+    if not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', email):
+        flash('כתובת המייל לא תקינה')
+        return back
+    customer = find_customer_by_phone(msg.phone) if msg.phone else None
+    if not customer:
+        flash(f'לא נמצא לקוח עם הטלפון {msg.phone}')
+        return back
+    old = customer.email or ''
+    customer.email = email
+    customer.delivery_method = 'email'
+    msg.status = 'done'
+    msg.admin_note = ((msg.admin_note or '') + f'\nהמייל עודכן ל-{email}' + (f' (היה {old})' if old else '')).strip()
+    db.session.commit()
+    flash(f'✔ המייל של {customer.name or msg.phone} עודכן ל-{email}')
+    return back
 
 
 @admin_bp.route('/messages/<int:id>/delete', methods=['POST'])

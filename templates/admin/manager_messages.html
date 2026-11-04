@@ -91,13 +91,16 @@
       <td style="font-size:11px">{{ msg.created_at | il_time('%d/%m %H:%M') }}</td>
 
       <!-- טלפון -->
-      <td><strong>{{ msg.phone }}</strong></td>
+      <td>{% set cid = customer_ids.get(msg.phone) %}
+        {% if cid %}<a href="{{ url_for('admin.customer_detail', id=cid) }}" title="לכרטיס הלקוח" style="font-weight:700">{{ msg.phone }}</a>
+        {% else %}<strong>{{ msg.phone }}</strong>{% if msg.phone and msg.phone != '—' %}<br><span class="text-muted" style="font-size:10px">לא לקוח רשום</span>{% endif %}{% endif %}</td>
 
       <!-- שם / מייל -->
       <td style="font-size:11px">
         {% if msg.source == 'institution_contact' %}<span class="badge bg-danger" style="font-size:10px;">🏫 הודעת מוסד</span><br>{% endif %}
         {% if msg.source == 'recording_error' %}<span class="badge bg-danger" style="font-size:10px;">❌ הקלטה נכשלה</span><br>{% endif %}
-        {% if msg.source == 'nedarim_unmatched' %}<span class="badge bg-danger" style="font-size:10px;">💳 תשלום לא מזוהה</span><br>{% endif %}
+        {% if msg.source == 'email_request' %}<span class="badge bg-primary" style="font-size:10px;">📧 בקשה לעדכון מייל</span><br>{% endif %}
+                {% if msg.source == 'nedarim_unmatched' %}<span class="badge bg-danger" style="font-size:10px;">💳 תשלום לא מזוהה</span><br>{% endif %}
         {% if msg.name %}{{ msg.name }}<br>{% endif %}
         {% if msg.email %}<span class="text-muted">{{ msg.email }}</span>{% endif %}
       </td>
@@ -107,6 +110,15 @@
         {% if msg.transcript %}{{ msg.transcript }}
         {% elif msg.rec_url %}<span class="text-muted">⏳ מתמלל...</span>
         {% else %}<span class="text-muted">—</span>{% endif %}
+        {% if msg.rec_url %}<audio controls preload="none" style="width:100%;max-width:250px;height:32px;margin-top:6px;display:block"
+               src="{{ url_for('admin.play_manager_message', id=msg.id) }}"></audio>{% endif %}
+        {% if msg.source == 'email_request' and msg.status != 'done' %}
+        <form method="POST" action="{{ url_for('admin.message_set_email', id=msg.id) }}" style="display:flex;gap:4px;margin-top:6px"
+              onsubmit="return confirm('לעדכן ללקוח את המייל ' + this.email.value + ' ?')">
+          <input type="hidden" name="return_filter" value="{{ status_filter }}">
+          <input class="form-control form-control-sm" type="email" name="email" required dir="ltr" placeholder="המייל ששמעת" style="font-size:12px">
+          <button class="btn btn-sm btn-primary" type="submit" style="white-space:nowrap">עדכן מייל</button>
+        </form>{% endif %}
       </td>
 
       <!-- סטטוס + הערה inline -->

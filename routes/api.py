@@ -326,10 +326,16 @@ def receive_manager_message():
     from services.transcribe import transcribe_manager_message_async
     data = request.json
     call_id = data.get('call_id', '')
-    msg = ManagerMessage.query.filter_by(call_id=call_id).first()
+    msg = None
+    if str(data.get('id') or '').isdigit():      # המספר ששוריין מראש (בקשת עדכון מייל)
+        msg = ManagerMessage.query.get(int(data['id']))
+    if not msg:
+        msg = ManagerMessage.query.filter_by(call_id=call_id).first()
     if not msg:
         msg = ManagerMessage(call_id=call_id, status='new')
         db.session.add(msg)
+    if data.get('source') in ('email_request',):
+        msg.source = data['source']
     msg.phone = data.get('phone', '')
     msg.name = data.get('name', '')
     msg.email = data.get('email', '')
