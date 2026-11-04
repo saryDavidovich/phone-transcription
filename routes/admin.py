@@ -1389,35 +1389,21 @@ def play_audio(id):
 @admin_bp.route('/recordings/<int:id>/download-word')
 @login_required
 def download_word(id):
-    from docx import Document
-    from docx.shared import Pt, RGBColor
-    from docx.enum.text import WD_ALIGN_PARAGRAPH
-
+    """אותו קובץ Word בדיוק שהלקוח מקבל במייל (services/transcribe._build_word_doc)."""
+    from services.transcribe import _build_word_doc
     recording = Recording.query.get_or_404(id)
     customer = Customer.query.get(recording.customer_id)
-
-    doc = Document()
-
-    title = doc.add_heading('תמלול שיחה', 0)
-    title.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-
-    doc.add_paragraph(f'לקוח: {customer.name or customer.phone if customer else ""}').alignment = WD_ALIGN_PARAGRAPH.RIGHT
-    doc.add_paragraph(f'תאריך: {recording.created_at.strftime("%d/%m/%Y %H:%M") if recording.created_at else ""}').alignment = WD_ALIGN_PARAGRAPH.RIGHT
-    doc.add_paragraph(f'משך: {recording.duration_seconds // 60} דקות').alignment = WD_ALIGN_PARAGRAPH.RIGHT
-    doc.add_paragraph('─' * 50)
-
-    if recording.summary:
-        doc.add_heading('סיכום', level=1).alignment = WD_ALIGN_PARAGRAPH.RIGHT
-        p = doc.add_paragraph(recording.summary)
-        p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-
-    doc.add_heading('תמלול מלא', level=1).alignment = WD_ALIGN_PARAGRAPH.RIGHT
-    p = doc.add_paragraph(recording.transcript or 'אין תמלול')
-    p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-
-    output = io.BytesIO()
-    doc.save(output)
-    output.seek(0)
+    if not recording.transcript:
+        return 'אין עדיין תמלול להקלטה הזו', 404
+    name = (customer.name or customer.phone) if customer else ''
+    secs = recording.duration_seconds or 0
+    call_time = None
+    if recording.created_at:                       # שעת ההקלטה (שמורה ב-UTC) בשעון ישראל
+        from datetime import timezone
+        from zoneinfo import ZoneInfo
+        call_time = recording.created_at.replace(tzinfo=timezone.utc).astimezone(ZoneInfo('Asia/Jerusalem'))
+    output = io.BytesIO(_build_word_doc(name, f'{secs // 60}:{secs % 60:02d}', recording.transcript,
+                                        title=recording.source_filename or 'תמלול שיחה', call_time=call_time))
 
     # נטפרי חוסמת קובץ Word שיורד ישירות מהאתר שלנו; כמו בפורטל המוסדות - עמוד HTML
     # שהקובץ מוטמע בתוכו, וההורדה קורית בדפדפן עצמו (routes/download_utils)

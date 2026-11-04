@@ -122,7 +122,8 @@ def _imap_find(M, ref):
         typ, data = M.list()
         for line in data or []:
             name = line.decode('utf-8', 'replace').rsplit(' "/" ', 1)[-1].strip().strip('"')
-            if name and name.upper() != 'INBOX' and not re.search(r'(sent|draft|trash|spam|junk|נשלח|טיוט|אשפה)', name, re.I):
+            # גם פח האשפה: בזוהו מוגדר "העבר ומחק", כך שהמיילים שהועברו נמצאים שם
+            if name and name.upper() != 'INBOX' and not re.search(r'(sent|draft|outbox|נשלח|טיוט|יוצא)', name, re.I):
                 folders.append(name)
     except Exception:
         pass
@@ -153,39 +154,60 @@ def _imap_find(M, ref):
     return found
 
 
+def _already_processed(message_id):
+    if not message_id:
+        return False
+    from app import app
+    from models import ProcessedWebhook
+    with app.app_context():
+        return ProcessedWebhook.query.filter_by(message_id=message_id).first() is not None
+
+
 def fetch_originals(ref):
-    """מחזיר רשימת מיילים מקוריים (bytes) מזוהו, או זורק שגיאה עם הסבר."""
-    user = os.environ.get('ZOHO_IMAP_USER', '')
-    pwd = os.environ.get('ZOHO_IMAP_PASSWORD', '')
-    host = os.environ.get('ZOHO_IMAP_HOST', '') or 'imappro.zoho.com'
+    """מוצא את המיילים המקוריים בזוהו ומחזיר אותם (bytes) אחד-אחד. מייל שכבר טופל
+    (לפי Message-ID) מדולג עוד לפני שמורידים אותו. זורק שגיאה עם הסבר אם לא נמצא כלום."""
+    user = os.environ.get('ZOHO_IMAP_USER', '').strip()
+    pwd = os.environ.get('ZOHO_IMAP_PASSWORD', '').strip()
+    host = os.environ.get('ZOHO_IMAP_HOST', '').strip() or 'imappro.zoho.com'
     if not user or not pwd:
         raise RuntimeError('לא הוגדרו ZOHO_IMAP_USER / ZOHO_IMAP_PASSWORD ב-Railway')
     for attempt in range(1, _SEARCH_ATTEMPTS + 1):
-        M = imaplib.IMAP4_SSL(host, 993, timeout=60)
+        M = imaplib.IMAP4_SSL(host, 993, timeout=120)
+        found_any = False
         try:
             try:
                 M.login(user, pwd)
             except imaplib.IMAP4.error as e:
                 raise RuntimeError(f'זוהו דחו את ההתחברות ({host}, {user}) - בדוק שגישת IMAP פעילה '
                                    f'ושהסיסמה ב-ZOHO_IMAP_PASSWORD היא סיסמת אפליקציה: {e}')
-            out = []
-            for folder, uid in _imap_find(M, ref):
+            hits = _imap_find(M, ref)
+            log.info(f'zoho_recover: נמצאו {len(hits)} מיילים מתאימים: {[f for f, _ in hits]}')
+            for folder, uid in hits:
+                found_any = True
                 M.select(f'"{folder}"', readonly=True)
+                typ, data = M.uid('FETCH', uid, '(BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)])')
+                hdr = b''.join(p[1] for p in (data or []) if isinstance(p, tuple) and len(p) > 1)
+                m = re.search(rb'Message-ID:\s*(<[^>\s]+>)', hdr, re.I)
+                mid = m.group(1).decode('utf-8', 'replace') if m else None
+                if _already_processed(mid):
+                    log.info(f'zoho_recover: {mid} כבר טופל בעבר - מדלגים')
+                    continue
                 typ, data = M.uid('FETCH', uid, '(BODY.PEEK[])')
                 for part in data or []:
                     if isinstance(part, tuple) and len(part) > 1:
-                        log.info(f'zoho_recover: נמצא מייל בתיקייה {folder} ({len(part[1])} בתים)')
-                        out.append(part[1])
-            if out:
-                return out
+                        log.info(f'zoho_recover: מוריד מייל מ-{folder} ({len(part[1])} בתים, {mid})')
+                        yield part[1]
+                        break
         finally:
             try:
                 M.logout()
             except Exception:
                 pass
+        if found_any:
+            return
         if attempt < _SEARCH_ATTEMPTS:
             time.sleep(_SEARCH_DELAY)
-    raise RuntimeError('המייל המקורי לא נמצא בתיבה בזוהו')
+    raise RuntimeError('המייל המקורי לא נמצא בתיבה בזוהו (חיפוש בכל התיקיות כולל פח האשפה)')
 
 
 def build_form(raw):
@@ -234,9 +256,13 @@ def _recover(ref):
     if ref.get('subject'):
         desc += f" | נושא: {ref['subject']}"
     try:
+        done = 0
         for raw in fetch_originals(ref):
             result = replay(raw)
+            done += 1
             log.info(f'zoho_recover: מייל מזוהו ({desc}) עובד מחדש: {result}')
+        if not done:
+            raise RuntimeError('נמצאו בזוהו רק מיילים שכבר טופלו בעבר - לא נמצא מייל חדש לעיבוד')
     except Exception as e:
         log.error(f'zoho_recover: שחזור נכשל ({desc}): {e}')
         _alert('זוהו לא הצליחו להעביר מייל ללקוח (כנראה קובץ גדול), והמשיכה הישירה מזוהו נכשלה.\n'
