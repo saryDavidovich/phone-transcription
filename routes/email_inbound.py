@@ -1689,6 +1689,15 @@ def email_inbound():
     attachment_names = [request.files[k].filename for k in request.files if request.files[k] and request.files[k].filename]
     log.info(f"email-inbound: webhook התקבל - from={sender_email!r} to={to_email!r} subject={subject!r} attachments={attachment_names}")
 
+    # זוהו לא הצליחו להעביר אלינו מייל של לקוח (בדרך כלל קובץ גדול מדי ל-SendGrid) -
+    # מושכים את המייל המקורי ישירות מהתיבה בזוהו ומעבדים אותו כרגיל (services/zoho_recover)
+    from services import zoho_recover
+    if zoho_recover.is_forward_failure(sender_email, subject):
+        ref = zoho_recover.extract_original_ref(request)
+        log.info(f"email-inbound: כשל העברה מזוהו - מושכים את המייל המקורי: {ref}")
+        zoho_recover.recover_async(ref)
+        return jsonify({'status': 'recovering_from_zoho'}), 200
+
     # פקס נכנס גולמי מימות המשיח (מודול "קבלת פקסים", מוגדר להעביר במייל
     # לכתובת ייעודית - ראה FAX_INBOUND_EMAIL למעלה) - נבדק לפי כתובת היעד
     # (to), לא לפי נושא/שולח שאין עליהם שום שליטה/פורמט ידוע מראש כמו בתגובת
