@@ -35,8 +35,9 @@ _SEARCH_DELAY = 20      # שניות בין ניסיונות (אם המייל ע
 
 def is_forward_failure(sender_email, subject):
     s = (sender_email or '').lower()
+    subj = (subject or '').lower()
     return ('mailer-daemon' in s and 'zoho' in s and
-            'forward' in (subject or '').lower() and 'fail' in (subject or '').lower())
+            (('forward' in subj and 'fail' in subj) or ('כשל' in subj and 'העבר' in subj)))
 
 
 def _header_block(text):
@@ -75,6 +76,11 @@ def extract_original_ref(req):
         m = re.search(r'Message-ID:\s*(<[^>\s]+>)', body, re.I)
         if m:
             ref['message-id'] = m.group(1)
+    if not ref.get('date'):
+        body = (req.form.get('text') or '') + '\n' + (req.form.get('html') or '')
+        m = re.search(r'Arrival-Date:\s*([^<\n]+)', body, re.I)
+        if m:
+            ref['date'] = m.group(1).strip()
     return ref
 
 
@@ -90,8 +96,27 @@ def _alert(text):
         log.error(f'zoho_recover: התראה למנהל נכשלה: {e}')
 
 
+LARGE_BYTES = 15 * 1024 * 1024     # מיילים גדולים מזה הם אלה ש-SendGrid עלול לדחות
+
+
+def _since_date(ref):
+    """IMAP SINCE (יום לפני ההגעה, או יומיים אחורה) - בפורמט 02-Nov-2026."""
+    from datetime import datetime, timedelta
+    from email.utils import parsedate_to_datetime
+    d = None
+    try:
+        d = parsedate_to_datetime(ref.get('date')) if ref.get('date') else None
+    except Exception:
+        d = None
+    d = (d or datetime.utcnow()) - timedelta(days=1 if d else 2)
+    return d.strftime('%d-%b-%Y')
+
+
 def _imap_find(M, ref):
-    """מחפש את המייל המקורי: קודם לפי Message-ID, ואם אין - לפי שולח ונושא. מחזיר uid או None."""
+    """מחפש את המייל המקורי. לפי Message-ID אם יש, אחרת לפי שולח, ואם אין שום פרט
+    (זוהו לא צירפו את כותרות המקור) - כל המיילים הגדולים מהימים האחרונים; מיילים
+    שכבר טופלו מדולגים ממילא (הגנת הכפילות לפי Message-ID במסלול הרגיל).
+    מחזיר רשימה של (תיקייה, uid)."""
     folders = ['INBOX']
     try:
         typ, data = M.list()
@@ -103,28 +128,33 @@ def _imap_find(M, ref):
         pass
     mid = ref.get('message-id')
     sender = re.search(r'[\w.+-]+@[\w-]+(\.[\w-]+)+', ref.get('from') or '')
+    since = _since_date(ref)
+    found = []
     for folder in folders:
         try:
             typ, _ = M.select(f'"{folder}"', readonly=True)
             if typ != 'OK':
                 continue
             if mid:
-                typ, data = M.uid('SEARCH', None, 'HEADER', 'Message-ID', f'"{mid}"')
-                uids = (data[0] or b'').split() if typ == 'OK' else []
-                if uids:
-                    return folder, uids[-1]
+                crit = ('HEADER', 'Message-ID', f'"{mid}"')
             elif sender:
-                typ, data = M.uid('SEARCH', None, 'FROM', f'"{sender.group(0)}"')
-                uids = (data[0] or b'').split() if typ == 'OK' else []
-                if uids:
-                    return folder, uids[-1]       # האחרון מאותו שולח
+                crit = ('SINCE', since, 'FROM', f'"{sender.group(0)}"')
+            else:
+                crit = ('SINCE', since, 'LARGER', str(LARGE_BYTES))
+            typ, data = M.uid('SEARCH', None, *crit)
+            uids = (data[0] or b'').split() if typ == 'OK' else []
+            if mid or sender:
+                uids = uids[-1:]
+            found += [(folder, u) for u in uids]
+            if (mid or sender) and found:
+                break
         except Exception as e:
             log.warning(f'zoho_recover: חיפוש בתיקייה {folder} נכשל: {e}')
-    return None, None
+    return found
 
 
-def fetch_original(ref):
-    """מחזיר את המייל המקורי (bytes) מזוהו, או זורק שגיאה עם הסבר."""
+def fetch_originals(ref):
+    """מחזיר רשימת מיילים מקוריים (bytes) מזוהו, או זורק שגיאה עם הסבר."""
     user = os.environ.get('ZOHO_IMAP_USER', '')
     pwd = os.environ.get('ZOHO_IMAP_PASSWORD', '')
     host = os.environ.get('ZOHO_IMAP_HOST', '') or 'imappro.zoho.com'
@@ -133,14 +163,21 @@ def fetch_original(ref):
     for attempt in range(1, _SEARCH_ATTEMPTS + 1):
         M = imaplib.IMAP4_SSL(host, 993, timeout=60)
         try:
-            M.login(user, pwd)
-            folder, uid = _imap_find(M, ref)
-            if uid:
+            try:
+                M.login(user, pwd)
+            except imaplib.IMAP4.error as e:
+                raise RuntimeError(f'זוהו דחו את ההתחברות ({host}, {user}) - בדוק שגישת IMAP פעילה '
+                                   f'ושהסיסמה ב-ZOHO_IMAP_PASSWORD היא סיסמת אפליקציה: {e}')
+            out = []
+            for folder, uid in _imap_find(M, ref):
+                M.select(f'"{folder}"', readonly=True)
                 typ, data = M.uid('FETCH', uid, '(BODY.PEEK[])')
                 for part in data or []:
                     if isinstance(part, tuple) and len(part) > 1:
-                        log.info(f'zoho_recover: נמצא המייל המקורי בתיקייה {folder} ({len(part[1])} בתים)')
-                        return part[1]
+                        log.info(f'zoho_recover: נמצא מייל בתיקייה {folder} ({len(part[1])} בתים)')
+                        out.append(part[1])
+            if out:
+                return out
         finally:
             try:
                 M.logout()
@@ -197,9 +234,9 @@ def _recover(ref):
     if ref.get('subject'):
         desc += f" | נושא: {ref['subject']}"
     try:
-        raw = fetch_original(ref)
-        result = replay(raw)
-        log.info(f'zoho_recover: המייל המקורי ({desc}) עובד מחדש: {result}')
+        for raw in fetch_originals(ref):
+            result = replay(raw)
+            log.info(f'zoho_recover: מייל מזוהו ({desc}) עובד מחדש: {result}')
     except Exception as e:
         log.error(f'zoho_recover: שחזור נכשל ({desc}): {e}')
         _alert('זוהו לא הצליחו להעביר מייל ללקוח (כנראה קובץ גדול), והמשיכה הישירה מזוהו נכשלה.\n'
