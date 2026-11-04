@@ -1635,6 +1635,13 @@ def play_manager_message(id):
     msg = ManagerMessage.query.get_or_404(id)
     if not msg.rec_url:
         return jsonify({'error': 'אין הקלטה'}), 404
+    # נטפרי חוסמת קובצי שמע שמוגשים מהדומיין שלנו, אבל דומיין ימות פתוח - לכן מפנים
+    # את הנגן ישר לימות, עם המפתח המוגבל להורדה בלבד (כמו בהקלטות, routes/recording_proxy.py)
+    from routes.recording_proxy import _YEMOT_DOWNLOAD_API_KEY, _with_replaced_token
+    if _YEMOT_DOWNLOAD_API_KEY and 'call2all.co.il' in msg.rec_url:
+        target = _with_replaced_token(msg.rec_url, _YEMOT_DOWNLOAD_API_KEY)
+        if target:
+            return redirect(target, code=302)
     try:
         r = req.get(msg.rec_url, timeout=120, stream=False)
         r.raise_for_status()
