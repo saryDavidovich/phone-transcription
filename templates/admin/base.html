@@ -242,8 +242,10 @@ textarea.form-input { resize:vertical; min-height:80px; }
     <a href="/admin/settings" class="nav-item {% if request.endpoint == 'admin.settings' %}active{% endif %}">
       <span class="nav-icon">⚙️</span> הגדרות
     </a>
-    <a href="/admin/maintenance" class="nav-item {% if request.endpoint == 'admin.maintenance' %}active{% endif %}">
+    <a href="/admin/maintenance" class="nav-item {% if request.endpoint == 'admin.maintenance' %}active{% endif %}"
+       {% if maintenance_on %}style="background:rgba(239,68,68,.14);color:#ef4444;font-weight:700"{% endif %}>
       <span class="nav-icon">🚦</span> מצב תחזוקה
+      {% if maintenance_on %}<span class="mt-pulse" title="מצב תחזוקה פעיל - הקלטות לא מתומללות">פעיל</span>{% endif %}
     </a>
     <a href="/admin/ocr" class="nav-item {% if request.endpoint in ['admin.ocr_list','admin.ocr_detail'] %}active{% endif %}">
       <span class="nav-icon">✍️</span> זיהוי כתב יד
@@ -293,6 +295,14 @@ textarea.form-input { resize:vertical; min-height:80px; }
       <span class="admin-badge">👤 מנהל</span>
     </div>
   </div>
+  {% if maintenance_on and request.endpoint != 'admin.maintenance' %}
+  <a href="/admin/maintenance" class="mt-banner">🚦 <b>מצב תחזוקה פעיל</b> - הקלטות ומיילים חדשים נשמרים בהמתנה ולא מתומללים. לא לשכוח לכבות ←</a>
+  {% endif %}
+  <style>
+    .mt-pulse{margin-right:auto;background:#ef4444;color:#fff;font-size:11px;font-weight:700;padding:1px 8px;border-radius:10px;animation:mtpulse 1.4s ease-in-out infinite}
+    @keyframes mtpulse{50%{opacity:.35}}
+    .mt-banner{display:block;margin:12px 24px 0;padding:10px 16px;border-radius:10px;background:rgba(239,68,68,.12);border:1px solid #ef4444;color:#ef4444;text-decoration:none;font-size:14px}
+  </style>
   <div class="content">
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% for cat, msg in messages %}

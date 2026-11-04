@@ -32,7 +32,11 @@ def inject_new_messages_count():
         count = int(db.session.execute(select(mm + cm + gi)).scalar() or 0)
     except Exception:
         count = 0
-    return {'new_messages_count': count}
+    try:
+        maintenance_on = get_setting('maintenance_mode', '0') == '1'
+    except Exception:
+        maintenance_on = False
+    return {'new_messages_count': count, 'maintenance_on': maintenance_on}
 
 @login_manager.user_loader
 def load_user(user_id):

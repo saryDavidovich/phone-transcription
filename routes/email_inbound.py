@@ -1658,6 +1658,46 @@ def process_pending_ocr(customer_id):
             )
 
 
+def _log_email_hops(raw_headers):
+    """MEASURE-TEMP (מדידה זמנית - למחוק אחרי ההחלטה): כמה זמן לקחה כל תחנה בדרך של
+    המייל - לפי חותמות הזמן בכותרות Received (כל שרת בדרך מוסיף אחת) - ועד שהגיע לשרת."""
+    try:
+        from email.parser import HeaderParser
+        from email.utils import parsedate_to_datetime
+        from datetime import datetime, timezone
+        h = HeaderParser().parsestr(raw_headers or '')
+        points = []
+        if h.get('Date'):
+            points.append(('נשלח', parsedate_to_datetime(h['Date'])))
+        for rcv in reversed(h.get_all('Received') or []):   # מהמוקדם למאוחר
+            rcv = ' '.join(rcv.split())
+            if ';' not in rcv:
+                continue
+            m = re.search(r'\bby\s+([\w.-]+)', rcv)
+            host = (m.group(1) if m else '?').split('.')
+            name = '.'.join(host[-3:]) if len(host) > 2 else '.'.join(host)
+            if not re.search(r'[a-zA-Z]{2}', name):
+                name = 'שרת השולח'
+            try:
+                points.append((name, parsedate_to_datetime(rcv.rsplit(';', 1)[1].strip())))
+            except Exception:
+                continue
+        points.append(('השרת שלנו', datetime.now(timezone.utc)))
+        parts, prev = [], None
+        for name, t in points:
+            if t.tzinfo is None:
+                t = t.replace(tzinfo=timezone.utc)
+            if prev is not None:
+                parts.append(f'{name} +{int((t - prev).total_seconds())}s')
+            else:
+                parts.append(name)
+            prev = t
+        total = int((points[-1][1] - points[0][1].replace(tzinfo=points[0][1].tzinfo or timezone.utc)).total_seconds())
+        log.info(f"⏱ email מסלול: {' → '.join(parts)} | סה\"כ {total}s")
+    except Exception as e:
+        log.info(f"⏱ email מסלול: לא נמדד ({e})")
+
+
 @email_bp.route('/email-inbound', methods=['POST'])
 def email_inbound():
     from app import app, db
@@ -1688,6 +1728,7 @@ def email_inbound():
     fax_check_body_text = request.form.get('text', '') or _strip_html(request.form.get('html', ''))
     attachment_names = [request.files[k].filename for k in request.files if request.files[k] and request.files[k].filename]
     log.info(f"email-inbound: webhook התקבל - from={sender_email!r} to={to_email!r} subject={subject!r} attachments={attachment_names}")
+    _log_email_hops(raw_headers)   # MEASURE-TEMP
 
     # זוהו לא הצליחו להעביר אלינו מייל של לקוח (בדרך כלל קובץ גדול מדי ל-SendGrid) -
     # מושכים את המייל המקורי ישירות מהתיבה בזוהו ומעבדים אותו כרגיל (services/zoho_recover)
