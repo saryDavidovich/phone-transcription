@@ -1183,6 +1183,150 @@ def retranscribe_recording(id):
           ' - תחויב ותישלח ללקוח בסיום (' + target + ')')
     return back
 
+_YEMOT_PATH_RE = __import__('re').compile(r'^[\w\-/.]+$')
+
+
+def _normalize_yemot_path(raw):
+    """'1507' / '1507.wav' / 'recordings/1507' / '/recordings/1507.wav' / 'ivr2:/recordings/1507.wav'
+    -> '/recordings/1507.wav'. מספר בלבד = תיקיית ההקלטות הרגילה. None אם לא תקין."""
+    p = (raw or '').strip().replace('\\', '/')
+    if p.lower().startswith('ivr2:'):
+        p = p[5:]
+    if not p or '..' in p or not _YEMOT_PATH_RE.match(p):
+        return None
+    if '/' not in p.strip('/'):
+        p = 'recordings/' + p.strip('/')
+    p = '/' + p.strip('/')
+    if not p.lower().endswith('.wav'):
+        p += '.wav'
+    return p
+
+
+def _yemot_probe(url):
+    """בודק שהקובץ קיים בימות ומחזיר (True, שניות_משוערות) או (False, הסבר)."""
+    import requests as _rq
+    import struct
+    try:
+        with _rq.get(url, timeout=25, stream=True, headers={
+                'User-Agent': ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+                               '(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36')}) as r:
+            if r.status_code >= 400:
+                return False, f'ימות החזירו שגיאה {r.status_code}'
+            head = next(r.iter_content(chunk_size=4096), b'')
+            size = int(r.headers.get('Content-Length') or 0)
+    except Exception as e:
+        return False, f'לא ניתן להתחבר לימות: {e}'
+    if not head.startswith(b'RIFF'):
+        return False, 'הקובץ לא נמצא בימות (בדוק את מספר ההקלטה)'
+    secs = 0
+    try:
+        byte_rate = struct.unpack('<I', head[28:32])[0]
+        if byte_rate and size > 44:
+            secs = int((size - 44) / byte_rate)
+    except Exception:
+        pass
+    return True, secs
+
+
+@admin_bp.route('/customers/<int:id>/manual-transcribe', methods=['POST'])
+@login_required
+def customer_manual_transcribe(id):
+    """תמלול חוזר / הוספת הקלטה ידנית ללקוח: קובץ שמע שמעלים, או הקלטה מימות לפי
+    מספר (למשל 1507 = /recordings/1507.wav). נוצרת הקלטה חדשה בכרטיס הלקוח והיא
+    עוברת את המסלול הרגיל בדיוק: תמלול, חיוב מהארנק ושליחה במייל/פקס."""
+    import uuid
+    from services.transcribe import transcribe_async
+    customer = Customer.query.get_or_404(id)
+    back = redirect(url_for('admin.customer_detail', id=id) + '#manual-transcribe')
+    tier = {'regular': 'gemini', 'professional': 'premium'}.get(request.form.get('tier', ''))
+    if not tier:
+        flash('יש לבחור סוג תמלול: רגיל או מקצועי')
+        return back
+    method = 'fax' if request.form.get('send_method') == 'fax' else 'email'
+    target = (request.form.get('send_to') or '').strip()
+    if not target:
+        target = ((customer.fax if method == 'fax' else customer.email) or '').strip()
+    if not target:
+        flash('אין כתובת מייל/מספר פקס לשליחת התמלול')
+        return back
+    if method == 'email' and '@' not in target:
+        flash('כתובת המייל לא תקינה')
+        return back
+
+    source = request.form.get('source')
+    file_backup, source_filename = None, None
+    if source == 'yemot':
+        path = _normalize_yemot_path(request.form.get('yemot_path'))
+        if not path:
+            flash('מספר/נתיב ההקלטה בימות לא תקין. דוגמה: 1507')
+            return back
+        token = os.environ.get('YEMOT_TOKEN', '') or get_setting('yemot_token', '')
+        if not token:
+            flash('YEMOT_TOKEN לא מוגדר בשרת - אי אפשר למשוך מימות')
+            return back
+        rec_url = f'https://www.call2all.co.il/ym/api/DownloadFile?token={token}&path=ivr2:{path}'
+        dup = (Recording.query.filter(Recording.rec_url.like(f'%path=ivr2:{path}'))
+               .order_by(Recording.id.desc()).first())
+        if dup and request.form.get('confirm_dup') != '1':
+            who = dup.customer.name if dup.customer else 'לקוח לא ידוע'
+            flash(f'⚠ ההקלטה {path} כבר קיימת במערכת (הקלטה #{dup.id}, {who}, סטטוס {dup.status}). '
+                  f'אם בכל זאת לתמלל שוב - סמן "לתמלל למרות שכבר קיימת" ושלח שוב')
+            return back
+        ok, info = _yemot_probe(rec_url)
+        if not ok:
+            flash('⚠ ' + info + f' ({path})')
+            return back
+        duration = info
+        source_filename = f'ימות {path}'
+    elif source == 'file':
+        from routes.email_inbound import RECORDINGS_EMAIL_DIR, AUDIO_VIDEO_EXTENSIONS, _estimate_duration_seconds
+        f = request.files.get('audio_file')
+        if not f or not f.filename:
+            flash('לא נבחר קובץ')
+            return back
+        ext = os.path.splitext(f.filename)[1].lstrip('.').lower()
+        if ext not in AUDIO_VIDEO_EXTENSIONS:
+            flash(f'סוג קובץ לא נתמך ({ext or "ללא סיומת"}) - יש להעלות קובץ שמע/וידאו')
+            return back
+        os.makedirs(RECORDINGS_EMAIL_DIR, exist_ok=True)
+        filename = f'{uuid.uuid4().hex}.{ext}'
+        filepath = os.path.join(RECORDINGS_EMAIL_DIR, filename)
+        f.save(filepath)
+        if os.path.getsize(filepath) <= 150 * 1024 * 1024:   # גיבוי ב-DB - הדיסק נמחק בכל דיפלוי
+            with open(filepath, 'rb') as fh:
+                file_backup = fh.read()
+        rec_url = f"{os.environ.get('APP_BASE_URL', '').rstrip('/')}/api/recordings-email/{filename}"
+        duration = _estimate_duration_seconds(filepath) or 0
+        source_filename = f.filename
+    else:
+        flash('יש לבחור מקור: העלאת קובץ או משיכה מימות')
+        return back
+
+    maintenance_on = get_setting('maintenance_mode', '0') == '1'
+    call_id = f'manual-{uuid.uuid4().hex[:12]}'
+    rec = Recording(
+        customer_id=customer.id, call_id=call_id, duration_seconds=duration,
+        status='queued_maintenance' if maintenance_on else 'processing',
+        delivery_method=method, delivered_to=target, rec_url=rec_url,
+        source_filename=source_filename, transcription_tier=tier,
+        language='he', output_language='he', file_data=file_backup,
+    )
+    db.session.add(rec)
+    db.session.commit()
+    logging.getLogger(__name__).info(
+        f'manual-transcribe: customer={customer.id} rec={rec.id} source={source} tier={tier} ~{duration}s')
+    label = 'מקצועי' if tier == 'premium' else 'רגיל'
+    if maintenance_on:
+        flash(f'מצב תחזוקה דלוק - ההקלטה #{rec.id} תיכנס לתמלול {label} כשיכבה')
+        return back
+    transcribe_async(call_id=call_id, rec_url=rec_url, customer_id=customer.id,
+                     delivery_method=method, delivered_to=target, duration_seconds=duration,
+                     transcription_tier=tier, language='he', output_language='he')
+    mins = f' (~{duration // 60} דק\')' if duration else ''
+    flash(f'✔ הקלטה #{rec.id}{mins} נשלחה לתמלול {label} - תחויב ותישלח ל-{target} בסיום')
+    return back
+
+
 @admin_bp.route('/recordings/<int:id>/download-audio')
 @login_required
 def download_audio(id):
