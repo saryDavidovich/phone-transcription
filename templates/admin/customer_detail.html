@@ -169,6 +169,7 @@
   </div>
 </div>
 
+<div id="recNewBanner" onclick="location.reload()" style="margin-top:20px"></div>
 <div style="margin-top:20px" class="table-card">
   <div class="table-header"><span class="table-title">🎧 הקלטות</span>
     {% if recordings_total > recordings|length %}<a href="?all=1" style="font-size:13px;color:var(--accent)">מוצגות {{ recordings|length }} האחרונות מתוך {{ recordings_total }} · הצג הכל</a>{% endif %}</div>
@@ -179,21 +180,14 @@
     </tr></thead>
     <tbody>
       {% for rec in recordings %}
-      <tr>
+      <tr data-rec-id="{{ rec.id }}">
         <td><input type="checkbox" name="recording_ids" value="{{ rec.id }}" form="sendRecForm" class="rec-check"></td>
         <td onclick="location='/admin/recordings/{{rec.id}}'" style="cursor:pointer">{{ rec.created_at | il_time }}</td>
-        <td onclick="location='/admin/recordings/{{rec.id}}'" style="cursor:pointer;color:#8892b0;font-family:monospace">{{ rec.rec_url | yemot_rec_number or '—' }}</td>
-        <td onclick="location='/admin/recordings/{{rec.id}}'" style="cursor:pointer">{{ rec.duration_seconds // 60 }}:{{ '%02d'%(rec.duration_seconds % 60) }}</td>
-        <td onclick="location='/admin/recordings/{{rec.id}}'" style="cursor:pointer">₪{{ "%.2f"|format(rec.cost) }}</td>
+        <td onclick="location='/admin/recordings/{{rec.id}}'" style="cursor:pointer;color:#8892b0;font-family:monospace">{% if rec.rec_url %}<button type="button" class="rec-play" title="השמעה" onclick="event.stopPropagation();recPlay(this,{{ rec.id }})">▶</button> {% endif %}{{ rec.rec_url | yemot_rec_number or '—' }}</td>
+        <td onclick="location='/admin/recordings/{{rec.id}}'" class="rec-dur" style="cursor:pointer">{{ rec.duration_seconds // 60 }}:{{ '%02d'%(rec.duration_seconds % 60) }}</td>
+        <td onclick="location='/admin/recordings/{{rec.id}}'" class="rec-cost" style="cursor:pointer">₪{{ "%.2f"|format(rec.cost) }}</td>
         <td onclick="location='/admin/recordings/{{rec.id}}'" style="cursor:pointer">{{ rec.delivered_to or '—' }}</td>
-        <td onclick="location='/admin/recordings/{{rec.id}}'" style="cursor:pointer">
-          {% if rec.transcription_tier == 'excel' %}<span class="badge badge-blue" title="טבלת אקסל מהקלטה">📊 אקסל</span> {% endif %}
-          {% if rec.status == 'delivered' %}<span class="badge badge-green">נשלח</span>
-          {% elif rec.status == 'pending_payment' %}<span class="badge badge-amber">ממתין לתשלום</span>
-          {% elif rec.status == 'error' %}<span class="badge badge-red">שגיאה</span>
-          {% elif rec.status == 'too_short' %}<span class="badge badge-gray" title="קצרה מ-6 שניות - לא נשלחה לתמלול, בלי חיוב">הקלטת טעות</span>
-          {% else %}<span class="badge badge-gray">{{ rec.status }}</span>{% endif %}
-        </td>
+        <td class="rec-st" onclick="location='/admin/recordings/{{rec.id}}'" style="cursor:pointer">{% include 'admin/_rec_status.html' %}</td>
       </tr>
       {% endfor %}
     </tbody>
@@ -549,4 +543,5 @@ function confirmOcrDelete() {
   </form>
 </div>
 {% endfor %}
+{% with live_scope=customer.id, live_auto_refresh=False %}{% include 'admin/_rec_live.html' %}{% endwith %}
 {% endblock %}

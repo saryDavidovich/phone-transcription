@@ -1419,12 +1419,70 @@ def download_word(id):
     doc.save(output)
     output.seek(0)
 
-    return send_file(
-        output,
+    # נטפרי חוסמת קובץ Word שיורד ישירות מהאתר שלנו; כמו בפורטל המוסדות - עמוד HTML
+    # שהקובץ מוטמע בתוכו, וההורדה קורית בדפדפן עצמו (routes/download_utils)
+    from routes.download_utils import render_data_uri_download_page
+    who = (customer.name or customer.phone) if customer else ''
+    date = recording.created_at.strftime('%d-%m-%Y') if recording.created_at else str(id)
+    return render_data_uri_download_page(
+        output.getvalue(), f'תמלול - {who} - {date}.docx'.replace('/', '-'),
         mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-        as_attachment=True,
-        download_name=f'transcript_{id}.docx'
     )
+
+
+@admin_bp.route('/recordings/<int:id>/listen')
+@login_required
+def recording_listen(id):
+    """השמעה בנגן / הורדה של הקלטה. נטפרי חוסמת שמע שמגיע מהאתר שלנו, אז הקלטה
+    מהטלפון מופנית ישר לימות (המפתח המוגבל להורדה בלבד - routes/recording_proxy).
+    הקלטה שהגיעה במייל נמצאת אצלנו - מוגשת כמו שהיא (משוחזרת מה-DB אם נמחקה מהדיסק)."""
+    from routes.recording_proxy import _best_yemot_url
+    rec = Recording.query.get_or_404(id)
+    url = (rec.rec_url or '').strip()
+    if '/api/recordings-email/' in url:
+        ok, why = _recording_source_available(rec)       # משחזר לדיסק מה-DB במידת הצורך
+        if not ok:
+            return why, 404
+        from routes.email_inbound import RECORDINGS_EMAIL_DIR
+        from flask import send_from_directory
+        return send_from_directory(os.path.abspath(RECORDINGS_EMAIL_DIR), url.rsplit('/', 1)[-1],
+                                   as_attachment=bool(request.args.get('download')),
+                                   download_name=rec.source_filename or None)
+    target = _best_yemot_url(rec)
+    if not target:
+        return 'אין קובץ שמע להקלטה הזו', 404
+    return redirect(target, code=302)
+
+
+@admin_bp.route('/recordings/live')
+@login_required
+def recordings_live():
+    """הלוח החי (templates/admin/_rec_live.html): מצב עדכני של ההקלטות שבטיפול,
+    והאם נכנסו הקלטות חדשות מאז שהדף נטען."""
+    ids = [int(x) for x in (request.args.get('ids') or '').split(',') if x.strip().isdigit()][:200]
+    rows = {}
+    if ids:
+        tpl = "{% include 'admin/_rec_status.html' %}"
+        from flask import render_template_string
+        for rec in Recording.query.options(*_light(Recording)).filter(Recording.id.in_(ids)).all():
+            rows[rec.id] = {
+                'st': render_template_string(tpl, rec=rec),
+                'cost': '₪%.2f' % (rec.cost or 0),
+                'dur': '%d:%02d' % ((rec.duration_seconds or 0) // 60, (rec.duration_seconds or 0) % 60),
+            }
+    newer = 0
+    after = request.args.get('after', '')
+    scope = request.args.get('scope', '')
+    if after.isdigit():
+        q = Recording.query.filter(Recording.id > int(after))
+        if scope.isdigit():
+            q = q.filter(Recording.customer_id == int(scope))
+        elif scope != 'all':
+            q = None
+        newer = q.count() if q is not None else 0
+    resp = jsonify({'rows': rows, 'newer': newer})
+    resp.headers['Cache-Control'] = 'no-store'
+    return resp
 
 @admin_bp.route('/recordings/cleanup', methods=['POST'])
 @login_required

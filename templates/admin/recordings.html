@@ -12,6 +12,7 @@
   <button type="submit" class="btn btn-danger" style="font-size:12px;padding:5px 14px">🗑️ מחק נבחרים</button>
 </div>
 
+<div id="recNewBanner" onclick="location.reload()"></div>
 <div class="table-card">
   <div class="table-header"><span class="table-title">🎧 הקלטות ({{ recordings.total }})</span></div>
   <table>
@@ -21,28 +22,22 @@
     </tr></thead>
     <tbody>
       {% for rec in recordings.items %}
-      <tr>
+      <tr data-rec-id="{{ rec.id }}">
         <td style="text-align:center" onclick="event.stopPropagation()"><input type="checkbox" name="recording_ids" value="{{ rec.id }}" class="row-check"></td>
         <td onclick="location='/admin/recordings/{{rec.id}}'" style="cursor:pointer">{{ rec.created_at | il_time }}</td>
         <td onclick="location='/admin/recordings/{{rec.id}}'" style="cursor:pointer"><a href="/admin/customers/{{ rec.customer_id }}" onclick="event.stopPropagation()">{{ rec.customer.phone }}</a></td>
-        <td onclick="location='/admin/recordings/{{rec.id}}'" style="cursor:pointer;color:#8892b0;font-family:monospace">{{ rec.rec_url | yemot_rec_number or '—' }}</td>
-        <td onclick="location='/admin/recordings/{{rec.id}}'" style="cursor:pointer">{{ rec.duration_seconds // 60 }}:{{ '%02d'%(rec.duration_seconds % 60) }}</td>
-        <td onclick="location='/admin/recordings/{{rec.id}}'" style="cursor:pointer">₪{{ "%.2f"|format(rec.cost) }}</td>
+        <td onclick="location='/admin/recordings/{{rec.id}}'" style="cursor:pointer;color:#8892b0;font-family:monospace">{% if rec.rec_url %}<button type="button" class="rec-play" title="השמעה" onclick="event.stopPropagation();recPlay(this,{{ rec.id }})">▶</button> {% endif %}{{ rec.rec_url | yemot_rec_number or '—' }}</td>
+        <td onclick="location='/admin/recordings/{{rec.id}}'" class="rec-dur" style="cursor:pointer">{{ rec.duration_seconds // 60 }}:{{ '%02d'%(rec.duration_seconds % 60) }}</td>
+        <td onclick="location='/admin/recordings/{{rec.id}}'" class="rec-cost" style="cursor:pointer">₪{{ "%.2f"|format(rec.cost) }}</td>
         <td onclick="location='/admin/recordings/{{rec.id}}'" style="cursor:pointer">{{ '📧 מייל' if rec.delivery_method == 'email' else '📠 פקס' }}</td>
-        <td onclick="location='/admin/recordings/{{rec.id}}'" style="cursor:pointer">
-          {% if rec.transcription_tier == 'excel' %}<span class="badge badge-blue" title="טבלת אקסל מהקלטה">📊 אקסל</span> {% endif %}
-          {% if rec.status == 'delivered' %}<span class="badge badge-green">נשלח</span>
-              {% elif rec.status == 'transcribing' %}<span class="badge badge-amber">מתמלל</span>
-              {% elif rec.status == 'pending_payment' %}<span class="badge badge-amber">ממתין לתשלום</span>
-              {% elif rec.status == 'error' %}<span class="badge badge-red">שגיאה</span>
-          {% elif rec.status == 'too_short' %}<span class="badge badge-gray" title="קצרה מ-6 שניות - לא נשלחה לתמלול, בלי חיוב">הקלטת טעות</span>
-              {% else %}<span class="badge badge-gray">{{ rec.status }}</span>{% endif %}</td>
+        <td class="rec-st" onclick="location='/admin/recordings/{{rec.id}}'" style="cursor:pointer">{% include 'admin/_rec_status.html' %}</td>
       </tr>
       {% endfor %}
     </tbody>
   </table>
 </div>
 </form>
+{% with live_scope='all', live_auto_refresh=(recordings.page == 1) %}{% include 'admin/_rec_live.html' %}{% endwith %}
 
 <div class="pagination">
   {% for p in recordings.iter_pages() %}

@@ -14,6 +14,24 @@ log = logging.getLogger(__name__)
 
 # מקסימום 10 תמלולים במקביל — מגן על rate limits של גמיני
 _executor = ThreadPoolExecutor(max_workers=10)
+
+# התקדמות התמלול ללוח החי בממשק: _process מסמן איזו הקלטה רצה בתהליכון הזה,
+# ו-_gemini_from_url מעדכן אחוזים אחרי כל חלק של 5 דקות (עדכון קטן וישיר ב-DB).
+_progress_local = threading.local()
+
+
+def _report_progress(pct):
+    call_id = getattr(_progress_local, 'call_id', None)
+    if not call_id:
+        return
+    try:
+        from app import db
+        from sqlalchemy import text
+        with db.engine.begin() as conn:
+            conn.execute(text('UPDATE recordings SET progress = :p WHERE call_id = :c'),
+                         {'p': int(max(0, min(100, pct))), 'c': call_id})
+    except Exception as e:
+        log.warning(f"progress update failed ({call_id}): {e}")
 # תור תמלול — מקסימום 10 במקביל
 
 # תור OCR נפרד — מקסימום 3 לקוחות במקביל (הופחת מ-6: כל תמונה בזום 450% יכולה לצרוך מאות MB-1GB+ בזיכרון)
@@ -96,6 +114,7 @@ def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, durat
             rec = Recording.query.filter_by(call_id=call_id).first()
             if rec:
                 rec.status = 'transcribing'
+                rec.progress = 3
                 rec.rec_url = rec_url
                 db.session.commit()
 
@@ -282,7 +301,11 @@ def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, durat
                             )
                         return
 
-                transcript_raw, actual_duration, is_video = _gemini_from_url(rec_url, language, output_language)
+                _progress_local.call_id = call_id
+                try:
+                    transcript_raw, actual_duration, is_video = _gemini_from_url(rec_url, language, output_language)
+                finally:
+                    _progress_local.call_id = None
                 transcript_fixed = transcript_raw
                 price_key = 'price_per_20min_video' if is_video else 'price_per_20min_basic'
                 description_tier = 'וידאו' if is_video else 'רגיל'
@@ -895,6 +918,7 @@ def _gemini_from_url(url, language='he', output_language='he'):
 
         # תמלול כל חלק של 5 דקות בנפרד (החלקים נקראים מהדיסק אחד-אחד)
         log.info(f"Split into {n_chunks} chunks of up to {CHUNK_SECONDS}s each")
+        _report_progress(10)
 
         transcript_parts = []
         for i, chunk_bytes in enumerate(chunks):
@@ -921,6 +945,7 @@ def _gemini_from_url(url, language='he', output_language='he'):
                         log.error(f"Chunk {chunk_num} failed after 5 attempts, skipping")
             if chunk_transcript:
                 transcript_parts.append(chunk_transcript)
+            _report_progress(10 + 80 * chunk_num / max(1, n_chunks))
 
         transcript = '\n\n'.join(transcript_parts) if transcript_parts else None
         if transcript:

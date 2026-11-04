@@ -1,0 +1,5 @@
+{# תג סטטוס הקלטה בעברית + גלגל שיניים ואחוזים כשבטיפול. משמש גם את הלוח החי (admin.recordings_live) #}
+{% set st = rec_status(rec) %}
+{% if rec.transcription_tier == 'excel' %}<span class="badge badge-blue" title="טבלת אקסל מהקלטה">📊 אקסל</span> {% endif %}
+<span class="badge {{ st.cls }}" title="{{ st.title }}">{% if st.active %}<span class="rec-gear">⚙️</span> {% endif %}{{ st.label }}{% if st.active and st.pct is not none %} · {{ st.pct }}%{% endif %}</span>
+{% if st.active and st.pct is not none %}<span class="rec-bar"><span style="width:{{ st.pct }}%"></span></span>{% endif %}

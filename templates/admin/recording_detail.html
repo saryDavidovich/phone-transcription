@@ -2,29 +2,37 @@
 {% block title %}הקלטה #{{ recording.id }}{% endblock %}
 {% block page_title %}
 הקלטה #{{ recording.id }}
-<div style="display:flex;gap:8px;margin-top:12px">
-  <button onclick="downloadFile('/admin/recordings/{{ recording.id }}/play-audio', 'recording_{{ recording.id }}.wav')" class="btn btn-primary">▶️ הורד והאזן</button>
-  <button onclick="downloadFile('/admin/recordings/{{ recording.id }}/download-audio', 'recording_{{ recording.id }}.wav')" class="btn btn-success">📥 הורד שמע</button>
-  <button onclick="downloadFile('/admin/recordings/{{ recording.id }}/download-word', 'תמלול_{{ recording.id }}.docx')" class="btn btn-primary">📄 הורד וורד</button>
+<div style="display:flex;gap:10px;margin-top:12px;align-items:center;flex-wrap:wrap">
+  {% if recording.rec_url %}
+  <audio controls preload="none" src="{{ url_for('admin.recording_listen', id=recording.id) }}" style="height:38px;width:340px;max-width:100%"></audio>
+  <a class="btn btn-success" href="{{ url_for('admin.recording_listen', id=recording.id, download=1) }}" target="_blank" data-turbo="false">📥 הורד שמע</a>
+  {% endif %}
+  {% if recording.transcript %}
+  <a class="btn btn-primary" href="{{ url_for('admin.download_word', id=recording.id) }}" target="_blank" data-turbo="false">📄 הורד וורד</a>
+  {% endif %}
+  <span class="rec-st" id="detailStatus">{% with rec=recording %}{% include 'admin/_rec_status.html' %}{% endwith %}</span>
 </div>
+<style>.rec-gear{display:inline-block;animation:recspin 1.6s linear infinite}@keyframes recspin{to{transform:rotate(360deg)}}
+.rec-bar{display:block;height:4px;background:rgba(127,127,127,.25);border-radius:4px;margin-top:5px;overflow:hidden;max-width:150px}.rec-bar span{display:block;height:100%;background:#f59e0b;transition:width .8s}</style>
 <script>
-function downloadFile(url, filename) {
-  fetch(url, { credentials: 'include' })
-    .then(res => {
-      if (!res.ok) throw new Error('שגיאת שרת: ' + res.status);
-      return res.blob();
-    })
-    .then(blob => {
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-    })
-    .catch(err => alert('שגיאה בהורדה: ' + err));
-}
+(function () {   // לוח חי: כשההקלטה בטיפול - מתעדכן לבד, ובסיום הדף נטען מחדש (להצגת התמלול)
+  if (window.__recDetail) clearTimeout(window.__recDetail);
+  var box = document.getElementById('detailStatus');
+  function tick() {
+    if (!document.body.contains(box) || !box.querySelector('.rec-gear')) return;
+    if (document.visibilityState !== 'visible') { window.__recDetail = setTimeout(tick, 3000); return; }
+    fetch('/admin/recordings/live?ids={{ recording.id }}', { credentials: 'same-origin' }).then(function (r) { return r.json(); })
+      .then(function (d) {
+        var x = (d.rows || {})['{{ recording.id }}'];
+        if (x) {
+          box.innerHTML = x.st;
+          if (!box.querySelector('.rec-gear')) { window.Turbo ? Turbo.visit(location.href, { action: 'replace' }) : location.reload(); return; }
+        }
+        window.__recDetail = setTimeout(tick, 3000);
+      }).catch(function () { window.__recDetail = setTimeout(tick, 10000); });
+  }
+  window.__recDetail = setTimeout(tick, 3000);
+})();
 </script>
 {% endblock %}
 {% block content %}
@@ -58,7 +66,7 @@ function downloadFile(url, filename) {
 <div class="card" style="margin-bottom:20px">
   <div style="font-size:14px;font-weight:600;margin-bottom:6px">🔁 שליחה חוזרת לתמלול</div>
   <div style="color:#8892b0;font-size:13px;margin-bottom:12px">
-    סטטוס נוכחי: <b>{{ recording.status }}</b> · סוג תמלול שנשמר: <b>{{ 'מקצועי' if recording.transcription_tier == 'premium' else ('טבלת אקסל' if recording.transcription_tier == 'excel' else 'רגיל') }}</b>
+    סטטוס נוכחי: <b>{{ rec_status(recording).label }}</b> · סוג תמלול שנשמר: <b>{{ 'מקצועי' if recording.transcription_tier == 'premium' else ('טבלת אקסל' if recording.transcription_tier == 'excel' else 'רגיל') }}</b>
     · יתרת הלקוח: <b>₪{{ "%.2f"|format(rt_balance) }}</b> · יחידות חיוב (20 דק׳): <b>{{ rt_units }}</b>
   </div>
   {% if rt_in_progress %}

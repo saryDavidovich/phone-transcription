@@ -151,6 +151,9 @@ def create_app():
 
     app.jinja_env.filters['yemot_rec_number'] = yemot_rec_number
 
+    from services.rec_status import status_info as _rec_status_info
+    app.jinja_env.globals['rec_status'] = _rec_status_info
+
     # מספר הדקות שיחויבו עבור סבב הגהה (מעגל כלפי מעלה לדקה שלמה - ראה
     # routes/dictate.py._proofing_minutes_billed, אותו חישוב בדיוק, כאן
     # כפילטר לשימוש בתבניות כמו customer_detail.html).
@@ -234,6 +237,7 @@ def _migrate_db():
         "ALTER TABLE customers ADD COLUMN IF NOT EXISTS transcription_tier VARCHAR(10) DEFAULT 'basic'",
         "ALTER TABLE recordings ADD COLUMN IF NOT EXISTS alefbot_job_id VARCHAR(100)",
         "ALTER TABLE recordings ADD COLUMN IF NOT EXISTS rec_url VARCHAR(500)",
+        "ALTER TABLE recordings ADD COLUMN IF NOT EXISTS progress INTEGER",
         "ALTER TABLE recordings ADD COLUMN IF NOT EXISTS source_filename VARCHAR(255)",
         # שדות סטטוס פקס (ימות המשיח) - שייכים ל-recordings, לא ל-customers
         "ALTER TABLE recordings ADD COLUMN IF NOT EXISTS fax_campaign_id VARCHAR(64)",

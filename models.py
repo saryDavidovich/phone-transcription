@@ -147,6 +147,7 @@ class Recording(db.Model):
     transcript = db.Column(db.Text)
     summary = db.Column(db.Text)
     status = db.Column(db.String(30), default='recording')
+    progress = db.Column(db.Integer)   # אחוז התקדמות התמלול (0-100), ללוח החי בממשק
     delivery_method = db.Column(db.String(10))
     delivered_to = db.Column(db.String(200))
     alefbot_job_id = db.Column(db.String(100))

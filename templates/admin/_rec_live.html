@@ -1,0 +1,79 @@
+{# לוח חי להקלטות + נגן צף. נכלל ברשימת ההקלטות ובכרטיס הלקוח.
+   live_scope: 'all' (כל ההקלטות, עמוד 1 מתרענן לבד כשנכנסת הקלטה חדשה) / מספר לקוח (מוצגת הודעה לרענון).
+   הבדיקה רצה רק כשהדף פתוח ומוצג (לשונית פעילה): כל 3 שניות כשיש הקלטה בטיפול, אחרת כל 15 שניות. #}
+<style>
+  .rec-gear{display:inline-block;animation:recspin 1.6s linear infinite}
+  @keyframes recspin{to{transform:rotate(360deg)}}
+  .rec-bar{display:block;height:4px;background:rgba(127,127,127,.25);border-radius:4px;margin-top:5px;overflow:hidden;max-width:150px}
+  .rec-bar span{display:block;height:100%;background:#f59e0b;transition:width .8s}
+  .rec-play{border:0;background:var(--accent,#4f6ef7);color:#fff;border-radius:50%;width:22px;height:22px;font-size:10px;cursor:pointer;line-height:22px;padding:0}
+  #recPlayer{position:fixed;bottom:14px;left:14px;z-index:900;background:var(--surface,#1a1d2e);border:1px solid var(--border,#2d3561);border-radius:12px;padding:8px 12px;box-shadow:0 6px 24px rgba(0,0,0,.35);display:none;align-items:center;gap:10px}
+  #recNewBanner{display:none;margin:0 0 12px;padding:10px 14px;border-radius:10px;background:rgba(79,110,247,.15);border:1px solid #4f6ef7;cursor:pointer;font-weight:600}
+</style>
+<div id="recPlayer" data-turbo-permanent>
+  <span id="recPlayerLabel" style="font-size:13px;white-space:nowrap"></span>
+  <audio id="recPlayerAudio" controls preload="none" style="height:34px;width:300px;max-width:60vw"></audio>
+  <a id="recPlayerDl" href="#" target="_blank" data-turbo="false" title="הורדת ההקלטה" style="text-decoration:none">📥</a>
+  <button type="button" onclick="recPlayClose()" style="border:0;background:none;color:inherit;cursor:pointer;font-size:16px">✕</button>
+</div>
+<script>
+window.recPlay = function (btn, id) {
+  var bar = document.getElementById('recPlayer'), a = document.getElementById('recPlayerAudio');
+  var src = '/admin/recordings/' + id + '/listen';
+  document.getElementById('recPlayerLabel').textContent = '🎧 הקלטה #' + id;
+  document.getElementById('recPlayerDl').href = src + '?download=1';
+  bar.style.display = 'flex';
+  if (a.getAttribute('src') !== src) { a.src = src; }
+  a.play().catch(function () {});
+};
+window.recPlayClose = function () {
+  var a = document.getElementById('recPlayerAudio'); a.pause();
+  document.getElementById('recPlayer').style.display = 'none';
+};
+(function () {
+  if (window.__recLive) clearTimeout(window.__recLive);
+  var scope = {{ live_scope|tojson }};
+  var autoRefresh = {{ 'true' if live_auto_refresh else 'false' }};
+  var marker = document.currentScript;
+  function rows() { return Array.prototype.slice.call(document.querySelectorAll('tr[data-rec-id]')); }
+  var maxId = rows().reduce(function (m, r) { return Math.max(m, +r.dataset.recId); }, 0);
+  function schedule(ms) { window.__recLive = setTimeout(tick, ms); }
+  function busy() {
+    var el = document.activeElement;
+    return document.querySelector('input[type=checkbox]:checked') ||
+      (el && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
+  }
+  function tick() {
+    if (!document.body.contains(marker)) return;            // עברנו לדף אחר
+    if (document.visibilityState !== 'visible') return;      // ימשיך כשהלשונית תוצג שוב
+    var active = rows().filter(function (r) { return r.querySelector('.rec-gear'); })
+                       .map(function (r) { return r.dataset.recId; });
+    var url = '/admin/recordings/live?scope=' + encodeURIComponent(scope) + '&after=' + maxId +
+              '&ids=' + active.join(',');
+    fetch(url, { credentials: 'same-origin' }).then(function (r) { return r.json(); }).then(function (d) {
+      Object.keys(d.rows || {}).forEach(function (id) {
+        var tr = document.querySelector('tr[data-rec-id="' + id + '"]'); if (!tr) return;
+        var x = d.rows[id];
+        var st = tr.querySelector('.rec-st'); if (st && st.innerHTML !== x.st) st.innerHTML = x.st;
+        var c = tr.querySelector('.rec-cost'); if (c) c.textContent = x.cost;
+        var du = tr.querySelector('.rec-dur'); if (du) du.textContent = x.dur;
+      });
+      if (d.newer) {
+        if (autoRefresh && !busy() && window.Turbo) { Turbo.visit(location.href, { action: 'replace' }); return; }
+        var b = document.getElementById('recNewBanner');
+        if (b) { b.textContent = '🆕 נכנסו ' + d.newer + ' הקלטות חדשות - לחץ לרענון'; b.style.display = 'block'; }
+      }
+      var anyActive = rows().some(function (r) { return r.querySelector('.rec-gear'); });
+      schedule(anyActive ? 3000 : 15000);
+    }).catch(function () { schedule(15000); });
+  }
+  if (!window.__recLiveVis) {
+    window.__recLiveVis = true;
+    document.addEventListener('visibilitychange', function () {
+      if (document.visibilityState === 'visible' && window.__recLiveTick) { clearTimeout(window.__recLive); window.__recLiveTick(); }
+    });
+  }
+  window.__recLiveTick = tick;
+  schedule(3000);
+})();
+</script>
