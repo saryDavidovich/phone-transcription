@@ -173,6 +173,9 @@
     <div><label class="form-label">מספר פקס</label><input class="form-input" name="number" inputmode="tel" dir="ltr" placeholder="02-1234567" style="width:200px"></div>
     <button class="btn btn-primary" type="submit">📠 שלח פקס בדיקה</button>
   </form>
+  {% set fax_rep = get_fax_test_report() if get_fax_test_report is defined else '' %}
+  {% if fax_rep %}<div style="margin-top:10px;font-size:13px">📬 <b>דוח מסירה אחרון מימות</b> (מתעדכן כשימות שולחים - לרענן את הדף):
+    <pre dir="ltr" style="background:var(--surface2,#22263a);padding:10px;border-radius:8px;font-size:12px;white-space:pre-wrap">{{ fax_rep }}</pre></div>{% endif %}
   {% if request.args.get('fax_steps') %}
   <pre dir="ltr" style="margin-top:12px;background:var(--surface2,#22263a);padding:12px;border-radius:8px;font-size:12px;white-space:pre-wrap;max-height:320px;overflow:auto">{{ request.args.get('fax_steps') }}</pre>
   {% endif %}

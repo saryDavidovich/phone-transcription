@@ -1829,7 +1829,8 @@ def send_pdf_fax(to_number, pdf_bytes, filename_hint='document.pdf', delivery_ur
             if caller_id:
                 data['callerId'] = caller_id
             if base_url and delivery_url_path:
-                data['deliveryUrl'] = f'{base_url}{delivery_url_path}'
+                wsecret = os.environ.get('WEBHOOK_SECRET', '')
+                data['deliveryUrl'] = f'{base_url}{delivery_url_path}' + (f'?key={wsecret}' if wsecret else '')
             response = requests.post('https://www.call2all.co.il/ym/api/SendFax', data=data, timeout=120)
             try:
                 result = response.json()
@@ -1938,6 +1939,21 @@ def handle_fax_delivery_webhook(data):
 
     if not campaign_id:
         return
+
+    with app.app_context():
+        try:   # פקס בדיקה מההגדרות - שומרים את דוח המסירה כדי שיוצג שם
+            import json as _json
+            from models import Settings as _S
+            row = _S.query.filter_by(key='fax_test_last').first()
+            last = _json.loads(row.value) if row and row.value else {}
+            if last.get('campaign_id') == campaign_id:
+                rep = _S.query.filter_by(key='fax_test_report').first() or _S(key='fax_test_report')
+                rep.value = _json.dumps({'campaign_id': campaign_id, 'report': data}, ensure_ascii=False)[:490]
+                db.session.add(rep)
+                db.session.commit()
+        except Exception as e:
+            log.warning(f'fax test report save failed: {e}')
+            db.session.rollback()
 
     with app.app_context():
         try:

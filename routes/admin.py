@@ -14,6 +14,14 @@ log = logging.getLogger(__name__)
 
 admin_bp = Blueprint('admin', __name__)
 
+@admin_bp.app_template_global('get_fax_test_report')
+def get_fax_test_report():
+    try:
+        return get_setting('fax_test_report', '')
+    except Exception:
+        return ''
+
+
 @admin_bp.context_processor
 def inject_new_messages_count():
     from models import ManagerMessage, CustomerMessage, GeneralInboxMessage
@@ -1900,9 +1908,9 @@ def fax_test():
                              f'נשלח: {datetime.utcnow().strftime("%d/%m/%Y %H:%M")} (UTC)')
     res = send_pdf_fax(number, pdf, filename_hint='fax_test.pdf', return_details=True)
     set_setting('fax_test_last', json.dumps({'number': number, 'at': datetime.utcnow().isoformat(),
-                                             'ok': res['ok'], 'campaign_id': res.get('campaign_id'),
-                                             'error': res.get('error'), 'steps': res.get('steps', [])},
-                                            ensure_ascii=False)[:490])
+                                             'ok': res['ok'], 'campaign_id': res.get('campaign_id')},
+                                            ensure_ascii=False))
+    set_setting('fax_test_report', '')
     flash(('✔ ימות קיבלו את הפקס לשליחה (מספר קמפיין ' + str(res.get('campaign_id')) + '). אם הדף מגיע למכשיר - הבעיה נפתרה.')
           if res['ok'] else ('⚠ שליחת הפקס נכשלה: ' + str(res.get('error'))))
     return redirect(url_for('admin.settings', fax_steps=json.dumps(res.get('steps', []), ensure_ascii=False)) + '#fax-test')
