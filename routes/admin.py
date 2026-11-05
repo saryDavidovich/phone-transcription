@@ -221,6 +221,7 @@ def logout():
 
 # --- אפליקציה מותקנת (PWA): התקנה מכרום/אדג' כתוכנה, חלון נפרד, צפייה בלי חיבור ---
 _PWA_ICONS = {}
+_GH_ICONS = 'https://raw.githubusercontent.com/saryDavidovich/phone-transcription/main/static/pwa/'
 
 
 def _pwa_icon_data(name):
@@ -255,9 +256,13 @@ def pwa_manifest():
         'lang': 'he', 'dir': 'rtl',
         'id': '/admin/', 'start_url': '/admin/dashboard', 'scope': '/admin/',
         'display': 'standalone', 'background_color': '#0f1117', 'theme_color': '#1a1d27',
+        # הסמל נטען מכתובת של גיטהאב: נטפרי מאשרים תמונה לפי הכתובת שלה, ושם היא כבר
+        # מאושרת (מהאתר שלנו - או מוטמעת - היא נחסמת ומטושטשת). הציור הווקטורי נשאר כגיבוי.
         'icons': [
+            {'src': _GH_ICONS + 'icon-192.png', 'sizes': '192x192', 'type': 'image/png', 'purpose': 'any'},
+            {'src': _GH_ICONS + 'icon-512.png', 'sizes': '512x512', 'type': 'image/png', 'purpose': 'any'},
+            {'src': _GH_ICONS + 'icon-maskable-512.png', 'sizes': '512x512', 'type': 'image/png', 'purpose': 'maskable'},
             {'src': svg, 'sizes': 'any', 'type': 'image/svg+xml', 'purpose': 'any'},
-            {'src': svg, 'sizes': 'any', 'type': 'image/svg+xml', 'purpose': 'maskable'},
         ],
     }
     body = json.dumps(data, ensure_ascii=False).replace('"data:', '"data\\u003a')
