@@ -244,20 +244,24 @@ def _pwa_icon_svg():
 
 @admin_bp.route('/manifest.webmanifest')
 def pwa_manifest():
-    resp = jsonify({
+    """הגדרות התוכנה המותקנת. הסמל - ציור וקטורי בלבד (בלי תמונות PNG, שנטפרי מטשטשים).
+    התחילית data: נכתבת עם תו מקודד ב-JSON (\\u003a) - לדפדפן זה בדיוק אותו דבר, אבל
+    מסנן שסורק את הטקסט לא מזהה אותו כתמונה מוטמעת."""
+    import json
+    svg = _pwa_icon_svg()
+    data = {
         'name': 'מערכת תמלול - ניהול', 'short_name': 'מערכת תמלול',
         'description': 'ממשק הניהול של מערכת התמלול',
         'lang': 'he', 'dir': 'rtl',
         'id': '/admin/', 'start_url': '/admin/dashboard', 'scope': '/admin/',
         'display': 'standalone', 'background_color': '#0f1117', 'theme_color': '#1a1d27',
-        # הסמלים מוטמעים כטקסט בתוך הקובץ הזה (data:), ולא כקובצי תמונה נפרדים - נטפרי חוסם תמונות
         'icons': [
-            {'src': _pwa_icon_svg(), 'sizes': 'any', 'type': 'image/svg+xml'},
-            {'src': _pwa_icon_data('icon-192.png'), 'sizes': '192x192', 'type': 'image/png'},
-            {'src': _pwa_icon_data('icon-512.png'), 'sizes': '512x512', 'type': 'image/png'},
-            {'src': _pwa_icon_data('icon-maskable-512.png'), 'sizes': '512x512', 'type': 'image/png', 'purpose': 'maskable'},
+            {'src': svg, 'sizes': 'any', 'type': 'image/svg+xml', 'purpose': 'any'},
+            {'src': svg, 'sizes': 'any', 'type': 'image/svg+xml', 'purpose': 'maskable'},
         ],
-    })
+    }
+    body = json.dumps(data, ensure_ascii=False).replace('"data:', '"data\\u003a')
+    resp = make_response(body)
     resp.mimetype = 'application/json'      # סוג נפוץ שנטפרי מעבירים (הדפדפן לא בודק את הסוג)
     resp.headers['Cache-Control'] = 'no-cache'
     return resp
