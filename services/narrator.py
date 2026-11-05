@@ -46,22 +46,71 @@ def current_voice():
     return v if v in VOICES else 'Charon'
 
 
-def synthesize(text, voice=None):
-    """טקסט -> בייטים של WAV (PCM 16bit 24kHz מונו). זורק שגיאה עם הסבר."""
-    from google import genai
-    from google.genai import types
+SPEEDS = {'1.0': 'רגיל', '1.1': 'מהיר', '1.2': 'מהיר מאוד'}
+
+
+def current_speed():
+    v = _setting('narrator_speed', '1.1')
+    return v if v in SPEEDS else '1.1'
+
+
+def synthesize(text, voice=None, speed=None):
+    """טקסט -> (בייטים של WAV, שם המנוע). קודם Chirp 3 HD - אותו קול בדיוק בכל פעם;
+    אם השירות לא מופעל בחשבון גוגל - Gemini עם הגדרות קבועות (מעט שונות בין הפקות)."""
     text = (text or '').strip()
     if not text:
         raise ValueError('יש לכתוב נוסח להקראה')
     voice = voice if voice in VOICES else current_voice()
+    speed = speed if speed in SPEEDS else current_speed()
+    errors = []
+    try:
+        return _chirp(text, voice, speed), 'chirp'
+    except Exception as e:
+        errors.append(f'Chirp: {e}')
+        log.warning(f'narrator: Chirp 3 HD נכשל, עוברים ל-Gemini: {e}')
+    try:
+        return _gemini(text, voice), 'gemini'
+    except Exception as e:
+        errors.append(f'Gemini: {e}')
+    raise RuntimeError('ההקראה נכשלה. ' + ' | '.join(errors))
+
+
+def _chirp(text, voice, speed):
+    """Google Cloud Text-to-Speech, קול Chirp 3 HD בעברית (he-IL-Chirp3-HD-<קול>).
+    קול יציב - אותו קול בכל הפקה. דורש להפעיל פעם אחת את Cloud Text-to-Speech API בפרויקט של המפתח."""
+    key = os.environ.get('GOOGLE_TTS_API_KEY') or os.environ.get('GOOGLE_API_KEY')
+    body = {'input': {'text': text},
+            'voice': {'languageCode': 'he-IL', 'name': f'he-IL-Chirp3-HD-{voice}'},
+            'audioConfig': {'audioEncoding': 'LINEAR16', 'sampleRateHertz': 24000, 'speakingRate': float(speed)}}
+    r = requests.post('https://texttospeech.googleapis.com/v1/text:synthesize', params={'key': key}, json=body, timeout=60)
+    if r.status_code == 400 and 'speakingRate' in r.text:          # אם הקול לא תומך בשינוי מהירות
+        body['audioConfig'].pop('speakingRate')
+        r = requests.post('https://texttospeech.googleapis.com/v1/text:synthesize', params={'key': key}, json=body, timeout=60)
+    if r.status_code != 200:
+        try:
+            msg = r.json().get('error', {}).get('message', r.text[:200])
+        except ValueError:
+            msg = r.text[:200]
+        raise RuntimeError(f'{r.status_code}: {msg}')
+    audio = base64.b64decode(r.json().get('audioContent') or b'')
+    if not audio:
+        raise RuntimeError('לא התקבל שמע')
+    log.info(f'narrator: הופקה הקראה (Chirp 3 HD, {voice}, מהירות {speed})')
+    return audio
+
+
+def _gemini(text, voice):
+    """גיבוי: Gemini TTS. הגדרות קבועות (בלי אקראיות, זרע קבוע, עברית) כדי לצמצם הבדלים בין הפקות."""
+    from google import genai
+    from google.genai import types
     client = genai.Client(api_key=os.environ.get('GOOGLE_API_KEY'))   # נשמר במשתנה עד סוף הבקשה
     cfg = types.GenerateContentConfig(
-        response_modalities=['AUDIO'], temperature=0.4,
-        speech_config=types.SpeechConfig(voice_config=types.VoiceConfig(
+        response_modalities=['AUDIO'], temperature=0.0, seed=7,
+        speech_config=types.SpeechConfig(language_code='he-IL', voice_config=types.VoiceConfig(
             prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=voice))))
     last = None
-    models = [_setting('narrator_model')] if _setting('narrator_model') else []
-    for model in models + [m for m in TTS_MODELS if m not in models]:
+    pinned = _setting('narrator_model')
+    for model in ([pinned] if pinned else []) + [m for m in TTS_MODELS if m != pinned]:
         try:
             resp = client.models.generate_content(model=model, contents=STYLE + text, config=cfg)
             part = resp.candidates[0].content.parts[0]
@@ -70,22 +119,35 @@ def synthesize(text, voice=None):
                 pcm = base64.b64decode(pcm)
             if not pcm:
                 raise RuntimeError('לא התקבל שמע')
+            if not pinned:                                  # תמיד אותו מודל - מודל אחר = קול אחר
+                _save_setting('narrator_model', model)
+            if pcm[:4] == b'RIFF':
+                return pcm
             rate = 24000
             m = re.search(r'rate=(\d+)', getattr(part.inline_data, 'mime_type', '') or '')
             if m:
                 rate = int(m.group(1))
-            if pcm[:4] == b'RIFF':
-                return pcm
             import wave
             out = io.BytesIO()
             with wave.open(out, 'wb') as w:
                 w.setnchannels(1); w.setsampwidth(2); w.setframerate(rate); w.writeframes(pcm)
-            log.info(f'narrator: הופקה הקראה ({model}, {voice}, {len(pcm) // (rate * 2)} שניות)')
+            log.info(f'narrator: הופקה הקראה (Gemini {model}, {voice})')
             return out.getvalue()
         except Exception as e:
             last = e
             log.warning(f'narrator: מודל {model} נכשל: {e}')
-    raise RuntimeError(f'ההקראה נכשלה: {last}')
+    raise RuntimeError(str(last))
+
+
+def _save_setting(key, value):
+    from app import db
+    from models import Settings
+    s = Settings.query.filter_by(key=key).first()
+    if s:
+        s.value = value
+    else:
+        db.session.add(Settings(key=key, value=value))
+    db.session.commit()
 
 
 def prepare(audio_bytes, trim=True):

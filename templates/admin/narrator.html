@@ -27,6 +27,18 @@
   </div>
 </div>
 
+<details class="card" style="margin-bottom:20px;padding:12px 18px">
+  <summary style="cursor:pointer;font-weight:700">🔒 קול יציב - אותו קול בדיוק בכל הפקה (הפעלה חד-פעמית)</summary>
+  <div style="font-size:13px;line-height:1.9;margin-top:8px">
+    הקריין משתמש קודם בשירות Chirp 3 HD של גוגל - אותם קולות (כולל יאפטוס), אבל הקול זהה בכל הפקה.
+    כל עוד השירות לא מופעל, ההקראה נעשית ב-Gemini, שהקול שלו משתנה מעט בין הפקות.<br>
+    <b>להפעלה:</b> 1. להיכנס ל-<b>console.cloud.google.com</b> עם החשבון שבו נוצר מפתח ה-Gemini, ולבחור למעלה את הפרויקט שלו.
+    2. בחיפוש למעלה: <b>Cloud Text-to-Speech API</b> ← <b>Enable</b>.
+    3. אם מתבקש - לחבר חשבון חיוב (Billing). בכמות שלנו זה בחינם: מיליון תווים בחודש בלי תשלום.
+    אין צורך לשנות שום דבר בשרת - ההפקה הבאה כבר תהיה בקול היציב (בהיסטוריה יופיע "קול יציב").
+  </div>
+</details>
+
 <div class="nr-grid">
   <div class="card">
     <div style="font-size:15px;font-weight:700;margin-bottom:10px">✍️ הקראה בקול הקריין</div>
@@ -37,6 +49,10 @@
         <div><label class="form-label">קול (נשמר - תמיד אותו קול)</label>
           <select class="form-input" name="voice" style="width:230px">
             {% for k, v in voices.items() %}<option value="{{ k }}" {% if k == voice %}selected{% endif %}>{{ v }}</option>{% endfor %}
+          </select></div>
+        <div><label class="form-label">קצב</label>
+          <select class="form-input" name="speed" style="width:130px">
+            {% for k, v in speeds.items() %}<option value="{{ k }}" {% if k == speed %}selected{% endif %}>{{ v }}</option>{% endfor %}
           </select></div>
         <label style="font-size:13px;padding-bottom:8px"><input type="checkbox" name="trim" value="1" checked> חיתוך שקט בהתחלה ובסוף</label>
       </div>
