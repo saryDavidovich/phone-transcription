@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from sqlalchemy import func
 import io
 import os
+import re
 import logging
 
 log = logging.getLogger(__name__)
@@ -1884,6 +1885,29 @@ def manager_messages():
 
 
 # --- קריין והודעות מערכת (services/narrator.py) ---
+@admin_bp.route('/fax-test', methods=['POST'])
+@login_required
+def fax_test():
+    """שליחת פקס בדיקה, והצגת התשובות המדויקות של ימות (העלאה + שליחה)."""
+    import json
+    from services.transcribe import _build_pdf_for_fax, send_pdf_fax
+    number = re.sub(r'\D', '', request.form.get('number') or '')
+    if len(number) < 9:
+        flash('⚠ יש להקליד מספר פקס תקין')
+        return redirect(url_for('admin.settings') + '#fax-test')
+    pdf = _build_pdf_for_fax('בדיקת פקס', '0:00',
+                             'זהו פקס בדיקה ממערכת התמלול.\nאם הדף הזה הגיע - שליחת הפקסים תקינה.\n'
+                             f'נשלח: {datetime.utcnow().strftime("%d/%m/%Y %H:%M")} (UTC)')
+    res = send_pdf_fax(number, pdf, filename_hint='fax_test.pdf', return_details=True)
+    set_setting('fax_test_last', json.dumps({'number': number, 'at': datetime.utcnow().isoformat(),
+                                             'ok': res['ok'], 'campaign_id': res.get('campaign_id'),
+                                             'error': res.get('error'), 'steps': res.get('steps', [])},
+                                            ensure_ascii=False)[:490])
+    flash(('✔ ימות קיבלו את הפקס לשליחה (מספר קמפיין ' + str(res.get('campaign_id')) + '). אם הדף מגיע למכשיר - הבעיה נפתרה.')
+          if res['ok'] else ('⚠ שליחת הפקס נכשלה: ' + str(res.get('error'))))
+    return redirect(url_for('admin.settings', fax_steps=json.dumps(res.get('steps', []), ensure_ascii=False)) + '#fax-test')
+
+
 @admin_bp.route('/narrator')
 @login_required
 def narrator():

@@ -1767,60 +1767,80 @@ def _normalize_israeli_phone(raw):
     return phone
 
 
-def send_pdf_fax(to_number, pdf_bytes, filename_hint='document.pdf', delivery_url_path='/api/fax-delivery-webhook'):
-    """שולח PDF כלשהו כפקס באמצעות ה-API של ימות המשיח (SendFax) - גרסה
-    כללית שהוצאה החוצה מתוך _send_fax (שהייתה קשורה קשיחות לתמלול שיחה +
-    לטבלת Recording). מעלה את ה-PDF בעצמו (pdfFile=UPLOAD) ומבקש דוח מסירה
-    ל-deliveryUrl. משמשת גם את _send_fax (תמלול שיחה, למטה) וגם את
-    routes/dictate.py לשליחת כתבי-יד/הגהות בפקס ללקוחות ללא מייל (ראה
-    routes/dictate.py._send_manuscript_fax).
-    מחזיר dict: {'ok': bool, 'campaign_id': str|None, 'error': str|None} -
-    הקורא אחראי לעדכן את שדות הסטטוס הרלוונטיים לו (Recording/ManuscriptPage/
-    ProofingRound, כל אחד לפי הטבלה שלו) על סמך זה, ולא התפקיד של הפונקציה
-    הכללית הזו לדעת על טבלאות ספציפיות."""
+FAX_UPLOAD_FOLDER = '/fax_out'
+
+
+def send_pdf_fax(to_number, pdf_bytes, filename_hint='document.pdf', delivery_url_path='/api/fax-delivery-webhook',
+                 return_details=False):
+    """שולח PDF כפקס דרך ימות המשיח - בשני שלבים, כמו שימות דורשים:
+    1. מעלים את ה-PDF למערכת בימות (UploadFile) לתיקייה /fax_out.
+    2. SendFax עם pdfFile = הנתיב של הקובץ במערכת (ivr2:/fax_out/....pdf).
+    (בעבר הקובץ נשלח ישירות בבקשת SendFax - ימות קיבלו את הבקשה וחייבו, אבל לא קראו
+    את הקובץ ולכן שום פקס לא הגיע.)
+    משמשת את _send_fax (תמלול), את routes/dictate.py (כתבי-יד/הגהות) ואת בדיקת הפקס בממשק.
+    מחזיר dict: {'ok', 'campaign_id', 'error'} (+ 'steps' עם התשובות הגולמיות של ימות אם return_details)."""
+    import uuid as _uuid
+    steps = []
+
+    def done(ok, campaign_id=None, error=None):
+        out = {'ok': ok, 'campaign_id': campaign_id, 'error': error}
+        if return_details:
+            out['steps'] = steps
+        return out
+
     try:
         yemot_token = os.environ.get('YEMOT_TOKEN')
         if not yemot_token:
             log.error("YEMOT_TOKEN not configured - cannot send fax")
-            return {'ok': False, 'campaign_id': None, 'error': 'YEMOT_TOKEN לא מוגדר'}
+            return done(False, error='YEMOT_TOKEN לא מוגדר')
+        if not pdf_bytes or pdf_bytes[:4] != b'%PDF':
+            return done(False, error='הקובץ לשליחה אינו PDF תקין')
 
         caller_id = os.environ.get('YEMOT_FAX_CALLER_ID', '')
         base_url = os.environ.get('APP_BASE_URL', '').rstrip('/')
-
         fax_number = _normalize_israeli_phone(to_number)
 
-        files = {
-            'fileToUpload': (filename_hint, pdf_bytes, 'application/pdf'),
-        }
-        data = {
-            'token': yemot_token,
-            'pdfFile': 'UPLOAD',
-            'phone': fax_number,
-        }
+        # --- שלב 1: העלאת ה-PDF למערכת בימות ---
+        remote = f"{FAX_UPLOAD_FOLDER}/{_uuid.uuid4().hex[:12]}.pdf"
+        up = requests.post('https://www.call2all.co.il/ym/api/UploadFile',
+                           data={'token': yemot_token, 'path': f'ivr2:{remote}', 'convertAudio': 0},
+                           files={'file': (remote.rsplit('/', 1)[-1], pdf_bytes, 'application/pdf')}, timeout=120)
+        try:
+            up_json = up.json()
+        except ValueError:
+            up_json = {'raw': up.text[:300]}
+        steps.append({'step': 'UploadFile', 'path': f'ivr2:{remote}', 'http': up.status_code, 'response': up_json})
+        if up.status_code != 200 or str(up_json.get('responseStatus', '')).upper() != 'OK':
+            log.error(f"Fax: העלאת ה-PDF לימות נכשלה: {up_json}")
+            return done(False, error=f'העלאת ה-PDF לימות נכשלה: {str(up_json)[:300]}')
+        uploaded_path = up_json.get('path') or remote
+        if not str(uploaded_path).startswith('ivr2:'):
+            uploaded_path = 'ivr2:' + ('' if str(uploaded_path).startswith('/') else '/') + str(uploaded_path)
+
+        # --- שלב 2: שליחת הפקס מהקובץ שבמערכת ---
+        data = {'token': yemot_token, 'pdfFile': uploaded_path, 'phone': fax_number}
         if caller_id:
             data['callerId'] = caller_id
         if base_url and delivery_url_path:
             data['deliveryUrl'] = f'{base_url}{delivery_url_path}'
+        response = requests.post('https://www.call2all.co.il/ym/api/SendFax', data=data, timeout=120)
+        try:
+            result = response.json()
+        except ValueError:
+            result = {'raw': response.text[:300]}
+        steps.append({'step': 'SendFax', 'pdfFile': uploaded_path, 'phone': fax_number,
+                      'callerId': caller_id or '(ברירת מחדל של המערכת)', 'http': response.status_code, 'response': result})
 
-        response = requests.post(
-            'https://www.call2all.co.il/ym/api/SendFax',
-            data=data,
-            files=files,
-            timeout=120,
-        )
-        result = response.json() if response.headers.get('content-type', '').startswith('application/json') else {}
-
-        if result.get('responseStatus') == 'OK':
-            campaign_id = result.get('CampaignId')
-            log.info(f"Fax queued via Yemot to {fax_number}, CampaignId: {campaign_id}")
-            return {'ok': True, 'campaign_id': campaign_id, 'error': None}
-        else:
-            log.error(f"Yemot SendFax failed: {response.text}")
-            return {'ok': False, 'campaign_id': None, 'error': response.text[:500]}
+        if str(result.get('responseStatus', '')).upper() == 'OK':
+            campaign_id = result.get('CampaignId') or result.get('campaignId')
+            log.info(f"Fax queued via Yemot to {fax_number} (file {uploaded_path}), CampaignId: {campaign_id}")
+            return done(True, campaign_id=campaign_id)
+        log.error(f"Yemot SendFax failed: {result}")
+        return done(False, error=str(result)[:500])
 
     except Exception as e:
         log.error(f"Fax error: {e}")
-        return {'ok': False, 'campaign_id': None, 'error': str(e)[:500]}
+        return done(False, error=str(e)[:500])
 
 
 def _send_fax(to_number, transcript_fixed, customer, duration_seconds, call_id=None):

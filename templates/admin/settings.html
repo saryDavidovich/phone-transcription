@@ -165,6 +165,19 @@
   </div>
 </form>
 
+<div class="card" style="margin-top:24px" id="fax-test">
+  <div style="font-size:16px;font-weight:700;margin-bottom:8px">📠 בדיקת פקס</div>
+  <div style="font-size:13px;color:#8892b0;margin-bottom:12px">שולח דף בדיקה לפקס, ומציג בדיוק מה ימות ענו בכל שלב (העלאת ה-PDF למערכת, ואז השליחה).</div>
+  <form method="POST" action="{{ url_for('admin.fax_test') }}" style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap"
+        onsubmit="var b=this.querySelector('button');setTimeout(function(){b.disabled=true;b.textContent='⏳ שולח...'},0);return true">
+    <div><label class="form-label">מספר פקס</label><input class="form-input" name="number" inputmode="tel" dir="ltr" placeholder="02-1234567" style="width:200px"></div>
+    <button class="btn btn-primary" type="submit">📠 שלח פקס בדיקה</button>
+  </form>
+  {% if request.args.get('fax_steps') %}
+  <pre dir="ltr" style="margin-top:12px;background:var(--surface2,#22263a);padding:12px;border-radius:8px;font-size:12px;white-space:pre-wrap;max-height:320px;overflow:auto">{{ request.args.get('fax_steps') }}</pre>
+  {% endif %}
+</div>
+
 <div class="card" style="margin-top:24px">
   <div style="font-size:16px;font-weight:700;margin-bottom:8px">🔒 סיסמת מנהל</div>
   <div style="font-size:13px;color:#4a5568">שם המשתמש והסיסמה של המנהל מוגדרים רק במשתני הסביבה בשרת (Railway): <b>ADMIN_USERNAME</b> ו-<b>ADMIN_PASSWORD</b>. לשינוי - משנים אותם שם ומפעילים מחדש.</div>
