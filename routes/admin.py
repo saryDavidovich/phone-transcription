@@ -232,6 +232,16 @@ def _pwa_icon_data(name):
     return _PWA_ICONS[name]
 
 
+def _pwa_icon_svg():
+    """הסמל כציור וקטורי (טקסט, לא תמונה) - static/pwa/icon.svg."""
+    if 'svg' not in _PWA_ICONS:
+        from urllib.parse import quote
+        path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'static', 'pwa', 'icon.svg')
+        with open(path, encoding='utf-8') as f:
+            _PWA_ICONS['svg'] = 'data:image/svg+xml,' + quote(f.read(), safe='')
+    return _PWA_ICONS['svg']
+
+
 @admin_bp.route('/manifest.webmanifest')
 def pwa_manifest():
     resp = jsonify({
@@ -242,12 +252,14 @@ def pwa_manifest():
         'display': 'standalone', 'background_color': '#0f1117', 'theme_color': '#1a1d27',
         # הסמלים מוטמעים כטקסט בתוך הקובץ הזה (data:), ולא כקובצי תמונה נפרדים - נטפרי חוסם תמונות
         'icons': [
+            {'src': _pwa_icon_svg(), 'sizes': 'any', 'type': 'image/svg+xml'},
             {'src': _pwa_icon_data('icon-192.png'), 'sizes': '192x192', 'type': 'image/png'},
             {'src': _pwa_icon_data('icon-512.png'), 'sizes': '512x512', 'type': 'image/png'},
             {'src': _pwa_icon_data('icon-maskable-512.png'), 'sizes': '512x512', 'type': 'image/png', 'purpose': 'maskable'},
         ],
     })
-    resp.mimetype = 'application/manifest+json'
+    resp.mimetype = 'application/json'      # סוג נפוץ שנטפרי מעבירים (הדפדפן לא בודק את הסוג)
+    resp.headers['Cache-Control'] = 'no-cache'
     return resp
 
 
