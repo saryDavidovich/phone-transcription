@@ -1813,23 +1813,32 @@ def send_pdf_fax(to_number, pdf_bytes, filename_hint='document.pdf', delivery_ur
         if up.status_code != 200 or str(up_json.get('responseStatus', '')).upper() != 'OK':
             log.error(f"Fax: העלאת ה-PDF לימות נכשלה: {up_json}")
             return done(False, error=f'העלאת ה-PDF לימות נכשלה: {str(up_json)[:300]}')
-        uploaded_path = up_json.get('path') or remote
-        if not str(uploaded_path).startswith('ivr2:'):
-            uploaded_path = 'ivr2:' + ('' if str(uploaded_path).startswith('/') else '/') + str(uploaded_path)
+        # הנתיב לשליחה: בדיוק המקום שאליו העלינו (ימות מחזירים את הנתיב בכתיב פנימי "ivr/..."
+        # שאסור להעתיק כמו שהוא). אם ימות עונים "הקובץ לא נמצא" - מנסים את צורות הכתיבה האחרות.
+        returned = str(up_json.get('path') or '')
+        candidates = [f'ivr2:{remote}', f'ivr2:{remote.lstrip("/")}']
+        if returned.startswith('ivr/'):
+            candidates.append('ivr2:/' + returned[4:])
+        candidates.append(returned)
 
         # --- שלב 2: שליחת הפקס מהקובץ שבמערכת ---
-        data = {'token': yemot_token, 'pdfFile': uploaded_path, 'phone': fax_number}
-        if caller_id:
-            data['callerId'] = caller_id
-        if base_url and delivery_url_path:
-            data['deliveryUrl'] = f'{base_url}{delivery_url_path}'
-        response = requests.post('https://www.call2all.co.il/ym/api/SendFax', data=data, timeout=120)
-        try:
-            result = response.json()
-        except ValueError:
-            result = {'raw': response.text[:300]}
-        steps.append({'step': 'SendFax', 'pdfFile': uploaded_path, 'phone': fax_number,
-                      'callerId': caller_id or '(ברירת מחדל של המערכת)', 'http': response.status_code, 'response': result})
+        result = {}
+        response = None
+        for uploaded_path in [c for i, c in enumerate(candidates) if c and c not in candidates[:i]]:
+            data = {'token': yemot_token, 'pdfFile': uploaded_path, 'phone': fax_number}
+            if caller_id:
+                data['callerId'] = caller_id
+            if base_url and delivery_url_path:
+                data['deliveryUrl'] = f'{base_url}{delivery_url_path}'
+            response = requests.post('https://www.call2all.co.il/ym/api/SendFax', data=data, timeout=120)
+            try:
+                result = response.json()
+            except ValueError:
+                result = {'raw': response.text[:300]}
+            steps.append({'step': 'SendFax', 'pdfFile': uploaded_path, 'phone': fax_number,
+                          'callerId': caller_id or '(ברירת מחדל של המערכת)', 'http': response.status_code, 'response': result})
+            if 'לא נמצא' not in str(result.get('message', '')):
+                break
 
         if str(result.get('responseStatus', '')).upper() == 'OK':
             campaign_id = result.get('CampaignId') or result.get('campaignId')
