@@ -364,14 +364,13 @@ function confirmOcrDelete() {
         <td style="font-size:13px">{{ t.columns|join(' · ') }}</td>
         <td>{{ t.rows }}</td>
         <td style="font-size:13px">{{ t.updated|il_time if t.updated else '' }}</td>
-        <td>{% if t.rows %}<a class="btn btn-ghost" style="font-size:12px" href="{{ url_for('admin.customer_excel_download', id=customer.id, tid=t.id) }}">⬇ אקסל</a>
-</details>
-{% endif %}</td>
+        <td>{% if t.rows %}<a class="btn btn-ghost" style="font-size:12px" href="{{ url_for('admin.customer_excel_download', id=customer.id, tid=t.id) }}">⬇ אקסל</a>{% endif %}</td>
       </tr>
     {% endfor %}
     </tbody>
   </table>
 </div>
+</details>
 {% endif %}
 
 <details class="cd-sec" data-sec="dictation"><summary>🗣️ הקראה ראשונית (כתבי יד)</summary>
@@ -626,7 +625,7 @@ function confirmOcrDelete() {
   var KEY = 'cdOpenSections', secs = document.querySelectorAll('details.cd-sec');
   var open;
   try { open = JSON.parse(localStorage.getItem(KEY) || 'null'); } catch (e) { open = null; }
-  if (!Array.isArray(open)) open = ['recordings'];
+  if (!Array.isArray(open)) open = [];   // בפעם הראשונה הכל סגור
   secs.forEach(function (d) {
     if (open.indexOf(d.dataset.sec) !== -1) d.open = true;
     d.addEventListener('toggle', function () {
