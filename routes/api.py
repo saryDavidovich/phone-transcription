@@ -69,6 +69,19 @@ def get_customer(phone):
                         for k in ('basic', 'premium', 'video', 'excel')},
     })
 
+@api_bp.route('/system-messages', methods=['GET'])
+def system_messages_for_ivr():
+    """להודעות שעדיין בהקראה ממוחשבת (SAY ב-ivr.js): האם כבר הועלתה הקלטה, ומה הנוסח העדכני."""
+    from models import SystemMessage
+    from services import message_catalog as MC
+    try:
+        MC.sync()
+    except Exception:
+        db.session.rollback()
+    rows = SystemMessage.query.filter(SystemMessage.kind == 'tts').all()
+    return jsonify({str(m.num): {'r': bool(m.recorded), 't': m.text or m.default_text or ''} for m in rows})
+
+
 @api_bp.route('/voice-messages/<phone>', methods=['GET'])
 def voice_messages_for_caller(phone):
     """הודעות קוליות למתקשר: pending (להשמיע בכניסה), replay (לשלוחה 9). ראה services/voice_messages."""

@@ -1,0 +1,222 @@
+{% extends 'admin/base.html' %}
+{% block title %}קריין{% endblock %}
+{% block page_title %}🎙️ קריין והודעות מערכת{% endblock %}
+{% block content %}
+<style>
+  .nr-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+  @container (max-width: 860px){ .nr-grid{grid-template-columns:1fr} }
+  .nr-num{width:110px;text-align:center;font-size:20px;font-weight:700;letter-spacing:2px}
+  .nr-sel{border:2px solid var(--accent,#4f6ef7)}
+  .nr-tag{font-size:11px;padding:1px 8px;border-radius:10px;white-space:nowrap}
+</style>
+
+<div class="card" style="margin-bottom:20px">
+  <div style="display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap">
+    <div><label class="form-label">מספר הודעת מערכת</label>
+      <input class="form-input nr-num" id="nrNum" value="{{ num }}" placeholder="083" inputmode="numeric" maxlength="3"
+             oninput="nrSyncNum(this.value)"></div>
+    <div style="font-size:13px;color:#8892b0;max-width:520px">
+      ההודעה נשמרת בימות בתיקייה <b>הודעות מערכת/<span class="nr-num-echo">{{ num or 'NNN' }}</span></b> כקובץ <b>000.wav</b> -
+      בדיוק כמו שהמערכת משמיעה אותה. ההעלאה מחליפה את הקובץ הקיים (ועותק שלו נשמר לשחזור).
+    </div>
+    <div id="nrCurrentBox" style="{% if not num %}display:none{% endif %}">
+      <label class="form-label">ההקלטה שנמצאת עכשיו בימות</label>
+      <button type="button" class="btn btn-ghost" onclick="nrPlayCurrent()">▶ השמע את הנוכחית</button>
+      <span id="nrCurrentPlayer"></span>
+    </div>
+  </div>
+</div>
+
+<div class="nr-grid">
+  <div class="card">
+    <div style="font-size:15px;font-weight:700;margin-bottom:10px">✍️ הקראה בקול הקריין</div>
+    <form method="POST" action="{{ url_for('admin.narrator_generate') }}" onsubmit="return nrBusy(this)">
+      <input type="hidden" name="num" class="nr-num-field" value="{{ num }}">
+      <textarea class="form-input" name="text" rows="5" style="width:100%" placeholder="הנוסח שהקריין יקריא. אפשר להוסיף ניקוד למילה שמוקראת לא נכון.">{{ sel.text if sel and sel.source == 'tts' else '' }}</textarea>
+      <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-top:10px">
+        <div><label class="form-label">קול (נשמר - תמיד אותו קול)</label>
+          <select class="form-input" name="voice" style="width:230px">
+            {% for k, v in voices.items() %}<option value="{{ k }}" {% if k == voice %}selected{% endif %}>{{ v }}</option>{% endfor %}
+          </select></div>
+        <label style="font-size:13px;padding-bottom:8px"><input type="checkbox" name="trim" value="1" checked> חיתוך שקט בהתחלה ובסוף</label>
+      </div>
+      <button class="btn btn-primary" type="submit" style="margin-top:12px">🎙️ הפק הקראה</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <div style="font-size:15px;font-weight:700;margin-bottom:10px">📁 העלאת הקלטה מוכנה</div>
+    <form method="POST" action="{{ url_for('admin.narrator_upload_file') }}" enctype="multipart/form-data" onsubmit="return nrBusy(this)">
+      <input type="hidden" name="num" class="nr-num-field" value="{{ num }}">
+      <input class="form-input" type="file" name="audio_file" accept="audio/*,video/*" required style="max-width:100%">
+      <div style="font-size:12px;color:#8892b0;margin-top:6px">כל פורמט שמע (WAV, MP3, M4A...) - מומר אוטומטית לפורמט של ימות. רק הקובץ עצמו, בלי תיקייה.</div>
+      <label style="font-size:13px;display:block;margin-top:10px"><input type="checkbox" name="trim" value="1" checked> חיתוך שקט בהתחלה ובסוף</label>
+      <button class="btn btn-primary" type="submit" style="margin-top:12px">⬆ הכן להעלאה</button>
+    </form>
+  </div>
+</div>
+
+{% if sel %}
+<div class="card nr-sel" style="margin-top:20px">
+  <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">
+    <div style="font-size:15px;font-weight:700">הודעה {{ '%03d'|format(sel.msg_num) }} · {{ sel.duration }} שניות
+      {% if sel.uploaded_at %}<span class="nr-tag badge-green">הועלתה {{ sel.uploaded_at | il_time }}</span>{% else %}<span class="nr-tag badge-amber">עוד לא הועלתה</span>{% endif %}</div>
+    <span id="nrPreview"></span>
+    <form method="POST" action="{{ url_for('admin.narrator_publish', cid=sel.id) }}"
+          onsubmit="return confirm('להעלות לימות ולהחליף את הודעה {{ '%03d'|format(sel.msg_num) }}? ההקלטה הקיימת תישמר לשחזור.') && nrBusy(this)">
+      <button class="btn btn-success" type="submit">⬆ העלה לימות כהודעה {{ '%03d'|format(sel.msg_num) }}</button>
+    </form>
+    {% if sel.backup_audio %}
+    <form method="POST" action="{{ url_for('admin.narrator_restore', cid=sel.id) }}" onsubmit="return confirm('להחזיר לימות את ההקלטה שהייתה לפני ההחלפה?')">
+      <button class="btn btn-ghost" type="submit">↩ שחזר את הקודמת</button>
+    </form>{% endif %}
+  </div>
+  {% if sel.text %}<div style="margin-top:8px;font-size:13px;color:#8892b0">{{ sel.text }}</div>{% endif %}
+</div>
+{% endif %}
+
+<div class="table-card" style="margin-top:20px" id="catalog">
+  <div class="table-header" style="flex-wrap:wrap;gap:10px">
+    <span class="table-title">📋 כל ההודעות במערכת ({{ catalog|length }})</span>
+    <div style="display:flex;gap:6px;flex-wrap:wrap">
+      <button type="button" class="btn btn-ghost ct-f" data-f="all" style="font-size:12px">הכל</button>
+      <button type="button" class="btn btn-ghost ct-f" data-f="tts" style="font-size:12px">🤖 בהקראה ממוחשבת ({{ catalog|selectattr('kind','equalto','tts')|rejectattr('recorded')|list|length }})</button>
+      <button type="button" class="btn btn-ghost ct-f" data-f="recorded" style="font-size:12px">🎙️ מוקלטות</button>
+      <button type="button" class="btn btn-ghost ct-f" data-f="unused" style="font-size:12px">לא בשימוש</button>
+      <input class="form-input" id="ctSearch" placeholder="חיפוש בנוסח / מספר" style="width:200px;font-size:13px">
+    </div>
+  </div>
+  <div style="padding:8px 16px;font-size:12px;color:#8892b0">אפשר לשנות כל נוסח - נשמר אוטומטית. הודעה בהקראה ממוחשבת: השיחות הבאות כבר ישמעו את הנוסח החדש. "🎙️ לקריין" מעביר את הנוסח למעלה להקראה ולהעלאה; אחרי ההעלאה ההודעה עוברת ל"מוקלטת" והמערכת משמיעה את ההקלטה.</div>
+  <table>
+    <thead><tr><th style="width:60px">מספר</th><th>נוסח</th><th style="width:170px">איפה נשמעת</th><th style="width:120px">מצב</th><th style="width:150px"></th></tr></thead>
+    <tbody>
+    {% for m in catalog %}
+      {% set st = 'recorded' if (m.recorded or m.kind == 'recorded') else m.kind %}
+      <tr class="ct-row" data-st="{{ st }}" data-num="{{ '%03d'|format(m.num) }}">
+        <td><b>{{ '%03d'|format(m.num) if m.kind != 'dynamic' else '—' }}</b></td>
+        <td>{% if m.kind == 'dynamic' %}<span style="color:#8892b0">{{ m.text }}</span>
+            {% else %}<textarea class="form-input ct-text" rows="1" data-num="{{ m.num }}" style="width:100%;font-size:13px;resize:vertical;min-height:34px">{{ m.text }}</textarea>{% endif %}</td>
+        <td style="font-size:12px;color:#8892b0">{{ m.context }}</td>
+        <td>{% if st == 'recorded' %}<span class="nr-tag badge-green">🎙️ מוקלטת</span>
+            {% elif st == 'tts' %}<span class="nr-tag badge-amber">🤖 הקראה ממוחשבת</span>
+            {% elif st == 'unused' %}<span class="nr-tag badge-gray">לא בשימוש</span>
+            {% else %}<span class="nr-tag badge-gray">משתנה</span>{% endif %}
+            <span class="nr-tag badge-blue ct-changed" {% if (m.text or '') == (m.default_text or '') %}style="display:none"{% endif %}>נערך</span>
+            <span class="ct-saved" style="font-size:11px;color:#10b981"></span></td>
+        <td style="white-space:nowrap">{% if m.kind != 'dynamic' %}
+          <button type="button" class="btn btn-ghost" style="font-size:12px" onclick="ctToNarrator({{ m.num }})">🎙️ לקריין</button>
+          <button type="button" class="btn btn-ghost" style="font-size:12px" onclick="ctPlay(this, {{ m.num }})">▶</button>
+          {% if m.kind == 'tts' and m.recorded %}<button type="button" class="btn btn-ghost" style="font-size:12px" title="אם הקובץ נמחק בימות או לא תקין"
+              onclick="ctBackToTts(this, {{ m.num }})">↩ להקראה ממוחשבת</button>{% endif %}{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="table-card" style="margin-top:20px">
+  <div class="table-header"><span class="table-title">📜 היסטוריה</span></div>
+  {% if clips %}
+  <table>
+    <thead><tr><th>הודעה</th><th>נוסח</th><th>קול</th><th>אורך</th><th>נוצרה</th><th>בימות</th><th></th></tr></thead>
+    <tbody>
+    {% for c in clips %}
+      <tr style="cursor:pointer" onclick="location='{{ url_for('admin.narrator', clip=c.id) }}'">
+        <td><b>{{ '%03d'|format(c.msg_num) }}</b></td>
+        <td style="max-width:380px">{{ c.text or '' }}</td>
+        <td>{{ c.voice or ('קובץ' if c.source == 'upload' else '') }}</td>
+        <td>{{ c.duration }} ש׳</td>
+        <td>{{ c.created_at | il_time }}</td>
+        <td>{% if c.restored_at %}<span class="nr-tag badge-gray">שוחזרה</span>{% elif c.uploaded_at %}<span class="nr-tag badge-green">הועלתה</span>{% else %}—{% endif %}</td>
+        <td onclick="event.stopPropagation()">
+          <form method="POST" action="{{ url_for('admin.narrator_delete', cid=c.id) }}" onsubmit="return confirm('למחוק מהרשימה?')">
+            <button class="btn btn-ghost" style="font-size:12px" type="submit">🗑</button></form></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<div style="padding:16px;color:#8892b0">עוד לא הופקו הקראות.</div>{% endif %}
+</div>
+
+<script>
+(function () {
+  function pad(v) { v = String(v || '').replace(/\D/g, ''); return v ? ('00' + v).slice(-3) : ''; }
+  window.nrSyncNum = function (v) {
+    var p = pad(v);
+    document.querySelectorAll('.nr-num-field').forEach(function (f) { f.value = p; });
+    document.querySelectorAll('.nr-num-echo').forEach(function (e) { e.textContent = p || 'NNN'; });
+    document.getElementById('nrCurrentBox').style.display = p ? '' : 'none';
+    document.getElementById('nrCurrentPlayer').innerHTML = '';
+  };
+  window.nrPlayCurrent = function () {
+    var p = pad(document.getElementById('nrNum').value); if (!p) return;
+    var a = document.createElement('audio'); a.controls = true; a.autoplay = true; a.style.cssText = 'height:34px;vertical-align:middle';
+    a.src = '{{ url_for("admin.narrator_current", num=0) }}'.replace(/0$/, String(+p));
+    var box = document.getElementById('nrCurrentPlayer'); box.innerHTML = ''; box.appendChild(a);
+  };
+  window.nrBusy = function (f) {
+    if (f.querySelector('.nr-num-field') && !f.querySelector('.nr-num-field').value) { alert('יש להקליד קודם מספר הודעה'); return false; }
+    var b = f.querySelector('button[type=submit]'); setTimeout(function () { b.disabled = true; b.textContent = '⏳ רגע...'; }, 0);
+    return true;
+  };
+  // --- רשימת ההודעות ---
+  function grow(t) { t.style.height = 'auto'; t.style.height = (t.scrollHeight + 2) + 'px'; }
+  document.querySelectorAll('.ct-text').forEach(function (t) {
+    var last = t.value;
+    grow(t); t.addEventListener('input', function () { grow(t); });
+    t.addEventListener('blur', function () {
+      if (t.value === last) return;
+      fetch('{{ url_for("admin.narrator_catalog_save", num=0) }}'.replace(/0$/, t.dataset.num), {
+        method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: t.value })
+      }).then(function (r) { return r.json(); }).then(function (d) {
+        last = t.value = d.text;
+        var row = t.closest('tr');
+        row.querySelector('.ct-changed').style.display = d.changed ? '' : 'none';
+        var ok = row.querySelector('.ct-saved'); ok.textContent = '✔ נשמר'; setTimeout(function () { ok.textContent = ''; }, 2000);
+      }).catch(function () { alert('השמירה נכשלה - בדוק חיבור'); });
+    });
+  });
+  window.ctToNarrator = function (num) {
+    var row = document.querySelector('.ct-row[data-num="' + ('00' + num).slice(-3) + '"]');
+    var p = ('00' + num).slice(-3);
+    document.getElementById('nrNum').value = p; nrSyncNum(p);
+    var ta = document.querySelector('form[action$="/narrator/generate"] textarea[name=text]');
+    ta.value = row.querySelector('.ct-text').value; ta.focus();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+  window.ctBackToTts = function (btn, num) {
+    if (!confirm('להחזיר את הודעה ' + ('00' + num).slice(-3) + ' להקראה ממוחשבת? המערכת תפסיק להשמיע את הקובץ מימות (תוך דקה).')) return;
+    fetch('{{ url_for("admin.narrator_catalog_save", num=0) }}'.replace(/0$/, String(num)), {
+      method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ recorded: false })
+    }).then(function () { location.reload(); });
+  };
+  window.ctPlay = function (btn, num) {
+    var a = document.createElement('audio'); a.controls = true; a.autoplay = true; a.style.cssText = 'height:30px;width:200px;vertical-align:middle';
+    a.src = '{{ url_for("admin.narrator_current", num=0) }}'.replace(/0$/, String(num));
+    btn.replaceWith(a);
+  };
+  function ctFilter() {
+    var f = window.__ctF || 'all', q = (document.getElementById('ctSearch').value || '').trim();
+    document.querySelectorAll('.ct-row').forEach(function (r) {
+      var txt = (r.querySelector('.ct-text') ? r.querySelector('.ct-text').value : r.innerText) + ' ' + r.dataset.num;
+      var okF = f === 'all' || r.dataset.st === f;
+      r.style.display = okF && (!q || txt.indexOf(q) !== -1) ? '' : 'none';
+    });
+    document.querySelectorAll('.ct-row:not([style*="none"]) .ct-text').forEach(function (t) { grow(t); });
+    document.querySelectorAll('.ct-f').forEach(function (b) { b.classList.toggle('btn-primary', b.dataset.f === f); });
+  }
+  document.querySelectorAll('.ct-f').forEach(function (b) { b.addEventListener('click', function () { window.__ctF = b.dataset.f; ctFilter(); }); });
+  document.getElementById('ctSearch').addEventListener('input', ctFilter);
+  window.__ctF = 'tts'; ctFilter();
+  document.querySelectorAll('.ct-text').forEach(grow);
+  {% if sel_b64 %}
+  // ההקראה מוטמעת בדף עצמו (נטפרי חוסמים שמע שמגיע מהאתר שלנו כקובץ)
+  var a = document.createElement('audio'); a.controls = true; a.style.cssText = 'height:36px;vertical-align:middle';
+  a.src = ['data', 'audio/mpeg;base64,'].join(':') + '{{ sel_b64 }}';
+  document.getElementById('nrPreview').appendChild(a);
+  {% endif %}
+})();
+</script>
+{% endblock %}

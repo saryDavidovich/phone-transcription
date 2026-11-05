@@ -690,3 +690,33 @@ class VoiceMessageHeard(db.Model):
     phone = db.Column(db.String(20))
     heard_at = db.Column(db.DateTime, default=datetime.utcnow)
     __table_args__ = (db.UniqueConstraint('message_id', 'customer_id', name='uq_voice_heard'),)
+
+
+class NarratorClip(db.Model):
+    """הקראה שהופקה בקריין (או קובץ שהועלה) עבור הודעת מערכת בימות - ראה services/narrator.py.
+    backup_audio - ההקלטה שהייתה בימות לפני ההחלפה (לשחזור)."""
+    __tablename__ = 'narrator_clips'
+    id = db.Column(db.Integer, primary_key=True)
+    msg_num = db.Column(db.Integer, nullable=False, index=True)
+    text = db.Column(db.Text)
+    voice = db.Column(db.String(30))
+    source = db.Column(db.String(10), default='tts')      # tts / upload
+    audio = db.Column(db.LargeBinary)                       # WAV מונו 8kHz - מה שעולה לימות
+    duration = db.Column(db.Float)
+    backup_audio = db.Column(db.LargeBinary)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    uploaded_at = db.Column(db.DateTime)
+    restored_at = db.Column(db.DateTime)
+
+
+class SystemMessage(db.Model):
+    """נוסח הודעה שהמערכת הטלפונית משמיעה (הרשימה המלאה: services/message_catalog.py).
+    recorded - יש הקלטה בימות (/הודעות מערכת/NNN/000.wav); אחרת ימות מקריאים את text."""
+    __tablename__ = 'system_messages'
+    num = db.Column(db.Integer, primary_key=True)
+    text = db.Column(db.Text)
+    default_text = db.Column(db.Text)
+    context = db.Column(db.String(200))
+    kind = db.Column(db.String(10))
+    recorded = db.Column(db.Boolean, default=False, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

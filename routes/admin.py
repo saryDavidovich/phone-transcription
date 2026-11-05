@@ -1883,6 +1883,183 @@ def manager_messages():
         unread_inbox_count=unread_inbox_count, customer_ids=customer_ids)
 
 
+# --- קריין והודעות מערכת (services/narrator.py) ---
+@admin_bp.route('/narrator')
+@login_required
+def narrator():
+    from models import NarratorClip
+    from services import narrator as N
+    clips = (NarratorClip.query.options(*_light(NarratorClip, keep=('text',)))
+             .order_by(NarratorClip.created_at.desc()).limit(60).all())
+    sel, sel_b64 = None, None
+    if (request.args.get('clip') or '').isdigit():
+        sel = NarratorClip.query.get(int(request.args['clip']))
+        if sel and sel.audio:
+            try:
+                sel_b64 = N.preview_mp3_b64(sel.audio)
+            except Exception as e:
+                flash(f'⚠ לא הצלחנו להכין השמעה: {e}')
+    from models import SystemMessage
+    from services import message_catalog as MC
+    try:
+        MC.sync()
+    except Exception as e:
+        db.session.rollback()
+        logging.getLogger(__name__).warning(f'message catalog sync failed: {e}')
+    catalog = SystemMessage.query.order_by(SystemMessage.num).all()
+    return render_template('admin/narrator.html', clips=clips, sel=sel, sel_b64=sel_b64,
+                           catalog=catalog, kind_labels=MC.KIND_LABELS,
+                           voices=N.VOICES, voice=N.current_voice(),
+                           num=request.args.get('num') or (f'{sel.msg_num:03d}' if sel else ''))
+
+
+def _narrator_num(raw):
+    raw = (raw or '').strip()
+    return int(raw) if raw.isdigit() and 0 < int(raw) < 1000 else None
+
+
+@admin_bp.route('/narrator/generate', methods=['POST'])
+@login_required
+def narrator_generate():
+    from models import NarratorClip
+    from services import narrator as N
+    num = _narrator_num(request.form.get('num'))
+    text = (request.form.get('text') or '').strip()
+    voice = request.form.get('voice') or N.current_voice()
+    if num is None:
+        flash('⚠ יש להקליד מספר הודעה (1-999), למשל 083')
+        return redirect(url_for('admin.narrator'))
+    if voice != N.current_voice() and voice in N.VOICES:
+        set_setting('narrator_voice', voice)          # הקול שנבחר נשמר - מעכשיו תמיד הוא
+    try:
+        wav, secs = N.prepare(N.synthesize(text, voice), trim=request.form.get('trim') == '1')
+    except Exception as e:
+        flash(f'⚠ {e}')
+        return redirect(url_for('admin.narrator', num=f'{num:03d}'))
+    clip = NarratorClip(msg_num=num, text=text, voice=voice, source='tts', audio=wav, duration=secs)
+    db.session.add(clip)
+    db.session.commit()
+    flash(f'✔ ההקראה מוכנה ({secs} שניות) - האזן, ואם טוב: "העלה לימות"')
+    return redirect(url_for('admin.narrator', clip=clip.id))
+
+
+@admin_bp.route('/narrator/upload-file', methods=['POST'])
+@login_required
+def narrator_upload_file():
+    from models import NarratorClip
+    from services import narrator as N
+    num = _narrator_num(request.form.get('num'))
+    f = request.files.get('audio_file')
+    if num is None or not f or not f.filename:
+        flash('⚠ יש להקליד מספר הודעה ולבחור קובץ שמע')
+        return redirect(url_for('admin.narrator'))
+    try:
+        wav, secs = N.prepare(f.read(), trim=request.form.get('trim') == '1')
+    except Exception as e:
+        flash(f'⚠ לא הצלחנו לקרוא את קובץ השמע: {e}')
+        return redirect(url_for('admin.narrator', num=f'{num:03d}'))
+    clip = NarratorClip(msg_num=num, text=f'קובץ: {f.filename}', source='upload', audio=wav, duration=secs)
+    db.session.add(clip)
+    db.session.commit()
+    flash(f'✔ הקובץ מוכן ({secs} שניות) - האזן, ואם טוב: "העלה לימות"')
+    return redirect(url_for('admin.narrator', clip=clip.id))
+
+
+@admin_bp.route('/narrator/<int:cid>/publish', methods=['POST'])
+@login_required
+def narrator_publish(cid):
+    """מעלה לימות כהודעת מערכת. קודם שומר עותק של ההקלטה הקיימת (לשחזור)."""
+    from models import NarratorClip
+    from services import narrator as N
+    clip = NarratorClip.query.get_or_404(cid)
+    try:
+        if clip.backup_audio is None:
+            clip.backup_audio = N.download_current(clip.msg_num)
+        N.upload(clip.msg_num, clip.audio)
+        clip.uploaded_at = datetime.utcnow()
+        # בדיקה כפולה: מורידים את הקובץ בחזרה מימות - רק אם הוא באמת שם ותקין, ההודעה
+        # מסומנת "מוקלטת" (אחרת ה-IVR היה מבקש מימות קובץ שלא קיים)
+        if not N.download_current(clip.msg_num):
+            db.session.commit()
+            flash(f'⚠ ימות אישרו את ההעלאה, אבל הקובץ לא נמצא בבדיקה חוזרת - הודעה {clip.msg_num:03d} '
+                  'נשארת בהקראה ממוחשבת. נסה להעלות שוב בעוד דקה.')
+            return redirect(url_for('admin.narrator', clip=cid))
+        from models import SystemMessage
+        sm = SystemMessage.query.get(clip.msg_num)
+        if sm is None:
+            sm = SystemMessage(num=clip.msg_num, kind='recorded', context='נוספה מהקריין')
+            db.session.add(sm)
+        sm.recorded = True                      # ה-IVR יעבור מהקראה ממוחשבת להקלטה תוך דקה
+        if clip.source == 'tts' and clip.text:
+            sm.text = clip.text
+        db.session.commit()
+        flash(f'✔ הועלה לימות: הודעה {clip.msg_num:03d} הוחלפה' +
+              (' (ההקלטה הקודמת נשמרה לשחזור)' if clip.backup_audio else ' (לא הייתה הקלטה קודמת)'))
+    except Exception as e:
+        db.session.rollback()
+        flash(f'⚠ ההעלאה נכשלה: {e}')
+    return redirect(url_for('admin.narrator', clip=cid))
+
+
+@admin_bp.route('/narrator/<int:cid>/restore', methods=['POST'])
+@login_required
+def narrator_restore(cid):
+    from models import NarratorClip
+    from services import narrator as N
+    clip = NarratorClip.query.get_or_404(cid)
+    if not clip.backup_audio:
+        flash('⚠ אין גיבוי של הקלטה קודמת להודעה הזו')
+        return redirect(url_for('admin.narrator', clip=cid))
+    try:
+        N.upload(clip.msg_num, clip.backup_audio)
+        clip.restored_at = datetime.utcnow()
+        db.session.commit()
+        flash(f'✔ ההקלטה הקודמת של הודעה {clip.msg_num:03d} הוחזרה לימות')
+    except Exception as e:
+        flash(f'⚠ השחזור נכשל: {e}')
+    return redirect(url_for('admin.narrator', clip=cid))
+
+
+@admin_bp.route('/narrator/<int:cid>/delete', methods=['POST'])
+@login_required
+def narrator_delete(cid):
+    from models import NarratorClip
+    db.session.delete(NarratorClip.query.get_or_404(cid))
+    db.session.commit()
+    flash('ההקראה נמחקה מהרשימה (מה שכבר הועלה לימות - נשאר בימות)')
+    return redirect(url_for('admin.narrator'))
+
+
+@admin_bp.route('/narrator/catalog/<int:num>', methods=['POST'])
+@login_required
+def narrator_catalog_save(num):
+    """עריכת נוסח ברשימת ההודעות (נשמר אוטומטית בממשק). להודעה בהקראה ממוחשבת -
+    השיחות הבאות כבר ישמעו את הנוסח החדש."""
+    from models import SystemMessage
+    m = SystemMessage.query.get_or_404(num)
+    data = request.get_json(silent=True) or request.form
+    if 'text' in data:
+        m.text = (data.get('text') or '').strip() or m.default_text
+    if 'recorded' in data:
+        m.recorded = str(data.get('recorded')) in ('1', 'true', 'True')
+    db.session.commit()
+    return jsonify({'ok': True, 'text': m.text, 'recorded': m.recorded, 'changed': (m.text or '') != (m.default_text or '')})
+
+
+@admin_bp.route('/narrator/current/<int:num>')
+@login_required
+def narrator_current(num):
+    """השמעת ההקלטה שנמצאת עכשיו בימות - ישר מימות (נטפרי חוסמים שמע מהאתר שלנו)."""
+    from urllib.parse import quote
+    from routes.recording_proxy import _YEMOT_DOWNLOAD_API_KEY
+    from services import narrator as N
+    key = _YEMOT_DOWNLOAD_API_KEY
+    if not key:
+        return 'לא מוגדר מפתח הורדה מוגבל (YEMOT_DOWNLOAD_API_KEY)', 404
+    return redirect('https://www.call2all.co.il/ym/api/DownloadFile?token=' + quote(key, safe='') +
+                    '&path=' + quote('ivr2:' + N.msg_path(num), safe=''))
+
+
 @admin_bp.route('/messages/<int:id>/play')
 @login_required
 def play_manager_message(id):

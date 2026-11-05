@@ -355,6 +355,9 @@ table.as-cards textarea,table.as-cards input,table.as-cards select{min-width:0 !
     <a href="/admin/broadcast" class="nav-item {% if request.endpoint in ['admin.broadcast_message','admin.broadcast_test','admin.broadcast_send'] %}active{% endif %}">
       <span class="nav-icon">📣</span> הודעה תפוצתית
     </a>
+    <a href="/admin/narrator" class="nav-item {% if request.endpoint and request.endpoint.startswith('admin.narrator') %}active{% endif %}">
+      <span class="nav-icon">🎙️</span> קריין והודעות מערכת
+    </a>
     <a href="/admin/dev-requests" class="nav-item {% if request.endpoint and request.endpoint.startswith('admin.dev_') %}active{% endif %}">
       <span class="nav-icon">🛠️</span> בקשות פיתוח
     </a>
