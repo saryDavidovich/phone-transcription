@@ -72,7 +72,7 @@
         <th style="width:120px">תאריך</th>
         <th style="width:110px">טלפון</th>
         <th>שם / מייל</th>
-        <th style="width:260px">תמלול</th>
+        <th>תמלול</th>
         <th style="width:160px">סטטוס + הערה</th>
         <th style="width:60px">פעולה</th>
       </tr>
@@ -106,7 +106,7 @@
       </td>
 
       <!-- תמלול (בלי חשיבה) - מתמלא ברקע אחרי השארת ההודעה -->
-      <td style="font-size:11px; max-width:260px; white-space:pre-wrap">
+      <td style="font-size:11px; min-width:180px; white-space:pre-wrap">
         {% if msg.transcript %}{{ msg.transcript }}
         {% elif msg.rec_url %}<span class="text-muted">⏳ מתמלל...</span>
         {% else %}<span class="text-muted">—</span>{% endif %}
@@ -122,7 +122,7 @@
       </td>
 
       <!-- סטטוס + הערה inline -->
-      <td style="min-width:300px">
+      <td style="min-width:210px">
         <form method="POST" action="{{ url_for('admin.update_message_status', id=msg.id) }}">
           <input type="hidden" name="return_filter" value="{{ status_filter }}">
           <div class="d-flex gap-1 align-items-center">
@@ -134,7 +134,7 @@
             <textarea name="admin_note" class="form-control flex-grow-1"
                       placeholder="הערה..."
                       rows="2"
-                      style="font-size:12px;min-width:200px;resize:vertical"
+                      style="font-size:12px;min-width:110px;resize:vertical"
                       onblur="this.form.submit()">{{ msg.admin_note or '' }}</textarea>
           </div>
         </form>

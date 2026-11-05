@@ -220,6 +220,18 @@ def logout():
     return redirect(url_for('admin.login'))
 
 # --- אפליקציה מותקנת (PWA): התקנה מכרום/אדג' כתוכנה, חלון נפרד, צפייה בלי חיבור ---
+_PWA_ICONS = {}
+
+
+def _pwa_icon_data(name):
+    if name not in _PWA_ICONS:
+        import base64
+        path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'static', 'pwa', name)
+        with open(path, 'rb') as f:
+            _PWA_ICONS[name] = 'data:image/png;base64,' + base64.b64encode(f.read()).decode('ascii')
+    return _PWA_ICONS[name]
+
+
 @admin_bp.route('/manifest.webmanifest')
 def pwa_manifest():
     resp = jsonify({
@@ -228,10 +240,11 @@ def pwa_manifest():
         'lang': 'he', 'dir': 'rtl',
         'id': '/admin/', 'start_url': '/admin/dashboard', 'scope': '/admin/',
         'display': 'standalone', 'background_color': '#0f1117', 'theme_color': '#1a1d27',
+        # הסמלים מוטמעים כטקסט בתוך הקובץ הזה (data:), ולא כקובצי תמונה נפרדים - נטפרי חוסם תמונות
         'icons': [
-            {'src': '/static/pwa/icon-192.png', 'sizes': '192x192', 'type': 'image/png'},
-            {'src': '/static/pwa/icon-512.png', 'sizes': '512x512', 'type': 'image/png'},
-            {'src': '/static/pwa/icon-maskable-512.png', 'sizes': '512x512', 'type': 'image/png', 'purpose': 'maskable'},
+            {'src': _pwa_icon_data('icon-192.png'), 'sizes': '192x192', 'type': 'image/png'},
+            {'src': _pwa_icon_data('icon-512.png'), 'sizes': '512x512', 'type': 'image/png'},
+            {'src': _pwa_icon_data('icon-maskable-512.png'), 'sizes': '512x512', 'type': 'image/png', 'purpose': 'maskable'},
         ],
     })
     resp.mimetype = 'application/manifest+json'
@@ -1686,9 +1699,6 @@ def settings():
             set_setting(f'bonus_amount_{i}', request.form.get(f'bonus_amount_{i}', ''))
         set_setting('min_balance', request.form.get('min_balance', '5'))
         set_setting('max_recording_seconds', request.form.get('max_recording_seconds', '1800'))
-        set_setting('welcome_new', request.form.get('welcome_new', ''))
-        set_setting('welcome_returning', request.form.get('welcome_returning', ''))
-        set_setting('system_explanation', request.form.get('system_explanation', ''))
         if request.form.get('_topup_field') == '1':
             set_setting('allow_student_self_topup', '1' if request.form.get('allow_student_self_topup') == '1' else '0')
         flash('הגדרות נשמרו בהצלחה')
