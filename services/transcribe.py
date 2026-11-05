@@ -1,4 +1,4 @@
-import os, requests, logging, threading, time, math
+import os, re, requests, logging, threading, time, math
 from services.email_layout import wrap_existing as _email_wrap
 from concurrent.futures import ThreadPoolExecutor
 
@@ -1772,11 +1772,9 @@ FAX_UPLOAD_FOLDER = '/fax_out'
 
 def send_pdf_fax(to_number, pdf_bytes, filename_hint='document.pdf', delivery_url_path='/api/fax-delivery-webhook',
                  return_details=False):
-    """שולח PDF כפקס דרך ימות המשיח - בשני שלבים, כמו שימות דורשים:
-    1. מעלים את ה-PDF למערכת בימות (UploadFile) לתיקייה /fax_out.
-    2. SendFax עם pdfFile = הנתיב של הקובץ במערכת (ivr2:/fax_out/....pdf).
-    (בעבר הקובץ נשלח ישירות בבקשת SendFax - ימות קיבלו את הבקשה וחייבו, אבל לא קראו
-    את הקובץ ולכן שום פקס לא הגיע.)
+    """שולח PDF כפקס דרך ימות המשיח.
+    דרך ראשית - זהה לאתר של ימות (שעובד): SendFax עם pdfFile=UPLOAD והקובץ בשדה fileToUpload.
+    גיבוי (אם נדחה): העלאה ל-/fax_out ואז SendFax עם הנתיב.
     משמשת את _send_fax (תמלול), את routes/dictate.py (כתבי-יד/הגהות) ואת בדיקת הפקס בממשק.
     מחזיר dict: {'ok', 'campaign_id', 'error'} (+ 'steps' עם התשובות הגולמיות של ימות אם return_details)."""
     import uuid as _uuid
@@ -1800,7 +1798,36 @@ def send_pdf_fax(to_number, pdf_bytes, filename_hint='document.pdf', delivery_ur
         base_url = os.environ.get('APP_BASE_URL', '').rstrip('/')
         fax_number = _normalize_israeli_phone(to_number)
 
-        # --- שלב 1: העלאת ה-PDF למערכת בימות ---
+        delivery_url = ''
+        if base_url and delivery_url_path:
+            wsecret = os.environ.get('WEBHOOK_SECRET', '')
+            delivery_url = f'{base_url}{delivery_url_path}' + (f'?key={wsecret}' if wsecret else '')
+
+        # --- דרך ראשית: בדיוק כמו אתר ימות (דף "שליחת פקס", שעובד) ---
+        # בקשה אחת: pdfFile=UPLOAD והקובץ עצמו בשדה fileToUpload.
+        data = {'token': yemot_token, 'phone': fax_number, 'pdfFile': 'UPLOAD'}
+        if caller_id:
+            data['callerId'] = caller_id
+        if delivery_url:
+            data['deliveryUrl'] = delivery_url
+        safe_name = re.sub(r'[^A-Za-z0-9_.-]', '_', filename_hint or 'document.pdf') or 'document.pdf'
+        if not safe_name.lower().endswith('.pdf'):
+            safe_name += '.pdf'
+        response = requests.post('https://www.call2all.co.il/ym/api/SendFax', data=data,
+                                 files={'fileToUpload': (safe_name, pdf_bytes, 'application/pdf')}, timeout=120)
+        try:
+            result = response.json()
+        except ValueError:
+            result = {'raw': response.text[:300]}
+        steps.append({'step': 'SendFax (UPLOAD כמו באתר)', 'phone': fax_number,
+                      'callerId': caller_id or '(ברירת מחדל של המערכת)', 'http': response.status_code, 'response': result})
+        if str(result.get('responseStatus', '')).upper() == 'OK':
+            campaign_id = result.get('CampaignId') or result.get('campaignId')
+            log.info(f"Fax queued via Yemot (UPLOAD) to {fax_number}, CampaignId: {campaign_id}")
+            return done(True, campaign_id=campaign_id)
+        log.warning(f"Fax: שליחה ישירה (UPLOAD) נדחתה, מנסים העלאה לתיקייה: {result}")
+
+        # --- גיבוי: שלב 1: העלאת ה-PDF למערכת בימות ---
         remote = f"{FAX_UPLOAD_FOLDER}/{_uuid.uuid4().hex[:12]}.pdf"
         up = requests.post('https://www.call2all.co.il/ym/api/UploadFile',
                            data={'token': yemot_token, 'path': f'ivr2:{remote}', 'convertAudio': 0},
@@ -1828,9 +1855,8 @@ def send_pdf_fax(to_number, pdf_bytes, filename_hint='document.pdf', delivery_ur
             data = {'token': yemot_token, 'pdfFile': uploaded_path, 'phone': fax_number}
             if caller_id:
                 data['callerId'] = caller_id
-            if base_url and delivery_url_path:
-                wsecret = os.environ.get('WEBHOOK_SECRET', '')
-                data['deliveryUrl'] = f'{base_url}{delivery_url_path}' + (f'?key={wsecret}' if wsecret else '')
+            if delivery_url:
+                data['deliveryUrl'] = delivery_url
             response = requests.post('https://www.call2all.co.il/ym/api/SendFax', data=data, timeout=120)
             try:
                 result = response.json()
