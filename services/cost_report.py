@@ -33,6 +33,8 @@ def category(t):
         return 'חיוב', 'טבלת אקסל'
     if 'OCR' in d or 'כתב יד' in d:
         return 'חיוב', 'זיהוי כתב יד'
+    if 'שליחת פקס' in d and '5 דקות' in d:
+        return 'חיוב', 'תוספת פקס (חיוב לפי 5 דקות)'
     if 'פקס' in d:
         return 'חיוב', 'שליחה חוזרת בפקס'
     if 'תמלול' in d:

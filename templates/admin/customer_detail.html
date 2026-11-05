@@ -174,6 +174,30 @@
 </div>
 </details>
 
+<details class="cd-sec" data-sec="billing"><summary>💲 מחירון: {{ billing.label }}{% if billing.unit == 5 %} <span class="badge badge-amber" style="font-size:11px">5 דק׳</span>{% endif %}</summary>
+<div class="card" id="billing">
+  <form method="POST" action="{{ url_for('admin.customer_billing_unit', id=customer.id) }}" style="display:flex;gap:18px;flex-wrap:wrap;align-items:center;margin-bottom:14px">
+    <label style="cursor:pointer"><input type="radio" name="billing_unit" value="20" {% if billing.unit != 5 %}checked{% endif %}> חיוב לפי <b>20 דקות</b> (רגיל)</label>
+    <label style="cursor:pointer"><input type="radio" name="billing_unit" value="5" {% if billing.unit == 5 %}checked{% endif %}> חיוב לפי <b>5 דקות</b></label>
+    <button class="btn btn-primary" type="submit" style="font-size:13px">💾 שמירה</button>
+  </form>
+  <table style="max-width:560px">
+    <thead><tr><th>שירות</th><th>לפי 20 דקות</th><th>לפי 5 דקות</th></tr></thead>
+    <tbody>
+    {% for k in ['basic', 'premium', 'video', 'excel'] %}
+      <tr><td>{{ billing.names[k] }}</td>
+          <td style="{% if billing.unit != 5 %}font-weight:700;color:var(--accent){% endif %}">₪{{ '%.2f'|format(billing.p20[k]) }}</td>
+          <td style="{% if billing.unit == 5 %}font-weight:700;color:var(--accent){% endif %}">₪{{ '%.2f'|format(billing.p5[k]) }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <div style="font-size:12px;color:#8892b0;margin-top:10px">
+    בחיוב לפי 5 דקות: תמלול שנשלח <b>בפקס</b> והקלטה קצרה מ-20 דקות (פחות מ-4 חיובים) - תוספת פקס של ₪{{ '%.2f'|format(billing.fax) }} בתנועה נפרדת.
+    המחירים נקבעים בהגדרות.
+  </div>
+</div>
+</details>
+
 <details class="cd-sec" data-sec="defaults"><summary>⚙️ ברירת מחדל להקלטה (שלוחה 4)</summary>
 <div class="card" id="defaults">
   {% set d = cust_defaults %}

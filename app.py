@@ -238,6 +238,7 @@ def _migrate_db():
         "ALTER TABLE recordings ADD COLUMN IF NOT EXISTS alefbot_job_id VARCHAR(100)",
         "ALTER TABLE recordings ADD COLUMN IF NOT EXISTS rec_url VARCHAR(500)",
         "ALTER TABLE recordings ADD COLUMN IF NOT EXISTS progress INTEGER",
+        "ALTER TABLE customers ADD COLUMN IF NOT EXISTS billing_unit INTEGER",
         "ALTER TABLE recordings ADD COLUMN IF NOT EXISTS source_filename VARCHAR(255)",
         # שדות סטטוס פקס (ימות המשיח) - שייכים ל-recordings, לא ל-customers
         "ALTER TABLE recordings ADD COLUMN IF NOT EXISTS fax_campaign_id VARCHAR(64)",

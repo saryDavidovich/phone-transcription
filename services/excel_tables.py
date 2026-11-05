@@ -413,7 +413,8 @@ def process_excel_recording(call_id, rec_url, customer_id, delivery_method, deli
         notify_recording_error(call_id, 'הקלטת אקסל: לתבנית אין עמודות')
         return
     title = tmpl.name or 'טבלה'
-    price = float(T._get_setting('price_per_20min_excel', '1.50'))
+    from services import pricing as P
+    price = P.unit_price(Customer.query.get(customer_id), 'excel')   # מחיר ליחידה של הלקוח (20 או 5 דק')
 
     # בדיקת יתרה מקדימה (לפי אורך ההקלטה) - לפני שמשלמים לגימיני
     if not duration_seconds:
@@ -424,8 +425,8 @@ def process_excel_recording(call_id, rec_url, customer_id, delivery_method, deli
             duration_seconds = 0
     customer = Customer.query.get(customer_id)
     if duration_seconds and customer:
-        cost_pre = round(math.ceil(duration_seconds / 1200) * price, 2)
-        if customer.balance < cost_pre:
+        cost_pre = P.cost_for(customer, duration_seconds, 'excel')
+        if customer.balance < cost_pre + P.fax_surcharge(customer, duration_seconds, delivery_method):
             T._save_pending_payment(rec=rec, customer=customer, duration_seconds=duration_seconds,
                                     price_per_20min=price, delivery_method=delivery_method,
                                     delivered_to=delivered_to, transcription_tier='excel',
@@ -449,9 +450,8 @@ def process_excel_recording(call_id, rec_url, customer_id, delivery_method, deli
         notify_recording_error(call_id, 'הקלטת אקסל: לא זוהו נתונים לטבלה בהקלטה (לא בוצע חיוב)')
         return
 
-    units = max(1, math.ceil((duration_seconds or 0) / 1200))
-    cost = round(units * price, 2)
-    if customer.balance < cost:
+    cost = P.cost_for(customer, duration_seconds or 0, 'excel')
+    if customer.balance < cost + P.fax_surcharge(customer, duration_seconds or 0, delivery_method):
         T._save_pending_payment(rec=rec, customer=customer, duration_seconds=duration_seconds,
                                 price_per_20min=price, delivery_method=delivery_method,
                                 delivered_to=delivered_to, transcription_tier='excel',
@@ -475,6 +475,7 @@ def process_excel_recording(call_id, rec_url, customer_id, delivery_method, deli
                                description=f'טבלת אקסל "{title}" - {duration_seconds // 60} דקות, {len(new_rows)} שורות',
                                recording_id=rec.id))
     db.session.commit()
+    P.charge_fax_surcharge(customer, rec.id, duration_seconds or 0, delivery_method)
 
     try:
         if delivery_method == 'email' and delivered_to:

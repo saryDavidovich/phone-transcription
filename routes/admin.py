@@ -658,6 +658,14 @@ def customer_cost_report(id):
                      mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
 
+def _billing_info(customer):
+    from services import pricing as P
+    kinds = ('basic', 'premium', 'video', 'excel')
+    return {'unit': P.unit_minutes(customer), 'label': P.plan_label(customer),
+            'p20': {k: P.price_20(k) for k in kinds}, 'p5': {k: P.price_5(k) for k in kinds},
+            'names': P.KIND_NAMES, 'fax': P.fax_surcharge(type('C', (), {'billing_unit': 5})(), 60, 'fax')}
+
+
 def _customer_defaults(customer):
     """ברירת המחדל להקלטה (שלוחה 4) - נשמרת לפעמים כטקסט JSON ולפעמים כאובייקט."""
     import json
@@ -672,6 +680,17 @@ def _customer_defaults(customer):
             'language': ds.get('language') if ds.get('language') in ('he', 'yi', 'en') else 'he',
             'output_language': ds.get('output_language') or 'he',
             'is_set': bool(ds)}
+
+
+@admin_bp.route('/customers/<int:id>/billing-unit', methods=['POST'])
+@login_required
+def customer_billing_unit(id):
+    """מחירון ללקוח: חיוב לפי 20 דקות (ברירת מחדל) או לפי 5 דקות."""
+    customer = Customer.query.get_or_404(id)
+    customer.billing_unit = 5 if request.form.get('billing_unit') == '5' else None
+    db.session.commit()
+    flash('✔ המחירון של הלקוח עודכן: ' + ('חיוב לפי 5 דקות' if customer.billing_unit == 5 else 'חיוב לפי 20 דקות (רגיל)'))
+    return redirect(url_for('admin.customer_detail', id=id) + '#billing')
 
 
 @admin_bp.route('/customers/<int:id>/defaults', methods=['POST'])
@@ -847,6 +866,7 @@ def customer_detail(id):
         threads=threads, timedelta=timedelta,
         excel_templates=_excel_templates_for(customer),
         cust_defaults=_customer_defaults(customer),
+        billing=_billing_info(customer),
         voice_messages=_voice_messages_for(customer.id),
         recordings_total=recordings_total, transactions_total=transactions_total,
         msg_attachments=_attachments_for('customer_message_id', [m.id for t in threads for m in t.messages]),
@@ -1226,13 +1246,14 @@ def recording_detail(id):
     import math
     recording = Recording.query.get_or_404(id)
     customer = recording.customer
-    units = math.ceil((recording.duration_seconds or 0) / 1200) or 1
-    price_basic = float(get_setting('price_per_20min_basic', '0.90') or 0.90)
-    price_premium = float(get_setting('price_per_20min_premium', '1.90') or 1.90)
+    from services import pricing as P
+    secs = recording.duration_seconds or 0
+    units = P.units_for(customer, secs)
     return render_template(
         'admin/recording_detail.html', recording=recording,
-        rt_units=units, rt_cost_basic=round(units * price_basic, 2),
-        rt_cost_premium=round(units * price_premium, 2),
+        rt_units=units, rt_unit_minutes=P.unit_minutes(customer),
+        rt_cost_basic=P.cost_for(customer, secs, 'basic'),
+        rt_cost_premium=P.cost_for(customer, secs, 'premium'),
         rt_balance=float(customer.balance or 0) if customer else 0.0,
         rt_prior_charge=_recording_prior_net_charge(recording),
         rt_in_progress=recording.status in ('recording', 'processing', 'transcribing', 'alefbot_pending', 'queued'),
@@ -1697,6 +1718,9 @@ def settings():
         set_setting('price_per_20min_premium', request.form.get('price_per_20min_premium', '1.90'))
         set_setting('price_per_20min_video', request.form.get('price_per_20min_video', '1.50'))
         set_setting('price_per_20min_excel', request.form.get('price_per_20min_excel', '1.50'))
+        for _k in ('basic', 'premium', 'video', 'excel'):
+            set_setting(f'price_per_5min_{_k}', (request.form.get(f'price_per_5min_{_k}') or '').strip())
+        set_setting('fax_surcharge_5min', request.form.get('fax_surcharge_5min') or '0.30')
         set_setting('price_per_1000_chars_ocr', request.form.get('price_per_1000_chars_ocr', '0.10'))
         set_setting('ocr_engine', request.form.get('ocr_engine', 'gemini'))
         set_setting('manuscript_char_unit_size', request.form.get('manuscript_char_unit_size', '1000'))
@@ -1725,6 +1749,11 @@ def settings():
         'price_per_20min_premium': get_setting('price_per_20min_premium', '1.90'),
         'price_per_20min_video': get_setting('price_per_20min_video', '1.50'),
         'price_per_20min_excel': get_setting('price_per_20min_excel', '1.50'),
+        'price_per_5min_basic': get_setting('price_per_5min_basic', ''),
+        'price_per_5min_premium': get_setting('price_per_5min_premium', ''),
+        'price_per_5min_video': get_setting('price_per_5min_video', ''),
+        'price_per_5min_excel': get_setting('price_per_5min_excel', ''),
+        'fax_surcharge_5min': get_setting('fax_surcharge_5min', '0.30'),
         'price_per_1000_chars_ocr': get_setting('price_per_1000_chars_ocr', '0.10'),
         'ocr_engine': get_setting('ocr_engine', 'gemini'),
         'manuscript_char_unit_size': get_setting('manuscript_char_unit_size', '1000'),

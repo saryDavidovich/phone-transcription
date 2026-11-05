@@ -147,11 +147,11 @@ def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, durat
                 log.info(f"Using AlefBot for customer {customer_id}")
 
                 # --- בדיקת יתרה מקדימה - לפני שליחה לאלף בוט (שעולה כסף!) ---
-                price_per_20min_premium_pre = float(_get_setting('price_per_20min_premium', '1.90'))
+                from services import pricing as P
+                customer_pre = Customer.query.get(customer_id)
+                price_per_20min_premium_pre = P.unit_price(customer_pre, 'premium')   # מחיר ליחידה (20 או 5 דק')
                 if duration_seconds and duration_seconds > 0:
-                    units_pre = math.ceil(duration_seconds / 1200)
-                    cost_pre = round(units_pre * price_per_20min_premium_pre, 2)
-                    customer_pre = Customer.query.get(customer_id)
+                    cost_pre = P.cost_for(customer_pre, duration_seconds, 'premium')
                     if customer_pre and customer_pre.balance < cost_pre:
                         log.info(f"AlefBot pre-check: יתרה לא מספיקה עבור customer {customer_id} (צריך {cost_pre}, יש {customer_pre.balance})")
                         db.session.remove()
@@ -279,10 +279,10 @@ def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, durat
 
                 # בדיקת יתרה לפי אומדן אורך לפני תמלול
                 if duration_seconds and duration_seconds > 0:
-                    price_per_20min_pre = float(_get_setting('price_per_20min_basic', '0.90'))
-                    units_pre = math.ceil(duration_seconds / 1200)
-                    cost_pre = round(units_pre * price_per_20min_pre, 2)
+                    from services import pricing as P
                     customer_pre = Customer.query.get(customer_id)
+                    price_per_20min_pre = P.unit_price(customer_pre, 'basic')   # מחיר ליחידה (20 או 5 דק')
+                    cost_pre = P.cost_for(customer_pre, duration_seconds, 'basic')
                     if customer_pre and customer_pre.balance < cost_pre:
                         log.info(f"Insufficient balance for {call_id}: need {cost_pre}, have {customer_pre.balance}")
                         db.session.remove()
@@ -340,13 +340,15 @@ def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, durat
                 notify_recording_error(call_id, 'התמלול (רגיל) לא החזיר טקסט - הקובץ לא ירד, לא בפורמט מוכר, או ש-Gemini נכשל. פרטים בלוג תחת "Gemini"')
                 return
 
-            price_per_20min = float(_get_setting(price_key, '0.90'))
-            units = math.ceil(duration_seconds / 1200)
-            cost = round(units * price_per_20min, 2)
+            from services import pricing as P
+            customer = Customer.query.get(customer_id)
+            kind = 'video' if price_key == 'price_per_20min_video' else 'basic'
+            price_per_20min = P.unit_price(customer, kind)          # מחיר ליחידה (20 או 5 דק')
+            cost = P.cost_for(customer, duration_seconds, kind)
+            fax_extra = P.fax_surcharge(customer, duration_seconds, delivery_method)
 
             # בדיקה סופית שהיתרה מספיקה (לאחר שיודעים את האורך המדויק)
-            customer = Customer.query.get(customer_id)
-            if customer and customer.balance < cost:
+            if customer and customer.balance < cost + fax_extra:
                 log.info(f"Insufficient balance after transcription for {call_id}: need {cost}, have {customer.balance}")
                 rec = Recording.query.filter_by(call_id=call_id).first()
                 if rec:
@@ -378,11 +380,12 @@ def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, durat
                     customer_id=customer_id,
                     amount=-cost,
                     type='debit',
-                    description=f'תמלול {duration_seconds//60} דקות ({description_tier})',
+                    description=f'תמלול {duration_seconds//60} דקות ({description_tier}{", לפי 5 דק׳" if P.unit_minutes(customer) == 5 else ""})',
                     recording_id=rec.id if rec else None
                 )
                 db.session.add(txn)
                 db.session.commit()
+                P.charge_fax_surcharge(customer, rec.id if rec else None, duration_seconds, delivery_method)
 
             if delivery_method == 'email':
                 source_filename = rec.source_filename if rec else None
@@ -437,12 +440,12 @@ def process_pending_recordings(customer_id):
             return
 
         for rec in pending:
-            price_per_20min = float(_get_setting('price_per_20min_basic', '0.90'))
-            units = math.ceil((rec.duration_seconds or 0) / 1200)
-            cost = round(units * price_per_20min, 2) if units > 0 else price_per_20min
-
+            from services import pricing as P
             db.session.refresh(customer)
-            if customer.balance < cost:
+            kind = P.kind_for_tier(rec.transcription_tier)
+            cost = P.cost_for(customer, rec.duration_seconds or 0, kind)
+            fax_extra = P.fax_surcharge(customer, rec.duration_seconds or 0, rec.delivery_method)
+            if customer.balance < cost + fax_extra:
                 log.info(f"process_pending_recordings: not enough balance for rec {rec.id} (need {cost}, have {customer.balance})")
                 continue
 
@@ -465,6 +468,7 @@ def process_pending_recordings(customer_id):
                 rec.status = 'transcribed'
                 rec.cost = cost
                 db.session.commit()
+                P.charge_fax_surcharge(customer, rec.id, rec.duration_seconds or 0, rec.delivery_method)
 
                 # שלח למייל/פקס
                 from services.transcribe import _send_email, _send_fax
@@ -555,8 +559,9 @@ def _save_pending_payment(rec, customer, duration_seconds, price_per_20min,
     """שומר הקלטה במצב pending_payment ושולח מייל ללקוח"""
     from datetime import datetime, timedelta
 
-    units = math.ceil(duration_seconds / 1200) if duration_seconds > 0 else 1
-    cost = round(units * price_per_20min, 2)
+    from services import pricing as P
+    units = P.units_for(customer, duration_seconds)            # price_per_20min = מחיר ליחידה של הלקוח
+    cost = round(units * price_per_20min, 2) + P.fax_surcharge(customer, duration_seconds, delivery_method)
 
     rec.status = 'pending_payment'
     rec.duration_seconds = duration_seconds
@@ -724,14 +729,14 @@ def finalize_alefbot_recording(call_id, transcript_text):
                 return
 
             duration_seconds = rec.duration_seconds or 0
-            price_per_20min = float(_get_setting('price_per_20min_premium', '1.90'))
-            units = math.ceil(duration_seconds / 1200) if duration_seconds > 0 else 1
-            cost = round(units * price_per_20min, 2)
-
+            from services import pricing as P
             customer = Customer.query.get(rec.customer_id)
+            price_per_20min = P.unit_price(customer, 'premium')     # מחיר ליחידה (20 או 5 דק')
+            cost = P.cost_for(customer, duration_seconds, 'premium')
+            fax_extra = P.fax_surcharge(customer, duration_seconds, rec.delivery_method)
 
             # --- בדיקת יתרה שהייתה חסרה לגמרי במסלול הזה - היה מחייב למינוס בלי בדיקה ---
-            if customer and customer.balance < cost:
+            if customer and customer.balance < cost + fax_extra:
                 log.info(f"AlefBot finalize: יתרה לא מספיקה עבור customer {rec.customer_id} (צריך {cost}, יש {customer.balance})")
                 rec.alefbot_job_id = None  # מנקה כדי שלא יתפוס webhook חוזר מאלף בוט וישלח שוב את אותה הודעה
                 _save_pending_payment(
@@ -754,11 +759,12 @@ def finalize_alefbot_recording(call_id, transcript_text):
                     customer_id=rec.customer_id,
                     amount=-cost,
                     type='debit',
-                    description=f'תמלול {duration_seconds//60} דקות (מקצועי)',
+                    description=f'תמלול {duration_seconds//60} דקות (מקצועי{", לפי 5 דק׳" if P.unit_minutes(customer) == 5 else ""})',
                     recording_id=rec.id
                 )
                 db.session.add(txn)
                 db.session.commit()
+                P.charge_fax_surcharge(customer, rec.id, duration_seconds, rec.delivery_method)
 
             if rec.delivery_method == 'email':
                 from routes.recording_proxy import recording_download_url

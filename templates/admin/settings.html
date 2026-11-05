@@ -26,6 +26,18 @@
         <input class="form-input" name="price_per_20min_excel" type="number" step="0.01" value="{{ settings.price_per_20min_excel }}">
         <div style="font-size:11px;color:#4a5568;margin-top:4px">שלוחה 1 ← 3 בטלפון: הקלטה שהופכת לטבלה לפי תבנית העמודות של הלקוח. החיוב רק אחרי שהטבלה נשלחה</div>
       </div>
+      <div class="form-group" style="border:1px dashed var(--border);border-radius:10px;padding:12px">
+        <div style="font-weight:700;margin-bottom:6px">⏱️ מחירון לפי 5 דקות</div>
+        <div style="font-size:11px;color:#4a5568;margin-bottom:10px">ללקוחות שבכרטיס שלהם נבחר "חיוב לפי 5 דקות". שדה ריק = רבע ממחיר 20 הדקות.</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px">
+          <div><label class="form-label">רגיל ל-5 דק׳ (₪)</label><input class="form-input" name="price_per_5min_basic" type="number" step="0.01" value="{{ settings.price_per_5min_basic }}" placeholder="{{ '%.2f'|format(settings.price_per_20min_basic|float / 4) }}"></div>
+          <div><label class="form-label">מקצועי ל-5 דק׳ (₪)</label><input class="form-input" name="price_per_5min_premium" type="number" step="0.01" value="{{ settings.price_per_5min_premium }}" placeholder="{{ '%.2f'|format(settings.price_per_20min_premium|float / 4) }}"></div>
+          <div><label class="form-label">וידאו ל-5 דק׳ (₪)</label><input class="form-input" name="price_per_5min_video" type="number" step="0.01" value="{{ settings.price_per_5min_video }}" placeholder="{{ '%.2f'|format(settings.price_per_20min_video|float / 4) }}"></div>
+          <div><label class="form-label">אקסל ל-5 דק׳ (₪)</label><input class="form-input" name="price_per_5min_excel" type="number" step="0.01" value="{{ settings.price_per_5min_excel }}" placeholder="{{ '%.2f'|format(settings.price_per_20min_excel|float / 4) }}"></div>
+          <div><label class="form-label">תוספת פקס (₪)</label><input class="form-input" name="fax_surcharge_5min" type="number" step="0.01" value="{{ settings.fax_surcharge_5min }}"></div>
+        </div>
+        <div style="font-size:11px;color:#4a5568;margin-top:6px">תוספת הפקס: נגבית בתנועה נפרדת כשהתמלול נשלח בפקס וההקלטה קצרה מ-20 דקות (פחות מ-4 חיובים של 5 דקות).</div>
+      </div>
       <div class="form-group">
         <label class="form-label">טוקן ימות המשיח (לקריאת דוח סליקות)</label>
         <input class="form-input" name="yemot_token" type="text" value="{{ settings.yemot_token }}" placeholder="033131795:סיסמה">

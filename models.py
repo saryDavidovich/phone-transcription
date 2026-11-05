@@ -25,6 +25,7 @@ class Customer(db.Model):
     is_blocked = db.Column(db.Boolean, default=False)
     delivery_method = db.Column(db.String(10), default='email')
     default_settings = db.Column(db.JSON, nullable=True)  # ברירות מחדל: tier, language, output_language
+    billing_unit = db.Column(db.Integer, nullable=True)   # יחידת חיוב בדקות: 5 או 20 (ריק = 20, המחירון הרגיל)
     transcription_tier = db.Column(db.String(10), default='basic')
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     recordings = db.relationship('Recording', backref='customer', lazy=True)

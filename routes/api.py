@@ -64,6 +64,9 @@ def get_customer(phone):
         'topup_allowed': __import__('services.student_links', fromlist=['x']).student_self_topup_allowed(customer),
         'default_settings': customer.default_settings or {},
         'name': customer.name or '',
+        'billing_unit': __import__('services.pricing', fromlist=['x']).unit_minutes(customer),
+        'unit_prices': {k: __import__('services.pricing', fromlist=['x']).unit_price(customer, k)
+                        for k in ('basic', 'premium', 'video', 'excel')},
     })
 
 @api_bp.route('/voice-messages/<phone>', methods=['GET'])
@@ -172,9 +175,10 @@ def get_pending_recordings():
     if not pending:
         return jsonify({'has_pending': False})
 
-    price_per_20min = float(get_setting('price_per_20min_basic', '0.90'))
-    units = math.ceil((pending.duration_seconds or 0) / 1200) or 1
-    cost = round(units * price_per_20min, 2)
+    from services import pricing as P
+    secs = pending.duration_seconds or 0
+    cost = round(P.cost_for(customer, secs, P.kind_for_tier(pending.transcription_tier))
+                 + P.fax_surcharge(customer, secs, pending.delivery_method), 2)
     minutes = (pending.duration_seconds or 0) // 60
 
     return jsonify({
