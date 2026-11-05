@@ -9,6 +9,39 @@
 <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32x32.png">
 <link rel="icon" type="image/png" sizes="192x192" href="/static/favicon-192x192.png">
 <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+<link rel="manifest" href="/admin/manifest.webmanifest">
+<meta name="theme-color" content="#1a1d27">
+<script>
+/* אפליקציה מותקנת (PWA) - ראו static/pwa/sw.js */
+(function () {
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', function () { navigator.serviceWorker.register('/admin/sw.js', { scope: '/admin/' }).catch(function () {}); });
+  }
+  var standalone = window.matchMedia('(display-mode: standalone)').matches;
+  // פתיחה ראשונה של התוכנה המותקנת: חלון ברוחב שני שליש מהמסך, בצד ימין (אחר כך נזכר הגודל שתבחר)
+  try {
+    if (standalone && !localStorage.getItem('pwaSized')) {
+      localStorage.setItem('pwaSized', '1');
+      var w = Math.round(screen.availWidth * 2 / 3), h = screen.availHeight;
+      window.resizeTo(w, h); window.moveTo(screen.availWidth - w, 0);
+    }
+  } catch (e) {}
+  // החיבור חזר אחרי שהוצג מידע שמור - טוענים את העמוד מחדש
+  window.addEventListener('online', function () { if (document.getElementById('swOffline')) location.reload(); });
+  // כפתור "התקנה כתוכנה" בתפריט - מופיע רק כשהדפדפן מאפשר התקנה (ועוד לא הותקן)
+  window.addEventListener('beforeinstallprompt', function (e) {
+    e.preventDefault(); window.__pwaPrompt = e;
+    var b = document.getElementById('pwaInstall'); if (b) b.style.display = '';
+  });
+  window.pwaInstall = function () {
+    var p = window.__pwaPrompt; if (!p) return;
+    p.prompt(); p.userChoice.finally(function () { window.__pwaPrompt = null; var b = document.getElementById('pwaInstall'); if (b) b.style.display = 'none'; });
+  };
+  document.addEventListener('turbo:load', function () {
+    var b = document.getElementById('pwaInstall'); if (b && window.__pwaPrompt) b.style.display = '';
+  });
+})();
+</script>
 <script>
 (function() {
   const saved = localStorage.getItem('admin-theme') || 'dark';
@@ -241,6 +274,9 @@ textarea.form-input { resize:vertical; min-height:80px; }
     </a>
     <a href="/admin/settings" class="nav-item {% if request.endpoint == 'admin.settings' %}active{% endif %}">
       <span class="nav-icon">⚙️</span> הגדרות
+    </a>
+    <a href="#" id="pwaInstall" class="nav-item" style="display:none" onclick="pwaInstall();return false">
+      <span class="nav-icon">💻</span> התקנה כתוכנה במחשב
     </a>
     <a href="/admin/maintenance" class="nav-item {% if request.endpoint == 'admin.maintenance' %}active{% endif %}"
        {% if maintenance_on %}style="background:rgba(239,68,68,.14);color:#ef4444;font-weight:700"{% endif %}>

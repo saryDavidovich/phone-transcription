@@ -219,6 +219,35 @@ def logout():
     flask_session.clear()
     return redirect(url_for('admin.login'))
 
+# --- אפליקציה מותקנת (PWA): התקנה מכרום/אדג' כתוכנה, חלון נפרד, צפייה בלי חיבור ---
+@admin_bp.route('/manifest.webmanifest')
+def pwa_manifest():
+    resp = jsonify({
+        'name': 'מערכת תמלול - ניהול', 'short_name': 'מערכת תמלול',
+        'description': 'ממשק הניהול של מערכת התמלול',
+        'lang': 'he', 'dir': 'rtl',
+        'id': '/admin/', 'start_url': '/admin/dashboard', 'scope': '/admin/',
+        'display': 'standalone', 'background_color': '#0f1117', 'theme_color': '#1a1d27',
+        'icons': [
+            {'src': '/static/pwa/icon-192.png', 'sizes': '192x192', 'type': 'image/png'},
+            {'src': '/static/pwa/icon-512.png', 'sizes': '512x512', 'type': 'image/png'},
+            {'src': '/static/pwa/icon-maskable-512.png', 'sizes': '512x512', 'type': 'image/png', 'purpose': 'maskable'},
+        ],
+    })
+    resp.mimetype = 'application/manifest+json'
+    return resp
+
+
+@admin_bp.route('/sw.js')
+def pwa_service_worker():
+    """מוגש מתוך /admin כדי שהתחום שלו יהיה כל עמודי הניהול (הקובץ עצמו: static/pwa/sw.js)."""
+    from flask import send_from_directory
+    resp = send_from_directory(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'static', 'pwa'),
+                               'sw.js', mimetype='application/javascript', max_age=0)
+    resp.headers['Cache-Control'] = 'no-cache'
+    return resp
+
+
 @admin_bp.route('/live-calls')
 @login_required
 def live_calls():

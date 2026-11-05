@@ -27,7 +27,8 @@ from flask import request, redirect, session, jsonify, current_app
 log = logging.getLogger(__name__)
 
 SAFE_METHODS = ('GET', 'HEAD', 'OPTIONS')
-ADMIN_OPEN_PATHS = ('/admin/login', '/admin/logout', '/admin/auth/google/start', '/admin/auth/google/callback')
+ADMIN_OPEN_PATHS = ('/admin/login', '/admin/logout', '/admin/auth/google/start', '/admin/auth/google/callback',
+                    '/admin/manifest.webmanifest', '/admin/sw.js')   # קבצי האפליקציה המותקנת - בלי מידע
 
 # --- הגבלת ניסיונות כניסה (בזיכרון, לכל תהליך) ---
 _FAILS = {}
