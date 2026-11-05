@@ -196,4 +196,9 @@
   };
 })();
 </script>
+
+<div class="card" style="margin-top:24px">
+  <div style="font-size:16px;font-weight:700;margin-bottom:6px">📢 הודעה קולית לכל הלקוחות (בטלפון)</div>
+  {% with vm_customer_id=None, voice_messages_list=voice_broadcasts %}{% include 'admin/_voice_messages.html' %}{% endwith %}
+</div>
 {% endblock %}

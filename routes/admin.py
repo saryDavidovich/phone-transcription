@@ -600,6 +600,122 @@ def customer_cost_report(id):
                      mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
 
+def _customer_defaults(customer):
+    """ברירת המחדל להקלטה (שלוחה 4) - נשמרת לפעמים כטקסט JSON ולפעמים כאובייקט."""
+    import json
+    ds = customer.default_settings
+    if isinstance(ds, str):
+        try:
+            ds = json.loads(ds)
+        except ValueError:
+            ds = {}
+    ds = ds if isinstance(ds, dict) else {}
+    return {'tier': 'premium' if ds.get('tier') == 'premium' else 'gemini',
+            'language': ds.get('language') if ds.get('language') in ('he', 'yi', 'en') else 'he',
+            'output_language': ds.get('output_language') or 'he',
+            'is_set': bool(ds)}
+
+
+@admin_bp.route('/customers/<int:id>/defaults', methods=['POST'])
+@login_required
+def customer_defaults_save(id):
+    """עריכת ברירת המחדל להקלטה מהממשק - אותם ערכים בדיוק כמו בשלוחה 4 בטלפון."""
+    customer = Customer.query.get_or_404(id)
+    tier = 'premium' if request.form.get('tier') == 'premium' else 'gemini'
+    if tier == 'premium':
+        new = {'tier': 'premium', 'output_language': 'original' if request.form.get('output_language') == 'original' else 'he'}
+        old = _customer_defaults(customer)
+        new['language'] = old['language']
+    else:
+        lang = request.form.get('language') if request.form.get('language') in ('he', 'yi', 'en') else 'he'
+        out = request.form.get('output_language')
+        out = out if (lang != 'he' and out in (lang, 'he')) else ('he' if lang == 'he' else lang)
+        new = {'tier': 'gemini', 'language': lang, 'output_language': out}
+    customer.default_settings = new
+    db.session.commit()
+    flash('✔ ברירת המחדל להקלטה עודכנה')
+    return redirect(url_for('admin.customer_detail', id=id) + '#defaults')
+
+
+def _voice_messages_for(customer_id):
+    """הודעות קוליות לתצוגה בממשק (customer_id=None - תפוצתיות), עם מי שמע."""
+    from models import VoiceMessage, VoiceMessageHeard
+    q = VoiceMessage.query.options(*_light(VoiceMessage, keep=('text',)))
+    q = q.filter(VoiceMessage.customer_id == customer_id) if customer_id else q.filter(VoiceMessage.customer_id.is_(None))
+    msgs = q.order_by(VoiceMessage.created_at.desc()).limit(50).all()
+    out = []
+    for m in msgs:
+        heard = VoiceMessageHeard.query.filter_by(message_id=m.id)
+        first = heard.order_by(VoiceMessageHeard.heard_at).first() if customer_id else None
+        out.append({'m': m, 'heard_count': heard.count(), 'heard_at': first.heard_at if first else None})
+    return out
+
+
+@admin_bp.route('/voice-messages/create', methods=['POST'])
+@login_required
+def voice_message_create():
+    from services import voice_messages as VM
+    cid = request.form.get('customer_id', '')
+    customer_id = int(cid) if cid.isdigit() else None
+    back = (url_for('admin.customer_detail', id=customer_id) + '#voice' if customer_id
+            else url_for('admin.broadcast_message') + '#voice')
+    source = request.form.get('source')
+    audio, filename = None, ''
+    if source in ('upload', 'record'):
+        f = request.files.get('audio_record' if source == 'record' else 'audio_file')
+        if f and f.filename:
+            audio, filename = f.read(), f.filename
+    try:
+        m = VM.create(customer_id, 'tts' if source == 'tts' else 'file',
+                      text=request.form.get('text', ''), audio=audio, filename=filename)
+        flash(f'✔ ההודעה הקולית #{m.id} נשמרה - ' +
+              ('הלקוח ישמע אותה בכניסה הבאה למערכת' if customer_id else 'כל הלקוחות ישמעו אותה בכניסה הבאה למערכת'))
+    except Exception as e:
+        flash(f'⚠ ההודעה לא נשמרה: {e}')
+    return redirect(back)
+
+
+@admin_bp.route('/voice-messages/<int:mid>/toggle', methods=['POST'])
+@login_required
+def voice_message_toggle(mid):
+    from models import VoiceMessage
+    m = VoiceMessage.query.get_or_404(mid)
+    m.active = not m.active
+    db.session.commit()
+    flash('ההודעה ' + ('הופעלה' if m.active else 'הושבתה - לא תושמע יותר'))
+    return redirect((url_for('admin.customer_detail', id=m.customer_id) if m.customer_id else url_for('admin.broadcast_message')) + '#voice')
+
+
+@admin_bp.route('/voice-messages/<int:mid>/delete', methods=['POST'])
+@login_required
+def voice_message_delete(mid):
+    from models import VoiceMessage, VoiceMessageHeard
+    m = VoiceMessage.query.get_or_404(mid)
+    back = (url_for('admin.customer_detail', id=m.customer_id) if m.customer_id else url_for('admin.broadcast_message')) + '#voice'
+    VoiceMessageHeard.query.filter_by(message_id=m.id).delete()
+    db.session.delete(m)
+    db.session.commit()
+    flash('ההודעה הקולית נמחקה')
+    return redirect(back)
+
+
+@admin_bp.route('/voice-messages/<int:mid>/listen')
+@login_required
+def voice_message_listen(mid):
+    """השמעה בממשק: מימות (נטפרי חוסמת שמע מהאתר שלנו), עם המפתח המוגבל להורדה בלבד."""
+    from models import VoiceMessage
+    from routes.recording_proxy import _YEMOT_DOWNLOAD_API_KEY
+    m = VoiceMessage.query.get_or_404(mid)
+    if m.yemot_path and _YEMOT_DOWNLOAD_API_KEY:
+        from urllib.parse import quote
+        return redirect('https://www.call2all.co.il/ym/api/DownloadFile?token='
+                        f'{quote(_YEMOT_DOWNLOAD_API_KEY, safe="")}&path={quote("ivr2:" + m.yemot_path, safe="")}')
+    if not m.file_data:
+        return 'אין קובץ שמע', 404
+    from routes.download_utils import plain_audio_response
+    return plain_audio_response(m.file_data, 'audio/wav', f'הודעה_{m.id}.wav', 'message.wav')
+
+
 @admin_bp.route('/customers/<int:id>/cost-report/email', methods=['POST'])
 @login_required
 def customer_cost_report_email(id):
@@ -672,6 +788,8 @@ def customer_detail(id):
         ocr_results=ocr_results, manuscript_pages=manuscript_pages, proofing_rounds=proofing_rounds,
         threads=threads, timedelta=timedelta,
         excel_templates=_excel_templates_for(customer),
+        cust_defaults=_customer_defaults(customer),
+        voice_messages=_voice_messages_for(customer.id),
         recordings_total=recordings_total, transactions_total=transactions_total,
         msg_attachments=_attachments_for('customer_message_id', [m.id for t in threads for m in t.messages]),
         all_institutions=Institution.query.order_by(Institution.name).all())
@@ -2258,7 +2376,7 @@ def _send_broadcast_bg(subject, html, recipient_emails):
 @login_required
 def broadcast_message():
     return render_template(
-        'admin/broadcast.html',
+        'admin/broadcast.html', voice_broadcasts=_voice_messages_for(None),
         subject='', body='', test_email='',
         recipient_count=len(_broadcast_recipient_emails()),
         result=None,
@@ -2301,7 +2419,7 @@ def broadcast_test():
             result = {'ok': False, 'text': f'שגיאה בשליחת מייל הבדיקה: {e}'}
 
     return render_template(
-        'admin/broadcast.html',
+        'admin/broadcast.html', voice_broadcasts=_voice_messages_for(None),
         subject=subject, body=body, test_email=test_email,
         recipient_count=recipient_count, result=result,
     )
@@ -2331,7 +2449,7 @@ def broadcast_send():
         result = {'ok': True, 'text': f'ההודעה נשלחת ברקע ל-{len(recipient_emails)} לקוחות. זה עשוי לקחת כמה דקות (ראה יומן השרת לפירוט תוצאה סופית).'}
 
     return render_template(
-        'admin/broadcast.html',
+        'admin/broadcast.html', voice_broadcasts=_voice_messages_for(None),
         subject=subject, body=body, test_email='',
         recipient_count=len(recipient_emails), result=result,
     )

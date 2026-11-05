@@ -66,6 +66,24 @@ def get_customer(phone):
         'name': customer.name or '',
     })
 
+@api_bp.route('/voice-messages/<phone>', methods=['GET'])
+def voice_messages_for_caller(phone):
+    """הודעות קוליות למתקשר: pending (להשמיע בכניסה), replay (לשלוחה 9). ראה services/voice_messages."""
+    from services import voice_messages as VM
+    return jsonify(VM.for_caller(find_customer_by_phone(phone)))
+
+
+@api_bp.route('/voice-messages/heard', methods=['POST'])
+def voice_messages_heard():
+    from services import voice_messages as VM
+    data = request.get_json(silent=True) or {}
+    customer = find_customer_by_phone(data.get('phone', ''))
+    ids = [int(x) for x in (data.get('ids') or []) if str(x).isdigit()]
+    if customer and ids:
+        VM.mark_heard(customer, ids, data.get('phone', ''))
+    return jsonify({'ok': True})
+
+
 @api_bp.route('/customer/<phone>/fax-code', methods=['GET'])
 def get_customer_fax_code(phone):
     """קוד אישי (5 ספרות) להזדהות בפקס - נמסר ללקוח **אך ורק בטלפון**

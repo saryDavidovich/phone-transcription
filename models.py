@@ -663,3 +663,29 @@ class MessageAttachment(db.Model):
     file_data = db.Column(db.LargeBinary)
     manuscript_page_id = db.Column(db.Integer, nullable=True)  # אם כבר הועבר להקראה
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class VoiceMessage(db.Model):
+    """הודעה קולית שהלקוח שומע בכניסה למערכת (אחרי 001, לפני 002), פעם אחת, ואחר כך
+    אפשר לשמוע שוב בשלוחה 9. customer_id ריק = הודעה תפוצתית לכל הלקוחות הרשומים.
+    kind: 'file' - קובץ שמע שהועלה לימות (yemot_path), 'tts' - טקסט בהקראה ממוחשבת של ימות."""
+    __tablename__ = 'voice_messages'
+    id = db.Column(db.Integer, primary_key=True)
+    customer_id = db.Column(db.Integer, db.ForeignKey('customers.id'), nullable=True, index=True)
+    kind = db.Column(db.String(10), nullable=False, default='tts')
+    text = db.Column(db.Text)                 # לטקסט בהקראה / תיאור קצר לקובץ
+    yemot_path = db.Column(db.String(200))    # למשל /voice_messages/12.wav
+    file_data = db.Column(db.LargeBinary)     # עותק ה-WAV (גיבוי, ולהשמעה בממשק)
+    active = db.Column(db.Boolean, default=True, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class VoiceMessageHeard(db.Model):
+    """מי שמע איזו הודעה (עד הסוף) בכניסה למערכת."""
+    __tablename__ = 'voice_message_heard'
+    id = db.Column(db.Integer, primary_key=True)
+    message_id = db.Column(db.Integer, db.ForeignKey('voice_messages.id', ondelete='CASCADE'), nullable=False, index=True)
+    customer_id = db.Column(db.Integer, nullable=False, index=True)
+    phone = db.Column(db.String(20))
+    heard_at = db.Column(db.DateTime, default=datetime.utcnow)
+    __table_args__ = (db.UniqueConstraint('message_id', 'customer_id', name='uq_voice_heard'),)
