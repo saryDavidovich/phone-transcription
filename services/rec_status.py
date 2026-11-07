@@ -28,9 +28,26 @@ _STAGE_PCT = {'recording': 0, 'processing': 0, 'queued': 0, 'transcribing': 3,
               'alefbot_pending': None, 'alefbot_finalizing': 95, 'transcribed': 96}
 
 
+# תמלול שנשלח בפקס: התג מראה מה קרה לפקס בפועל (Recording.fax_status), ולא תמיד "נשלחה"
+FAX_STATUS = {
+    'sent':      ('פקס - ממתין לאישור', 'badge-amber', 'הפקס נמסר לשליחה - עוד לא התקבל אישור שהגיע'),
+    'sending':   ('פקס - בשליחה',       'badge-amber', 'הפקס נשלח עכשיו'),
+    'delivered': ('פקס התקבל',          'badge-green', 'אושר שהפקס הגיע ליעד'),
+    'failed':    ('פקס נכשל',           'badge-red',   'הפקס לא הגיע ליעד'),
+    'no_answer': ('פקס נכשל - אין מענה', 'badge-red',  'מכשיר הפקס לא ענה'),
+    'error':     ('שליחת הפקס נכשלה',   'badge-red',   'הפקס לא נשלח'),
+}
+
+
 def status_info(rec):
     status = rec.status or ''
     label, cls, active, title = STATUS.get(status, (status or 'לא ידוע', 'badge-gray', False, ''))
+    fax = getattr(rec, 'fax_status', None)
+    if status == 'delivered' and fax in FAX_STATUS:
+        label, cls, title = FAX_STATUS[fax]
+        note = getattr(rec, 'fax_status_note', None)
+        if note:
+            title = f'{title} - {note}'
     pct = None
     if active:
         pct = rec.progress if (rec.progress is not None and status == 'transcribing') else _STAGE_PCT.get(status)

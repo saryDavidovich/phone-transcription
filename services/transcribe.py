@@ -1769,10 +1769,62 @@ def _normalize_israeli_phone(raw):
 
 FAX_UPLOAD_FOLDER = '/fax_out'
 
+# --- שליחת פקס במייל דרך אקסטרה מובייל (Mail2Fax) ---
+# שולחים מייל מהכתובת הרשומה אצלם (033131795@sheasystem.com) אל <מספר>@fax.exm.co.il,
+# עם ה-PDF מצורף - והם מוציאים אותו כפקס. הספק נבחר בהגדרות (fax_provider):
+# 'exm' (ברירת מחדל - אקסטרה מובייל) או 'yemot'. אין מעבר אוטומטי ביניהם.
+# מזהה הפקס (EXM-...) נכתב בנושא המייל ובשם הקובץ, כדי שהתשובה של אקסטרה מובייל
+# (אישור/כישלון) תשויך להקלטה הנכונה - handle_exm_fax_report.
+EXM_FAX_DOMAIN = 'fax.exm.co.il'
+FAX_PROVIDERS = {'exm': 'אקסטרה מובייל (מייל לפקס)', 'yemot': 'ימות המשיח'}
+
+
+def fax_provider():
+    try:
+        from app import app
+        from models import Settings
+        with app.app_context():
+            row = Settings.query.filter_by(key='fax_provider').first()
+            v = row.value if row and row.value else 'exm'
+    except Exception as e:
+        log.warning(f'fax_provider: קריאת ההגדרה נכשלה ({e}) - ברירת מחדל אקסטרה מובייל')
+        v = 'exm'
+    return v if v in FAX_PROVIDERS else 'exm'
+
+
+def _send_fax_via_exm(fax_number, pdf_bytes):
+    """שולח את ה-PDF במייל לאקסטרה מובייל. מחזיר (ok, campaign_id, error, step)."""
+    import base64 as _b64
+    import uuid as _uuid
+    sender = os.environ.get('EXM_FAX_FROM', '033131795@sheasystem.com')
+    to = f'{fax_number}@{EXM_FAX_DOMAIN}'
+    cid = 'EXM-' + _uuid.uuid4().hex[:12]
+    filename = f'{cid}.pdf'
+    step = {'step': 'Mail2Fax (אקסטרה מובייל)', 'from': sender, 'to': to, 'campaign_id': cid}
+    try:
+        import sendgrid
+        from sendgrid.helpers.mail import Mail, Attachment, FileContent, FileName, FileType, Disposition, Email
+        msg = Mail(from_email=Email(sender), to_emails=to, subject=cid,
+                   plain_text_content=' ')
+        msg.attachment = Attachment(FileContent(_b64.b64encode(pdf_bytes).decode('ascii')), FileName(filename),
+                                    FileType('application/pdf'), Disposition('attachment'))
+        resp = sendgrid.SendGridAPIClient(api_key=os.environ.get('SENDGRID_API_KEY')).send(msg)
+        step['http'] = resp.status_code
+        if 200 <= resp.status_code < 300:
+            log.info(f"Fax: נשלח במייל לאקסטרה מובייל ({to}), מזהה {cid}")
+            return True, cid, None, step
+        err = f'SendGrid החזיר {resp.status_code}'
+    except Exception as e:
+        err = str(getattr(e, 'body', '') or e)[:300]
+    step['error'] = err
+    log.error(f"Fax: שליחה במייל לאקסטרה מובייל נכשלה: {err}")
+    return False, None, err, step
+
 
 def send_pdf_fax(to_number, pdf_bytes, filename_hint='document.pdf', delivery_url_path='/api/fax-delivery-webhook',
                  return_details=False):
-    """שולח PDF כפקס דרך ימות המשיח.
+    """שולח PDF כפקס. אם בהגדרות נבחר 'exm' - קודם במייל דרך אקסטרה מובייל (_send_fax_via_exm),
+    ורק אם זה נכשל - דרך ימות המשיח:
     דרך ראשית - זהה לאתר של ימות (שעובד): SendFax עם pdfFile=UPLOAD והקובץ בשדה fileToUpload.
     גיבוי (אם נדחה): העלאה ל-/fax_out ואז SendFax עם הנתיב.
     משמשת את _send_fax (תמלול), את routes/dictate.py (כתבי-יד/הגהות) ואת בדיקת הפקס בממשק.
@@ -1794,10 +1846,22 @@ def send_pdf_fax(to_number, pdf_bytes, filename_hint='document.pdf', delivery_ur
         if not pdf_bytes or pdf_bytes[:4] != b'%PDF':
             return done(False, error='הקובץ לשליחה אינו PDF תקין')
 
+        fax_number = _normalize_israeli_phone(to_number)
+        safe_name = re.sub(r'[^A-Za-z0-9_.-]', '_', filename_hint or 'document.pdf') or 'document.pdf'
+        if not safe_name.lower().endswith('.pdf'):
+            safe_name += '.pdf'
+        if not re.search(r'[A-Za-z0-9]', safe_name[:-4]):      # שם בעברית בלבד -> שם כללי
+            safe_name = 'fax.pdf'
+
+        # --- ספק ראשי: אקסטרה מובייל במייל (אם נבחר בהגדרות) ---
+        # (בלי מעבר אוטומטי לימות - הקוד של ימות נשאר למטה, ונבחר רק אם בהגדרות נבחר 'yemot')
+        if fax_provider() == 'exm':
+            ok, cid, err, step = _send_fax_via_exm(fax_number, pdf_bytes)
+            steps.append(step)
+            return done(True, campaign_id=cid) if ok else done(False, error=f'שליחה לאקסטרה מובייל נכשלה: {err}')
+
         caller_id = os.environ.get('YEMOT_FAX_CALLER_ID', '')
         base_url = os.environ.get('APP_BASE_URL', '').rstrip('/')
-        fax_number = _normalize_israeli_phone(to_number)
-
         delivery_url = ''
         if base_url and delivery_url_path:
             wsecret = os.environ.get('WEBHOOK_SECRET', '')
@@ -1810,9 +1874,6 @@ def send_pdf_fax(to_number, pdf_bytes, filename_hint='document.pdf', delivery_ur
             data['callerId'] = caller_id
         if delivery_url:
             data['deliveryUrl'] = delivery_url
-        safe_name = re.sub(r'[^A-Za-z0-9_.-]', '_', filename_hint or 'document.pdf') or 'document.pdf'
-        if not safe_name.lower().endswith('.pdf'):
-            safe_name += '.pdf'
         response = requests.post('https://www.call2all.co.il/ym/api/SendFax', data=data,
                                  files={'fileToUpload': (safe_name, pdf_bytes, 'application/pdf')}, timeout=120)
         try:
@@ -1942,6 +2003,63 @@ def _update_fax_status(call_id, status, note=''):
                 db.session.commit()
         except Exception as e:
             log.error(f"_update_fax_status error: {e}")
+
+
+_EXM_FAIL_WORDS = ('לא התקבל', 'לא נשלח', 'נכשל', 'כישלון', 'לא הצליח', 'לא הגיב', 'מנותק', 'תפוס', 'אין מענה',
+                   'שגיאה', 'failed', 'failure', 'error', 'busy', 'no answer', 'not delivered', 'unsuccessful')
+_EXM_OK_WORDS = ('בהצלחה', 'התקבל', 'נשלח', 'נמסר', 'success', 'delivered', 'sent')
+
+
+def handle_exm_fax_report(sender, subject, body):
+    """תשובה מאקסטרה מובייל על פקס ששלחנו במייל: מעדכן את סטטוס הפקס של ההקלטה
+    (או כתב-היד/ההגהה) - 'delivered' אם הצליח, 'failed' אם לא - כדי שבכרטיס הלקוח
+    יופיע מה קרה באמת. השיוך לפי מזהה EXM-... (בנושא/בשם הקובץ ששלחנו), ואם הוא
+    לא מופיע בתשובה - לפי מספר הפקס, לפקס האחרון ששלחנו אליו ועדיין ממתין לאישור.
+    מחזיר את הסטטוס שנקבע (או None)."""
+    from app import app, db
+    from models import Recording, ManuscriptPage, ProofingRound
+    text = f'{subject or ""}\n{body or ""}'
+    low = text.lower()
+    if any(w in low for w in _EXM_FAIL_WORDS):
+        status = 'failed'
+    elif any(w in low for w in _EXM_OK_WORDS):
+        status = 'delivered'
+    else:
+        status = None
+    note = re.sub(r'\s+', ' ', text).strip()[:300]
+    m = re.search(r'EXM-[0-9a-f]{12}', text)
+    with app.app_context():
+        try:
+            rec = None
+            if m:
+                cid = m.group(0)
+                for model in (Recording, ManuscriptPage, ProofingRound):
+                    rec = model.query.filter_by(fax_campaign_id=cid).first()
+                    if rec:
+                        break
+            if rec is None:     # לפי מספר הפקס שמופיע בתשובה
+                from datetime import datetime as _dt, timedelta as _td
+                since = _dt.utcnow() - _td(days=3)
+                for num in dict.fromkeys(re.findall(r'0\d{8,9}', re.sub(r'(?<=\d)-(?=\d)', '', text))):
+                    rec = (Recording.query.filter(Recording.fax_campaign_id.like('EXM-%'),
+                                                  Recording.fax_status == 'sent',
+                                                  Recording.delivered_to.contains(num),
+                                                  Recording.created_at >= since)
+                           .order_by(Recording.id.desc()).first())
+                    if rec:
+                        break
+            if rec is None:
+                log.warning(f"Fax (אקסטרה מובייל): לא נמצאה הקלטה לתשובה: {note!r}")
+                return status
+            if status:
+                rec.fax_status = status
+            rec.fax_status_note = note
+            db.session.commit()
+            log.info(f"Fax (אקסטרה מובייל): {rec.__class__.__name__}#{rec.id} {rec.fax_campaign_id} -> {status}")
+        except Exception as e:
+            db.session.rollback()
+            log.error(f"handle_exm_fax_report error: {e}")
+    return status
 
 
 def handle_fax_delivery_webhook(data):

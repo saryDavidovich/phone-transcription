@@ -1739,6 +1739,27 @@ def email_inbound():
         zoho_recover.recover_async(ref)
         return jsonify({'status': 'recovering_from_zoho'}), 200
 
+    # דוח מסירה מאקסטרה מובייל (שליחת פקס במייל - services/transcribe._send_fax_via_exm):
+    # הם עונים לכתובת המערכת. זה לא מייל של לקוח ולא נכנס להודעות למנהל - מעדכן את
+    # סטטוס הפקס של ההקלטה (handle_exm_fax_report), ונשמר כ"דוח מסירה אחרון" בכרטיס
+    # בדיקת הפקס בהגדרות. בלי תשובה אוטומטית (מניעת לולאת מיילים).
+    if (sender_email or '').lower().endswith('exm.co.il'):
+        report = f'{subject}\n{(fax_check_body_text or "")[:400]}'.strip()
+        log.info(f"email-inbound: דוח פקס מאקסטרה מובייל: {report!r}")
+        try:
+            import json as _json
+            from models import Settings as _S
+            with app.app_context():
+                row = _S.query.filter_by(key='fax_test_report').first() or _S(key='fax_test_report')
+                row.value = _json.dumps({'from': sender_email, 'report': report}, ensure_ascii=False)[:490]
+                db.session.add(row)
+                db.session.commit()
+        except Exception as e:
+            log.warning(f'email-inbound: שמירת דוח הפקס נכשלה: {e}')
+        from services.transcribe import handle_exm_fax_report
+        st = handle_exm_fax_report(sender_email, subject, fax_check_body_text)
+        return jsonify({'status': 'fax_report', 'fax_status': st}), 200
+
     # פקס נכנס גולמי מימות המשיח (מודול "קבלת פקסים", מוגדר להעביר במייל
     # לכתובת ייעודית - ראה FAX_INBOUND_EMAIL למעלה) - נבדק לפי כתובת היעד
     # (to), לא לפי נושא/שולח שאין עליהם שום שליטה/פורמט ידוע מראש כמו בתגובת

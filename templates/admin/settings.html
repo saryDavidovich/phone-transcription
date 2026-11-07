@@ -167,14 +167,23 @@
 
 <div class="card" style="margin-top:24px" id="fax-test">
   <div style="font-size:16px;font-weight:700;margin-bottom:8px">📠 בדיקת פקס</div>
-  <div style="font-size:13px;color:#8892b0;margin-bottom:12px">שולח דף בדיקה לפקס, ומציג בדיוק מה ימות ענו בכל שלב (העלאת ה-PDF למערכת, ואז השליחה).</div>
+  {% set cur_fax_provider = get_fax_provider() %}
+  <form method="POST" action="{{ url_for('admin.fax_provider_save') }}" style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:14px">
+    <div><label class="form-label">שליחת פקסים דרך</label>
+      <select class="form-input" name="fax_provider" style="width:300px">
+        <option value="exm" {% if cur_fax_provider != 'yemot' %}selected{% endif %}>אקסטרה מובייל (מייל לפקס)</option>
+        <option value="yemot" {% if cur_fax_provider == 'yemot' %}selected{% endif %}>ימות המשיח</option>
+      </select></div>
+    <button class="btn" type="submit">💾 שמור</button>
+  </form>
+  <div style="font-size:13px;color:#8892b0;margin-bottom:12px">שולח דף בדיקה לפקס דרך הספק שנבחר, ומציג בדיוק מה ענו בכל שלב.</div>
   <form method="POST" action="{{ url_for('admin.fax_test') }}" style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap"
         onsubmit="var b=this.querySelector('button');setTimeout(function(){b.disabled=true;b.textContent='⏳ שולח...'},0);return true">
     <div><label class="form-label">מספר פקס</label><input class="form-input" name="number" inputmode="tel" dir="ltr" placeholder="02-1234567" style="width:200px"></div>
     <button class="btn btn-primary" type="submit">📠 שלח פקס בדיקה</button>
   </form>
   {% set fax_rep = get_fax_test_report() if get_fax_test_report is defined else '' %}
-  {% if fax_rep %}<div style="margin-top:10px;font-size:13px">📬 <b>דוח מסירה אחרון מימות</b> (מתעדכן כשימות שולחים - לרענן את הדף):
+  {% if fax_rep %}<div style="margin-top:10px;font-size:13px">📬 <b>דוח מסירה אחרון</b> (מתעדכן כשהספק שולח דוח - לרענן את הדף):
     <pre dir="ltr" style="background:var(--surface2,#22263a);padding:10px;border-radius:8px;font-size:12px;white-space:pre-wrap">{{ fax_rep }}</pre></div>{% endif %}
   {% if request.args.get('fax_steps') %}
   <pre dir="ltr" style="margin-top:12px;background:var(--surface2,#22263a);padding:12px;border-radius:8px;font-size:12px;white-space:pre-wrap;max-height:320px;overflow:auto">{{ request.args.get('fax_steps') }}</pre>

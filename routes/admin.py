@@ -22,6 +22,14 @@ def get_fax_test_report():
         return ''
 
 
+@admin_bp.app_template_global('get_fax_provider')
+def get_fax_provider():
+    try:
+        return get_setting('fax_provider', 'exm') or 'exm'
+    except Exception:
+        return 'exm'
+
+
 @admin_bp.context_processor
 def inject_new_messages_count():
     from models import ManagerMessage, CustomerMessage, GeneralInboxMessage
@@ -1911,9 +1919,23 @@ def fax_test():
                                              'ok': res['ok'], 'campaign_id': res.get('campaign_id')},
                                             ensure_ascii=False))
     set_setting('fax_test_report', '')
-    flash(('✔ ימות קיבלו את הפקס לשליחה (מספר קמפיין ' + str(res.get('campaign_id')) + '). אם הדף מגיע למכשיר - הבעיה נפתרה.')
+    via = 'אקסטרה מובייל (במייל)' if str(res.get('campaign_id') or '').startswith('EXM-') else 'ימות'
+    flash(('✔ הפקס נמסר לשליחה דרך ' + via + ' (מזהה ' + str(res.get('campaign_id')) + '). אם הדף מגיע למכשיר - הבעיה נפתרה.')
           if res['ok'] else ('⚠ שליחת הפקס נכשלה: ' + str(res.get('error'))))
     return redirect(url_for('admin.settings', fax_steps=json.dumps(res.get('steps', []), ensure_ascii=False)) + '#fax-test')
+
+
+@admin_bp.route('/fax-provider', methods=['POST'])
+@login_required
+def fax_provider_save():
+    """בחירת ספק שליחת הפקסים: אקסטרה מובייל במייל (ימות כגיבוי) או ימות בלבד."""
+    from services.transcribe import FAX_PROVIDERS
+    v = request.form.get('fax_provider', '')
+    if v in FAX_PROVIDERS:
+        set_setting('fax_provider', v)
+        db.session.commit()
+        flash('✔ ספק הפקסים נשמר: ' + FAX_PROVIDERS[v])
+    return redirect(url_for('admin.settings') + '#fax-test')
 
 
 @admin_bp.route('/narrator')
