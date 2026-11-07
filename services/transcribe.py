@@ -2010,6 +2010,12 @@ _EXM_FAIL_WORDS = ('לא התקבל', 'לא נשלח', 'נכשל', 'כישלון
 _EXM_OK_WORDS = ('בהצלחה', 'התקבל', 'נשלח', 'נמסר', 'success', 'delivered', 'sent')
 
 
+def _digits_only(col):
+    """עמודת טלפון בלי מקפים/רווחים - כדי ש-02-1234567 יתאים ל-021234567."""
+    from sqlalchemy import func
+    return func.replace(func.replace(col, '-', ''), ' ', '')
+
+
 def handle_exm_fax_report(sender, subject, body):
     """תשובה מאקסטרה מובייל על פקס ששלחנו במייל: מעדכן את סטטוס הפקס של ההקלטה
     (או כתב-היד/ההגהה) - 'delivered' אם הצליח, 'failed' אם לא - כדי שבכרטיס הלקוח
@@ -2043,7 +2049,7 @@ def handle_exm_fax_report(sender, subject, body):
                 for num in dict.fromkeys(re.findall(r'0\d{8,9}', re.sub(r'(?<=\d)-(?=\d)', '', text))):
                     rec = (Recording.query.filter(Recording.fax_campaign_id.like('EXM-%'),
                                                   Recording.fax_status == 'sent',
-                                                  Recording.delivered_to.contains(num),
+                                                  _digits_only(Recording.delivered_to).contains(num),
                                                   Recording.created_at >= since)
                            .order_by(Recording.id.desc()).first())
                     if rec:
