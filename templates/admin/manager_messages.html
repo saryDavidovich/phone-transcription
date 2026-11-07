@@ -3,62 +3,44 @@
 {% block content %}
 <div class="container-fluid py-4" dir="rtl">
 
-  <div class="d-flex justify-content-between align-items-center mb-3">
-    <h2>📬 הודעות למנהל</h2>
-    <div class="d-flex gap-2 align-items-center">
-      <!-- פילטר סטטוס -->
-      <div class="btn-group btn-group-sm">
-        <a href="{{ url_for('admin.manager_messages') }}" class="btn {{ 'btn-primary' if not status_filter else 'btn-outline-primary' }}">הכל</a>
-        <a href="{{ url_for('admin.manager_messages', status='new') }}" class="btn {{ 'btn-warning' if status_filter=='new' else 'btn-outline-warning' }}">חדש</a>
-        <a href="{{ url_for('admin.manager_messages', status='in_progress') }}" class="btn {{ 'btn-info' if status_filter=='in_progress' else 'btn-outline-info' }}">בטיפול</a>
-        <a href="{{ url_for('admin.manager_messages', status='done') }}" class="btn {{ 'btn-success' if status_filter=='done' else 'btn-outline-success' }}">טופל</a>
-      </div>
-      <!-- פעולות מרובות -->
-      <div class="d-flex gap-1" id="bulk-actions" style="display:none!important">
-        <select id="bulk-status" class="form-select form-select-sm" style="width:120px">
-          <option value="">שנה סטטוס...</option>
-          <option value="new">חדש</option>
-          <option value="in_progress">בטיפול</option>
-          <option value="done">טופל</option>
-        </select>
-        <button onclick="bulkUpdateStatus()" class="btn btn-sm btn-primary">✔ עדכן</button>
-        <button onclick="bulkDelete()" class="btn btn-sm btn-danger">🗑 מחק</button>
-      </div>
-    </div>
-  </div>
+  <h2 style="margin-bottom:14px">📬 הודעות למנהל</h2>
 
-  {% if unread_replies %}
-  <div class="alert alert-primary" style="border-right:4px solid #3b82f6">
-    <div style="font-weight:600;margin-bottom:8px">💬 {{ unread_replies|length }} תגובות חדשות מלקוחות בהתכתבות</div>
-    {% for r in unread_replies %}
-    <div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0">
-      <span style="font-size:13px">
-        <strong>{{ r.customer.phone }}</strong>{% if r.customer.name %} ({{ r.customer.name }}){% endif %}
-        · {{ r.body[:80] }}{% if r.body|length > 80 %}...{% endif %}
-        · {{ r.created_at | il_time }}
-      </span>
-      <a href="{{ url_for('admin.customer_detail', id=r.customer_id) }}#thread-{{ r.thread_id }}" class="btn btn-sm btn-primary">פתח שיחה</a>
-    </div>
+  {# ארבע לשוניות - על כל אחת מספר הפריטים שממתינים לטיפול #}
+  <nav class="mm-tabs">
+    {% for key, icon, label in [('phone','📞','הודעות טלפון'),('inbox','📥','תיבה כללית'),('customers','💬','הודעות מלקוחות'),('nedarim','💳','נדרים פלוס')] %}
+    <a href="{{ url_for('admin.manager_messages', tab=key) }}" class="mm-tab {{ 'on' if tab == key }}">
+      <span>{{ icon }} {{ label }}</span>
+      {% if counts[key] %}<b class="mm-count">{{ counts[key] }}</b>{% endif %}
+    </a>
     {% endfor %}
-  </div>
-  {% endif %}
+  </nav>
 
-  {% if unread_inbox_count %}
-  <div class="alert alert-warning" style="border-right:4px solid #f59e0b;display:flex;justify-content:space-between;align-items:center">
-    <span style="font-weight:600">📥 {{ unread_inbox_count }} הודעות חדשות בתיבה הכללית (מיילים ללא זיהוי לקוח)</span>
-    <a href="{{ url_for('admin.general_inbox') }}" class="btn btn-sm btn-primary">פתח את התיבה הכללית</a>
+  {% if tab == 'phone' %}
+  <div class="mm-info">
+    <div class="mm-info-icon">📞</div>
+    <div>
+      <div class="mm-info-title">הודעות שהושארו בטלפון, והתראות מהמערכת</div>
+      <div class="mm-info-text">הודעה חדשה נשארת מסומנת עד שלוחצים <b>✔ טופל</b> וכותבים מה נעשה. ההסבר נשמר בעמודת ההערה.</div>
+    </div>
   </div>
-  {% endif %}
-
-  {% with messages = get_flashed_messages() %}
-    {% if messages %}
-      {% for msg in messages %}
-        <div class="alert alert-success alert-dismissible fade show">{{ msg }}
-          <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-        </div>
-      {% endfor %}
-    {% endif %}
-  {% endwith %}
+  <div class="d-flex justify-content-between align-items-center mb-3" style="flex-wrap:wrap;gap:8px">
+    <div class="btn-group btn-group-sm">
+      <a href="{{ url_for('admin.manager_messages') }}" class="btn {{ 'btn-primary' if not status_filter else 'btn-outline-primary' }}">הכל</a>
+      <a href="{{ url_for('admin.manager_messages', status='new') }}" class="btn {{ 'btn-warning' if status_filter=='new' else 'btn-outline-warning' }}">חדש</a>
+      <a href="{{ url_for('admin.manager_messages', status='in_progress') }}" class="btn {{ 'btn-info' if status_filter=='in_progress' else 'btn-outline-info' }}">בטיפול</a>
+      <a href="{{ url_for('admin.manager_messages', status='done') }}" class="btn {{ 'btn-success' if status_filter=='done' else 'btn-outline-success' }}">טופל</a>
+    </div>
+    <div class="d-flex gap-1" id="bulk-actions" style="display:none!important">
+      <select id="bulk-status" class="form-select form-select-sm" style="width:120px">
+        <option value="">שנה סטטוס...</option>
+        <option value="new">חדש</option>
+        <option value="in_progress">בטיפול</option>
+        <option value="done">טופל</option>
+      </select>
+      <button onclick="bulkUpdateStatus()" class="btn btn-sm btn-primary">✔ עדכן</button>
+      <button onclick="bulkDelete()" class="btn btn-sm btn-danger">🗑 מחק</button>
+    </div>
+  </div>
 
   {% if not messages %}
     <div class="alert alert-info">אין הודעות</div>
@@ -74,7 +56,7 @@
         <th>שם / מייל</th>
         <th>תמלול</th>
         <th style="width:160px">סטטוס + הערה</th>
-        <th style="width:60px">פעולה</th>
+        <th style="width:80px">פעולה</th>
       </tr>
     </thead>
     <tbody>
@@ -127,7 +109,8 @@
         <form method="POST" action="{{ url_for('admin.update_message_status', id=msg.id) }}">
           <input type="hidden" name="return_filter" value="{{ status_filter }}">
           <div class="d-flex gap-1 align-items-center">
-            <select name="status" class="form-select form-select-sm" onchange="this.form.submit()" style="font-size:11px;width:85px;flex-shrink:0">
+            <select name="status" class="form-select form-select-sm" style="font-size:11px;width:85px;flex-shrink:0"
+                    onchange="if(this.value==='done'){var s=this;openHandled('{{ url_for('admin.manager_message_handled', id=msg.id) }}','הודעה #{{ msg.id }}{{ ' מ-' ~ msg.phone if msg.phone else '' }}',{return_filter:'{{ status_filter }}'},function(){s.value='{{ msg.status }}'})}else{this.form.submit()}">
               <option value="new"         {{ 'selected' if msg.status == 'new' }}>חדש</option>
               <option value="in_progress" {{ 'selected' if msg.status == 'in_progress' }}>בטיפול</option>
               <option value="done"        {{ 'selected' if msg.status == 'done' }}>טופל</option>
@@ -141,9 +124,11 @@
         </form>
       </td>
 
-      <!-- מחק -->
-      <td>
-        <form method="POST" action="{{ url_for('admin.delete_manager_message', id=msg.id) }}"
+      <!-- טופל / מחק -->
+      <td style="white-space:nowrap">
+        {% if msg.status != 'done' %}<button type="button" class="mm-done-btn" title="סימון כטופל, עם הסבר"
+          onclick="openHandled('{{ url_for('admin.manager_message_handled', id=msg.id) }}','הודעה #{{ msg.id }}{{ ' מ-' ~ msg.phone if msg.phone else '' }}',{return_filter:'{{ status_filter }}'})">✔</button>{% endif %}
+        <form style="display:inline" method="POST" action="{{ url_for('admin.delete_manager_message', id=msg.id) }}"
               onsubmit="return confirm('למחוק?')">
           <input type="hidden" name="return_filter" value="{{ status_filter }}">
           <button type="submit" class="btn btn-sm btn-outline-danger px-1">🗑</button>
@@ -155,7 +140,12 @@
   </table>
   </div>
   {% endif %}
+  {% elif tab == 'inbox' %}{% include 'admin/_mm_inbox.html' %}
+  {% elif tab == 'customers' %}{% include 'admin/_mm_customers.html' %}
+  {% else %}{% include 'admin/_mm_nedarim.html' %}
+  {% endif %}
 </div>
+{% include 'admin/_handled_dialog.html' %}
 
 <script>
 function toggleAll(cb) {
@@ -197,6 +187,23 @@ function bulkDelete() {
 }
 </script>
 <style>
+  .mm-tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px;border-bottom:1px solid var(--border,#2d3561);padding-bottom:0}
+  .mm-tab{display:flex;align-items:center;gap:8px;padding:10px 16px;border-radius:10px 10px 0 0;text-decoration:none;color:var(--text2,#8892b0);
+          font-weight:600;font-size:14px;border:1px solid transparent;border-bottom:none;margin-bottom:-1px}
+  .mm-tab:hover{color:var(--text,#e2e8f0);background:var(--surface2,#22263a)}
+  .mm-tab.on{color:var(--text,#e2e8f0);background:var(--surface,#1a1d2e);border-color:var(--border,#2d3561)}
+  .mm-count{background:#ef4444;color:#fff;border-radius:11px;min-width:22px;height:22px;padding:0 6px;font-size:12px;display:inline-flex;align-items:center;justify-content:center}
+  .mm-info{display:flex;gap:14px;align-items:flex-start;padding:14px 18px;margin-bottom:16px;border-radius:12px;
+           background:linear-gradient(135deg,rgba(99,102,241,.12),rgba(59,130,246,.06));border:1px solid rgba(99,102,241,.3)}
+  .mm-info-icon{font-size:26px;line-height:1}
+  .mm-info-title{font-weight:700;font-size:15px;margin-bottom:4px}
+  .mm-info-text{font-size:13px;line-height:1.7;color:var(--text2,#a0aec0)}
+  .mm-info-text ul{margin:4px 0 0;padding-inline-start:18px}
+  .mm-flash{padding:10px 14px;margin-bottom:12px;border-radius:10px;background:rgba(34,197,94,.12);border:1px solid rgba(34,197,94,.35);font-size:14px}
+  .mm-done-btn{border:1px solid #22c55e;background:rgba(34,197,94,.12);color:#22c55e;border-radius:8px;padding:2px 9px;font-weight:700;cursor:pointer}
+  .mm-done-btn.wide{padding:6px 14px;font-size:13px}
+  .mm-note{font-size:12px;color:#22c55e;margin-top:4px;white-space:pre-wrap}
+  .mm-new-dot{color:#ef4444}
   .msg-tx{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;cursor:pointer;line-height:1.45}
   .msg-tx.open{display:block;-webkit-line-clamp:unset}
   .msg-play{border:1px solid var(--border,#2d3561);background:var(--surface2,#22263a);color:inherit;border-radius:14px;padding:2px 10px;font-size:12px;cursor:pointer;white-space:nowrap}

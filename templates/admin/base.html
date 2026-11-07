@@ -346,7 +346,7 @@ table.as-cards textarea,table.as-cards input,table.as-cards select{min-width:0 !
       {% if dp.fax %}<a href="/admin/dictate?status=fax">📠 פקסים לשיוך <b>{{ dp.fax }}</b></a>{% endif %}
     </div>
     {% endif %}
-    <a href="/admin/messages" class="nav-item {% if request.endpoint == 'admin.manager_messages' %}active{% endif %}" style="position:relative">
+    <a href="/admin/messages" class="nav-item {% if request.endpoint in ['admin.manager_messages', 'admin.inbox_thread_detail'] %}active{% endif %}" style="position:relative" title="סה״כ ממתינות לטיפול בכל הלשוניות">
       <span class="nav-icon">📬</span> הודעות למנהל
       {% if new_messages_count > 0 %}
       <span style="position:absolute;left:14px;top:50%;transform:translateY(-50%);background:#ef4444;color:white;border-radius:50%;min-width:20px;height:20px;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;padding:0 4px">{{ new_messages_count }}</span>
@@ -360,9 +360,6 @@ table.as-cards textarea,table.as-cards input,table.as-cards select{min-width:0 !
     </a>
     <a href="/admin/dev-requests" class="nav-item {% if request.endpoint and request.endpoint.startswith('admin.dev_') %}active{% endif %}">
       <span class="nav-icon">🛠️</span> בקשות פיתוח
-    </a>
-    <a href="/admin/inbox" class="nav-item {% if request.endpoint in ['admin.general_inbox'] %}active{% endif %}">
-      <span class="nav-icon">📥</span> תיבה כללית
     </a>
   </nav>
   <div class="sidebar-bottom">

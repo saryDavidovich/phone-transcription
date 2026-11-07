@@ -2,7 +2,7 @@ from flask import Blueprint, render_template, request, redirect, url_for, flash,
 from flask_login import login_user, logout_user, login_required, current_user
 from werkzeug.security import check_password_hash
 from app import db, login_manager
-from models import Customer, Recording, Transaction, Settings, AdminUser, ManagerMessage, CustomerMessage
+from models import Customer, Recording, Transaction, Settings, AdminUser, ManagerMessage, CustomerMessage, ConversationThread
 from datetime import datetime, timedelta
 from sqlalchemy import func
 import io
@@ -42,11 +42,14 @@ def inject_new_messages_count():
                 and_(ManagerMessage.rec_url.isnot(None), ManagerMessage.rec_url != ''),
                 ManagerMessage.source != 'ivr',
             )).scalar_subquery()
-        cm = select(func.count()).select_from(CustomerMessage).where(
+        cm = select(func.count(func.distinct(CustomerMessage.thread_id))).where(   # שיחות שממתינות לטיפול
             CustomerMessage.direction == 'in', CustomerMessage.is_read.is_(False)).scalar_subquery()
         gi = select(func.count()).select_from(GeneralInboxMessage).where(
             GeneralInboxMessage.is_read.is_(False)).scalar_subquery()
-        count = int(db.session.execute(select(mm + cm + gi)).scalar() or 0)
+        from models import NedarimMessage
+        nm = select(func.count()).select_from(NedarimMessage).where(
+            NedarimMessage.is_read.is_(False)).scalar_subquery()
+        count = int(db.session.execute(select(mm + cm + gi + nm)).scalar() or 0)
     except Exception:
         count = 0
     try:
@@ -875,13 +878,7 @@ def customer_detail(id):
                         .filter(ManuscriptPage.customer_id == id)
                         .order_by(ProofingRound.requested_at.desc()).all())
     threads = ConversationThread.query.filter_by(customer_id=id).order_by(ConversationThread.created_at.desc()).all()
-    # צפייה בעמוד מסמנת הודעות נכנסות כ"נקראו" בכל השיחות - כדי שהתראה בעמוד הודעות למנהל תיעלם
-    unread = [m for t in threads for m in t.messages if m.direction == 'in' and not m.is_read]
-    # טעינה מוקדמת בריחוף (Turbo prefetch) - הלקוח עוד לא נפתח בפועל, לא מסמנים כנקרא
-    if unread and request.headers.get('X-Sec-Purpose') != 'prefetch':
-        for m in unread:
-            m.is_read = True
-        db.session.commit()
+    # הודעות נכנסות נשארות "חדשות" עד לחיצה על "טופל" (עם הסבר) - צפייה בעמוד לא מנקה אותן
     return render_template('admin/customer_detail.html',
         customer=customer, recordings=recordings, transactions=transactions,
         ocr_results=ocr_results, manuscript_pages=manuscript_pages, proofing_rounds=proofing_rounds,
@@ -1891,13 +1888,116 @@ def manager_messages():
             customer_ids[row[0]] = row[1]
         for row in Customer.query.filter(Customer.phone.in_(phones)).with_entities(Customer.phone, Customer.id):
             customer_ids[row[0]] = row[1]
-    unread_replies = CustomerMessage.query.filter_by(direction='in', is_read=False) \
-        .order_by(CustomerMessage.created_at.desc()).all()
+    tab = request.args.get('tab', 'phone')
+    if tab not in ('phone', 'inbox', 'customers', 'nedarim'):
+        tab = 'phone'
+    ctx = dict(messages=messages, status_filter=status_filter, timedelta=timedelta,
+               customer_ids=customer_ids, tab=tab, counts=_message_tab_counts())
+    if tab == 'inbox':
+        from models import GeneralInboxMessage
+        ctx['threads'] = GeneralInboxMessage.query.order_by(
+            GeneralInboxMessage.is_read.asc(), GeneralInboxMessage.updated_at.desc()).all()
+    elif tab == 'customers':
+        ctx.update(_customer_threads_overview())
+    elif tab == 'nedarim':
+        from models import NedarimMessage
+        from services import nedarim_messages as NM
+        from services.customer_phones import find_customer_by_phone
+        nmsgs = NedarimMessage.query.order_by(NedarimMessage.is_read.asc(),
+                                              NedarimMessage.nedarim_id.desc()).limit(300).all()
+        ncust = {}
+        for m in nmsgs:
+            ph = re.sub(r'\D', '', m.client_phone or '')
+            if ph and ph not in ncust:
+                try:
+                    c = find_customer_by_phone(ph)
+                except Exception:
+                    c = None
+                ncust[ph] = c.id if c else None
+        ctx.update(nedarim_msgs=nmsgs, nedarim_customers=ncust, nedarim_configured=NM.is_configured(),
+                   nedarim_error=NM.last_error(), nedarim_last_poll=get_setting('nedarim_msgs_last_poll', ''),
+                   nedarim_record_url=NM.RECORD_URL)
+    return render_template('admin/manager_messages.html', **ctx)
+
+
+@admin_bp.route('/nedarim-messages/refresh', methods=['POST'])
+@login_required
+def nedarim_messages_refresh():
+    """בדיקה מיידית של הודעות חדשות בנדרים פלוס (בלי לחכות 10 דקות)."""
+    from services import nedarim_messages as NM
+    added, err = NM.fetch_new(force=True)
+    flash(f'⚠ {err}' if err else (f'✔ נוספו {added} הודעות חדשות' if added else '✔ אין הודעות חדשות'))
+    return redirect(url_for('admin.manager_messages', tab='nedarim'))
+
+
+@admin_bp.route('/nedarim-messages/<int:id>/handled', methods=['POST'])
+@login_required
+def nedarim_message_handled(id):
+    from models import NedarimMessage
+    m = NedarimMessage.query.get_or_404(id)
+    note = _handled_note_from_form()
+    if not note:
+        flash('⚠ יש לכתוב מה נעשה לפני הסימון "טופל"')
+        return redirect(url_for('admin.manager_messages', tab='nedarim'))
+    m.is_read = True
+    m.handled_note = note
+    m.handled_at = datetime.utcnow()
+    db.session.commit()
+    flash('✔ סומן כטופל')
+    return redirect(url_for('admin.manager_messages', tab='nedarim'))
+
+
+def _message_tab_counts():
+    """כמה חדשים (שלא סומנו "טופל") יש בכל לשונית של הודעות למנהל."""
+    from sqlalchemy import or_, and_, func as _f
     from models import GeneralInboxMessage
-    unread_inbox_count = GeneralInboxMessage.query.filter_by(is_read=False).count()
-    return render_template('admin/manager_messages.html', messages=messages,
-        status_filter=status_filter, timedelta=timedelta, unread_replies=unread_replies,
-        unread_inbox_count=unread_inbox_count, customer_ids=customer_ids)
+    phone = ManagerMessage.query.filter(ManagerMessage.status == 'new', or_(
+        and_(ManagerMessage.rec_url.isnot(None), ManagerMessage.rec_url != ''),
+        ManagerMessage.source != 'ivr')).count()
+    inbox = GeneralInboxMessage.query.filter_by(is_read=False).count()
+    customers = (db.session.query(_f.count(_f.distinct(CustomerMessage.thread_id)))
+                 .filter(CustomerMessage.direction == 'in', CustomerMessage.is_read.is_(False)).scalar() or 0)
+    from models import NedarimMessage
+    nedarim = NedarimMessage.query.filter_by(is_read=False).count()
+    return {'phone': phone, 'inbox': inbox, 'customers': int(customers), 'nedarim': nedarim}
+
+
+def _customer_threads_overview():
+    """לשונית "הודעות מלקוחות": שיחות שממתינות לטיפול, ורשימת כל הלקוחות שהייתה איתם התכתבות."""
+    from sqlalchemy import func as _f
+    # שיחות עם הודעה נכנסת שלא טופלה - הודעה אחרונה מכל שיחה
+    pending_ids = [r[0] for r in db.session.query(CustomerMessage.thread_id)
+                   .filter(CustomerMessage.direction == 'in', CustomerMessage.is_read.is_(False))
+                   .distinct().all()]
+    pending = []
+    if pending_ids:
+        for t in ConversationThread.query.filter(ConversationThread.id.in_(pending_ids)).all():
+            ins = [m for m in t.messages if m.direction == 'in' and not m.is_read]
+            last = max(ins, key=lambda m: m.created_at)
+            pending.append({'thread': t, 'customer': Customer.query.get(t.customer_id),
+                            'last': last, 'count': len(ins)})
+        pending.sort(key=lambda p: p['last'].created_at, reverse=True)
+    # כל הלקוחות שהייתה איתם התכתבות
+    rows = (db.session.query(CustomerMessage.customer_id,
+                             _f.count(CustomerMessage.id),
+                             _f.max(CustomerMessage.created_at),
+                             _f.count(_f.distinct(CustomerMessage.thread_id)))
+            .group_by(CustomerMessage.customer_id)
+            .order_by(_f.max(CustomerMessage.created_at).desc()).all())
+    custs = {c.id: c for c in Customer.query.filter(Customer.id.in_([r[0] for r in rows])).all()} if rows else {}
+    last_notes = {}
+    for cid, note, at in (db.session.query(CustomerMessage.customer_id, CustomerMessage.handled_note,
+                                           CustomerMessage.handled_at)
+                          .filter(CustomerMessage.handled_note.isnot(None))
+                          .order_by(CustomerMessage.handled_at.asc()).all()):
+        last_notes[cid] = (note, at)
+    pending_by_cust = {}
+    for p in pending:
+        pending_by_cust[p['thread'].customer_id] = pending_by_cust.get(p['thread'].customer_id, 0) + 1
+    corr = [{'customer': custs.get(r[0]), 'messages': r[1], 'last_at': r[2], 'threads': r[3],
+             'note': last_notes.get(r[0]), 'pending': pending_by_cust.get(r[0], 0)}
+            for r in rows if custs.get(r[0])]
+    return {'pending_threads': pending, 'correspondents': corr}
 
 
 # --- קריין והודעות מערכת (services/narrator.py) ---
@@ -2822,12 +2922,73 @@ def _send_inbox_reply_email(to_email, subject, body, message_id, in_reply_to=Non
 @admin_bp.route('/inbox')
 @login_required
 def general_inbox():
+    """התיבה הכללית היא עכשיו לשונית בתוך "הודעות למנהל"."""
+    return redirect(url_for('admin.manager_messages', tab='inbox'))
+
+
+def _handled_note_from_form():
+    return (request.form.get('note') or '').strip()[:2000]
+
+
+@admin_bp.route('/inbox/<int:id>/handled', methods=['POST'])
+@login_required
+def inbox_thread_handled(id):
+    """סימון שרשור בתיבה הכללית כ"טופל", עם הסבר מה נעשה (חובה)."""
     from models import GeneralInboxMessage
-    threads = GeneralInboxMessage.query.order_by(GeneralInboxMessage.updated_at.desc()).all()
-    # שימו לב: בכוונה לא מסמנים כאן כלום כ"נקרא" - רק צפייה בפועל בשרשור ספציפי
-    # (inbox_thread_detail למטה) מסמנת אותו. אחרת עצם טעינת הרשימה הזו הייתה
-    # מנקה את כל ההתראות במחי יד, גם עבור שרשורים שלא נפתחו בפועל בכלל.
-    return render_template('admin/inbox.html', threads=threads)
+    thread = GeneralInboxMessage.query.get_or_404(id)
+    note = _handled_note_from_form()
+    if not note:
+        flash('⚠ יש לכתוב מה נעשה לפני הסימון "טופל"')
+        return redirect(request.referrer or url_for('admin.manager_messages', tab='inbox'))
+    thread.is_read = True
+    thread.handled_note = note
+    thread.handled_at = datetime.utcnow()
+    db.session.commit()
+    flash('✔ סומן כטופל')
+    return redirect(url_for('admin.manager_messages', tab='inbox'))
+
+
+@admin_bp.route('/threads/<int:tid>/handled', methods=['POST'])
+@login_required
+def customer_thread_handled(tid):
+    """סימון שיחה עם לקוח כ"טופלה": כל ההודעות הנכנסות שלא טופלו מסומנות, וההסבר
+    נשמר על ההודעה הנכנסת האחרונה."""
+    thread = ConversationThread.query.get_or_404(tid)
+    note = _handled_note_from_form()
+    if not note:
+        flash('⚠ יש לכתוב מה נעשה לפני הסימון "טופל"')
+        return redirect(request.referrer or url_for('admin.manager_messages', tab='customers'))
+    pending = (CustomerMessage.query.filter_by(thread_id=tid, direction='in', is_read=False)
+               .order_by(CustomerMessage.created_at.asc()).all())
+    now = datetime.utcnow()
+    for m in pending:
+        m.is_read = True
+        m.handled_at = now
+    if pending:
+        pending[-1].handled_note = note
+    db.session.commit()
+    flash('✔ השיחה סומנה כטופלה')
+    back = request.form.get('back')
+    if back == 'customer':
+        return redirect(url_for('admin.customer_detail', id=thread.customer_id) + f'#thread-{tid}')
+    return redirect(url_for('admin.manager_messages', tab='customers'))
+
+
+@admin_bp.route('/messages/<int:id>/handled', methods=['POST'])
+@login_required
+def manager_message_handled(id):
+    """הודעת טלפון/מערכת - "טופל" עם הסבר: הסטטוס הופך ל'טופל' וההסבר נכתב בהערה."""
+    msg = ManagerMessage.query.get_or_404(id)
+    note = _handled_note_from_form()
+    if not note:
+        flash('⚠ יש לכתוב מה נעשה לפני הסימון "טופל"')
+        return redirect(request.referrer or url_for('admin.manager_messages'))
+    old = (msg.admin_note or '').strip()
+    msg.admin_note = f'{old}\n✔ טופל: {note}' if old else f'✔ טופל: {note}'
+    msg.status = 'done'
+    db.session.commit()
+    flash('✔ סומן כטופל')
+    return redirect(url_for('admin.manager_messages', status=request.form.get('return_filter', '')))
 
 
 @admin_bp.route('/inbox/<int:id>')
@@ -2835,9 +2996,7 @@ def general_inbox():
 def inbox_thread_detail(id):
     from models import GeneralInboxMessage
     thread = GeneralInboxMessage.query.get_or_404(id)
-    if not thread.is_read and request.headers.get('X-Sec-Purpose') != 'prefetch':
-        thread.is_read = True
-        db.session.commit()
+    # בכוונה לא מסמנים כנקרא בצפייה - רק בלחיצה על "טופל" (inbox_thread_handled)
     return render_template('admin/inbox_thread.html', thread=thread,
                            attachments=_attachments_for('inbox_message_id', [m.id for m in thread.messages]))
 
@@ -2861,8 +3020,7 @@ def reply_inbox_thread(id):
 
     msg = InboxMessage(thread_id=thread.id, direction='out', body=body, message_id=new_message_id)
     db.session.add(msg)
-    thread.is_read = True
-    db.session.commit()
+    db.session.commit()      # תשובה לא מסמנת "טופל" - רק הכפתור עם ההסבר
 
     reply_subject = thread.subject or 'תמלול פון'
     if not reply_subject.lower().startswith('re:'):
@@ -2891,7 +3049,7 @@ def delete_inbox_message(id):
     db.session.delete(thread)
     db.session.commit()
     flash('השרשור נמחק')
-    return redirect(url_for('admin.general_inbox'))
+    return redirect(url_for('admin.manager_messages', tab='inbox'))
 
 
 @admin_bp.route('/inbox/<int:id>/assign', methods=['POST'])

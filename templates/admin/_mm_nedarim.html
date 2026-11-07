@@ -1,0 +1,67 @@
+<div class="mm-info">
+  <div class="mm-info-icon">💳</div>
+  <div>
+    <div class="mm-info-title">הודעות להנהלה מנדרים פלוס</div>
+    <div class="mm-info-text">
+      הודעות שאנשים שולחים להנהלה דרך נדרים פלוס ("הודעות לגבאי"). השרת בודק אם יש חדשות בערך כל 10 דקות.
+      המשיכה <b>לא מסמנת אותן כנקראו</b> בנדרים פלוס. כאן כל הודעה נשארת חדשה עד שלוחצים <b>✔ טופל</b>.
+    </div>
+  </div>
+</div>
+
+{% if not nedarim_configured %}
+<div class="mm-info" style="background:rgba(245,158,11,.1);border-color:rgba(245,158,11,.4)">
+  <div class="mm-info-icon">🔑</div>
+  <div>
+    <div class="mm-info-title">החיבור עדיין לא מוגדר</div>
+    <div class="mm-info-text">
+      צריך מפתח API של נדרים פלוס:
+      <ul>
+        <li>בנדרים פלוס: <b>הגדרות ← API ← מפתחות API</b>, יוצרים מפתח חדש (מתחיל ב-<span dir="ltr">npk_</span>).</li>
+        <li>ב-Railway, במשתני הסביבה של השרת: <b dir="ltr">NEDARIM_API_KEY</b> = המפתח.</li>
+        <li>מספר המוסד נלקח מ-<b dir="ltr">NEDARIM_MOSAD</b>, שכבר מוגדר.</li>
+      </ul>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:14px">
+  <form method="POST" action="{{ url_for('admin.nedarim_messages_refresh') }}"
+        onsubmit="var b=this.querySelector('button');setTimeout(function(){b.disabled=true;b.textContent='⏳ בודק...'},0);return true">
+    <button class="btn btn-primary" type="submit" {% if not nedarim_configured %}disabled{% endif %}>🔄 בדוק עכשיו</button>
+  </form>
+  {% if nedarim_last_poll %}<span style="font-size:12px;color:var(--text2)">בדיקה אחרונה: {{ nedarim_last_poll[:16].replace('T', ' ') }} (UTC)</span>{% endif %}
+  {% if nedarim_error %}<span style="font-size:12px;color:#ef4444">⚠ {{ nedarim_error }}</span>{% endif %}
+</div>
+
+<div class="table-card">
+  <div class="table-header"><span class="table-title">הודעות</span></div>
+  {% if not nedarim_msgs %}
+  <div style="padding:16px;color:var(--text2);font-size:13px">עוד לא התקבלו הודעות מנדרים פלוס.</div>
+  {% else %}
+  <table>
+    <thead><tr><th style="width:140px">נשלחה</th><th style="width:190px">שולח</th><th>ההודעה</th><th style="width:110px"></th></tr></thead>
+    <tbody>
+    {% for m in nedarim_msgs %}
+      {% set ph = m.client_phone|replace('-', '')|replace(' ', '') %}
+      {% set cid = nedarim_customers.get(ph) %}
+      <tr style="{% if not m.is_read %}font-weight:600{% endif %}">
+        <td style="font-size:12px">{% if not m.is_read %}<span class="mm-new-dot">●</span> {% endif %}{{ m.send_date }}</td>
+        <td>
+          <div>{{ m.client_name or '—' }}</div>
+          {% if m.client_phone %}<div style="font-size:12px">{% if cid %}<a href="{{ url_for('admin.customer_detail', id=cid) }}" style="color:var(--accent,#6c8cff);font-weight:700;text-decoration:none" title="לכרטיס הלקוח">{{ m.client_phone }}</a>{% else %}<span style="color:var(--text2)">{{ m.client_phone }}</span>{% endif %}</div>{% endif %}
+          {% if m.masof_name %}<div style="font-size:11px;color:var(--text2)">מסוף: {{ m.masof_name }}</div>{% endif %}
+        </td>
+        <td style="font-size:13px;font-weight:400">
+          {% if m.message %}<div class="msg-tx" onclick="this.classList.toggle('open')">{{ m.message }}</div>{% endif %}
+          {% if m.record_file %}<a href="{{ nedarim_record_url.format(m.record_file) }}" target="_blank" rel="noopener" class="msg-play" style="display:inline-block;margin-top:4px;text-decoration:none">▶ הודעה קולית</a>{% endif %}
+          {% if m.is_read and m.handled_note %}<div class="mm-note">✔ {{ m.handled_note }}{% if m.handled_at %} · {{ m.handled_at | il_time('%d/%m %H:%M') }}{% endif %}</div>{% endif %}
+        </td>
+        <td>{% if not m.is_read %}<button type="button" class="mm-done-btn wide" onclick='openHandled("{{ url_for("admin.nedarim_message_handled", id=m.id) }}", {{ ("הודעה מ" ~ (m.client_name or m.client_phone or "נדרים פלוס"))|tojson }})'>✔ טופל</button>{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>

@@ -521,7 +521,9 @@ class CustomerMessage(db.Model):
     # כל יצירה של הודעה נכנסת (direction='in') חייבת להעביר is_read=False
     # במפורש, אחרת היא תיווצר כבר "נקראה" ולעולם לא תפעיל התראה - בדיוק הבאג
     # שנמצא ותוקן ב-general_inbox() (routes/admin.py).
-    is_read = db.Column(db.Boolean, default=True)
+    is_read = db.Column(db.Boolean, default=True)   # הודעה נכנסת: False עד שמסמנים "טופל" (עם הסבר)
+    handled_note = db.Column(db.Text)                # מה נעשה - נכתב בלחיצה על "טופל"
+    handled_at = db.Column(db.DateTime)
     message_id = db.Column(db.String(255))  # Message-ID שקבענו לעצמנו, לשרשור אמיתי (In-Reply-To/References)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
 
@@ -543,6 +545,27 @@ class CallLog(db.Model):
     duration_seconds = db.Column(db.Integer, nullable=True)
 
 
+class NedarimMessage(db.Model):
+    """הודעה שנשלחה להנהלה דרך נדרים פלוס ("הודעות לגבאי" - Action=GetUserMessage).
+    נמשכת אוטומטית בערך כל 10 דקות (services/nedarim_messages.py), ומוצגת בלשונית
+    "נדרים פלוס" בהודעות למנהל. חדשה עד שמסמנים "טופל" עם הסבר."""
+    __tablename__ = 'nedarim_messages'
+    id = db.Column(db.Integer, primary_key=True)
+    nedarim_id = db.Column(db.BigInteger, unique=True, nullable=False, index=True)   # ID בנדרים פלוס
+    send_date = db.Column(db.String(40))          # תאריך השליחה כפי שנדרים פלוס מחזירים
+    client_name = db.Column(db.String(200))
+    client_phone = db.Column(db.String(40))
+    client_address = db.Column(db.String(300))
+    client_id = db.Column(db.String(40))          # מזהה תורם בנדרים פלוס
+    message = db.Column(db.Text)
+    masof_name = db.Column(db.String(200))
+    record_file = db.Column(db.String(100))       # מזהה הקלטה, אם נשלחה הודעה קולית
+    is_read = db.Column(db.Boolean, default=False)
+    handled_note = db.Column(db.Text)
+    handled_at = db.Column(db.DateTime)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
+
 class GeneralInboxMessage(db.Model):
     """שרשור פנייה מגורם שלא זוהה כלקוח רשום (לא נמצא מספר טלפון בנושא שתואם
     ללקוח קיים) - מקביל ל-ConversationThread, אבל מזוהה לפי כתובת מייל בלבד
@@ -554,7 +577,9 @@ class GeneralInboxMessage(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     from_email = db.Column(db.String(255), nullable=False, index=True)
     subject = db.Column(db.String(500))
-    is_read = db.Column(db.Boolean, default=False)
+    is_read = db.Column(db.Boolean, default=False)   # False עד שמסמנים "טופל" (צפייה/תשובה לא מנקות)
+    handled_note = db.Column(db.Text)                 # מה נעשה - נכתב בלחיצה על "טופל"
+    handled_at = db.Column(db.DateTime)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, index=True)
 

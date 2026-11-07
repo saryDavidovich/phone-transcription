@@ -124,6 +124,13 @@ def create_app():
         _migrate_db()
         _create_default_admin()
 
+    # משיכת "הודעות לגבאי" מנדרים פלוס ברקע, בערך כל 10 דקות (services/nedarim_messages.py)
+    try:
+        from services import nedarim_messages
+        nedarim_messages.start(app)
+    except Exception as e:
+        logging.getLogger(__name__).warning(f'nedarim messages: לא הופעל ({e})')
+
     # פילטר להצגת זמן לפי אזור זמן ישראל - מטפל אוטומטית בשעון קיץ/חורף
     # (לא כמו hours=3 קבוע שהיה שגוי בחורף, כשישראל היא UTC+2 ולא UTC+3)
     from zoneinfo import ZoneInfo
@@ -511,6 +518,10 @@ def _migrate_db():
         "ALTER TABLE proofing_rounds ADD COLUMN IF NOT EXISTS fax_campaign_id VARCHAR(64)",
         "ALTER TABLE proofing_rounds ADD COLUMN IF NOT EXISTS fax_status VARCHAR(32)",
         "ALTER TABLE proofing_rounds ADD COLUMN IF NOT EXISTS fax_status_note TEXT",
+        "ALTER TABLE customer_messages ADD COLUMN IF NOT EXISTS handled_note TEXT",
+        "ALTER TABLE customer_messages ADD COLUMN IF NOT EXISTS handled_at TIMESTAMP",
+        "ALTER TABLE general_inbox_messages ADD COLUMN IF NOT EXISTS handled_note TEXT",
+        "ALTER TABLE general_inbox_messages ADD COLUMN IF NOT EXISTS handled_at TIMESTAMP",
         "CREATE INDEX IF NOT EXISTS ix_proofing_rounds_fax_campaign_id ON proofing_rounds (fax_campaign_id)",
         # שינוי מינוח: "מסמכים כלליים" -> "קלדנות דיגיטלית" (הלקוחות לא
         # אמורים לדעת שמדובר בהקראה בטלפון) - מתקן גם את לקוחות-הדמה

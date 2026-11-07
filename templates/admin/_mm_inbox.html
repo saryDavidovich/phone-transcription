@@ -1,0 +1,55 @@
+<div class="mm-info">
+  <div class="mm-info-icon">📥</div>
+  <div>
+    <div class="mm-info-title">מיילים שהמערכת לא הצליחה לשייך ללקוח</div>
+    <div class="mm-info-text">
+      מיילים שהגיעו לכתובת הראשית, בלי מספר טלפון של לקוח רשום ובלי קשר לשיחה קיימת.
+      <ul>
+        <li>💬 <b>להשיב</b>: הצד השני יכול לענות בחזרה, והתשובה תיכנס לאותו שרשור.</li>
+        <li>👤 <b>לשייך ללקוח</b> לפי טלפון: השרשור עובר לכרטיס שלו.</li>
+        <li>✔ <b>טופל</b>: רק זה מוריד את הסימון האדום. צפייה או תשובה לא מורידות אותו.</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<div class="table-card">
+  <div class="table-header"><span class="table-title">שרשורים</span></div>
+  {% if not threads %}
+  <div style="padding:16px;color:var(--text2);font-size:13px">אין הודעות בתיבה הכללית.</div>
+  {% else %}
+  <table>
+    <thead>
+      <tr>
+        <th style="width:150px">עדכון אחרון</th>
+        <th>מאת</th>
+        <th>נושא</th>
+        <th style="width:70px">הודעות</th>
+        <th style="width:150px"></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for t in threads %}
+      <tr style="{% if not t.is_read %}font-weight:700{% endif %}">
+        <td style="font-size:12px">{{ t.updated_at | il_time }}</td>
+        <td dir="ltr" style="text-align:right">{{ t.from_email }}</td>
+        <td>
+          <a href="{{ url_for('admin.inbox_thread_detail', id=t.id) }}" style="color:var(--accent);text-decoration:none">
+            {% if not t.is_read %}<span class="mm-new-dot">●</span> {% endif %}{{ t.subject or '(ללא נושא)' }}
+          </a>
+          {% if t.is_read and t.handled_note %}<div class="mm-note" style="font-weight:400">✔ {{ t.handled_note }}{% if t.handled_at %} · {{ t.handled_at | il_time('%d/%m %H:%M') }}{% endif %}</div>{% endif %}
+        </td>
+        <td>{{ t.messages|length }}</td>
+        <td style="white-space:nowrap">
+          {% if not t.is_read %}<button type="button" class="mm-done-btn" onclick='openHandled("{{ url_for("admin.inbox_thread_handled", id=t.id) }}", {{ (t.subject or t.from_email)|tojson }})'>✔ טופל</button>{% endif %}
+          <form method="POST" action="{{ url_for('admin.delete_inbox_message', id=t.id) }}" style="display:inline"
+                onsubmit="return confirm('למחוק את השרשור הזה לצמיתות?')">
+            <button type="submit" class="btn btn-danger" style="font-size:12px;padding:4px 10px">🗑</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>

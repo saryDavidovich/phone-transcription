@@ -1,0 +1,60 @@
+<div class="mm-info">
+  <div class="mm-info-icon">💬</div>
+  <div>
+    <div class="mm-info-title">התכתבות עם לקוחות</div>
+    <div class="mm-info-text">
+      תשובות שלקוחות שלחו בשיחות שנפתחו מכרטיס הלקוח. שיחה נשארת כאן עד שלוחצים <b>✔ טופל</b> וכותבים מה נעשה.
+      למטה יש רשימה של כל הלקוחות שהייתה איתם התכתבות.
+    </div>
+  </div>
+</div>
+
+<div class="table-card" style="margin-bottom:22px">
+  <div class="table-header"><span class="table-title">🔴 ממתינות לטיפול ({{ pending_threads|length }})</span></div>
+  {% if not pending_threads %}
+  <div style="padding:16px;color:var(--text2);font-size:13px">אין שיחות שממתינות לטיפול 👍</div>
+  {% else %}
+  <table>
+    <thead><tr><th style="width:150px">התקבלה</th><th style="width:180px">לקוח</th><th>ההודעה האחרונה</th><th style="width:210px"></th></tr></thead>
+    <tbody>
+    {% for p in pending_threads %}
+      <tr>
+        <td style="font-size:12px">{{ p.last.created_at | il_time }}</td>
+        <td><a href="{{ url_for('admin.customer_detail', id=p.thread.customer_id) }}" style="font-weight:700;color:var(--accent,#6c8cff);text-decoration:none">{{ p.customer.name or p.customer.phone }}</a>
+          {% if p.customer.name %}<div style="font-size:12px;color:var(--text2)">{{ p.customer.phone }}</div>{% endif %}</td>
+        <td style="font-size:13px"><div class="msg-tx" onclick="this.classList.toggle('open')">{{ p.last.body }}</div>
+          {% if p.count > 1 %}<div style="font-size:11px;color:var(--text2)">ועוד {{ p.count - 1 }} הודעות שלא טופלו</div>{% endif %}</td>
+        <td style="white-space:nowrap">
+          <a href="{{ url_for('admin.customer_detail', id=p.thread.customer_id) }}#thread-{{ p.thread.id }}" class="btn btn-sm btn-primary">פתח שיחה</a>
+          <button type="button" class="mm-done-btn wide" onclick='openHandled("{{ url_for("admin.customer_thread_handled", tid=p.thread.id) }}", {{ ("שיחה עם " ~ (p.customer.name or p.customer.phone))|tojson }})'>✔ טופל</button>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>
+
+<div class="table-card">
+  <div class="table-header"><span class="table-title">📇 לקוחות שהייתה איתם התכתבות ({{ correspondents|length }})</span></div>
+  {% if not correspondents %}
+  <div style="padding:16px;color:var(--text2);font-size:13px">עוד לא הייתה התכתבות עם לקוחות.</div>
+  {% else %}
+  <table>
+    <thead><tr><th style="width:180px">לקוח</th><th style="width:150px">הודעה אחרונה</th><th style="width:90px">שיחות</th><th style="width:90px">הודעות</th><th>הטיפול האחרון</th></tr></thead>
+    <tbody>
+    {% for c in correspondents %}
+      <tr style="cursor:pointer" onclick="location='{{ url_for('admin.customer_detail', id=c.customer.id) }}'">
+        <td><a href="{{ url_for('admin.customer_detail', id=c.customer.id) }}" style="font-weight:700;color:var(--accent,#6c8cff);text-decoration:none" onclick="event.stopPropagation()">{{ c.customer.name or c.customer.phone }}</a>
+          {% if c.pending %} <span class="mm-new-dot" title="ממתינה לטיפול">●</span>{% endif %}
+          {% if c.customer.name %}<div style="font-size:12px;color:var(--text2)">{{ c.customer.phone }}</div>{% endif %}</td>
+        <td style="font-size:12px">{{ c.last_at | il_time }}</td>
+        <td>{{ c.threads }}</td>
+        <td>{{ c.messages }}</td>
+        <td style="font-size:12px">{% if c.note %}<span style="color:#22c55e">✔</span> {{ c.note[0] }}{% if c.note[1] %} <span style="color:var(--text2)">· {{ c.note[1] | il_time('%d/%m') }}</span>{% endif %}{% else %}<span style="color:var(--text2)">—</span>{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>
