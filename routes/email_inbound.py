@@ -2309,8 +2309,8 @@ _GUIDANCE_MESSAGES = {
     'no_attachment': lambda phone: f'''
 לא נמצא קובץ הקלטת אודיו מצורף למייל שנשלח עם הנושא <b>{phone}</b>.<br><br>
 יש לצרף את קובץ ההקלטה למייל, או לשלוח קישור Google Drive לקובץ משותף.<br><br>
-אם הקובץ גדול מ-25MB, ניתן להעלות אותו ל-Google Drive, לשתף אותו
-("כל מי שיש לו קישור יכול לצפות"), ולשלוח את הקישור בגוף המייל (ללא קובץ מצורף).
+אם הקבצים גדולים מ-20MB בסך הכל, שלחו אותם דרך ג'מבו מייל (jumbomail.me) לכתובת המערכת עם אותה שורת נושא,
+או העלו אותם ל-Google Drive, שתפו ("כל מי שיש לו קישור יכול לצפות"), ושלחו את הקישורים בגוף המייל (ללא קובץ מצורף).
 ''',
     'gdrive_download_failed': lambda phone: f'''
 לא הצלחנו להוריד את הקובץ מהקישור Google Drive שנשלח במייל עם הנושא <b>{phone}</b>.<br><br>
@@ -2526,7 +2526,7 @@ def _send_instructions_email(to_email, phone, name=''):
 🎵 <b>אודיו:</b> MP3, WAV, M4A, OGG, FLAC, AAC, OPUS, WEBM<br>
 🎬 <b>וידאו:</b> MP4, MOV, AVI, MKV, 3GP<br>
 </p>
-<p style="margin:8px 0 0;font-size:13px;color:#6b7280">אפשר לצרף כמה קבצים באותו מייל (או כמה קישורי Drive / ג'מבו מייל) - כל קובץ יתומלל בנפרד ויישלח אליכם במייל נפרד. גודל מקסימלי מומלץ: 25MB.</p>
+<p style="margin:8px 0 0;font-size:13px;color:#6b7280">אפשר לצרף כמה קבצים באותו מייל (או כמה קישורי Drive / ג'מבו מייל) - כל קובץ יתומלל בנפרד ויישלח אליכם במייל נפרד. גודל מקסימלי: 20MB לכל המייל יחד.</p>
 </div>
 
 <div style="background:#fffbeb;border-right:4px solid #f59e0b;padding:14px;margin:16px 0;border-radius:8px">
@@ -2539,10 +2539,12 @@ def _send_instructions_email(to_email, phone, name=''):
 </div>
 
 <div style="background:#eff6ff;border-right:4px solid #3b82f6;padding:14px;margin:16px 0;border-radius:8px">
-<p style="margin:0 0 8px;font-weight:700;color:#1e40af">📁 קובץ גדול מ-25MB? שלחו קישור Google Drive</p>
+<p style="margin:0 0 8px;font-weight:700;color:#1e40af">📁 קבצים מעל 20MB? שלחו דרך ג'מבו מייל או Google Drive</p>
 <p style="margin:0;line-height:1.8;color:#111827;font-size:14px">
-אם הקובץ גדול מדי לצירוף רגיל, העלו אותו ל-Google Drive ושלחו את הקישור בגוף המייל (ללא קובץ מצורף).<br>
-<b>חשוב:</b> הקובץ ב-Drive חייב להיות משותף כ-"כל מי שיש לו קישור יכול לצפות".<br>
+מייל עם קבצים מצורפים מעל <b>20MB בסך הכל</b> לא יגיע אלינו. במקרה כזה:<br>
+<b>ג'מבו מייל:</b> שלחו את הקבצים דרך האתר jumbomail.me לכתובת המערכת, עם אותה שורת נושא.<br>
+<b>Google Drive:</b> העלו את הקבצים ל-Drive ושלחו את הקישורים בגוף המייל (ללא קובץ מצורף).
+הקבצים חייבים להיות משותפים כ-"כל מי שיש לו קישור יכול לצפות".<br>
 שורת הנושא נשארת זהה (מספר הטלפון + סוג תמלול כרגיל).
 </p>
 </div>
