@@ -131,6 +131,36 @@ def beep_path():
 
 
 # ---------------------------------------------------------------------------
+# צינתוק: כשנוצרת הודעה - "מצלצלים" ללקוח כדי שיחזור למערכת וישמע אותה.
+# תפוצה -> כל רשימת הצינתוקים החינמית (phones=tzl:<שם הרשימה>), חינם.
+# לקוח בודד -> המספר שלו (phones=<טלפון>). לא ברור אם ימות גובים על צינתוק כזה - לבירור.
+# שם הרשימה: TZINTUK_LIST (ברירת מחדל clients - כמו list_tzintuk בשלוחת הצינתוקים בימות).
+# ---------------------------------------------------------------------------
+def run_tzintuk(phone=None):
+    """phone=None -> לכל הרשימה. מחזיר (הצליח?, הודעה)."""
+    token = os.environ.get('YEMOT_TOKEN', '')
+    if not token:
+        return False, 'YEMOT_TOKEN לא מוגדר בשרת'
+    lst = (os.environ.get('TZINTUK_LIST') or 'clients').strip()
+    phones = f'tzl:{lst}' if not phone else ''.join(ch for ch in str(phone) if ch.isdigit())
+    params = {'token': token, 'phones': phones, 'TzintukTimeOut': 8}
+    caller = (os.environ.get('TZINTUK_CALLER_ID') or '').strip()
+    if caller:
+        params['callerId'] = caller
+    try:
+        r = requests.get('https://www.call2all.co.il/ym/api/RunTzintuk', params=params, timeout=30)
+        body = r.json()
+    except Exception as e:
+        log.warning(f'tzintuk failed: {e}')
+        return False, f'הצינתוק נכשל: {e}'
+    log.info(f'tzintuk {"list " + lst if not phone else "single"}: {body}')
+    if str(body.get('responseStatus', '')).upper() == 'OK':
+        n = body.get('callsCount') or body.get('countPhones') or ''
+        return True, ('הצינתוק נשלח' + (f' ({n} מספרים)' if n not in ('', None) else ''))
+    return False, f'ימות דחו את הצינתוק: {body.get("message") or body}'
+
+
+# ---------------------------------------------------------------------------
 # תבניות - כלליות לכל הלקוחות. טקסט, או הקלטה מוכנה (מהקריין / קובץ / הקלטה בממשק)
 # ---------------------------------------------------------------------------
 def templates():
