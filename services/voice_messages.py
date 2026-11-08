@@ -162,8 +162,12 @@ def _yemot(method, **params):
         return {'responseStatus': 'ERROR', 'message': r.text[:200]}
 
 
-def _ext_ini_ok(folder, lst, extra=''):
-    """בודק בימות שקובץ ההגדרות של השלוחה קיים ושהוא של הרשימה הנכונה (ועם השורה הנוספת, אם יש)."""
+def _ini_lines(txt):
+    return sorted(l.strip() for l in (txt or '').splitlines() if l.strip())
+
+
+def _ext_ini_ok(folder, want):
+    """בודק בימות שקובץ ההגדרות של השלוחה קיים ושהוא בדיוק ההגדרות הרצויות (בלי שורות ישנות)."""
     token = os.environ.get('YEMOT_TOKEN', '')
     try:
         r = requests.get('https://www.call2all.co.il/ym/api/DownloadFile',
@@ -171,25 +175,20 @@ def _ext_ini_ok(folder, lst, extra=''):
         txt = r.content.decode('utf-8', 'ignore') if r.status_code == 200 else ''
     except Exception:
         return False
-    return 'type=tzintuk' in txt and f'list_tzintuk={lst}' in txt and (not extra or extra in txt)
-
-
-# הצטרפות אוטומטית בלי התפריט של ימות (M3332 - הודעת מערכת שאי אפשר להחליף).
-# ימות מצרפים לזמן מוגבל בלבד: <מספר>-<יחידה> (m דקות, h שעות, d ימים, M חודשים)
-TZ_JOIN_TIME = os.environ.get('TZINTUK_JOIN_TIME', '99-M').strip() or '99-M'
+    return _ini_lines(txt) == _ini_lines(want)
 
 
 def _ensure_ext(folder, lst, extra=''):
     """יוצר שלוחת צינתוקים בימות אם צריך (UpdateExtension - UploadTextFile לבד לא יוצר תיקייה),
-    וכותב את ההגדרות. מחזיר שגיאה או None."""
+    וכותב את ההגדרות (ומוחק שורות ישנות). מחזיר שגיאה או None."""
     want = f'type=tzintuk\nlist_tzintuk={lst}\n' + extra
-    if _ext_ini_ok(folder, lst, extra.strip()):
+    if _ext_ini_ok(folder, want):
         return None
     created = _yemot('UpdateExtension', path=f'ivr2:{folder}', type='tzintuk', list_tzintuk=lst)
     log.info(f'tzintuk: UpdateExtension {folder}: {created}')
     wrote = _yemot('UploadTextFile', what=f'ivr2:{folder}/ext.ini', contents=want)
     log.info(f'tzintuk: UploadTextFile {folder}/ext.ini: {wrote}')
-    if not _ext_ini_ok(folder, lst, extra.strip()):
+    if not _ext_ini_ok(folder, want):
         return f'השלוחה {folder} לא נוצרה בימות (UpdateExtension: {created.get("message") or created})'
     log.info(f'tzintuk: נוצרה שלוחה {folder} (רשימה {lst})')
     return None
@@ -197,7 +196,7 @@ def _ensure_ext(folder, lst, extra=''):
 
 def prepare_personal(phone, action='add'):
     """שלוחת הצינתוקים האישית של המתקשר (רשימה c<טלפון>):
-    add    -> <תיקיית אב>/<טלפון> - הרשמה אוטומטית, בלי תפריט (accumulation_to_tzintuk_limited_time).
+    add    -> <תיקיית אב>/<טלפון> - תפריט הצינתוקים של ימות (1 הרשמה, 2 הסרה וכו').
     remove -> <תיקיית אב>/<טלפון>/2 - הסרה מיידית, בלי תפריט (tzintuk_type=removing_to_list).
     מחזיר (נתיב או None, שגיאה או None)."""
     from app import db
@@ -208,7 +207,7 @@ def prepare_personal(phone, action='add'):
     base = f'{tzintuk_base()}/{ph}'
     lst = personal_list(ph)
     try:
-        err = _ensure_ext(base, lst, f'accumulation_to_tzintuk_limited_time={TZ_JOIN_TIME}\n')
+        err = _ensure_ext(base, lst)
         if err:
             return None, err
         if action == 'remove':
