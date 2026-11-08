@@ -38,6 +38,11 @@
   document.addEventListener('turbo:load', function () {
     var b = document.getElementById('pwaInstall'); if (b && window.__pwaPrompt) b.style.display = '';
   });
+  // העמוד האחרון שהוצג בלשונית הזו - כדי שעמוד ידע אם זה רענון/חזרה לאותו עמוד או כניסה חדשה
+  // (כרטיס לקוח: הכותרות הפתוחות נשמרות רק ברענון). מתעדכן אחרי שהסקריפטים של העמוד רצו.
+  document.addEventListener('turbo:load', function () {
+    try { sessionStorage.setItem('admPath', location.pathname); } catch (e) {}
+  });
 })();
 </script>
 <script>

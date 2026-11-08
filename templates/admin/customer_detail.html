@@ -675,10 +675,22 @@ function confirmOcrDelete() {
   .cd-tools{display:flex;gap:8px;justify-content:flex-start;margin-top:18px}
 </style>
 <script>
-(function () {   // כותרות מתקפלות: בכל כניסה לכרטיס הכל סגור, ונפתח רק מה שלוחצים עליו (בלי זיכרון)
+(function () {   // כותרות מתקפלות: כניסה חדשה לכרטיס - הכל סגור. רענון / חזרה לאותו כרטיס (למשל אחרי שמירת טופס) - נשאר מה שהיה פתוח
   var secs = document.querySelectorAll('details.cd-sec');
-  try { localStorage.removeItem('cdOpenSections'); } catch (e) {}   // ניקוי הזיכרון הישן
-  secs.forEach(function (d) { d.open = false; });
+  var key = 'cdOpen:' + location.pathname;
+  var open = [];
+  try {
+    localStorage.removeItem('cdOpenSections');   // ניקוי הזיכרון הישן
+    if (sessionStorage.getItem('admPath') === location.pathname) open = JSON.parse(sessionStorage.getItem(key) || '[]');
+    else sessionStorage.removeItem(key);
+  } catch (e) { open = []; }
+  secs.forEach(function (d) { d.open = open.indexOf(d.dataset.sec) !== -1; });
+  function save() {
+    var list = [];
+    document.querySelectorAll('details.cd-sec').forEach(function (d) { if (d.open) list.push(d.dataset.sec); });
+    try { sessionStorage.setItem(key, JSON.stringify(list)); } catch (e) {}
+  }
+  secs.forEach(function (d) { d.addEventListener('toggle', save); });
   if (location.hash) {             // קישור/חזרה לחלק מסוים (למשל אחרי שליחת טופס) - פותחים אותו
     var t = document.getElementById(location.hash.slice(1));
     var d = t && t.closest('details.cd-sec');
