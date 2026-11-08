@@ -327,11 +327,14 @@ def live_calls():
         calls = r.json().get('calls', [])
     except Exception as e:
         return jsonify({'ok': False, 'error': f'שרת ה-IVR לא ענה ({type(e).__name__})'})
-    phones = {c.get('phone') for c in calls if c.get('phone')}
+    # זיהוי כמו בכניסה לשיחה (find_customer_and_row) - גם מספר נוסף של לקוח ולא רק המספר הראשי
+    from services.customer_phones import find_customer_and_row
     by_phone = {}
-    if phones:
-        for cu in Customer.query.filter(Customer.phone.in_(phones)).all():
-            by_phone[cu.phone] = cu
+    for ph in {c.get('phone') for c in calls if c.get('phone')}:
+        try:
+            by_phone[ph] = find_customer_and_row(ph)[0]
+        except Exception:
+            db.session.rollback()
     for c in calls:
         cu = by_phone.get(c.get('phone'))
         c['name'] = (cu.name or '') if cu else ''
