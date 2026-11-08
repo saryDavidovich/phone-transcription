@@ -174,7 +174,9 @@ def _ext_ini_ok(folder, lst, extra=''):
     return 'type=tzintuk' in txt and f'list_tzintuk={lst}' in txt and (not extra or extra in txt)
 
 
-TZ_PROMPT_NUM = 254   # הקלטה מהקריין שמחליפה בשלוחה האישית את תפריט ההרשמה של ימות (M3332)
+# הצטרפות אוטומטית בלי התפריט של ימות (M3332 - הודעת מערכת שאי אפשר להחליף).
+# ימות מצרפים לזמן מוגבל בלבד: <מספר>-<יחידה> (m דקות, h שעות, d ימים, M חודשים)
+TZ_JOIN_TIME = os.environ.get('TZINTUK_JOIN_TIME', '99-M').strip() or '99-M'
 
 
 def _ensure_ext(folder, lst, extra=''):
@@ -193,21 +195,9 @@ def _ensure_ext(folder, lst, extra=''):
     return None
 
 
-def _copy_prompt(folder):
-    """מעתיק את הקלטת הקריין 254 לשלוחה בשם M3332.wav - במקום תפריט ההרשמה של ימות.
-    בלי הקלטה כזו - ימות משמיעים את התפריט שלהם."""
-    try:
-        from services import narrator as N
-        wav = N.download_current(TZ_PROMPT_NUM)
-        if wav:
-            upload_to_yemot(wav, f'{folder}/M3332.wav')
-    except Exception as e:
-        log.warning(f'tzintuk: העתקת הקלטה {TZ_PROMPT_NUM} ל-{folder} נכשלה: {e}')
-
-
 def prepare_personal(phone, action='add'):
     """שלוחת הצינתוקים האישית של המתקשר (רשימה c<טלפון>):
-    add    -> <תיקיית אב>/<טלפון> - הרשמה. תפריט ימות מוחלף בהקלטה 254 (אם הוקלטה).
+    add    -> <תיקיית אב>/<טלפון> - הרשמה אוטומטית, בלי תפריט (accumulation_to_tzintuk_limited_time).
     remove -> <תיקיית אב>/<טלפון>/2 - הסרה מיידית, בלי תפריט (tzintuk_type=removing_to_list).
     מחזיר (נתיב או None, שגיאה או None)."""
     from app import db
@@ -218,7 +208,7 @@ def prepare_personal(phone, action='add'):
     base = f'{tzintuk_base()}/{ph}'
     lst = personal_list(ph)
     try:
-        err = _ensure_ext(base, lst)
+        err = _ensure_ext(base, lst, f'accumulation_to_tzintuk_limited_time={TZ_JOIN_TIME}\n')
         if err:
             return None, err
         if action == 'remove':
@@ -228,7 +218,6 @@ def prepare_personal(phone, action='add'):
                 return None, err
         else:
             folder = base
-            _copy_prompt(base)
     except Exception as e:
         return None, f'יצירת השלוחה בימות נכשלה: {e}'
     customer = find_customer_by_phone(ph)
