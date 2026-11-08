@@ -61,7 +61,7 @@
 <meta name="turbo-prefetch-cache-time" content="15000">
 <meta name="turbo-root" content="/admin">
 <script src="/static/vendor/turbo/turbo-8.0.13.js"></script>
-<script src="/static/js/keyboards.js?v=1" defer></script>
+<script src="/static/js/keyboards.js?v=2" defer></script>
 <script>
   // טפסים: רק טופס שמסומן data-turbo="true" עובר ברענון פנימי (טופסי חיפוש/סינון - GET);
   // כל טופס ששומר/מוחק (POST) נשלח כרגיל, כמו תמיד.
@@ -148,7 +148,7 @@ body { font-family:'Heebo',sans-serif; background:var(--bg); color:var(--text); 
 .nav-pin:hover { color:var(--text); background:var(--surface2) }
 .sidebar-search { position:relative }
 .sidebar-search .search-ic { position:absolute; right:25px; top:50%; transform:translateY(-35%); color:var(--text3); pointer-events:none; display:inline-flex }
-.sidebar-search input[type=search] { padding-right:32px }
+.sidebar-search input[name=q] { padding-right:32px }
 .nav-sub a span { display:inline-flex; align-items:center; gap:6px }
 .logout-btn .nav-icon { --c:#94a3b8 }
 .logout-btn:hover .nav-icon { --c:var(--red) }
@@ -165,7 +165,7 @@ body { font-family:'Heebo',sans-serif; background:var(--bg); color:var(--text); 
   body.nav-mini .sidebar:not(:hover) .nav-pin,
   body.nav-mini .sidebar:not(:hover) .nav-badge-text { opacity:0; pointer-events:none }
   body.nav-mini .sidebar:not(:hover) .nav-sub { display:none }
-  body.nav-mini .sidebar:not(:hover) .sidebar-search input[type=search] { background:transparent; border-color:transparent; color:transparent; cursor:pointer }
+  body.nav-mini .sidebar:not(:hover) .sidebar-search input[name=q] { background:transparent; border-color:transparent; color:transparent; cursor:pointer }
   body.nav-mini .sidebar:not(:hover) .sidebar-search input::placeholder { color:transparent }
   body.nav-mini .sidebar:not(:hover) .nav-badge { position:absolute; right:38px; top:1px; min-width:17px; height:17px; padding:0 4px; font-size:10px; box-shadow:0 0 0 2px var(--surface) }
 }
@@ -178,7 +178,7 @@ body { font-family:'Heebo',sans-serif; background:var(--bg); color:var(--text); 
   body:not(.nav-open) .sidebar:not(:hover) .nav-pin,
   body:not(.nav-open) .sidebar:not(:hover) .nav-badge-text { opacity:0; pointer-events:none }
   body:not(.nav-open) .sidebar:not(:hover) .nav-sub { display:none }
-  body:not(.nav-open) .sidebar:not(:hover) .sidebar-search input[type=search] { background:transparent; border-color:transparent; color:transparent; cursor:pointer }
+  body:not(.nav-open) .sidebar:not(:hover) .sidebar-search input[name=q] { background:transparent; border-color:transparent; color:transparent; cursor:pointer }
   body:not(.nav-open) .sidebar:not(:hover) .sidebar-search input::placeholder { color:transparent }
   body:not(.nav-open) .sidebar:not(:hover) .nav-badge { position:absolute; right:38px; top:1px; min-width:17px; height:17px; padding:0 4px; font-size:10px; box-shadow:0 0 0 2px var(--surface) }
 }

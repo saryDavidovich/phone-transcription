@@ -16,9 +16,16 @@
       el.setAttribute('lang', 'en');
       el.setAttribute('dir', 'ltr');
       if (!el.getAttribute('autocomplete')) el.setAttribute('autocomplete', 'email');
+      // מחשב מגע עם Windows: מקלדת המגע בוחרת פריסה לפי סוג השדה (type) ולא לפי inputmode.
+      // שדה טקסט הופך לשדה מייל - בלי לחסום שמירה של ערך ישן לא תקין (noValidate על הטופס).
+      if (el.type === 'text' || !el.getAttribute('type')) {
+        try { el.type = 'email'; el.multiple = true; if (el.form) el.form.noValidate = true; } catch (e) {}
+      }
     });
     root.querySelectorAll('input[data-kb="num"]').forEach(function (el) {
       el.setAttribute('inputmode', 'numeric');
+      // גם כאן - ב-Windows מקלדת המספרים נפתחת לפי type=tel (אפשר עדיין להקליד שם במקלדת רגילה)
+      if (el.type !== 'tel') { try { el.type = 'tel'; } catch (e) {} }
     });
   }
   function run() { apply(document); }
