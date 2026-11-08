@@ -135,7 +135,7 @@ def beep_path():
 # - לכל לקוח רשימה אישית משלו, ובה רק הוא (c<טלפון>). כשהוא מקיש 4 בשלוחה 9, המערכת
 #   יוצרת לו (פעם אחת, ובודקת שנוצרה) שלוחת צינתוקים אישית בימות - <TZINTUK_BASE>/<טלפון>,
 #   ברירת מחדל 302/<טלפון> - ומעבירה אותו אליה כדי להירשם. צינתוק ללקוח = הרשימה האישית שלו.
-# - תפוצה: הרשימה הכללית (TZINTUK_LIST, ברירת מחדל clients) + כל הרשימות האישיות.
+# - תפוצה: כל הרשימות האישיות (הרשימה הכללית clients בוטלה).
 # לקוח שלא נרשם: צינתוק ישיר למספר (phones=<טלפון>) - ימות גובים עליו יחידות, ובממשק זה מסומן.
 # ---------------------------------------------------------------------------
 def _digits(v):
@@ -274,12 +274,11 @@ def tzintuk_customer(customer):
 
 
 def tzintuk_everyone_async():
-    """תפוצה: הרשימה הכללית + כל הרשימות האישיות, ברקע (קריאה לכל רשימה). מחזיר כמה רשימות."""
+    """תפוצה: כל הרשימות האישיות, ברקע (קריאה לכל רשימה). מחזיר כמה רשימות."""
     import threading
     import time
     from models import Customer
-    lists = [(os.environ.get('TZINTUK_LIST') or 'clients').strip()]
-    lists += [r[0] for r in Customer.query.with_entities(Customer.tzintuk_list)
+    lists = [r[0] for r in Customer.query.with_entities(Customer.tzintuk_list)
               .filter(Customer.tzintuk_list.isnot(None)).distinct().all()]
 
     def work():
