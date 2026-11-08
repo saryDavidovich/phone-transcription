@@ -566,6 +566,21 @@ class NedarimMessage(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
 
 
+class NedarimCommand(db.Model):
+    """פקודת ניהול שנשלחה מעמדת נדרים פלוס כ"הודעה לגבאי" (services/nedarim_commands.py).
+    התוצאה נשמעת בטלפון, בתפריט המנהל ← 6."""
+    __tablename__ = 'nedarim_commands'
+    id = db.Column(db.Integer, primary_key=True)
+    nedarim_message_id = db.Column(db.Integer, index=True)    # NedarimMessage.id
+    action = db.Column(db.Integer)                             # קוד הפעולה (שורה 2)
+    params = db.Column(db.Text)                                # JSON - השורות שאחרי קוד הפעולה
+    status = db.Column(db.String(20))                          # done / failed / rejected / undone
+    result = db.Column(db.Text)                                # התוצאה בעברית (להקראה)
+    undo = db.Column(db.Text)                                  # JSON - מה צריך כדי לבטל
+    heard = db.Column(db.Boolean, default=False)               # הושמע כבר בטלפון
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
+
 class GeneralInboxMessage(db.Model):
     """שרשור פנייה מגורם שלא זוהה כלקוח רשום (לא נמצא מספר טלפון בנושא שתואם
     ללקוח קיים) - מקביל ל-ConversationThread, אבל מזוהה לפי כתובת מייל בלבד

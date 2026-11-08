@@ -644,3 +644,144 @@ def process_pending():
     t = threading.Thread(target=_run_both, args=(customer.id,), daemon=True)
     t.start()
     return jsonify({'status': 'started'})
+
+
+# ---------------------------------------------------------------------------
+# תפריט המנהל בטלפון (שלוחה 0 ב-IVR): קוד סודי, מספר הודעות ממתינות, יתרת לקוח וזיכוי.
+# הקוד הסודי - משתנה הסביבה ADMIN_PHONE_PIN (בשירות web). לא מוגדר = הפעולות האלה כבויות.
+# אחרי קוד נכון חוזר "אישור" חתום (תקף 20 דקות, לשיחה הזו בלבד), וכל פעולה דורשת אותו.
+# 5 ניסיונות שגויים ברבע שעה - נעילה ל-30 דקות.
+# ---------------------------------------------------------------------------
+ADMIN_PHONE_NUMBER = '0527134491'
+_PIN_MAX_FAILS, _PIN_WINDOW_MIN, _PIN_LOCK_MIN = 5, 15, 30
+
+
+def _admin_serializer():
+    from itsdangerous import URLSafeTimedSerializer
+    return URLSafeTimedSerializer(current_app.secret_key, salt='admin-phone')
+
+
+def _admin_token_ok(token, call_id):
+    try:
+        data = _admin_serializer().loads(token or '', max_age=20 * 60)
+        return data.get('c') == (call_id or '')
+    except Exception:
+        return False
+
+
+def _pin_state():
+    import json
+    row = Settings.query.filter_by(key='admin_phone_pin_state').first()
+    try:
+        return row, json.loads(row.value) if row and row.value else {}
+    except ValueError:
+        return row, {}
+
+
+def _save_pin_state(row, st):
+    import json
+    if row is None:
+        row = Settings(key='admin_phone_pin_state')
+        db.session.add(row)
+    row.value = json.dumps(st)
+    db.session.commit()
+
+
+@api_bp.route('/admin-phone/pin', methods=['POST'])
+def admin_phone_pin():
+    import hmac as _hmac
+    import os as _os
+    from datetime import timedelta
+    d = request.get_json(silent=True) or {}
+    pin_cfg = (_os.environ.get('ADMIN_PHONE_PIN') or '').strip()
+    if not pin_cfg:
+        return jsonify({'ok': False, 'reason': 'not_configured'})
+    if (d.get('phone') or '') != ADMIN_PHONE_NUMBER:
+        return jsonify({'ok': False, 'reason': 'not_admin'})
+    row, st = _pin_state()
+    now = datetime.utcnow()
+    locked = st.get('locked_until')
+    if locked and now < datetime.fromisoformat(locked):
+        return jsonify({'ok': False, 'reason': 'locked'})
+    if _hmac.compare_digest(str(d.get('pin') or '').encode(), pin_cfg.encode()):
+        _save_pin_state(row, {})
+        return jsonify({'ok': True, 'token': _admin_serializer().dumps({'c': d.get('call_id') or ''})})
+    since = st.get('since')
+    if not since or now - datetime.fromisoformat(since) > timedelta(minutes=_PIN_WINDOW_MIN):
+        st = {'since': now.isoformat(), 'count': 0}
+    st['count'] = st.get('count', 0) + 1
+    if st['count'] >= _PIN_MAX_FAILS:
+        st['locked_until'] = (now + timedelta(minutes=_PIN_LOCK_MIN)).isoformat()
+        current_app.logger.warning('admin phone: נעילה אחרי קודים שגויים')
+    _save_pin_state(row, st)
+    return jsonify({'ok': False, 'reason': 'locked' if st.get('locked_until') else 'wrong'})
+
+
+@api_bp.route('/admin-phone/summary', methods=['POST'])
+def admin_phone_summary():
+    d = request.get_json(silent=True) or {}
+    if not _admin_token_ok(d.get('token'), d.get('call_id')):
+        return jsonify({'ok': False, 'reason': 'unauthorized'}), 401
+    from routes.admin import _message_tab_counts
+    c = _message_tab_counts()
+    return jsonify({'ok': True, **c, 'total': sum(c.values())})
+
+
+@api_bp.route('/admin-phone/customer', methods=['POST'])
+def admin_phone_customer():
+    d = request.get_json(silent=True) or {}
+    if not _admin_token_ok(d.get('token'), d.get('call_id')):
+        return jsonify({'ok': False, 'reason': 'unauthorized'}), 401
+    customer = find_customer_by_phone(str(d.get('phone') or ''))
+    if not customer:
+        return jsonify({'ok': True, 'found': False})
+    return jsonify({'ok': True, 'found': True, 'name': customer.name or '',
+                    'balance': round(customer.balance or 0, 2)})
+
+
+@api_bp.route('/admin-phone/credit', methods=['POST'])
+def admin_phone_credit():
+    from models import Transaction
+    d = request.get_json(silent=True) or {}
+    if not _admin_token_ok(d.get('token'), d.get('call_id')):
+        return jsonify({'ok': False, 'reason': 'unauthorized'}), 401
+    try:
+        amount = round(float(d.get('amount')), 2)
+    except (TypeError, ValueError):
+        return jsonify({'ok': False, 'reason': 'bad_amount'})
+    if not (0 < amount <= 500):
+        return jsonify({'ok': False, 'reason': 'bad_amount'})
+    customer = find_customer_by_phone(str(d.get('phone') or ''))
+    if not customer:
+        return jsonify({'ok': False, 'reason': 'not_found'})
+    customer.balance = round((customer.balance or 0) + amount, 2)
+    db.session.add(Transaction(customer_id=customer.id, amount=amount, type='credit',
+                               description='זיכוי מהטלפון של המנהל'))
+    db.session.commit()
+    current_app.logger.info(f'admin phone: זיכוי {amount} ללקוח {customer.id}')
+    try:
+        from routes.dictate import trigger_pending_manuscripts
+        trigger_pending_manuscripts(customer_id=customer.id)
+    except Exception:
+        pass
+    return jsonify({'ok': True, 'balance': customer.balance})
+
+
+@api_bp.route('/admin-phone/commands', methods=['POST'])
+def admin_phone_commands():
+    """תפריט מנהל ← 6: תוצאות הפקודות מנדרים פלוס."""
+    d = request.get_json(silent=True) or {}
+    if not _admin_token_ok(d.get('token'), d.get('call_id')):
+        return jsonify({'ok': False, 'reason': 'unauthorized'}), 401
+    from services import nedarim_commands
+    return jsonify({'ok': True, 'text': nedarim_commands.results_for_phone()})
+
+
+@api_bp.route('/admin-phone/help', methods=['POST'])
+def admin_phone_help():
+    """תפריט מנהל ← 7: הוראות לפקודות מנדרים פלוס."""
+    d = request.get_json(silent=True) or {}
+    if not _admin_token_ok(d.get('token'), d.get('call_id')):
+        return jsonify({'ok': False, 'reason': 'unauthorized'}), 401
+    from services import nedarim_commands
+    return jsonify({'ok': True, 'text': nedarim_commands.help_text()})

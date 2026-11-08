@@ -109,6 +109,7 @@ def fetch_new(force=False):
     if not isinstance(logs, list):
         return 0, f'תשובה לא צפויה מנדרים פלוס: {str(data)[:200]}'
     added = 0
+    new_msgs = []
     for item in logs:
         try:
             nid = int(item.get('ID'))
@@ -116,7 +117,7 @@ def fetch_new(force=False):
             continue
         if NedarimMessage.query.filter_by(nedarim_id=nid).first():
             continue
-        db.session.add(NedarimMessage(
+        nm = NedarimMessage(
             nedarim_id=nid,
             send_date=str(item.get('SendDate') or '')[:40],
             client_name=str(item.get('ClientName') or '')[:200],
@@ -126,13 +127,23 @@ def fetch_new(force=False):
             message=str(item.get('Message') or ''),
             masof_name=str(item.get('MasofName') or '')[:200],
             record_file=(str(item.get('RecordFile')) if item.get('RecordFile') else None),
-            is_read=False))
+            is_read=False)
+        db.session.add(nm)
+        new_msgs.append(nm)
         added += 1
     try:
         db.session.commit()
     except Exception as e:
         db.session.rollback()
         return 0, f'שמירת ההודעות נכשלה: {e}'
+    # פקודות ניהול מהמנהל (services/nedarim_commands.py) - לפי סדר השליחה
+    from services import nedarim_commands
+    for nm in sorted(new_msgs, key=lambda m: m.nedarim_id):
+        try:
+            nedarim_commands.handle(nm)
+        except Exception as e:
+            db.session.rollback()
+            log.exception(f'nedarim command error: {e}')
     row = Settings.query.filter_by(key='nedarim_msgs_last_error').first() or Settings(key='nedarim_msgs_last_error')
     row.value = ''
     db.session.add(row)

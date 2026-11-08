@@ -26,6 +26,19 @@
 </div>
 {% endif %}
 
+{% if nedarim_cmd_locked %}
+<div class="mm-info" style="background:rgba(239,68,68,.1);border-color:rgba(239,68,68,.45)">
+  <div class="mm-info-icon">🔒</div>
+  <div style="flex:1">
+    <div class="mm-info-title">הפקודות מנדרים פלוס נעולות</div>
+    <div class="mm-info-text">אחרי 3 קודים שגויים ברצף, הפקודות ננעלו. ההודעות עם הקוד השגוי מסומנות למטה באדום.</div>
+  </div>
+  <form method="POST" action="{{ url_for('admin.nedarim_commands_unlock') }}" onsubmit="return confirm('לפתוח את הפקודות מנדרים פלוס?')">
+    <button class="btn btn-primary" type="submit">🔓 פתיחת הפקודות</button>
+  </form>
+</div>
+{% endif %}
+
 <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:14px">
   <form method="POST" action="{{ url_for('admin.nedarim_messages_refresh') }}"
         onsubmit="var b=this.querySelector('button');setTimeout(function(){b.disabled=true;b.textContent='⏳ בודק...'},0);return true">
@@ -56,6 +69,7 @@
         <td style="font-size:13px;font-weight:400">
           {% if m.message %}<div class="msg-tx" onclick="this.classList.toggle('open')">{{ m.message }}</div>{% endif %}
           {% if m.record_file %}<a href="{{ nedarim_record_url.format(m.record_file) }}" target="_blank" rel="noopener" class="msg-play" style="display:inline-block;margin-top:4px;text-decoration:none">▶ הודעה קולית</a>{% endif %}
+          {% if not m.is_read and m.handled_note and m.handled_note.startswith('⚙') %}<div class="mm-note" style="color:#ef4444">{{ m.handled_note }}</div>{% endif %}
           {% if m.is_read and m.handled_note %}<div class="mm-note">✔ {{ m.handled_note }}{% if m.handled_at %} · {{ m.handled_at | il_time('%d/%m %H:%M') }}{% endif %}</div>{% endif %}
         </td>
         <td>{% if not m.is_read %}<button type="button" class="mm-done-btn wide" onclick='openHandled("{{ url_for("admin.nedarim_message_handled", id=m.id) }}", {{ ("הודעה מ" ~ (m.client_name or m.client_phone or "נדרים פלוס"))|tojson }})'>✔ טופל</button>{% endif %}</td>

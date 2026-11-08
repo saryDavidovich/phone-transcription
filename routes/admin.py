@@ -1342,18 +1342,24 @@ def retranscribe_recording(id):
     """שולח הקלטה שוב לתמלול (רגיל=ג'מיני / מקצועי=אלף-בוט) - חיוב ושליחה ללקוח
     בדיוק כמו תמלול רגיל. אם כבר נגבה כסף על ההקלטה, אפשר לסמן זיכוי של החיוב
     הקודם כדי שהלקוח לא ישלם פעמיים."""
-    from services.transcribe import transcribe_async
     rec = Recording.query.get_or_404(id)
-    customer = rec.customer
     back = redirect(url_for('admin.recording_detail', id=id))
-    choice = request.form.get('tier', '')
-    tier = {'regular': 'gemini', 'professional': 'premium'}.get(choice)
+    tier = {'regular': 'gemini', 'professional': 'premium'}.get(request.form.get('tier', ''))
     if not tier:
         flash('יש לבחור סוג תמלול: רגיל או מקצועי')
         return back
+    ok, msg = do_retranscribe(rec, tier, refund=request.form.get('refund') == '1')
+    flash(msg if ok else '⚠ ' + msg)
+    return back
+
+
+def do_retranscribe(rec, tier, refund=False):
+    """הלוגיקה של "תמלול מחדש" - משותפת לכפתור בממשק ולפקודות מנדרים פלוס.
+    tier: 'gemini' (רגיל) / 'premium' (מקצועי). מחזיר (הצליח?, הודעה)."""
+    from services.transcribe import transcribe_async
+    customer = rec.customer
     if not customer:
-        flash('לא נמצא לקוח משויך להקלטה')
-        return back
+        return False, 'לא נמצא לקוח משויך להקלטה'
 
     method = rec.delivery_method
     target = (rec.delivered_to or '').strip()
@@ -1361,18 +1367,16 @@ def retranscribe_recording(id):
         if (customer.email or '').strip():
             method, target = 'email', customer.email.strip()
         else:
-            flash('אין כתובת מייל/פקס למסירה ללקוח הזה - אי אפשר לשלוח את התמלול בסיום')
-            return back
+            return False, 'אין כתובת מייל/פקס למסירה ללקוח הזה - אי אפשר לשלוח את התמלול בסיום'
     if method not in ('email', 'fax'):
         method = 'email' if '@' in target else 'fax'
 
     ok, why = _recording_source_available(rec)
     if not ok:
-        flash('⚠ ' + why)
-        return back
+        return False, why
 
     prior = _recording_prior_net_charge(rec)
-    if prior > 0 and request.form.get('refund') == '1':
+    if prior > 0 and refund:
         customer.balance = (customer.balance or 0) + prior
         db.session.add(Transaction(
             customer_id=customer.id, amount=prior, type='credit', recording_id=rec.id,
@@ -1390,18 +1394,16 @@ def retranscribe_recording(id):
     rec.status = 'queued_maintenance' if maintenance_on else 'queued'
     db.session.commit()
 
+    kind = 'מקצועי' if tier == 'premium' else 'רגיל'
     if maintenance_on:
-        flash('מצב תחזוקה דלוק - ההקלטה תיכנס לתמלול (' + ('מקצועי' if tier == 'premium' else 'רגיל') + ') כשיכבה')
-        return back
+        return True, f'מצב תחזוקה דלוק - ההקלטה תיכנס לתמלול ({kind}) כשיכבה'
     transcribe_async(
         call_id=rec.call_id, rec_url=rec.rec_url, customer_id=customer.id,
         delivery_method=method, delivered_to=target,
         duration_seconds=rec.duration_seconds or 0, transcription_tier=tier,
         language=rec.language or 'he', output_language=rec.output_language or 'he',
     )
-    flash('✔ ההקלטה נשלחה שוב לתמלול ' + ('מקצועי' if tier == 'premium' else 'רגיל') +
-          ' - תחויב ותישלח ללקוח בסיום (' + target + ')')
-    return back
+    return True, f'✔ ההקלטה נשלחה שוב לתמלול {kind} - תחויב ותישלח ללקוח בסיום ({target})'
 
 _YEMOT_PATH_RE = __import__('re').compile(r'^[\w\-/.]+$')
 
@@ -1914,6 +1916,8 @@ def manager_messages():
                 except Exception:
                     c = None
                 ncust[ph] = c.id if c else None
+        from services import nedarim_commands as NC
+        ctx.update(nedarim_cmd_locked=NC.is_locked())
         ctx.update(nedarim_msgs=nmsgs, nedarim_customers=ncust, nedarim_configured=NM.is_configured(),
                    nedarim_error=NM.last_error(), nedarim_last_poll=get_setting('nedarim_msgs_last_poll', ''),
                    nedarim_record_url=NM.RECORD_URL)
@@ -1927,6 +1931,15 @@ def nedarim_messages_refresh():
     from services import nedarim_messages as NM
     added, err = NM.fetch_new(force=True)
     flash(f'⚠ {err}' if err else (f'✔ נוספו {added} הודעות חדשות' if added else '✔ אין הודעות חדשות'))
+    return redirect(url_for('admin.manager_messages', tab='nedarim'))
+
+
+@admin_bp.route('/nedarim-commands/unlock', methods=['POST'])
+@login_required
+def nedarim_commands_unlock():
+    from services import nedarim_commands
+    nedarim_commands.unlock()
+    flash('✔ הפקודות מנדרים פלוס נפתחו')
     return redirect(url_for('admin.manager_messages', tab='nedarim'))
 
 
