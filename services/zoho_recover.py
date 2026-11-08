@@ -219,6 +219,7 @@ def build_form(raw):
         'subject': str(msg.get('Subject', '')), 'headers': headers, 'text': '', 'html': '',
     }
     n = 0
+    info = {}   # כמו ה-attachment-info של SendGrid: תמונות מוטמעות בגוף (חתימה) מסומנות ב-content-id
     for part in msg.walk():
         if part.is_multipart():
             continue
@@ -228,11 +229,17 @@ def build_form(raw):
             payload = part.get_payload(decode=True) or b''
             n += 1
             data[f'attachment{n}'] = (io.BytesIO(payload), filename or f'attachment{n}', ctype)
+            cid = str(part.get('Content-ID') or '').strip('<> ')
+            entry = {'filename': filename or f'attachment{n}', 'type': ctype}
+            if cid:   # כמו SendGrid: כל חלק עם Content-ID
+                entry['content-id'] = cid
+            info[f'attachment{n}'] = entry
         elif ctype == 'text/plain' and not data['text']:
             data['text'] = part.get_content()
         elif ctype == 'text/html' and not data['html']:
             data['html'] = part.get_content()
     data['attachments'] = str(n)
+    data['attachment-info'] = __import__('json').dumps(info)
     return data
 
 
