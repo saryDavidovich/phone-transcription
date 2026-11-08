@@ -792,5 +792,5 @@ def tzintuk_prepare():
     """שלוחה 9 ← 4: יוצר (פעם אחת) את שלוחת הצינתוקים האישית של המתקשר בימות, ומחזיר את הנתיב."""
     from services import voice_messages as VM
     d = request.get_json(silent=True) or {}
-    folder, err = VM.prepare_personal(d.get('phone', ''))
+    folder, err = VM.prepare_personal(d.get('phone', ''), 'remove' if d.get('action') == 'remove' else 'add')
     return jsonify({'ok': bool(folder), 'folder': folder, 'error': err})

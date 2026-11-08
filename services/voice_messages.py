@@ -162,8 +162,8 @@ def _yemot(method, **params):
         return {'responseStatus': 'ERROR', 'message': r.text[:200]}
 
 
-def _ext_ini_ok(folder, lst):
-    """בודק בימות שקובץ ההגדרות של השלוחה קיים ושהוא של הרשימה הנכונה."""
+def _ext_ini_ok(folder, lst, extra=''):
+    """בודק בימות שקובץ ההגדרות של השלוחה קיים ושהוא של הרשימה הנכונה (ועם השורה הנוספת, אם יש)."""
     token = os.environ.get('YEMOT_TOKEN', '')
     try:
         r = requests.get('https://www.call2all.co.il/ym/api/DownloadFile',
@@ -171,36 +171,72 @@ def _ext_ini_ok(folder, lst):
         txt = r.content.decode('utf-8', 'ignore') if r.status_code == 200 else ''
     except Exception:
         return False
-    return 'type=tzintuk' in txt and f'list_tzintuk={lst}' in txt
+    return 'type=tzintuk' in txt and f'list_tzintuk={lst}' in txt and (not extra or extra in txt)
 
 
-def prepare_personal(phone):
-    """שלוחת הצינתוקים האישית של המתקשר (<תיקיית אב>/<טלפון>, רשימה c<טלפון>):
-    אם עוד לא קיימת בימות - יוצרים אותה (UpdateExtension - UploadTextFile לבד לא יוצר תיקייה),
-    כותבים את ההגדרות, ובודקים שנשמרו. מחזיר (נתיב או None, שגיאה או None)."""
+TZ_PROMPT_NUM = 254   # הקלטה מהקריין שמחליפה בשלוחה האישית את תפריט ההרשמה של ימות (M3332)
+
+
+def _ensure_ext(folder, lst, extra=''):
+    """יוצר שלוחת צינתוקים בימות אם צריך (UpdateExtension - UploadTextFile לבד לא יוצר תיקייה),
+    וכותב את ההגדרות. מחזיר שגיאה או None."""
+    want = f'type=tzintuk\nlist_tzintuk={lst}\n' + extra
+    if _ext_ini_ok(folder, lst, extra.strip()):
+        return None
+    created = _yemot('UpdateExtension', path=f'ivr2:{folder}', type='tzintuk', list_tzintuk=lst)
+    log.info(f'tzintuk: UpdateExtension {folder}: {created}')
+    wrote = _yemot('UploadTextFile', what=f'ivr2:{folder}/ext.ini', contents=want)
+    log.info(f'tzintuk: UploadTextFile {folder}/ext.ini: {wrote}')
+    if not _ext_ini_ok(folder, lst, extra.strip()):
+        return f'השלוחה {folder} לא נוצרה בימות (UpdateExtension: {created.get("message") or created})'
+    log.info(f'tzintuk: נוצרה שלוחה {folder} (רשימה {lst})')
+    return None
+
+
+def _copy_prompt(folder):
+    """מעתיק את הקלטת הקריין 254 לשלוחה בשם M3332.wav - במקום תפריט ההרשמה של ימות.
+    בלי הקלטה כזו - ימות משמיעים את התפריט שלהם."""
+    try:
+        from services import narrator as N
+        wav = N.download_current(TZ_PROMPT_NUM)
+        if wav:
+            upload_to_yemot(wav, f'{folder}/M3332.wav')
+    except Exception as e:
+        log.warning(f'tzintuk: העתקת הקלטה {TZ_PROMPT_NUM} ל-{folder} נכשלה: {e}')
+
+
+def prepare_personal(phone, action='add'):
+    """שלוחת הצינתוקים האישית של המתקשר (רשימה c<טלפון>):
+    add    -> <תיקיית אב>/<טלפון> - הרשמה. תפריט ימות מוחלף בהקלטה 254 (אם הוקלטה).
+    remove -> <תיקיית אב>/<טלפון>/2 - הסרה מיידית, בלי תפריט (tzintuk_type=removing_to_list).
+    מחזיר (נתיב או None, שגיאה או None)."""
     from app import db
     from services.customer_phones import find_customer_by_phone
     ph = _digits(phone)
     if len(ph) < 9:
         return None, 'מספר לא מזוהה'
-    folder = f'{tzintuk_base()}/{ph}'
+    base = f'{tzintuk_base()}/{ph}'
     lst = personal_list(ph)
     try:
-        if not _ext_ini_ok(folder, lst):
-            created = _yemot('UpdateExtension', path=f'ivr2:{folder}', type='tzintuk', list_tzintuk=lst)
-            log.info(f'tzintuk: UpdateExtension {folder}: {created}')
-            wrote = _yemot('UploadTextFile', what=f'ivr2:{folder}/ext.ini',
-                           contents=f'type=tzintuk\nlist_tzintuk={lst}\n')
-            log.info(f'tzintuk: UploadTextFile {folder}/ext.ini: {wrote}')
-            if not _ext_ini_ok(folder, lst):
-                return None, f'השלוחה {folder} לא נוצרה בימות (UpdateExtension: {created.get("message") or created})'
-            log.info(f'tzintuk: נוצרה שלוחה אישית {folder} (רשימה {lst})')
+        err = _ensure_ext(base, lst)
+        if err:
+            return None, err
+        if action == 'remove':
+            folder = f'{base}/2'
+            err = _ensure_ext(folder, lst, 'tzintuk_type=removing_to_list\n')
+            if err:
+                return None, err
+        else:
+            folder = base
+            _copy_prompt(base)
     except Exception as e:
         return None, f'יצירת השלוחה בימות נכשלה: {e}'
     customer = find_customer_by_phone(ph)
-    if customer and customer.tzintuk_list != lst:
-        customer.tzintuk_list = lst
-        db.session.commit()
+    if customer:
+        new_val = lst if action != 'remove' else None
+        if customer.tzintuk_list != new_val:
+            customer.tzintuk_list = new_val
+            db.session.commit()
     return folder, None
 
 
