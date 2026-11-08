@@ -479,6 +479,25 @@ def _extract_gdrive_file_id(text):
     return m.group(1) if m else None
 
 
+def _extract_gdrive_file_ids(text):
+    """כל קישורי ה-Drive בטקסט, לפי סדר הופעתם, בלי כפילויות (גם קישורים ש-Gmail עוטף)."""
+    if not text:
+        return []
+    import urllib.parse
+    found = []   # (מיקום, מזהה)
+    for m in _GOOGLE_REDIRECT_RE.finditer(text):
+        inner = _GDRIVE_RE.search(urllib.parse.unquote(m.group(1)))
+        if inner:
+            found.append((m.start(), inner.group(1)))
+    for m in _GDRIVE_RE.finditer(text):
+        found.append((m.start(), m.group(1)))
+    ids = []
+    for _pos, fid in sorted(found):
+        if fid not in ids:
+            ids.append(fid)
+    return ids
+
+
 def _download_gdrive_file(file_id, dest_dir):
     """
     מוריד קובץ מ-Google Drive לפי file_id לתיקיית dest_dir.
@@ -742,6 +761,7 @@ IMAGE_MIME_TYPES = {
 IMAGE_EXTENSIONS = {'jpg', 'jpeg', 'png', 'gif', 'webp', 'tiff', 'tif', 'bmp', 'pdf'}
 AUDIO_VIDEO_EXTENSIONS = {'mp3', 'wav', 'm4a', 'ogg', 'flac', 'aac', 'opus', 'webm',
                            'mp4', 'mov', 'avi', 'mkv', '3gp', 'amr'}
+VIDEO_EXTENSIONS = {'mp4', 'mov', 'avi', 'mkv', '3gp', 'webm'}
 
 
 def _pick_file():
@@ -1984,98 +2004,194 @@ def email_inbound():
             _send_guidance_email(sender_email, 'low_balance', phone=phone)
             return jsonify({'status': 'rejected', 'reason': 'low_balance'}), 200
 
-        attached_file, file_type = _pick_file()
-        gdrive_filepath = None  # אם הורדנו מ-Drive - לניקוי בשגיאה
+        # כמה קבצים במייל אחד (מצורפים, כמה קישורי Drive, העברת ג'מבו עם כמה קבצים):
+        # כל קובץ שמע/וידאו - הקלטה נפרדת עם מייל תוצאה נפרד; תמונות/PDF (כתב יד) -
+        # מאוחדים לקובץ אחד לפי הסדר. המצורפים נשמרים כאן (הם בבקשה), וההורדות
+        # והטיפול - ברקע, כדי לא לחרוג מזמן הבקשה של SendGrid.
+        audio_items, image_files = _save_attachments_in_order()
+        body_text = request.form.get('text', '') or _strip_html(request.form.get('html', ''))
+        drive_ids = _extract_gdrive_file_ids(body_text) or _extract_gdrive_file_ids(request.form.get('html', ''))
+        if not audio_items and not image_files and not jumbo_info and not drive_ids:
+            log.warning(f"email-inbound: אין קובץ מצורף או קישור. תחילת גוף: {body_text[:300]}")
+            _send_guidance_email(sender_email, 'no_attachment', phone=phone)
+            return jsonify({'status': 'rejected', 'reason': 'no_attachment'}), 200
+        customer_id = customer.id
 
-        if attached_file is None and jumbo_info:
-            # העברה מג'מבו מייל - הקובץ הראשון שהוא שמע/וידאו או תמונה/PDF
-            jfid, jname = _jumbo_pick_file(jumbo_info)
-            filepath = None
-            if jfid:
-                filepath, original_filename, filename = _download_jumbo_file(
-                    jumbo_info, jfid, jname, RECORDINGS_EMAIL_DIR)
-            if not filepath:
-                _send_guidance_email(sender_email, 'no_attachment', phone=phone)
-                return jsonify({'status': 'rejected', 'reason': 'jumbo_download_failed'}), 200
-            others = len(jumbo_info['files']) - 1
-            if others > 0:
-                log.warning(f"email-inbound: בהעברת ג'מבו מייל יש עוד {others} קבצים - מתומלל רק {jname!r}")
-            gdrive_filepath = filepath   # לניקוי בשגיאה, כמו קובץ מ-Drive
-            jext = os.path.splitext(original_filename or '')[1].lstrip('.').lower()
-            file_type = 'image' if jext in IMAGE_EXTENSIONS else 'audio'
-            base_url = os.environ.get('APP_BASE_URL', '').rstrip('/')
-            rec_url = f"{base_url}/api/recordings-email/{filename}"
-            duration_seconds = _estimate_duration_seconds(filepath) if file_type == 'audio' else 0
+    threading.Thread(target=_process_email_files, daemon=True, args=(
+        customer_id, sender_email, phone, parsed, audio_items, image_files, jumbo_info, drive_ids)).start()
+    log.info(f"email-inbound: {len(audio_items)} שמע/וידאו + {len(image_files)} תמונות מצורפים, "
+             f"ג'מבו={'כן' if jumbo_info else 'לא'}, קישורי Drive={len(drive_ids)} - בטיפול ברקע")
+    return jsonify({'status': 'processing'}), 200
 
-        elif attached_file is None:
-            # אין קובץ מצורף - נבדוק אם יש קישור Google Drive בגוף המייל
-            body_text = request.form.get('text', '') or _strip_html(request.form.get('html', ''))
-            file_id = _extract_gdrive_file_id(body_text)
 
-            if not file_id:
-                log.warning(f"email-inbound: לא נמצא קישור Drive בגוף המייל. תחילת גוף: {body_text[:300]}")
-                _send_guidance_email(sender_email, 'no_attachment', phone=phone)
-                return jsonify({'status': 'rejected', 'reason': 'no_attachment'}), 200
+def _attachment_order_key(key):
+    m = re.search(r'(\d+)$', key or '')
+    return (int(m.group(1)) if m else 10 ** 6, key)
 
-            log.info(f"email-inbound: לא נמצא קובץ מצורף, מנסה Google Drive file_id={file_id}")
-            filepath, original_filename, filename = _download_gdrive_file(file_id, RECORDINGS_EMAIL_DIR)
 
-            if not filepath:
+def _inline_attachment_keys():
+    """מצורפים שמוטמעים בגוף המייל (לוגו בחתימה וכו') - לפי content-id ב-attachment-info של SendGrid."""
+    import json
+    try:
+        info = json.loads(request.form.get('attachment-info') or '{}')
+    except ValueError:
+        return set()
+    return {k for k, v in (info or {}).items() if isinstance(v, dict) and (v.get('content-id') or v.get('content_id'))}
+
+
+def _save_attachments_in_order():
+    """שומר את המצורפים לפי הסדר שבמייל. מחזיר:
+    audio_items - [(filepath, שם מקורי, שם בדיסק)] לשמע/וידאו (כל אחד יתומלל בנפרד),
+    image_files - [(שם, bytes)] לתמונות/PDF (יאוחדו לקובץ אחד).
+    תמונה מוטמעת בגוף המייל (חתימה) לא נחשבת כשיש במייל קבצים אחרים."""
+    audio_items, images, inline_images, unknown = [], [], [], []
+    inline = _inline_attachment_keys()
+    for key in sorted(request.files.keys(), key=_attachment_order_key):
+        for f in request.files.getlist(key):
+            if not f or not f.filename:
+                continue
+            mime = (f.mimetype or '').lower()
+            ext = os.path.splitext(f.filename or '')[1].lstrip('.').lower()
+            if mime.startswith('audio') or mime.startswith('video') or ext in AUDIO_VIDEO_EXTENSIONS:
+                audio_items.append(_save_audio_upload(f))
+            elif mime in IMAGE_MIME_TYPES or ext in IMAGE_EXTENSIONS:
+                item = (f.filename, f.read())
+                (inline_images if key in inline else images).append(item)
+            else:
+                unknown.append(f)
+    if not images and not audio_items:
+        images = inline_images
+    if not audio_items and not images and unknown:
+        audio_items.append(_save_audio_upload(unknown[0]))   # כמו קודם: קובץ לא מזוהה - מנסים לתמלל
+    return audio_items, images
+
+
+def _save_audio_upload(f):
+    ext = AUDIO_EXT_MAP.get(
+        (f.mimetype or '').lower(),
+        (os.path.splitext(f.filename or '')[1].lstrip('.') or 'mp3').lower()
+    )
+    if ext not in AUDIO_VIDEO_EXTENSIONS:
+        ext = 'mp3'   # אבטחה: סיומת מדיה מוכרת בלבד
+    filename = f"{uuid.uuid4().hex}.{ext}"
+    filepath = os.path.join(RECORDINGS_EMAIL_DIR, filename)
+    f.save(filepath)
+    return filepath, f.filename or filename, filename
+
+
+def _process_email_files(customer_id, sender_email, phone, parsed, audio_items, image_files, jumbo_info, drive_ids):
+    """ברקע: מוריד קבצים מג'מבו / Drive (לפי הסדר), מאחד תמונות לקובץ אחד, ושולח כל
+    קובץ שמע/וידאו לתמלול נפרד - לפי סדר הקבלה, כל עוד היתרה מספיקה (לפי אומדן).
+    קבצים שאין להם יתרה - ממתינים לתשלום, עם המייל הרגיל ללקוח."""
+    from app import app, db
+    with app.app_context():
+        try:
+            audio_items = list(audio_items)
+            image_files = list(image_files)
+            failed_jumbo = failed_drive = 0
+            if jumbo_info:
+                for jfid, jname, _size in jumbo_info.get('files') or []:
+                    jext = os.path.splitext(jname)[1].lstrip('.').lower()
+                    if jext not in AUDIO_VIDEO_EXTENSIONS and jext not in IMAGE_EXTENSIONS:
+                        continue
+                    fp, orig, fn = _download_jumbo_file(jumbo_info, jfid, jname, RECORDINGS_EMAIL_DIR)
+                    if not fp:
+                        failed_jumbo += 1
+                    elif jext in IMAGE_EXTENSIONS:
+                        image_files.append(_read_and_remove(fp, orig))
+                    else:
+                        audio_items.append((fp, orig, fn))
+            for fid in drive_ids:
+                fp, orig, fn = _download_gdrive_file(fid, RECORDINGS_EMAIL_DIR)
+                if not fp:
+                    failed_drive += 1
+                    continue
+                dext = os.path.splitext(orig or '')[1].lstrip('.').lower()
+                if dext in IMAGE_EXTENSIONS:
+                    image_files.append(_read_and_remove(fp, orig))
+                else:
+                    audio_items.append((fp, orig, fn))
+
+            if failed_drive:
                 _send_guidance_email(sender_email, 'gdrive_download_failed', phone=phone)
-                return jsonify({'status': 'rejected', 'reason': 'gdrive_download_failed'}), 200
+            elif failed_jumbo and not audio_items and not image_files:
+                _send_guidance_email(sender_email, 'no_attachment', phone=phone)
+            if not audio_items and not image_files:
+                log.warning(f"email-inbound: לא ירד אף קובץ (ג'מבו נכשלו={failed_jumbo}, Drive נכשלו={failed_drive})")
+                return
 
-            gdrive_filepath = filepath
-            # זיהוי סוג מ-Drive לפי סיומת
-            drive_ext = os.path.splitext(original_filename or '')[1].lstrip('.').lower()
-            file_type = 'image' if drive_ext in IMAGE_EXTENSIONS else 'audio'
-            base_url = os.environ.get('APP_BASE_URL', '').rstrip('/')
-            rec_url = f"{base_url}/api/recordings-email/{filename}"
-            duration_seconds = _estimate_duration_seconds(filepath) if file_type == 'audio' else 0
+            from models import Customer
+            customer = Customer.query.get(customer_id)
+            if image_files:
+                _dispatch_images(image_files, customer, sender_email, phone, parsed, db)
+            if audio_items:
+                _dispatch_audio(audio_items, customer, sender_email, phone, parsed, db)
+        except Exception as e:
+            log.error(f"email-inbound: טיפול בקבצי המייל נכשל: {e}", exc_info=True)
+        finally:
+            db.session.remove()
 
-        elif file_type == 'image':
-            # --- שמירת קובץ תמונה/PDF ---
-            mime = (attached_file.mimetype or '').lower()
-            ext = IMAGE_MIME_TYPES.get(mime) or \
-                  os.path.splitext(attached_file.filename or '')[1].lstrip('.').lower() or 'jpg'
-            if ext not in IMAGE_EXTENSIONS:
-                ext = 'jpg'   # אבטחה: לא שומרים סיומות מסוכנות (html/svg וכו') בתיקייה שמוגשת ציבורית
-            filename = f"{uuid.uuid4().hex}.{ext}"
-            filepath = os.path.join(RECORDINGS_EMAIL_DIR, filename)
-            attached_file.save(filepath)
-            original_filename = attached_file.filename or filename
-            rec_url = ''
-            duration_seconds = 0
 
-        else:
-            # --- שמירת קובץ האודיו המצורף ---
-            audio_file = attached_file
-            ext = AUDIO_EXT_MAP.get(
-                (audio_file.mimetype or '').lower(),
-                (os.path.splitext(audio_file.filename or '')[1].lstrip('.') or 'mp3').lower()
-            )
-            if ext not in AUDIO_VIDEO_EXTENSIONS:
-                ext = 'mp3'   # אבטחה: סיומת מדיה מוכרת בלבד
-            filename = f"{uuid.uuid4().hex}.{ext}"
-            filepath = os.path.join(RECORDINGS_EMAIL_DIR, filename)
-            audio_file.save(filepath)
+def _read_and_remove(filepath, name):
+    with open(filepath, 'rb') as fh:
+        data = fh.read()
+    try:
+        os.remove(filepath)
+    except OSError:
+        pass
+    return name, data
 
-            base_url = os.environ.get('APP_BASE_URL', '').rstrip('/')
-            rec_url = f"{base_url}/api/recordings-email/{filename}"
-            duration_seconds = _estimate_duration_seconds(filepath)
-            original_filename = audio_file.filename or filename
 
-        # --- ניתוב: OCR או תמלול ---
-        if file_type == 'image':
-            image_mode = parsed.get('image_mode')
-            if image_mode is None:
-                # לא נכתב "רגיל"/"מקצועי" - שומרים את הקובץ ושולחים ללקוח מייל
-                # עם שני כפתורים; שום עיבוד/חיוב עד שיבחר.
-                return _hold_image_for_choice(filepath, original_filename, customer, sender_email)
-            return _route_image(image_mode, filepath, original_filename, customer, sender_email, phone, db)
+def _dispatch_images(image_files, customer, sender_email, phone, parsed, db):
+    """תמונה אחת - כמו קודם. כמה - מאוחדות לקובץ PDF אחד לפי הסדר (services/manuscript_merge)."""
+    if len(image_files) == 1:
+        name, data = image_files[0]
+        ext = os.path.splitext(name or '')[1].lstrip('.').lower()
+        if ext not in IMAGE_EXTENSIONS:
+            ext = 'jpg'   # אבטחה: לא שומרים סיומות מסוכנות בתיקייה שמוגשת ציבורית
+    else:
+        from services.manuscript_merge import expand, merge_to_pdf
+        good, skipped = expand(image_files)
+        if not good:
+            log.warning(f"email-inbound: אף תמונה לא תקינה לאיחוד (דולגו: {skipped})")
+            return
+        data, pages, bad = merge_to_pdf(good)
+        first = os.path.splitext(os.path.basename(good[0][0]))[0]
+        name = (f'{first} ועוד {len(good) - 1} קבצים' if len(good) > 1 else first)[:200] + '.pdf'
+        ext = 'pdf'
+        log.info(f"email-inbound: {len(good)} תמונות/PDF אוחדו לקובץ אחד ({pages} עמודים)"
+                 + (f", דולגו: {skipped + bad}" if skipped or bad else ''))
+    filename = f"{uuid.uuid4().hex}.{ext}"
+    filepath = os.path.join(RECORDINGS_EMAIL_DIR, filename)
+    with open(filepath, 'wb') as fh:
+        fh.write(data)
+    image_mode = parsed.get('image_mode')
+    if image_mode is None:
+        _hold_image_for_choice(filepath, name, customer, sender_email)
+    else:
+        _route_image(image_mode, filepath, name, customer, sender_email, phone, db)
 
-        # אותו קובץ כבר בטיפול אצל אותו לקוח (נשלח שוב כי התמלול לוקח זמן, או
-        # ששירות המייל שלח שוב) - לא מתחילים תמלול כפול. אחרי שגיאה מותר לשלוח שוב.
-        from datetime import datetime as _dt, timedelta as _td
+
+def _dispatch_audio(audio_items, customer, sender_email, phone, parsed, db):
+    """כל קובץ שמע/וידאו - הקלטה נפרדת (מייל תוצאה נפרד), לפי סדר הקבלה. היתרה "נשמרת"
+    לפי אומדן המחיר של כל קובץ: מה שנכנס ביתרה - לתמלול; השאר - ממתין לתשלום עם
+    המייל הרגיל. (הבדיקה הסופית בזמן החיוב נשארת כמו שהייתה.)"""
+    from datetime import datetime as _dt, timedelta as _td
+    from models import Recording
+    from routes.admin import get_setting
+    from services import pricing as P
+    from services.transcribe import _save_pending_payment
+    base_url = os.environ.get('APP_BASE_URL', '').rstrip('/')
+    tier = parsed['tier']
+    remaining = float(customer.balance or 0)
+    maintenance_on = get_setting('maintenance_mode', '0') == '1'
+    delivered_to = delivery_email_for_sender(customer, sender_email)
+
+    for filepath, original_filename, filename in audio_items:
+        rec_url = f"{base_url}/api/recordings-email/{filename}"
+        duration_seconds = _estimate_duration_seconds(filepath)
+
+        # אותו קובץ כבר בטיפול אצל אותו לקוח - לא מתחילים תמלול כפול
         if original_filename:
             dup = (Recording.query
                    .filter(Recording.customer_id == customer.id,
@@ -2087,48 +2203,39 @@ def email_inbound():
                 log.info(f"email-inbound: {original_filename} כבר בטיפול עבור לקוח {customer.id} "
                          f"(call_id={dup.call_id}) - לא מתחילים שוב")
                 try:
-                    if os.path.exists(filepath):
-                        os.remove(filepath)
+                    os.remove(filepath)
                 except OSError:
                     pass
-                return jsonify({'status': 'duplicate', 'call_id': dup.call_id}), 200
+                continue
+
+        ext = os.path.splitext(filename)[1].lstrip('.').lower()
+        kind = P.kind_for_tier(tier, is_video=ext in VIDEO_EXTENSIONS)
+        est = P.cost_for(customer, duration_seconds, kind) if duration_seconds else 0.0
+        over_budget = bool(duration_seconds) and est > remaining + 1e-9
+
+        # מצב תחזוקה: מגבים את הקובץ עצמו ב-DB (הדיסק נמחק בדפלוי), עד 150MB
+        file_backup = None
+        if maintenance_on and not over_budget:
+            if os.path.getsize(filepath) > 150 * 1024 * 1024:
+                log.warning(f"email-inbound: {filepath} גדול מ-150MB - לא מגובה ב-DB במצב תחזוקה (נשאר בדיסק)")
+            else:
+                try:
+                    with open(filepath, 'rb') as fh:
+                        file_backup = fh.read()
+                except OSError as e:
+                    log.error(f"email-inbound: failed to read {filepath} for maintenance backup: {e}")
 
         call_id = f"email-{uuid.uuid4().hex}"
-
-        # מצב תחזוקה (/admin/maintenance) - כמו בשיחות טלפון (/api/transcribe),
-        # אם המצב דלוק דוחים את התמלול במקום להתחיל אותו מיד. כל מה שצריך
-        # לשחזור נשמר על השורה עצמה כדי ש-resume_queued_recordings יוכל
-        # להריץ את זה מאוחר יותר בדיוק כאילו האימייל הגיע עכשיו.
-        from routes.admin import get_setting
-        maintenance_on = get_setting('maintenance_mode', '0') == '1'
-
-        # כשדוחים למצב תחזוקה, מגבים גם את בייטי הקובץ עצמו ב-DB (לא רק
-        # את הנתיב) - כי rec_url של הקלטת אימייל מצביע על קובץ בדיסק המקומי
-        # שנמחק בכל דפלוי, בדיוק כמו שקרה עם כתבי היד לפני התיקון. שיחות
-        # טלפון לא צריכות את זה כי ה-rec_url שלהן מצביע לשרת חיצוני.
-        file_backup = None
-        # קובץ ענק (הקלטה של שעה+ באיכות גבוהה) לא נכנס ל-DB - ניסיון לגבות קובץ
-        # של 1GB הפיל את הבקשה ("cannot allocate memory"). הוא נשאר בדיסק בלבד.
-        _backup_limit = 150 * 1024 * 1024
-        if maintenance_on and os.path.getsize(filepath) > _backup_limit:
-            log.warning(f"email-inbound: {filepath} גדול מ-150MB - לא מגובה ב-DB במצב תחזוקה (נשאר בדיסק)")
-        elif maintenance_on:
-            try:
-                with open(filepath, 'rb') as f:
-                    file_backup = f.read()
-            except OSError as e:
-                log.error(f"email-inbound: failed to read {filepath} for maintenance backup: {e}")
-
         rec = Recording(
             customer_id=customer.id,
             call_id=call_id,
             duration_seconds=duration_seconds,
-            status='queued_maintenance' if maintenance_on else 'recording',
+            status='queued_maintenance' if (maintenance_on and not over_budget) else 'recording',
             delivery_method='email',
-            delivered_to=delivery_email_for_sender(customer, sender_email),
+            delivered_to=delivered_to,
             rec_url=rec_url,
             source_filename=original_filename,
-            transcription_tier=parsed['tier'],
+            transcription_tier=tier,
             language=parsed['language'],
             output_language=parsed['output_language'],
             file_data=file_backup,
@@ -2136,29 +2243,36 @@ def email_inbound():
         db.session.add(rec)
         db.session.commit()
 
+        if over_budget:
+            log.info(f"email-inbound: {call_id} ({original_filename}) - אין מספיק יתרה "
+                     f"(אומדן {est}, נשאר {remaining:.2f}) - ממתין לתשלום")
+            _save_pending_payment(
+                rec=rec, customer=customer, duration_seconds=duration_seconds,
+                price_per_20min=P.unit_price(customer, kind), delivery_method='email',
+                delivered_to=delivered_to, transcription_tier=tier,
+                language=parsed['language'], output_language=parsed['output_language'])
+            continue
+
+        remaining -= est
         log.info(
-            f"email-inbound: call_id={call_id} phone={phone} "
-            f"tier={parsed['tier']} lang={parsed['language']}->{parsed['output_language']} "
-            f"file={filename} duration~{duration_seconds}s"
+            f"email-inbound: call_id={call_id} phone={phone} tier={tier} "
+            f"lang={parsed['language']}->{parsed['output_language']} file={filename} "
+            f"({original_filename}) duration~{duration_seconds}s"
             + (" [queued - maintenance mode]" if maintenance_on else "")
         )
-
         if maintenance_on:
-            return jsonify({'status': 'queued_maintenance', 'call_id': call_id}), 200
-
+            continue
         transcribe_async(
             call_id=call_id,
             rec_url=rec_url,
             customer_id=customer.id,
             delivery_method='email',
-            delivered_to=delivery_email_for_sender(customer, sender_email),
+            delivered_to=delivered_to,
             duration_seconds=duration_seconds,
-            transcription_tier=parsed['tier'],
+            transcription_tier=tier,
             language=parsed['language'],
             output_language=parsed['output_language'],
         )
-
-    return jsonify({'status': 'processing', 'call_id': call_id}), 200
 
 
 @email_bp.route('/recordings-email/<filename>')
@@ -2412,7 +2526,7 @@ def _send_instructions_email(to_email, phone, name=''):
 🎵 <b>אודיו:</b> MP3, WAV, M4A, OGG, FLAC, AAC, OPUS, WEBM<br>
 🎬 <b>וידאו:</b> MP4, MOV, AVI, MKV, 3GP<br>
 </p>
-<p style="margin:8px 0 0;font-size:13px;color:#6b7280">ניתן לצרף קובץ אחד בלבד לכל מייל. גודל מקסימלי מומלץ: 25MB.</p>
+<p style="margin:8px 0 0;font-size:13px;color:#6b7280">אפשר לצרף כמה קבצים באותו מייל (או כמה קישורי Drive / ג'מבו מייל) - כל קובץ יתומלל בנפרד ויישלח אליכם במייל נפרד. גודל מקסימלי מומלץ: 25MB.</p>
 </div>
 
 <div style="background:#fffbeb;border-right:4px solid #f59e0b;padding:14px;margin:16px 0;border-radius:8px">
@@ -2544,7 +2658,7 @@ def _send_handwriting_instructions_email(to_email, phone, name=''):
 🖼️ <b>תמונות:</b> JPG, PNG, WEBP, HEIC<br>
 📄 <b>מסמכים:</b> PDF (כולל רב-עמודי)<br>
 </p>
-<p style="margin:8px 0 0;font-size:13px;color:#6b7280">ניתן לצרף קובץ אחד בלבד לכל מייל. גודל מקסימלי מומלץ: 25MB.</p>
+<p style="margin:8px 0 0;font-size:13px;color:#6b7280">אפשר לצרף כמה תמונות או קובצי PDF באותו מייל - הם יאוחדו למסמך אחד לפי סדר שמות הקבצים. גודל מקסימלי מומלץ: 25MB.</p>
 </div>
 
 <div style="background:#fffbeb;border-right:4px solid #f59e0b;padding:14px;margin:16px 0;border-radius:8px">
