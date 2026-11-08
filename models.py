@@ -37,6 +37,8 @@ class Customer(db.Model):
     # כבוי (ברירת מחדל): כל התמלולים נשלחים למייל/פקס של הלקוח. דלוק: לכל מספר
     # אפשר להגדיר מייל/פקס משלו (מספר בלי הגדרה - נופל חזרה לשל הלקוח).
     phones_separate = db.Column(db.Boolean, nullable=True, default=False)
+    # רשימת הצינתוקים האישית של הלקוח בימות (נוצרת כשהוא מקיש 4 בשלוחה 9) - services/voice_messages
+    tzintuk_list = db.Column(db.String(40), nullable=True)
 
     # --- שיוך למוסד (תלמיד) ---
     # לקוח "רגיל" (הרשמה עצמאית) - institution_id ריק. "תלמיד" ששייך למוסד -

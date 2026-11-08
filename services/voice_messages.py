@@ -131,19 +131,63 @@ def beep_path():
 
 
 # ---------------------------------------------------------------------------
-# צינתוק: כשנוצרת הודעה - "מצלצלים" ללקוח כדי שיחזור למערכת וישמע אותה.
-# תפוצה -> כל רשימת הצינתוקים החינמית (phones=tzl:<שם הרשימה>), חינם.
-# לקוח בודד -> המספר שלו (phones=<טלפון>). לא ברור אם ימות גובים על צינתוק כזה - לבירור.
-# שם הרשימה: TZINTUK_LIST (ברירת מחדל clients - כמו list_tzintuk בשלוחת הצינתוקים בימות).
+# צינתוקים - רק דרך מודול הצינתוקים החינמיים של ימות (phones=tzl:<רשימה>):
+# - לכל לקוח רשימה אישית משלו, ובה רק הוא (c<טלפון>). כשהוא מקיש 4 בשלוחה 9, המערכת
+#   יוצרת לו (פעם אחת) שלוחת צינתוקים אישית בימות - <TZINTUK_BASE>/<טלפון> - ומעבירה
+#   אותו אליה כדי להירשם. צינתוק ללקוח = הפעלת הרשימה האישית שלו.
+# - תפוצה: הרשימה הכללית (TZINTUK_LIST, ברירת מחדל clients) + כל הרשימות האישיות.
+# צינתוק ישיר למספר (phones=<טלפון>) לא בשימוש - ימות גובים עליו.
 # ---------------------------------------------------------------------------
-def run_tzintuk(phone=None):
-    """phone=None -> לכל הרשימה. מחזיר (הצליח?, הודעה)."""
+def _digits(v):
+    return ''.join(ch for ch in str(v or '') if ch.isdigit())
+
+
+def tzintuk_base():
+    return '/' + (os.environ.get('TZINTUK_BASE') or 'tz').strip().strip('/')
+
+
+def personal_list(phone):
+    return 'c' + _digits(phone)
+
+
+def prepare_personal(phone):
+    """יוצר בימות את שלוחת הצינתוקים האישית של המתקשר (אם עוד לא קיימת) ומחזיר את הנתיב שלה.
+    מחזיר (נתיב או None, שגיאה או None)."""
+    from app import db
+    from models import Customer
+    from services.customer_phones import find_customer_by_phone
+    ph = _digits(phone)
+    if len(ph) < 9:
+        return None, 'מספר לא מזוהה'
+    token = os.environ.get('YEMOT_TOKEN', '')
+    if not token:
+        return None, 'YEMOT_TOKEN לא מוגדר בשרת'
+    folder = f'{tzintuk_base()}/{ph}'
+    lst = personal_list(ph)
+    customer = find_customer_by_phone(ph)
+    if not (customer and customer.tzintuk_list == lst):
+        contents = f'type=tzintuk\nlist_tzintuk={lst}\ntzintuk_end=/\n'
+        try:
+            r = requests.post('https://www.call2all.co.il/ym/api/UploadTextFile',
+                              data={'token': token, 'what': f'ivr2:{folder}/ext.ini', 'contents': contents}, timeout=30)
+            body = r.json()
+        except Exception as e:
+            return None, f'יצירת השלוחה בימות נכשלה: {e}'
+        if str(body.get('responseStatus', '')).upper() != 'OK':
+            return None, f'ימות דחו את יצירת השלוחה: {body.get("message") or body}'
+        if customer:
+            customer.tzintuk_list = lst
+            db.session.commit()
+        log.info(f'tzintuk: נוצרה שלוחה אישית {folder} (רשימה {lst})')
+    return folder, None
+
+
+def run_tzintuk_list(lst):
+    """הפעלת רשימת צינתוקים (מודול החינמי). מחזיר (הצליח?, הודעה)."""
     token = os.environ.get('YEMOT_TOKEN', '')
     if not token:
         return False, 'YEMOT_TOKEN לא מוגדר בשרת'
-    lst = (os.environ.get('TZINTUK_LIST') or 'clients').strip()
-    phones = f'tzl:{lst}' if not phone else ''.join(ch for ch in str(phone) if ch.isdigit())
-    params = {'token': token, 'phones': phones, 'TzintukTimeOut': 8}
+    params = {'token': token, 'phones': f'tzl:{lst}', 'TzintukTimeOut': 8}
     caller = (os.environ.get('TZINTUK_CALLER_ID') or '').strip()
     if caller:
         params['callerId'] = caller
@@ -151,13 +195,38 @@ def run_tzintuk(phone=None):
         r = requests.get('https://www.call2all.co.il/ym/api/RunTzintuk', params=params, timeout=30)
         body = r.json()
     except Exception as e:
-        log.warning(f'tzintuk failed: {e}')
+        log.warning(f'tzintuk {lst} failed: {e}')
         return False, f'הצינתוק נכשל: {e}'
-    log.info(f'tzintuk {"list " + lst if not phone else "single"}: {body}')
+    log.info(f'tzintuk {lst}: {body}')
     if str(body.get('responseStatus', '')).upper() == 'OK':
-        n = body.get('callsCount') or body.get('countPhones') or ''
-        return True, ('הצינתוק נשלח' + (f' ({n} מספרים)' if n not in ('', None) else ''))
+        return True, 'הצינתוק נשלח'
     return False, f'ימות דחו את הצינתוק: {body.get("message") or body}'
+
+
+def tzintuk_customer(customer):
+    if not customer or not customer.tzintuk_list:
+        return False, 'הלקוח עוד לא נרשם לצינתוקים (שלוחה 9, מקש 4)'
+    return run_tzintuk_list(customer.tzintuk_list)
+
+
+def tzintuk_everyone_async():
+    """תפוצה: הרשימה הכללית + כל הרשימות האישיות, ברקע (קריאה לכל רשימה). מחזיר כמה רשימות."""
+    import threading
+    import time
+    from models import Customer
+    lists = [(os.environ.get('TZINTUK_LIST') or 'clients').strip()]
+    lists += [r[0] for r in Customer.query.with_entities(Customer.tzintuk_list)
+              .filter(Customer.tzintuk_list.isnot(None)).distinct().all()]
+
+    def work():
+        ok = 0
+        for lst in lists:
+            if run_tzintuk_list(lst)[0]:
+                ok += 1
+            time.sleep(0.3)
+        log.info(f'tzintuk broadcast: {ok}/{len(lists)} רשימות הופעלו')
+    threading.Thread(target=work, daemon=True).start()
+    return len(lists)
 
 
 # ---------------------------------------------------------------------------

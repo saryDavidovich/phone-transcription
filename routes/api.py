@@ -785,3 +785,12 @@ def admin_phone_help():
         return jsonify({'ok': False, 'reason': 'unauthorized'}), 401
     from services import nedarim_commands
     return jsonify({'ok': True, 'text': nedarim_commands.help_text()})
+
+
+@api_bp.route('/tzintuk/prepare', methods=['POST'])
+def tzintuk_prepare():
+    """שלוחה 9 ← 4: יוצר (פעם אחת) את שלוחת הצינתוקים האישית של המתקשר בימות, ומחזיר את הנתיב."""
+    from services import voice_messages as VM
+    d = request.get_json(silent=True) or {}
+    folder, err = VM.prepare_personal(d.get('phone', ''))
+    return jsonify({'ok': bool(folder), 'folder': folder, 'error': err})

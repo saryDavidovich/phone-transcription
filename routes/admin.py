@@ -808,10 +808,13 @@ def voice_message_create():
             VM.save_template(text, m.file_data if m.kind == 'file' else None, hint)
         flash(f'✔ ההודעה הקולית #{m.id} נשמרה - ' +
               ('הלקוח ישמע אותה בכניסה הבאה למערכת' if customer_id else 'כל הלקוחות ישמעו אותה בכניסה הבאה למערכת'))
-        if request.form.get('tzintuk') == '1':   # צינתוק - כדי שיחזרו למערכת וישמעו
-            phone = Customer.query.get(customer_id).phone if customer_id else None
-            ok, msg = VM.run_tzintuk(phone)
-            flash(('📳 ' if ok else '⚠ ') + msg)
+        if request.form.get('tzintuk') == '1':   # צינתוק - דרך מודול הצינתוקים החינמי בלבד
+            if customer_id:
+                ok, msg = VM.tzintuk_customer(Customer.query.get(customer_id))
+                flash(('📳 ' if ok else '⚠ ') + msg)
+            else:
+                n = VM.tzintuk_everyone_async()
+                flash(f'📳 הצינתוק נשלח ברקע ל-{n} רשימות (הכללית והאישיות)')
     except Exception as e:
         flash(f'⚠ ההודעה לא נשמרה: {e}')
     return redirect(back)

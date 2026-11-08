@@ -261,7 +261,7 @@
 
 <details class="cd-sec" data-sec="voice"><summary>📢 הודעה קולית ללקוח{% if voice_messages %} ({{ voice_messages|length }}){% endif %}</summary>
 <div class="card">
-{% with vm_customer_id=customer.id, voice_messages_list=voice_messages %}{% include 'admin/_voice_messages.html' %}{% endwith %}
+{% with vm_customer_id=customer.id, voice_messages_list=voice_messages, vm_tzintuk_list=customer.tzintuk_list %}{% include 'admin/_voice_messages.html' %}{% endwith %}
 </div>
 </details>
 
