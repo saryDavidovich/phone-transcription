@@ -2030,13 +2030,23 @@ def _attachment_order_key(key):
 
 
 def _inline_attachment_keys():
-    """מצורפים שמוטמעים בגוף המייל (לוגו בחתימה וכו') - לפי content-id ב-attachment-info של SendGrid."""
+    """מצורפים שמוטמעים בגוף המייל (לוגו בחתימה וכו'): יש להם content-id ב-attachment-info
+    של SendGrid, וגם גוף המייל מציג אותם (cid:...). Gmail נותן content-id לכל מצורף -
+    לכן content-id לבד לא מספיק."""
     import json
     try:
         info = json.loads(request.form.get('attachment-info') or '{}')
     except ValueError:
         return set()
-    return {k for k, v in (info or {}).items() if isinstance(v, dict) and (v.get('content-id') or v.get('content_id'))}
+    html = (request.form.get('html') or '').lower()
+    out = set()
+    for k, v in (info or {}).items():
+        if not isinstance(v, dict):
+            continue
+        cid = str(v.get('content-id') or v.get('content_id') or '').strip('<> ').lower()
+        if cid and f'cid:{cid}' in html:
+            out.add(k)
+    return out
 
 
 def _save_attachments_in_order():
