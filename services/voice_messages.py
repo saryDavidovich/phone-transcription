@@ -133,8 +133,8 @@ def beep_path():
 # ---------------------------------------------------------------------------
 # צינתוקים - רק דרך מודול הצינתוקים החינמיים של ימות (phones=tzl:<רשימה>):
 # - לכל לקוח רשימה אישית משלו, ובה רק הוא (c<טלפון>). כשהוא מקיש 4 בשלוחה 9, המערכת
-#   יוצרת לו (פעם אחת) שלוחת צינתוקים אישית בימות - <TZINTUK_BASE>/<טלפון> - ומעבירה
-#   אותו אליה כדי להירשם. צינתוק ללקוח = הפעלת הרשימה האישית שלו.
+#   יוצרת לו (פעם אחת, ובודקת שנוצרה) שלוחת צינתוקים אישית בימות - <TZINTUK_BASE>/<טלפון>,
+#   ברירת מחדל 302/<טלפון> - ומעבירה אותו אליה כדי להירשם. צינתוק ללקוח = הרשימה האישית שלו.
 # - תפוצה: הרשימה הכללית (TZINTUK_LIST, ברירת מחדל clients) + כל הרשימות האישיות.
 # לקוח שלא נרשם: צינתוק ישיר למספר (phones=<טלפון>) - ימות גובים עליו יחידות, ובממשק זה מסומן.
 # ---------------------------------------------------------------------------
@@ -143,42 +143,64 @@ def _digits(v):
 
 
 def tzintuk_base():
-    return '/' + (os.environ.get('TZINTUK_BASE') or 'tz').strip().strip('/')
+    """תיקיית האב של השלוחות האישיות - בתוך שלוחת הצינתוקים הכללית (TZINTUK_BASE, ברירת מחדל 302)."""
+    return '/' + (os.environ.get('TZINTUK_BASE') or '302').strip().strip('/')
 
 
 def personal_list(phone):
     return 'c' + _digits(phone)
 
 
+def _yemot(method, **params):
+    token = os.environ.get('YEMOT_TOKEN', '')
+    if not token:
+        raise RuntimeError('YEMOT_TOKEN לא מוגדר בשרת')
+    r = requests.post(f'https://www.call2all.co.il/ym/api/{method}', data={'token': token, **params}, timeout=30)
+    try:
+        return r.json()
+    except ValueError:
+        return {'responseStatus': 'ERROR', 'message': r.text[:200]}
+
+
+def _ext_ini_ok(folder, lst):
+    """בודק בימות שקובץ ההגדרות של השלוחה קיים ושהוא של הרשימה הנכונה."""
+    token = os.environ.get('YEMOT_TOKEN', '')
+    try:
+        r = requests.get('https://www.call2all.co.il/ym/api/DownloadFile',
+                         params={'token': token, 'path': f'ivr2:{folder}/ext.ini'}, timeout=30)
+        txt = r.content.decode('utf-8', 'ignore') if r.status_code == 200 else ''
+    except Exception:
+        return False
+    return 'type=tzintuk' in txt and f'list_tzintuk={lst}' in txt
+
+
 def prepare_personal(phone):
-    """יוצר בימות את שלוחת הצינתוקים האישית של המתקשר (אם עוד לא קיימת) ומחזיר את הנתיב שלה.
-    מחזיר (נתיב או None, שגיאה או None)."""
+    """שלוחת הצינתוקים האישית של המתקשר (<תיקיית אב>/<טלפון>, רשימה c<טלפון>):
+    אם עוד לא קיימת בימות - יוצרים אותה (UpdateExtension - UploadTextFile לבד לא יוצר תיקייה),
+    כותבים את ההגדרות, ובודקים שנשמרו. מחזיר (נתיב או None, שגיאה או None)."""
     from app import db
-    from models import Customer
     from services.customer_phones import find_customer_by_phone
     ph = _digits(phone)
     if len(ph) < 9:
         return None, 'מספר לא מזוהה'
-    token = os.environ.get('YEMOT_TOKEN', '')
-    if not token:
-        return None, 'YEMOT_TOKEN לא מוגדר בשרת'
     folder = f'{tzintuk_base()}/{ph}'
     lst = personal_list(ph)
+    try:
+        if not _ext_ini_ok(folder, lst):
+            created = _yemot('UpdateExtension', path=f'ivr2:{folder}', type='tzintuk', list_tzintuk=lst)
+            log.info(f'tzintuk: UpdateExtension {folder}: {created}')
+            wrote = _yemot('UploadTextFile', what=f'ivr2:{folder}/ext.ini',
+                           contents=f'type=tzintuk\nlist_tzintuk={lst}\n')
+            log.info(f'tzintuk: UploadTextFile {folder}/ext.ini: {wrote}')
+            if not _ext_ini_ok(folder, lst):
+                return None, f'השלוחה {folder} לא נוצרה בימות (UpdateExtension: {created.get("message") or created})'
+            log.info(f'tzintuk: נוצרה שלוחה אישית {folder} (רשימה {lst})')
+    except Exception as e:
+        return None, f'יצירת השלוחה בימות נכשלה: {e}'
     customer = find_customer_by_phone(ph)
-    if not (customer and customer.tzintuk_list == lst):
-        contents = f'type=tzintuk\nlist_tzintuk={lst}\ntzintuk_end=/\n'
-        try:
-            r = requests.post('https://www.call2all.co.il/ym/api/UploadTextFile',
-                              data={'token': token, 'what': f'ivr2:{folder}/ext.ini', 'contents': contents}, timeout=30)
-            body = r.json()
-        except Exception as e:
-            return None, f'יצירת השלוחה בימות נכשלה: {e}'
-        if str(body.get('responseStatus', '')).upper() != 'OK':
-            return None, f'ימות דחו את יצירת השלוחה: {body.get("message") or body}'
-        if customer:
-            customer.tzintuk_list = lst
-            db.session.commit()
-        log.info(f'tzintuk: נוצרה שלוחה אישית {folder} (רשימה {lst})')
+    if customer and customer.tzintuk_list != lst:
+        customer.tzintuk_list = lst
+        db.session.commit()
     return folder, None
 
 
