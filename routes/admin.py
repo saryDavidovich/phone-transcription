@@ -937,6 +937,12 @@ def customer_excel_download(id, tid):
 def customer_detail(id):
     from models import OcrResult, ConversationThread, ManuscriptPage, ProofingRound, Institution
     customer = Customer.query.get_or_404(id)
+    try:   # סטטוס הצינתוקים מימות (נשמר דקה בזיכרון)
+        from services import voice_messages as _VM
+        _VM.sync_tzintuk()
+    except Exception as e:
+        db.session.rollback()
+        import logging; logging.getLogger(__name__).warning(f'tzintuk sync: {e}')
     # בלי עמודות כבדות (קבצים/תמלולים/JSON) - העמוד מציג רק נתוני רשימה
     # לקוח עם אלפי הקלטות/עסקאות - מציגים את האחרונות בלבד (מהירות), עם "הצג הכל"
     show_all = request.args.get('all') == '1'

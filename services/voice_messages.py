@@ -151,11 +151,11 @@ def personal_list(phone):
     return 'c' + _digits(phone)
 
 
-def _yemot(method, **params):
+def _yemot(method, _timeout=30, **params):
     token = os.environ.get('YEMOT_TOKEN', '')
     if not token:
         raise RuntimeError('YEMOT_TOKEN לא מוגדר בשרת')
-    r = requests.post(f'https://www.call2all.co.il/ym/api/{method}', data={'token': token, **params}, timeout=30)
+    r = requests.post(f'https://www.call2all.co.il/ym/api/{method}', data={'token': token, **params}, timeout=_timeout)
     try:
         return r.json()
     except ValueError:
@@ -219,13 +219,69 @@ def prepare_personal(phone, action='add'):
             folder = base
     except Exception as e:
         return None, f'יצירת השלוחה בימות נכשלה: {e}'
+    # ההרשמה עצמה נעשית בתפריט של ימות - השרת לא יודע מה נבחר שם. הסטטוס מתעדכן
+    # מימות (sync_tzintuk). כאן רק הסרה מיידית מעדכנת מיד.
     customer = find_customer_by_phone(ph)
-    if customer:
-        new_val = lst if action != 'remove' else None
-        if customer.tzintuk_list != new_val:
-            customer.tzintuk_list = new_val
-            db.session.commit()
+    if customer and action == 'remove' and customer.tzintuk_list:
+        customer.tzintuk_list = None
+        db.session.commit()
+    _lists_cache['at'] = 0
     return folder, None
+
+
+# ---------------------------------------------------------------------------
+# סטטוס הרשמה אמיתי - מימות (TzintukimListManagement action=getlists: כל הרשימות + כמה רשומים).
+# לקוח רשום = לרשימה האישית שלו (c<טלפון>) יש לפחות מנוי אחד.
+# ---------------------------------------------------------------------------
+_lists_cache = {'at': 0, 'data': None}
+
+
+def yemot_tzintuk_lists(max_age=60):
+    """{שם רשימה: כמה רשומים}, או None אם ימות לא ענו. נשמר בזיכרון עד דקה."""
+    import time
+    if _lists_cache['data'] is not None and time.time() - _lists_cache['at'] < max_age:
+        return _lists_cache['data']
+    try:
+        body = _yemot('TzintukimListManagement', _timeout=8, action='getlists')
+    except Exception as e:
+        log.warning(f'tzintuk getlists failed: {e}')
+        return None
+    if str(body.get('responseStatus', '')).upper() != 'OK':
+        log.warning(f'tzintuk getlists: {body}')
+        return None
+    data = {}
+    for it in body.get('lists') or []:
+        try:
+            data[str(it.get('listName'))] = int(it.get('subscribers') or 0)
+        except (TypeError, ValueError):
+            pass
+    _lists_cache.update(at=time.time(), data=data)
+    return data
+
+
+def sync_tzintuk(max_age=60):
+    """מעדכן לכל הלקוחות את tzintuk_list לפי ימות: רשום -> שם הרשימה, לא רשום -> None.
+    מחזיר True אם הסנכרון הצליח."""
+    from app import db
+    from models import Customer
+    from services.customer_phones import find_customer_by_phone
+    lists = yemot_tzintuk_lists(max_age)
+    if lists is None:
+        return False
+    active = {name for name, n in lists.items() if n > 0 and name.startswith('c') and name[1:].isdigit()}
+    changed = False
+    for c in Customer.query.filter(Customer.tzintuk_list.isnot(None)).all():
+        if c.tzintuk_list not in active:
+            c.tzintuk_list = None
+            changed = True
+    for name in active:
+        c = find_customer_by_phone(name[1:])
+        if c and not c.tzintuk_list:
+            c.tzintuk_list = name
+            changed = True
+    if changed:
+        db.session.commit()
+    return True
 
 
 def run_tzintuk_list(lst):
@@ -267,6 +323,7 @@ def tzintuk_customer(customer):
     """רשום לצינתוקים - הרשימה האישית שלו (חינם). לא רשום - צינתוק ישיר בעלות יחידות."""
     if not customer:
         return False, 'הלקוח לא נמצא'
+    sync_tzintuk(max_age=0)   # סטטוס עדכני מימות לפני שמחליטים חינם / בתשלום
     if customer.tzintuk_list:
         return run_tzintuk_list(customer.tzintuk_list)
     return run_tzintuk_paid(customer.phone)
@@ -277,6 +334,7 @@ def tzintuk_everyone_async():
     import threading
     import time
     from models import Customer
+    sync_tzintuk(max_age=0)
     lists = [r[0] for r in Customer.query.with_entities(Customer.tzintuk_list)
               .filter(Customer.tzintuk_list.isnot(None)).distinct().all()]
 
