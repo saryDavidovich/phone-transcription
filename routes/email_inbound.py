@@ -2132,10 +2132,16 @@ def _process_email_files(customer_id, sender_email, phone, parsed, audio_items, 
 
             from models import Customer
             customer = Customer.query.get(customer_id)
+            delayed = []
             if image_files:
-                _dispatch_images(image_files, customer, sender_email, phone, parsed, db)
+                img = _dispatch_images(image_files, customer, sender_email, phone, parsed, db)
+                if img:
+                    delayed.append(img)
             if audio_items:
-                _dispatch_audio(audio_items, customer, sender_email, phone, parsed, db)
+                delayed = (_dispatch_audio(audio_items, customer, sender_email, phone, parsed, db) or []) + delayed
+            from routes.admin import get_setting
+            if delayed and get_setting('maintenance_mode', '0') == '1':
+                _send_maintenance_delay_email(sender_email, phone, delayed)
         except Exception as e:
             log.error(f"email-inbound: טיפול בקבצי המייל נכשל: {e}", exc_info=True)
         finally:
@@ -2178,8 +2184,9 @@ def _dispatch_images(image_files, customer, sender_email, phone, parsed, db):
     image_mode = parsed.get('image_mode')
     if image_mode is None:
         _hold_image_for_choice(filepath, name, customer, sender_email)
-    else:
-        _route_image(image_mode, filepath, name, customer, sender_email, phone, db)
+        return None
+    _route_image(image_mode, filepath, name, customer, sender_email, phone, db)
+    return name if image_mode == 'regular' else None   # OCR רגיל - נדחה במצב תחזוקה
 
 
 def _dispatch_audio(audio_items, customer, sender_email, phone, parsed, db):
@@ -2196,6 +2203,7 @@ def _dispatch_audio(audio_items, customer, sender_email, phone, parsed, db):
     remaining = float(customer.balance or 0)
     maintenance_on = get_setting('maintenance_mode', '0') == '1'
     delivered_to = delivery_email_for_sender(customer, sender_email)
+    queued_names = []   # קבצים שנכנסו לתור בגלל מצב תחזוקה - בשביל מייל ההרגעה ללקוח
 
     for filepath, original_filename, filename in audio_items:
         rec_url = f"{base_url}/api/recordings-email/{filename}"
@@ -2271,6 +2279,7 @@ def _dispatch_audio(audio_items, customer, sender_email, phone, parsed, db):
             + (" [queued - maintenance mode]" if maintenance_on else "")
         )
         if maintenance_on:
+            queued_names.append(original_filename or filename)
             continue
         transcribe_async(
             call_id=call_id,
@@ -2283,6 +2292,7 @@ def _dispatch_audio(audio_items, customer, sender_email, phone, parsed, db):
             language=parsed['language'],
             output_language=parsed['output_language'],
         )
+    return queued_names
 
 
 @email_bp.route('/recordings-email/<filename>')
@@ -2368,6 +2378,44 @@ def _send_guidance_email(to_email, reason, phone=''):
         log.info(f"Guidance email sent to {to_email} (reason: {reason})")
     except Exception as e:
         log.error(f"Failed to send guidance email to {to_email}: {e}")
+
+
+def maintenance_delay_html(phone, file_names):
+    """מייל הרגעה ללקוח ששלח קבצים בזמן מצב תחזוקה: הקבצים התקבלו, התוצאה תתעכב בכמה דקות."""
+    from html import escape
+    items = ''.join(f'<li style="margin:2px 0">{escape(n or "")}</li>' for n in file_names[:20])
+    more = f'<li>ועוד {len(file_names) - 20} קבצים</li>' if len(file_names) > 20 else ''
+    files_word = 'הקובץ שלכם התקבל' if len(file_names) == 1 else f'{len(file_names)} הקבצים שלכם התקבלו'
+    return f'''<div dir="rtl" style="font-family:Arial,sans-serif;max-width:600px;margin:auto;color:#111827">
+<h2 style="color:#1d4ed8;margin-bottom:6px">{files_word} ✅</h2>
+<div style="background:#eff6ff;border-right:4px solid #3b82f6;padding:16px;margin:16px 0;border-radius:8px;line-height:1.9;font-size:15px">
+המערכת עוברת כרגע <b>שדרוג קצר</b>, ולכן התוצאה תגיע אליכם <b>באיחור של מספר דקות</b>.<br>
+אין צורך לעשות דבר ואין צורך לשלוח שוב - הקבצים שמורים אצלנו ויטופלו אוטומטית מיד בסיום השדרוג,
+והתוצאה תישלח למייל כרגיל.
+</div>
+<p style="margin:0 0 4px;font-weight:700">הקבצים שהתקבלו:</p>
+<ul style="margin:0 0 16px;padding-right:20px;line-height:1.7;font-size:14px">{items}{more}</ul>
+<p style="line-height:1.8">תודה על הסבלנות 🙏</p>
+<p style="color:#6b7280;font-size:13px">מערכת תמלול פון 03-3131795</p>
+</div>'''
+
+
+def _send_maintenance_delay_email(to_email, phone, file_names):
+    if not to_email or _is_system_inbound_address(to_email):
+        return
+    try:
+        import sendgrid
+        from sendgrid.helpers.mail import Mail, Email
+        sg = sendgrid.SendGridAPIClient(api_key=os.environ.get('SENDGRID_API_KEY'))
+        sg.send(Mail(
+            from_email=Email(os.environ.get('SENDGRID_FROM_EMAIL', os.environ.get('GMAIL_USER', '')), 'תמלול פון'),
+            to_emails=to_email,
+            subject='תמלול פון - הקבצים התקבלו, התוצאה תגיע בעוד מספר דקות',
+            html_content=_email_wrap(maintenance_delay_html(phone, file_names), phone=phone),
+        ))
+        log.info(f"email-inbound: מייל 'שדרוג - איחור של כמה דקות' נשלח ל-{to_email} ({len(file_names)} קבצים)")
+    except Exception as e:
+        log.error(f"email-inbound: שליחת מייל התחזוקה נכשלה ({to_email}): {e}")
 
 
 _NO_REPLY_SENDER_RE = re.compile(r'(^|[._-])(no-?reply|do-?not-?reply|mailer-daemon|postmaster|bounces?)([._+-]|@)', re.IGNORECASE)

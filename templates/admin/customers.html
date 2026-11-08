@@ -5,7 +5,7 @@
 
 <div class="search-bar">
   <form method="GET" id="custSearchForm" data-turbo-action="replace" style="display:flex;gap:8px;width:100%;flex-wrap:wrap;align-items:center">
-    <input class="form-input" id="custSearchInput" data-turbo-permanent name="q" value="{{ search }}" placeholder="חיפוש לפי טלפון, שם או מייל..." autocomplete="off" style="flex:1;min-width:200px">
+    <input class="form-input" id="custSearchInput" data-turbo-permanent data-kb="num" name="q" value="{{ search }}" placeholder="חיפוש לפי טלפון, שם או מייל..." autocomplete="off" style="flex:1;min-width:200px">
     <select name="sort" onchange="this.form.requestSubmit ? this.form.requestSubmit() : this.form.submit()" style="padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);color:var(--text)">
       <option value="" {% if not current_sort %}selected{% endif %}>מיון: ברירת מחדל (הצטרפות)</option>
       <option value="contact" {% if current_sort=='contact' %}selected{% endif %}>מעודכן מייל/פקס</option>

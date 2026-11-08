@@ -131,6 +131,13 @@ def create_app():
     except Exception as e:
         logging.getLogger(__name__).warning(f'nedarim messages: לא הופעל ({e})')
 
+    # התראה למנהל על הקלטות תקועות (services/stuck_watch.py), בדיקה כל 5 דקות
+    try:
+        from services import stuck_watch
+        stuck_watch.start(app)
+    except Exception as e:
+        logging.getLogger(__name__).warning(f'stuck watch: לא הופעל ({e})')
+
     # פילטר להצגת זמן לפי אזור זמן ישראל - מטפל אוטומטית בשעון קיץ/חורף
     # (לא כמו hours=3 קבוע שהיה שגוי בחורף, כשישראל היא UTC+2 ולא UTC+3)
     from zoneinfo import ZoneInfo
@@ -309,13 +316,7 @@ def _migrate_db():
                 created_at TIMESTAMP DEFAULT NOW()
             )""",
         "CREATE INDEX IF NOT EXISTS ix_inbox_messages_thread_id ON inbox_messages (thread_id)",
-        # מיגרציית נתונים חד-פעמית: אם קיימת עדיין עמודת body ישנה (גרסה קודמת
-        # של הפיצ'ר, לפני שהתיבה הכללית הפכה לשיחה דו-כיוונית) - מעבירים כל
-        # הודעה קיימת להיות ההודעה הראשונה (direction='in') בשרשור שלה.
-        """INSERT INTO inbox_messages (thread_id, direction, body, created_at)
-           SELECT id, 'in', body, created_at FROM general_inbox_messages
-           WHERE body IS NOT NULL
-             AND NOT EXISTS (SELECT 1 FROM inbox_messages WHERE thread_id = general_inbox_messages.id)""",
+        # (מיגרציית הנתונים החד-פעמית מעמודת body הישנה כבר רצה, והעמודה נמחקה - הוסרה מכאן)
         "ALTER TABLE general_inbox_messages DROP COLUMN IF EXISTS body",
 
         # ===== ניהול מוסד (תלמידים) =====

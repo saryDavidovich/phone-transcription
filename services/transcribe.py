@@ -410,6 +410,50 @@ def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, durat
             notify_recording_error(call_id, f'תקלה בעיבוד: {type(e).__name__}: {e}')
 
 
+_EMAIL_FILE_BACKUP_LIMIT = 150 * 1024 * 1024   # קובץ גדול מזה לא נכנס ל-DB (זיכרון)
+
+
+def _email_file_path(rec_url):
+    """נתיב הקובץ בדיסק להקלטה שהגיעה במייל (rec_url של /api/recordings-email/...), או None."""
+    import os
+    if '/api/recordings-email/' not in (rec_url or ''):
+        return None
+    from routes.email_inbound import RECORDINGS_EMAIL_DIR
+    filename = os.path.basename((rec_url or '').rsplit('/', 1)[-1])
+    return os.path.join(RECORDINGS_EMAIL_DIR, filename) if filename else None
+
+
+def backup_email_file(rec):
+    """מגבה ב-DB (file_data) את קובץ המייל של הקלטה - הדיסק של השרת נמחק בכל דפלוי."""
+    import os
+    path = _email_file_path(rec.rec_url)
+    if not path or rec.file_data or not os.path.exists(path):
+        return
+    if os.path.getsize(path) > _EMAIL_FILE_BACKUP_LIMIT:
+        log.warning(f"{rec.call_id}: קובץ המייל גדול מ-150MB - לא מגובה ב-DB")
+        return
+    try:
+        with open(path, 'rb') as f:
+            rec.file_data = f.read()
+    except OSError as e:
+        log.error(f"{rec.call_id}: גיבוי קובץ המייל נכשל: {e}")
+
+
+def restore_email_file(rec_url, file_data, call_id=''):
+    """מחזיר לדיסק קובץ מייל מגובה (אם נמחק), לאותו נתיב שה-rec_url מצביע אליו."""
+    import os
+    path = _email_file_path(rec_url)
+    if not path or not file_data or os.path.exists(path):
+        return
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, 'wb') as f:
+            f.write(file_data)
+        log.info(f"{call_id}: קובץ המייל שוחזר מהגיבוי ב-DB ל-{path}")
+    except OSError as e:
+        log.error(f"{call_id}: שחזור קובץ המייל נכשל: {e}")
+
+
 def _get_pending_recordings(customer_id):
     """מחזיר הקלטות ממתינות לתשלום שטרם פגה תקופתן"""
     from models import Recording
@@ -419,7 +463,7 @@ def _get_pending_recordings(customer_id):
         status='pending_payment'
     ).filter(
         Recording.expires_at > datetime.utcnow()
-    ).all()
+    ).order_by(Recording.created_at.asc(), Recording.id.asc()).all()   # לפי סדר הקבלה
 
 
 def process_pending_recordings(customer_id):
@@ -479,7 +523,9 @@ def process_pending_recordings(customer_id):
                     _send_fax(rec.delivered_to, rec.transcript, customer, rec.duration_seconds or 0, rec.call_id)
                 continue
 
-            # אין טרנסקריפט — תמלל מחדש
+            # אין טרנסקריפט — תמלל מחדש (קובץ מייל - קודם משחזרים מהגיבוי אם נמחק בדפלוי)
+            restore_email_file(rec.rec_url, rec.file_data, rec.call_id)
+            rec.file_data = None
             rec.status = 'queued'
             db.session.commit()
 
@@ -527,23 +573,8 @@ def resume_queued_recordings():
         db.session.commit()
 
     for r in released:
-        # הקלטת אימייל ששוהתה נשמרה בגיבוי ב-DB (file_data) כי הקובץ בדיסק
-        # המקומי עלול היה להימחק בדפלוי בזמן שהמתנה. משחזרים אותו לדיסק
-        # באותו נתיב שה-rec_url הקיים כבר מצביע אליו, לפני שממשיכים כרגיל.
-        if r.get('file_data'):
-            try:
-                import os
-                from routes.email_inbound import RECORDINGS_EMAIL_DIR
-                filename = (r['rec_url'] or '').rsplit('/', 1)[-1]
-                if filename:
-                    filepath = os.path.join(RECORDINGS_EMAIL_DIR, filename)
-                    if not os.path.exists(filepath):
-                        os.makedirs(RECORDINGS_EMAIL_DIR, exist_ok=True)
-                        with open(filepath, 'wb') as f:
-                            f.write(r['file_data'])
-                        log.info(f"resume_queued_recordings: restored file for call_id={r['call_id']} to {filepath}")
-            except Exception as e:
-                log.error(f"resume_queued_recordings: failed to restore file for call_id={r['call_id']}: {e}")
+        # הקלטת אימייל ששוהתה נשמרה בגיבוי ב-DB (file_data) - משחזרים לדיסק אם נמחק בדפלוי
+        restore_email_file(r['rec_url'], r.get('file_data'), r['call_id'])
 
         transcribe_async(
             r['call_id'], r['rec_url'], r['customer_id'], r['delivery_method'], r['delivered_to'],
@@ -574,6 +605,8 @@ def _save_pending_payment(rec, customer, duration_seconds, price_per_20min,
     # שמור טרנסקריפט אם כבר תומלל — כדי לא לתמלל שוב
     if transcript:
         rec.transcript = transcript
+    else:
+        backup_email_file(rec)   # עד הטעינה יכול לעבור דפלוי שמוחק את הקובץ מהדיסק
 
     from app import db
     db.session.commit()

@@ -16,7 +16,7 @@ class Customer(db.Model):
     # לקוח ישן. ראה גם models.IncomingFax לשיוך פקסים נכנסים שהתקבלו.
     fax_code = db.Column(db.String(10), unique=True, nullable=True, index=True)
     # active_history: שנדע את הערך הקודם בכל שינוי יתרה (ראה _track_self_funded למטה)
-    balance = db.Column(db.Float, default=0.0, active_history=True)
+    balance = db.column_property(db.Column(db.Float, default=0.0), active_history=True)
     # החלק מהיתרה של תלמיד מוסד שהוא כסף של התלמיד עצמו (טעינה עצמית, או יתרה
     # שהייתה לו כלקוח עצמאי לפני שצורף למוסד) - ולכן המוסד לא יכול להוריד אותו.
     # שאר היתרה (balance - self_funded) היא כסף שהמוסד נתן. הצריכה יורדת קודם
