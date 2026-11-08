@@ -47,13 +47,13 @@
     </div>
     {# צינתוק - רק דרך מודול הצינתוקים החינמי: ללקוח = הרשימה האישית שלו (אם נרשם בשלוחה 9 ← 4) #}
     <div style="margin-top:8px">
-      {% if vm_customer_id and not vm_tzintuk_list %}
-      <div style="font-size:12.5px;color:#8892b0">📳 צינתוק: הלקוח עוד לא נרשם (נרשמים בשלוחה 9, מקש 4).</div>
-      {% else %}
-      <label style="cursor:pointer;font-size:13px"><input type="checkbox" name="tzintuk" value="1">
-        📳 {% if vm_customer_id %}לשלוח ללקוח צינתוק, כדי שיחזור למערכת וישמע{% else %}לשלוח צינתוק לכל הרשומים לצינתוקים{% endif %}</label>
-      <div style="font-size:11.5px;color:#8892b0;margin-top:2px;margin-right:22px">חינם - דרך מודול הצינתוקים החינמיים של ימות.</div>
-      {% endif %}
+      {% set tz_paid = vm_customer_id and not vm_tzintuk_list %}
+      <label style="cursor:pointer;font-size:13px"><input type="checkbox" name="tzintuk" value="1" {% if tz_paid %}data-paid="1"{% endif %}>
+        📳 {% if vm_customer_id %}לשלוח ללקוח צינתוק, כדי שיחזור למערכת וישמע{% else %}לשלוח צינתוק לכל הרשומים לצינתוקים{% endif %}
+        {% if tz_paid %}<span style="color:#f59e0b;font-weight:700">· בעלות יחידות</span>{% endif %}</label>
+      <div style="font-size:11.5px;color:{{ '#f59e0b' if tz_paid else '#8892b0' }};margin-top:2px;margin-right:22px">
+        {% if tz_paid %}הלקוח עוד לא נרשם לצינתוקים (שלוחה 9, מקש 4) - לכן זה צינתוק רגיל, וימות גובים עליו יחידות.
+        {% else %}חינם - דרך מודול הצינתוקים החינמיים של ימות.{% endif %}</div>
     </div>
     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px">
       <label style="font-size:13px">הלקוח ישמע אותה בכניסה
@@ -180,7 +180,9 @@ window.vmSubmit = function (f) {
   if (src === 'upload' && !f.audio_file.files.length) { alert('יש לבחור קובץ שמע'); return false; }
   if (src === 'record' && !f.audio_record.files.length) { alert('יש להקליט קודם'); return false; }
   var who = f.customer_id.value ? 'ללקוח' : 'לכל הלקוחות';
-  var tz = f.tzintuk && f.tzintuk.checked ? (f.customer_id.value ? '\nוישלח ללקוח צינתוק.' : '\nוישלח צינתוק לכל רשימת הצינתוקים.') : '';
+  var tz = f.tzintuk && f.tzintuk.checked ? (f.customer_id.value
+      ? (f.tzintuk.dataset.paid ? '\nוישלח ללקוח צינתוק בעלות יחידות (הוא לא רשום לצינתוקים).' : '\nוישלח ללקוח צינתוק.')
+      : '\nוישלח צינתוק לכל הרשומים לצינתוקים.') : '';
   if (!confirm('לשמור את ההודעה? היא תושמע ' + who + ' בכניסה הבאה למערכת.' + tz)) return false;
   var b = f.querySelector('button[type=submit]'); setTimeout(function () { b.disabled = true; b.textContent = src === 'narrator' ? '⏳ מקריא ושומר...' : '⏳ שומר...'; }, 0);
   return true;

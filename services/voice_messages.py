@@ -136,7 +136,7 @@ def beep_path():
 #   יוצרת לו (פעם אחת) שלוחת צינתוקים אישית בימות - <TZINTUK_BASE>/<טלפון> - ומעבירה
 #   אותו אליה כדי להירשם. צינתוק ללקוח = הפעלת הרשימה האישית שלו.
 # - תפוצה: הרשימה הכללית (TZINTUK_LIST, ברירת מחדל clients) + כל הרשימות האישיות.
-# צינתוק ישיר למספר (phones=<טלפון>) לא בשימוש - ימות גובים עליו.
+# לקוח שלא נרשם: צינתוק ישיר למספר (phones=<טלפון>) - ימות גובים עליו יחידות, ובממשק זה מסומן.
 # ---------------------------------------------------------------------------
 def _digits(v):
     return ''.join(ch for ch in str(v or '') if ch.isdigit())
@@ -184,10 +184,24 @@ def prepare_personal(phone):
 
 def run_tzintuk_list(lst):
     """הפעלת רשימת צינתוקים (מודול החינמי). מחזיר (הצליח?, הודעה)."""
+    return _run_tzintuk(f'tzl:{lst}', lst)
+
+
+def run_tzintuk_paid(phone):
+    """צינתוק ישיר למספר - צינתוק רגיל, ימות גובים עליו יחידות (ללקוח שלא נרשם לצינתוקים)."""
+    ph = _digits(phone)
+    if len(ph) < 9:
+        return False, 'מספר לא תקין'
+    ok, msg = _run_tzintuk(ph, 'single')
+    return ok, (msg + ' (בעלות יחידות)') if ok else msg
+
+
+def _run_tzintuk(phones, label):
     token = os.environ.get('YEMOT_TOKEN', '')
     if not token:
         return False, 'YEMOT_TOKEN לא מוגדר בשרת'
-    params = {'token': token, 'phones': f'tzl:{lst}', 'TzintukTimeOut': 8}
+    lst = label
+    params = {'token': token, 'phones': phones, 'TzintukTimeOut': 8}
     caller = (os.environ.get('TZINTUK_CALLER_ID') or '').strip()
     if caller:
         params['callerId'] = caller
@@ -204,9 +218,12 @@ def run_tzintuk_list(lst):
 
 
 def tzintuk_customer(customer):
-    if not customer or not customer.tzintuk_list:
-        return False, 'הלקוח עוד לא נרשם לצינתוקים (שלוחה 9, מקש 4)'
-    return run_tzintuk_list(customer.tzintuk_list)
+    """רשום לצינתוקים - הרשימה האישית שלו (חינם). לא רשום - צינתוק ישיר בעלות יחידות."""
+    if not customer:
+        return False, 'הלקוח לא נמצא'
+    if customer.tzintuk_list:
+        return run_tzintuk_list(customer.tzintuk_list)
+    return run_tzintuk_paid(customer.phone)
 
 
 def tzintuk_everyone_async():
