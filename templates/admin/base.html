@@ -500,7 +500,11 @@ updateThemeIcon();
     if (!b) return;
     if (n > 0) { b.textContent = n; b.style.display = 'inline-flex'; } else b.style.display = 'none';
   };
-  if (window.__liveNav) { show(window.__liveNav.count); return; }
+  if (window.__liveNav) {
+    show(window.__liveNav.count);
+    setTimeout(function () { document.dispatchEvent(new CustomEvent('livecalls', { detail: window.__liveNav.calls || [] })); }, 0);
+    return;
+  }
   const st = window.__liveNav = {count: 0, busy: false};
   async function upd() {
     if (st.busy || document.hidden) return;
@@ -509,7 +513,11 @@ updateThemeIcon();
       const r = await fetch('{{ url_for("admin.live_count") }}', {cache: 'no-store'});
       const d = await r.json();
       st.count = d.ok ? (d.count || 0) : 0;
-    } catch (e) { st.count = 0; } finally { st.busy = false; show(st.count); }
+      st.calls = d.ok ? (d.calls || []) : [];
+    } catch (e) { st.count = 0; st.calls = []; } finally {
+      st.busy = false; show(st.count);
+      document.dispatchEvent(new CustomEvent('livecalls', { detail: st.calls || [] }));   // לכרטיס הלקוח
+    }
   }
   upd();
   setInterval(upd, 10000);

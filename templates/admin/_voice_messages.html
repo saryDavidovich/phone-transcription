@@ -1,19 +1,37 @@
 {# הודעה קולית ללקוח (vm_customer_id) או תפוצתית (vm_customer_id=None). רשימה: voice_messages_list #}
 <div id="voice">
   <div style="font-size:13px;color:#8892b0;margin-bottom:12px">
-    {% if vm_customer_id %}הלקוח ישמע את ההודעה בכניסה הבאה למערכת, פעם אחת עד הסוף ובלי אפשרות לדלג (אחרי "שלום, ברוכים הבאים"). אחר כך אפשר לשמוע אותה שוב בשלוחה 9.
-    {% else %}כל הלקוחות הרשומים ישמעו את ההודעה בכניסה הבאה למערכת, כל אחד פעם אחת עד הסוף, ואחר כך אפשר לשמוע שוב בשלוחה 9. לקוח חדש שנרשם אחרי השליחה לא ישמע אותה.{% endif %}
+    {% if vm_customer_id %}הלקוח ישמע את ההודעה בכניסה הבאה למערכת, עד הסוף ובלי אפשרות לדלג (אחרי "שלום, ברוכים הבאים"). אפשר לבחור שישמע אותה בכמה כניסות. אחר כך אפשר לשמוע אותה שוב בשלוחה 9.
+    {% else %}כל הלקוחות הרשומים ישמעו את ההודעה בכניסה הבאה למערכת, עד הסוף. אפשר לבחור שישמעו אותה בכמה כניסות. אחר כך אפשר לשמוע שוב בשלוחה 9. לקוח חדש שנרשם אחרי השליחה לא ישמע אותה.{% endif %}
   </div>
   <form method="POST" action="{{ url_for('admin.voice_message_create') }}" enctype="multipart/form-data" class="vm-form"
         onsubmit="return vmSubmit(this)">
     <input type="hidden" name="customer_id" value="{{ vm_customer_id or '' }}">
-    <div style="display:flex;gap:18px;flex-wrap:wrap;margin-bottom:10px">
-      <label style="cursor:pointer"><input type="radio" name="source" value="tts" checked onchange="vmSrc(this)"> ✍️ כתיבה והקראה של ימות</label>
+    {% set tpls = voice_templates() %}
+    {% if tpls %}
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+      <select class="form-input vm-tpl" style="max-width:460px" onchange="vmTpl(this)">
+        <option value="">📋 מתבנית שמורה (כללית, לכל הלקוחות)...</option>
+        {% for t in tpls %}<option value="{{ t.id }}" data-audio="{{ 1 if t.audio else 0 }}" data-text="{{ t.text }}">{{ t.name }}</option>{% endfor %}
+      </select>
+      <button type="button" class="btn btn-ghost vm-tpl-del" style="font-size:12px;display:none" onclick="vmTplDel(this)">🗑 מחיקת התבנית</button>
+      <audio class="vm-tpl-audio" controls style="display:none;height:32px"></audio>
+    </div>
+    {% endif %}
+    <input type="hidden" name="template_id" value="">
+    <div class="vm-sources" style="display:flex;gap:18px;flex-wrap:wrap;margin-bottom:10px">
+      <input type="radio" name="source" value="template" style="display:none">
+      <label style="cursor:pointer"><input type="radio" name="source" value="tts" checked onchange="vmSrc(this)"> ✍️ הקראה של ימות</label>
+      <label style="cursor:pointer"><input type="radio" name="source" value="narrator" onchange="vmSrc(this)"> 🗣️ בקול הקריין</label>
       <label style="cursor:pointer"><input type="radio" name="source" value="upload" onchange="vmSrc(this)"> 📁 העלאת קובץ שמע</label>
       <label style="cursor:pointer"><input type="radio" name="source" value="record" onchange="vmSrc(this)"> 🎙️ הקלטה כאן בממשק</label>
     </div>
     <div class="vm-tts">
-      <textarea class="form-input" name="text" rows="3" style="width:100%;max-width:640px" placeholder="נוסח ההודעה - ימות יקריאו אותו בקול ממוחשב"></textarea>
+      <textarea class="form-input" name="text" rows="3" style="width:100%;max-width:640px" placeholder="נוסח ההודעה"></textarea>
+      <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-top:6px">
+        <button type="button" class="btn btn-ghost vm-preview-btn" style="font-size:13px;display:none" onclick="vmPreview(this)">▶ השמעת ניסיון בקול הקריין</button>
+        <audio class="vm-preview" controls style="display:none;height:32px"></audio>
+      </div>
     </div>
     <div class="vm-upload" style="display:none">
       <input class="form-input" type="file" name="audio_file" accept="audio/*,video/*" style="max-width:360px">
@@ -24,7 +42,18 @@
       <audio class="vm-rec-preview" controls style="display:none;height:34px"></audio>
       <input type="file" name="audio_record" style="display:none">
     </div>
-    <button class="btn btn-primary" type="submit" style="margin-top:12px">💾 שמירת ההודעה</button>
+    <div class="vm-save-tpl" style="margin-top:10px">
+      <label style="cursor:pointer;font-size:13px"><input type="checkbox" name="save_template" value="1"> לשמור גם כתבנית כללית (טקסט, או ההקלטה עצמה) - לשימוש אצל כל לקוח ובתפוצה</label>
+    </div>
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px">
+      <label style="font-size:13px">הלקוח ישמע אותה בכניסה
+        <select class="form-input" name="repeat_times" style="width:auto;display:inline-block;padding:4px 8px">
+          <option value="1" selected>פעם אחת</option>
+          {% for n in range(2, 6) %}<option value="{{ n }}">{{ n }} פעמים (ב-{{ n }} כניסות)</option>{% endfor %}
+        </select>
+      </label>
+      <button class="btn btn-primary" type="submit">💾 שמירת ההודעה</button>
+    </div>
   </form>
 
   {% if voice_messages_list %}
@@ -35,8 +64,10 @@
       <tr style="{% if not m.active %}opacity:.55{% endif %}">
         <td style="white-space:nowrap">{{ m.created_at | il_time }}</td>
         <td>{% if m.kind == 'file' %}<audio controls preload="none" src="{{ url_for('admin.voice_message_listen', mid=m.id) }}" style="height:32px;width:260px;max-width:100%"></audio>
+            {% if m.text %}<div style="font-size:12px;color:#8892b0;margin-top:3px">🗣️ {{ m.text }}</div>{% endif %}
             {% else %}✍️ {{ m.text }}{% endif %}</td>
-        <td style="white-space:nowrap">{% if vm_customer_id %}{{ (v.heard_at | il_time) if v.heard_at else 'עוד לא' }}{% else %}{{ v.heard_count }} לקוחות{% endif %}</td>
+        <td style="white-space:nowrap">{% if vm_customer_id %}{{ (v.heard_at | il_time) if v.heard_at else 'עוד לא' }}{% if (m.repeat_times or 1) > 1 %}<div style="font-size:11px;color:#8892b0">{{ v.times }} מתוך {{ m.repeat_times }} פעמים</div>{% endif %}
+            {% else %}{{ v.heard_count }} לקוחות{% if (m.repeat_times or 1) > 1 %}<div style="font-size:11px;color:#8892b0">כל אחד {{ m.repeat_times }} פעמים</div>{% endif %}{% endif %}</td>
         <td>
           <form method="POST" action="{{ url_for('admin.voice_message_toggle', mid=m.id) }}" style="display:inline">
             <button class="btn btn-ghost" style="font-size:12px" type="submit">{{ '✅ פעילה - השבת' if m.active else '⏸ מושבתת - הפעל' }}</button>
@@ -56,7 +87,15 @@
 <script>
 window.vmSrc = function (r) {
   var f = r.form;
-  f.querySelector('.vm-tts').style.display = r.value === 'tts' ? '' : 'none';
+  if (r.value !== 'template') {           // מקור אחר - יוצאים ממצב "הקלטה מתבנית"
+    f.template_id.value = '';
+    var sel = f.querySelector('.vm-tpl'), au = f.querySelector('.vm-tpl-audio');
+    if (sel && sel.selectedOptions[0] && sel.selectedOptions[0].dataset.audio === '1') { sel.value = ''; f.querySelector('.vm-tpl-del').style.display = 'none'; }
+    if (au) { au.pause(); au.style.display = 'none'; }
+    f.querySelector('.vm-save-tpl').style.display = '';
+  }
+  f.querySelector('.vm-tts').style.display = (r.value === 'tts' || r.value === 'narrator') ? '' : 'none';
+  f.querySelector('.vm-preview-btn').style.display = r.value === 'narrator' ? '' : 'none';
   f.querySelector('.vm-upload').style.display = r.value === 'upload' ? '' : 'none';
   f.querySelector('.vm-record').style.display = r.value === 'record' ? 'flex' : 'none';
 };
@@ -82,14 +121,57 @@ window.vmRecToggle = function (btn) {
     rec.start(); btn.textContent = '⏹ עצור הקלטה';
   }).catch(function () { alert('אין גישה למיקרופון - יש לאשר בדפדפן'); });
 };
+window.vmTpl = function (sel) {
+  var f = sel.form, o = sel.selectedOptions[0], au = f.querySelector('.vm-tpl-audio');
+  f.querySelector('.vm-tpl-del').style.display = sel.value ? '' : 'none';
+  au.pause(); au.style.display = 'none';
+  if (!sel.value) return;
+  if (o.dataset.audio === '1') {          // תבנית הקלטה - נשלחת כמו שהיא
+    f.template_id.value = sel.value;
+    var tr = f.querySelector('input[name=source][value=template]'); tr.checked = true;
+    ['vm-tts', 'vm-upload', 'vm-record'].forEach(function (c) { f.querySelector('.' + c).style.display = 'none'; });
+    f.querySelector('.vm-save-tpl').style.display = 'none';
+    fetch('{{ url_for("admin.voice_template_preview", tid=0) }}'.replace('/0/', '/' + sel.value + '/'))
+      .then(function (r) { return r.json(); }).then(function (d) {
+        if (d.ok) { au.src = 'data:audio/mpeg;base64,' + d.mp3; au.style.display = ''; }
+      });
+  } else {                                // תבנית טקסט - ממלאת את הנוסח
+    var cur = f.querySelector('input[name=source]:checked');
+    if (!cur || (cur.value !== 'tts' && cur.value !== 'narrator')) {
+      var t = f.querySelector('input[name=source][value=tts]'); t.checked = true; vmSrc(t);
+    }
+    f.text.value = o.dataset.text || '';
+  }
+};
+window.vmTplDel = function (btn) {
+  var f = btn.form, sel = f.querySelector('.vm-tpl');
+  if (!sel.value || !confirm('למחוק את התבנית "' + sel.selectedOptions[0].text + '"? היא תימחק לכל הלקוחות.')) return;
+  var fd = new FormData(); fd.append('id', sel.value);
+  fetch('{{ url_for("admin.voice_template_delete") }}', { method: 'POST', body: fd }).then(function () {
+    sel.remove(sel.selectedIndex); sel.value = ''; btn.style.display = 'none';
+    var t = f.querySelector('input[name=source][value=tts]'); t.checked = true; vmSrc(t);
+  });
+};
+window.vmPreview = function (btn) {
+  var f = btn.form, text = f.text.value.trim();
+  if (!text) { alert('יש לכתוב את נוסח ההודעה'); return; }
+  var old = btn.textContent; btn.disabled = true; btn.textContent = '⏳ מקריא...';
+  var fd = new FormData(); fd.append('text', text);
+  fetch('{{ url_for("admin.voice_message_preview") }}', { method: 'POST', body: fd }).then(function (r) { return r.json(); }).then(function (d) {
+    btn.disabled = false; btn.textContent = old;
+    if (!d.ok) { alert(d.error || 'ההקראה נכשלה'); return; }
+    var a = f.querySelector('.vm-preview'); a.src = 'data:audio/mpeg;base64,' + d.mp3; a.style.display = ''; a.play();
+  }).catch(function () { btn.disabled = false; btn.textContent = old; alert('ההקראה נכשלה'); });
+};
 window.vmSubmit = function (f) {
   var src = f.querySelector('input[name=source]:checked').value;
-  if (src === 'tts' && !f.text.value.trim()) { alert('יש לכתוב את נוסח ההודעה'); return false; }
+  if ((src === 'tts' || src === 'narrator') && !f.text.value.trim()) { alert('יש לכתוב את נוסח ההודעה'); return false; }
+  if (src === 'template' && !f.template_id.value) { alert('יש לבחור תבנית'); return false; }
   if (src === 'upload' && !f.audio_file.files.length) { alert('יש לבחור קובץ שמע'); return false; }
   if (src === 'record' && !f.audio_record.files.length) { alert('יש להקליט קודם'); return false; }
   var who = f.customer_id.value ? 'ללקוח' : 'לכל הלקוחות';
   if (!confirm('לשמור את ההודעה? היא תושמע ' + who + ' בכניסה הבאה למערכת.')) return false;
-  var b = f.querySelector('button[type=submit]'); setTimeout(function () { b.disabled = true; b.textContent = '⏳ שומר...'; }, 0);
+  var b = f.querySelector('button[type=submit]'); setTimeout(function () { b.disabled = true; b.textContent = src === 'narrator' ? '⏳ מקריא ושומר...' : '⏳ שומר...'; }, 0);
   return true;
 };
 </script>

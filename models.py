@@ -718,6 +718,18 @@ class VoiceMessage(db.Model):
     yemot_path = db.Column(db.String(200))    # למשל /voice_messages/12.wav
     file_data = db.Column(db.LargeBinary)     # עותק ה-WAV (גיבוי, ולהשמעה בממשק)
     active = db.Column(db.Boolean, default=True, nullable=False)
+    repeat_times = db.Column(db.Integer, default=1)   # כמה כניסות הלקוח ישמע אותה (1 = פעם אחת)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class VoiceTemplate(db.Model):
+    """תבנית הודעה קולית - כללית לכל הלקוחות (לא לפי לקוח). טקסט, או הקלטה (file_data:
+    מהקריין, מקובץ שהועלה או מהקלטה בממשק) - כך אפשר להשתמש שוב באותה הקלטה אצל לקוח אחר."""
+    __tablename__ = 'voice_templates'
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(120))
+    text = db.Column(db.Text)
+    file_data = db.Column(db.LargeBinary)      # WAV מוכן (8kHz) - None = תבנית טקסט
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
 
@@ -729,6 +741,7 @@ class VoiceMessageHeard(db.Model):
     customer_id = db.Column(db.Integer, nullable=False, index=True)
     phone = db.Column(db.String(20))
     heard_at = db.Column(db.DateTime, default=datetime.utcnow)
+    times = db.Column(db.Integer, default=1)          # כמה פעמים כבר שמע אותה עד הסוף
     __table_args__ = (db.UniqueConstraint('message_id', 'customer_id', name='uq_voice_heard'),)
 
 

@@ -2,6 +2,29 @@
 {% block title %}לקוח {{ customer.phone }}{% endblock %}
 {% block page_title %}לקוח: {{ customer.name or customer.phone }}{% endblock %}
 {% block content %}
+{# "בשיחה עכשיו" - מתעדכן מבדיקת השיחות החיות שכבר רצה כל 10 שניות (base.html), בלי פנייה נוספת לשרת #}
+<div id="cdLive" style="display:none;margin-bottom:14px;padding:10px 16px;border-radius:12px;background:rgba(16,185,129,.12);border:1px solid rgba(16,185,129,.45);font-size:14px">
+  <span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#10b981;margin-left:8px;animation:cdpulse 1.4s ease-in-out infinite"></span>
+  <b>בשיחה עכשיו</b> <span id="cdLiveTxt" style="color:var(--text2)"></span>
+  <a href="/admin/dashboard" style="margin-right:10px;font-size:13px;color:#10b981;text-decoration:none;font-weight:600">ללוח החי ←</a>
+</div>
+<style>@keyframes cdpulse{50%{opacity:.3}}</style>
+<script>
+(function () {
+  var phones = {{ ([customer.phone] + (customer.extra_phones | map(attribute='phone') | list)) | tojson }};
+  function fmt(s) { s = s || 0; return Math.floor(s / 60) + ':' + ('0' + s % 60).slice(-2); }
+  var box = document.getElementById('cdLive');
+  function onLive(e) {
+    if (!document.body.contains(box)) { document.removeEventListener('livecalls', onLive); return; }   // יצאנו מהכרטיס
+    var c = (e.detail || []).filter(function (x) { return phones.indexOf(x.phone) !== -1; })[0];
+    if (!c) { box.style.display = 'none'; return; }
+    document.getElementById('cdLiveTxt').textContent = '· ' + (c.stage || '') + ' · ' + fmt(c.seconds) + ' דקות' +
+      (phones.length > 1 ? ' · ' + c.phone : '');
+    box.style.display = '';
+  }
+  document.addEventListener('livecalls', onLive);
+})();
+</script>
 <div class="grid-2">
   <div class="card">
     <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:20px">
@@ -652,19 +675,10 @@ function confirmOcrDelete() {
   .cd-tools{display:flex;gap:8px;justify-content:flex-start;margin-top:18px}
 </style>
 <script>
-(function () {   // כותרות מתקפלות: כמה פתוחות במקביל, והמצב נשמר בדפדפן (גם אחרי רענון)
-  var KEY = 'cdOpenSections', secs = document.querySelectorAll('details.cd-sec');
-  var open;
-  try { open = JSON.parse(localStorage.getItem(KEY) || 'null'); } catch (e) { open = null; }
-  if (!Array.isArray(open)) open = [];   // בפעם הראשונה הכל סגור
-  secs.forEach(function (d) {
-    if (open.indexOf(d.dataset.sec) !== -1) d.open = true;
-    d.addEventListener('toggle', function () {
-      var now = Array.prototype.filter.call(document.querySelectorAll('details.cd-sec'), function (x) { return x.open; })
-                     .map(function (x) { return x.dataset.sec; });
-      try { localStorage.setItem(KEY, JSON.stringify(now)); } catch (e) {}
-    });
-  });
+(function () {   // כותרות מתקפלות: בכל כניסה לכרטיס הכל סגור, ונפתח רק מה שלוחצים עליו (בלי זיכרון)
+  var secs = document.querySelectorAll('details.cd-sec');
+  try { localStorage.removeItem('cdOpenSections'); } catch (e) {}   // ניקוי הזיכרון הישן
+  secs.forEach(function (d) { d.open = false; });
   if (location.hash) {             // קישור/חזרה לחלק מסוים (למשל אחרי שליחת טופס) - פותחים אותו
     var t = document.getElementById(location.hash.slice(1));
     var d = t && t.closest('details.cd-sec');

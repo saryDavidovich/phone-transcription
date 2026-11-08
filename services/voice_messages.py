@@ -4,8 +4,11 @@
 הלקוח שומע הודעה שממתינה לו בכניסה למערכת - פעם אחת עד הסוף - ואחר כך אפשר
 לשמוע אותה שוב בשלוחה 9 (ה-IVR: /api/voice-messages/<phone>, /api/voice-messages/heard).
 
-שלושה מקורות ליצירה בממשק: קובץ שמע שמעלים, הקלטה ישירה בדפדפן (שני אלה מומרים
-ל-WAV ומועלים לימות, לתיקייה /voice_messages), או טקסט שימות מקריאים בקול ממוחשב.
+ארבעה מקורות ליצירה בממשק: קובץ שמע שמעלים, הקלטה ישירה בדפדפן, טקסט בקול הקריין
+(services/narrator - הקול היציב) - שלושתם מומרים ל-WAV ומועלים לימות, לתיקייה /voice_messages -
+או טקסט שימות מקריאים בקול ממוחשב. לכל הודעה: כמה כניסות הלקוח ישמע אותה (repeat_times).
+בשמיעה החוזרת בשלוחה 9 יש צפצוף בין הודעה להודעה (beep_path). הודעות נשמרות כתבניות כלליות
+(טקסט או הקלטה - VoiceTemplate), לשימוש חוזר אצל כל לקוח ובתפוצה.
 """
 import io
 import logging
@@ -70,11 +73,103 @@ def for_caller(customer):
     # הודעה תפוצתית - רק ללקוחות שכבר היו רשומים כששלחו אותה (מתקשר חדש לא שומע הודעות ישנות)
     joined = customer.created_at
     msgs = [m for m in msgs if m.customer_id is not None or not joined or not m.created_at or joined <= m.created_at]
-    heard = {h.message_id for h in VoiceMessageHeard.query.filter_by(customer_id=customer.id).all()}
-    pending = [message_payload(m) for m in msgs if m.id not in heard]
+    heard = {h.message_id: (h.times or 1) for h in VoiceMessageHeard.query.filter_by(customer_id=customer.id).all()}
+    # ממתינה = עוד לא נשמעה מספר הפעמים שנקבע לה (repeat_times)
+    pending = [message_payload(m) for m in msgs if heard.get(m.id, 0) < max(1, m.repeat_times or 1)]
     since = datetime.utcnow() - timedelta(days=REPLAY_DAYS)
     replay = [message_payload(m) for m in reversed(msgs) if m.created_at and m.created_at >= since][:REPLAY_LIMIT]
-    return {'pending': pending, 'replay': replay}
+    return {'pending': pending, 'replay': replay, 'beep': beep_path()}
+
+
+# ---------------------------------------------------------------------------
+# צפצוף בין הודעה להודעה בשמיעה החוזרת (שלוחה 9): קובץ קצר שנוצר כאן ומועלה לימות פעם אחת
+# ---------------------------------------------------------------------------
+BEEP_PATH = f'{YEMOT_FOLDER}/beep'
+_beep_started = False
+
+
+def _make_beep():
+    from pydub.generators import Sine
+    from pydub import AudioSegment
+    tone = Sine(880).to_audio_segment(duration=220, volume=-9).fade_in(15).fade_out(40)
+    seg = AudioSegment.silent(duration=250) + tone + AudioSegment.silent(duration=350)
+    seg = seg.set_channels(1).set_frame_rate(8000).set_sample_width(2)
+    out = io.BytesIO()
+    seg.export(out, format='wav')
+    return out.getvalue()
+
+
+def beep_path():
+    """הנתיב בימות של הצפצוף, או None אם עוד לא הועלה (ההעלאה רצה ברקע פעם אחת)."""
+    global _beep_started
+    from models import Settings
+    row = Settings.query.filter_by(key='voice_beep_uploaded').first()
+    if row and row.value == BEEP_PATH:
+        return BEEP_PATH
+    if not _beep_started:
+        _beep_started = True
+        import threading
+        from flask import current_app
+        app = current_app._get_current_object()
+
+        def work():
+            try:
+                upload_to_yemot(_make_beep(), BEEP_PATH + '.wav')
+                with app.app_context():
+                    from app import db
+                    r = Settings.query.filter_by(key='voice_beep_uploaded').first() or Settings(key='voice_beep_uploaded')
+                    r.value = BEEP_PATH
+                    db.session.add(r)
+                    db.session.commit()
+                log.info('voice_messages: הצפצוף הועלה לימות')
+            except Exception as e:
+                global _beep_started
+                _beep_started = False
+                log.warning(f'voice_messages: העלאת הצפצוף נכשלה: {e}')
+        threading.Thread(target=work, daemon=True).start()
+    return None
+
+
+# ---------------------------------------------------------------------------
+# תבניות - כלליות לכל הלקוחות. טקסט, או הקלטה מוכנה (מהקריין / קובץ / הקלטה בממשק)
+# ---------------------------------------------------------------------------
+def templates():
+    """רשימה לתצוגה: [{id, name, text, audio}] (בלי תוכן הקובץ)."""
+    from app import db
+    from models import VoiceTemplate
+    from sqlalchemy.orm import defer
+    rows = VoiceTemplate.query.options(defer(VoiceTemplate.file_data)).order_by(VoiceTemplate.id.desc()).all()
+    has_audio = {r[0] for r in db.session.query(VoiceTemplate.id).filter(VoiceTemplate.file_data.isnot(None)).all()}
+    return [{'id': t.id, 'name': t.name, 'text': t.text or '', 'audio': t.id in has_audio} for t in rows]
+
+
+def save_template(text, wav=None, name_hint=''):
+    """שומר תבנית (נוסח אותו טקסט + אותו סוג - מחליף את הקודמת)."""
+    from app import db
+    from models import VoiceTemplate
+    text = (text or '').strip()
+    if not text and not wav:
+        return None
+    base = text or name_hint or 'הקלטה'
+    name = base if len(base) <= 60 else base[:58].rsplit(' ', 1)[0] + '…'
+    if wav:
+        name = '🔊 ' + name
+    for old in VoiceTemplate.query.filter(VoiceTemplate.text == (text or None)).all():
+        if bool(old.file_data) == bool(wav):
+            db.session.delete(old)
+    t = VoiceTemplate(name=name, text=text or None, file_data=wav)
+    db.session.add(t)
+    db.session.commit()
+    return t
+
+
+def delete_template(tid):
+    from app import db
+    from models import VoiceTemplate
+    t = VoiceTemplate.query.get(int(tid))
+    if t:
+        db.session.delete(t)
+        db.session.commit()
 
 
 def _order_col():
@@ -86,12 +181,15 @@ def mark_heard(customer, ids, phone=''):
     from app import db
     from models import VoiceMessageHeard
     for mid in ids:
-        if not VoiceMessageHeard.query.filter_by(message_id=mid, customer_id=customer.id).first():
-            db.session.add(VoiceMessageHeard(message_id=mid, customer_id=customer.id, phone=phone))
+        h = VoiceMessageHeard.query.filter_by(message_id=mid, customer_id=customer.id).first()
+        if h:
+            h.times = (h.times or 1) + 1
+        else:
+            db.session.add(VoiceMessageHeard(message_id=mid, customer_id=customer.id, phone=phone, times=1))
     db.session.commit()
 
 
-def create(customer_id, kind, text='', audio=None, filename=''):
+def create(customer_id, kind, text='', audio=None, filename='', repeat_times=1):
     """יוצר הודעה. audio - בייטים של קובץ שמע (העלאה/הקלטה). מחזיר את ההודעה או זורק שגיאה."""
     from app import db
     from models import VoiceMessage
@@ -108,7 +206,8 @@ def create(customer_id, kind, text='', audio=None, filename=''):
             raise ValueError(f'לא הצלחנו לקרוא את קובץ השמע ({e})')
         if secs < 0.5:
             raise ValueError('ההקלטה ריקה או קצרה מדי')
-    m = VoiceMessage(customer_id=customer_id, kind=kind, text=text or None, file_data=wav, active=True)
+    m = VoiceMessage(customer_id=customer_id, kind=kind, text=text or None, file_data=wav, active=True,
+                     repeat_times=max(1, min(int(repeat_times or 1), 10)))
     db.session.add(m)
     db.session.flush()
     if kind == 'file':

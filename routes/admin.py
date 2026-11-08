@@ -22,6 +22,15 @@ def get_fax_test_report():
         return ''
 
 
+@admin_bp.app_template_global('voice_templates')
+def voice_templates():
+    try:
+        from services import voice_messages as VM
+        return VM.templates()
+    except Exception:
+        return []
+
+
 @admin_bp.app_template_global('get_fax_provider')
 def get_fax_provider():
     try:
@@ -341,7 +350,11 @@ def live_count():
         return jsonify({'ok': False})
     try:
         r = requests.get(f'{ivr_url}/internal/live-calls', headers={'X-Internal-Secret': secret}, timeout=4)
-        return jsonify({'ok': True, 'count': len(r.json().get('calls', []))})
+        calls = r.json().get('calls', [])
+        # גם מי בשיחה - בשביל כרטיס הלקוח ("בשיחה עכשיו"), מאותה בדיקה בלי פנייה נוספת
+        return jsonify({'ok': True, 'count': len(calls),
+                        'calls': [{'phone': c.get('phone', ''), 'stage': c.get('stage', ''),
+                                   'seconds': c.get('seconds', 0)} for c in calls]})
     except Exception:
         return jsonify({'ok': False})
 
@@ -749,7 +762,8 @@ def _voice_messages_for(customer_id):
     for m in msgs:
         heard = VoiceMessageHeard.query.filter_by(message_id=m.id)
         first = heard.order_by(VoiceMessageHeard.heard_at).first() if customer_id else None
-        out.append({'m': m, 'heard_count': heard.count(), 'heard_at': first.heard_at if first else None})
+        out.append({'m': m, 'heard_count': heard.count(), 'heard_at': first.heard_at if first else None,
+                    'times': (first.times or 1) if first else 0})
     return out
 
 
@@ -762,19 +776,77 @@ def voice_message_create():
     back = (url_for('admin.customer_detail', id=customer_id) + '#voice' if customer_id
             else url_for('admin.broadcast_message') + '#voice')
     source = request.form.get('source')
+    text = (request.form.get('text') or '').strip()
     audio, filename = None, ''
     if source in ('upload', 'record'):
         f = request.files.get('audio_record' if source == 'record' else 'audio_file')
         if f and f.filename:
             audio, filename = f.read(), f.filename
     try:
+        if source == 'narrator':      # הנוסח בקול הקריין (הקול היציב) - נשמר כקובץ שמע
+            from services import narrator as N
+            if not text:
+                raise ValueError('יש לכתוב את נוסח ההודעה')
+            raw, _engine = N.synthesize(text)
+            audio, _secs = N.prepare(raw)
+            filename = 'narrator.wav'
+        elif source == 'template':    # הקלטה מתבנית שמורה
+            from models import VoiceTemplate
+            tpl = VoiceTemplate.query.get(int(request.form.get('template_id') or 0))
+            if not tpl or not tpl.file_data:
+                raise ValueError('התבנית לא נמצאה')
+            audio, filename, text = tpl.file_data, 'template.wav', (tpl.text or '')
         m = VM.create(customer_id, 'tts' if source == 'tts' else 'file',
-                      text=request.form.get('text', ''), audio=audio, filename=filename)
+                      text=text, audio=audio, filename=filename,
+                      repeat_times=request.form.get('repeat_times') or 1)
+        if request.form.get('save_template') == '1' and source != 'template':
+            hint = ''
+            if source in ('upload', 'record') and not text:
+                from zoneinfo import ZoneInfo as _ZI
+                when = datetime.now(_ZI('Asia/Jerusalem')).strftime('%d/%m %H:%M')
+                hint = (f'קובץ {filename.rsplit(".", 1)[0]}' if source == 'upload' and filename else 'הקלטה מהממשק') + f' ({when})'
+            VM.save_template(text, m.file_data if m.kind == 'file' else None, hint)
         flash(f'✔ ההודעה הקולית #{m.id} נשמרה - ' +
               ('הלקוח ישמע אותה בכניסה הבאה למערכת' if customer_id else 'כל הלקוחות ישמעו אותה בכניסה הבאה למערכת'))
     except Exception as e:
         flash(f'⚠ ההודעה לא נשמרה: {e}')
     return redirect(back)
+
+
+@admin_bp.route('/voice-messages/preview', methods=['POST'])
+@login_required
+def voice_message_preview():
+    """השמעת ניסיון בקול הקריין, לפני השמירה (שמע מוטמע בדף - נטפרי חוסמים שמע מהאתר)."""
+    from services import narrator as N
+    text = (request.form.get('text') or '').strip()
+    if not text:
+        return jsonify({'ok': False, 'error': 'יש לכתוב את נוסח ההודעה'})
+    try:
+        raw, _engine = N.synthesize(text)
+        wav, secs = N.prepare(raw)
+        return jsonify({'ok': True, 'mp3': N.preview_mp3_b64(wav), 'secs': secs})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)[:300]})
+
+
+@admin_bp.route('/voice-messages/template-delete', methods=['POST'])
+@login_required
+def voice_template_delete():
+    from services import voice_messages as VM
+    VM.delete_template(request.form.get('id') or 0)
+    return jsonify({'ok': True})
+
+
+@admin_bp.route('/voice-messages/template/<int:tid>/preview')
+@login_required
+def voice_template_preview(tid):
+    """השמעה של תבנית הקלטה בממשק (שמע מוטמע בדף - נטפרי חוסמים שמע מהאתר)."""
+    from models import VoiceTemplate
+    from services import narrator as N
+    t = VoiceTemplate.query.get_or_404(tid)
+    if not t.file_data:
+        return jsonify({'ok': False, 'error': 'זו תבנית טקסט'})
+    return jsonify({'ok': True, 'mp3': N.preview_mp3_b64(t.file_data)})
 
 
 @admin_bp.route('/voice-messages/<int:mid>/toggle', methods=['POST'])

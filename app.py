@@ -522,6 +522,8 @@ def _migrate_db():
         "ALTER TABLE customer_messages ADD COLUMN IF NOT EXISTS handled_at TIMESTAMP",
         "ALTER TABLE general_inbox_messages ADD COLUMN IF NOT EXISTS handled_note TEXT",
         "ALTER TABLE general_inbox_messages ADD COLUMN IF NOT EXISTS handled_at TIMESTAMP",
+        "ALTER TABLE voice_messages ADD COLUMN IF NOT EXISTS repeat_times INTEGER DEFAULT 1",
+        "ALTER TABLE voice_message_heard ADD COLUMN IF NOT EXISTS times INTEGER DEFAULT 1",
         "CREATE INDEX IF NOT EXISTS ix_proofing_rounds_fax_campaign_id ON proofing_rounds (fax_campaign_id)",
         # שינוי מינוח: "מסמכים כלליים" -> "קלדנות דיגיטלית" (הלקוחות לא
         # אמורים לדעת שמדובר בהקראה בטלפון) - מתקן גם את לקוחות-הדמה
