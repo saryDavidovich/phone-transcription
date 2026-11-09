@@ -1028,7 +1028,7 @@ def customer_contacts_send_link(id):
         flash('ללקוח אין כתובת מייל')
     else:
         CM.send_contacts_summary(customer, customer.email)
-        flash(f'נשלח ל-{customer.email} מייל עם אנשי הקשר וקישור לניהול שלהם')
+        flash(f'נשלח ל-{customer.email} מייל עם רשימת אנשי הקשר והסבר איך מעדכנים אותם במייל')
     return redirect(url_for('admin.customer_detail', id=id) + '#sec-mail')
 
 

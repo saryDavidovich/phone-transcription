@@ -597,7 +597,7 @@ function confirmOcrDelete() {
   {% else %}<div style="padding:0 16px 12px;color:var(--text2);font-size:13px">עדיין אין אנשי קשר.</div>{% endif %}
   <div style="padding:8px 16px 16px">
     <form method="POST" action="{{ url_for('admin.customer_contacts_send_link', id=customer.id) }}">
-      <button class="btn btn-ghost" type="submit" {% if not customer.email %}disabled{% endif %}>📨 שלח ללקוח את אנשי הקשר וקישור לניהול שלהם</button>
+      <button class="btn btn-ghost" type="submit" {% if not customer.email %}disabled{% endif %}>📨 שלח ללקוח את רשימת אנשי הקשר והסבר איך מעדכנים במייל</button>
     </form>
   </div>
 </div>
@@ -608,7 +608,7 @@ function confirmOcrDelete() {
   {% for o in outgoing_emails %}<tr style="vertical-align:top">
     <td style="font-size:12px">{{ o.created_at | il_time('%d/%m %H:%M') }}<br><span style="color:var(--text2)">₪{{ '%.2f'|format(o.cost or 0) }}</span></td>
     <td style="font-size:13px">{{ o.to_name or '' }}<div dir="ltr" style="text-align:right;color:var(--text2);font-size:12px">{{ o.to_email }}</div></td>
-    <td style="font-size:13px">{% if o.transcript %}<div class="msg-tx" onclick="this.classList.toggle('open')">{{ o.transcript }}</div>{% endif %}
+    <td style="font-size:13px">{% if o.in_reply_to_id %}<div style="font-size:11px;color:var(--text2)">↪ תשובה לתגובה · שרשור מס׳ {{ o.thread_ref }}</div>{% endif %}{% if o.transcript %}<div class="msg-tx" onclick="this.classList.toggle('open')">{{ o.transcript }}</div>{% endif %}
       {% for r in email_replies.get(o.id, []) %}<div class="mm-note" style="margin-top:6px">↩️ <b dir="ltr">{{ r.from_email }}</b> · {{ r.created_at | il_time('%d/%m %H:%M') }}{% if not r.heard_at %} · <span style="color:#f59e0b">לא נשמעה</span>{% endif %}<br>{{ r.body }}</div>{% endfor %}</td>
     <td>{% if o.status == 'sent' %}<span class="badge badge-green">נשלח</span>{% elif o.status == 'failed' %}<span class="badge badge-red" title="{{ o.error or '' }}">נכשל (הוחזר)</span>{% else %}<span class="badge badge-amber">בטיפול</span>{% endif %}</td>
   </tr>{% endfor %}

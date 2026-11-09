@@ -4,14 +4,15 @@
 הלקוח מקליט הודעה בטלפון ובוחר איש קשר (או מקיש כתובת חדשה). ההודעה מתומללת
 (Gemini, כמו תמלול רגיל) ונשלחת במייל לנמען: התמלול בגוף המייל + קישור להאזנה
 להקלטה המקורית. בשם השולח ובנושא מופיע ממי ההודעה, וכתובת התשובה (Reply-To) היא
-כתובת המערכת - כשהנמען עונה, התשובה מזוהה לפי [#מזהה] בנושא, נשמרת בחשבון הלקוח
-(EmailReply) ומוקראת לו בטלפון.
+כתובת המערכת - כשהנמען עונה, התשובה מזוהה לפי "(מס׳ 123456)" בנושא, נשמרת בחשבון
+הלקוח (EmailReply) ומוקראת לו בטלפון. הלקוח יכול לענות לתגובה (הקלטה), וכך הלאה -
+שרשור אחד עם אותו מספר (thread_ref).
 
 חיוב: לפי יחידות של 5 דקות (הגדרה price_per_5min_email_out), מראש - לפני התמלול.
 נכשל התמלול או השליחה - החיוב מוחזר.
 
-אנשי קשר (CustomerContact): בטלפון (הקשת כתובת), בדף אישי באתר (קישור חתום שנשלח
-ללקוח במייל), במייל למערכת עם הנושא "אנשי קשר", ובכרטיס הלקוח בממשק הניהול.
+אנשי קשר (CustomerContact): בטלפון (הוספה, עריכת שם / כתובת, מחיקה), במייל למערכת
+עם הנושא "אנשי קשר" (הוספה ומחיקה), ובכרטיס הלקוח בממשק הניהול.
 """
 import logging
 import math
@@ -24,7 +25,22 @@ from datetime import datetime
 log = logging.getLogger(__name__)
 
 EMAIL_RE = re.compile(r'^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$')
-REF_RE = re.compile(r'\[#(M[A-Z0-9]{6})\]')
+# מספר השרשור בנושא: "הודעה מאת משה (מס׳ 482193)" / "תשובה מאת ..." (וגם הפורמט הישן [#M3A867C])
+REF_RE = re.compile(r'(?:הודעה|תשובה) מאת .*?\(מס[׳\'"]?\s*(\d{6})\)|\[#(M[A-Z0-9]{6})\]')
+
+
+def ref_in(subject):
+    m = REF_RE.search(subject or '')
+    return (m.group(1) or m.group(2)) if m else None
+
+
+def _new_ref():
+    from models import OutgoingEmail
+    for _ in range(20):
+        ref = str(secrets.randbelow(900000) + 100000)
+        if not OutgoingEmail.query.filter((OutgoingEmail.ref == ref) | (OutgoingEmail.thread_ref == ref)).first():
+            return ref
+    return 'M' + secrets.token_hex(3).upper()
 DEFAULT_PRICE = '0.30'
 MAX_CONTACTS = 99
 
@@ -115,24 +131,35 @@ def parse_contact_lines(text):
     return out
 
 
-def _token_serializer():
-    from flask import current_app
-    from itsdangerous import URLSafeSerializer
-    return URLSafeSerializer(current_app.config['SECRET_KEY'], salt='customer-contacts')
+def update_contact(customer, contact_id, name=None, email=None):
+    from app import db
+    from models import CustomerContact
+    c = CustomerContact.query.filter_by(id=int(contact_id or 0), customer_id=customer.id).first()
+    if not c:
+        return None, 'איש הקשר לא נמצא'
+    if email is not None:
+        email = normalize_email(email)
+        if not EMAIL_RE.match(email):
+            return None, 'כתובת מייל לא תקינה'
+        c.email = email
+    if name:
+        c.name = name.strip()[:120]
+    db.session.commit()
+    return c, None
 
 
-def contacts_link(customer):
-    base = os.environ.get('APP_BASE_URL', os.environ.get('APP_URL', '')).rstrip('/')
-    return f"{base}/c/{_token_serializer().dumps({'cid': customer.id})}"
-
-
-def customer_from_token(token):
-    from models import Customer
-    try:
-        data = _token_serializer().loads(token)
-    except Exception:
+def find_contact_by_text(customer, text):
+    """איש קשר לפי כתובת מייל או שם (למחיקה במייל)."""
+    t = (text or '').strip().strip(':-–').strip()
+    if not t:
         return None
-    return Customer.query.get(int(data.get('cid') or 0))
+    m = re.search(r'[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}', t)
+    for c in contacts(customer):
+        if m and c.email == normalize_email(m.group(0)):
+            return c
+        if not m and (c.name or '').strip() == t:
+            return c
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -184,16 +211,26 @@ def outgoing_html(name, phone, transcript, listen_url):
 </div>'''
 
 
-def send_from_phone(phone, rec_url, call_id, contact_id=None, email=None):
-    """נקרא מה-IVR אחרי ההקלטה. מחזיר dict: ok / error ('balance', 'recipient', ...) / cost."""
+def send_from_phone(phone, rec_url, call_id, contact_id=None, email=None, reply_id=None):
+    """נקרא מה-IVR אחרי ההקלטה. מחזיר dict: ok / error ('balance', 'recipient', ...) / cost.
+    reply_id - מענה לתגובה שהתקבלה (אותו שרשור, לכתובת ששלחה את התגובה)."""
     from app import app, db
-    from models import Customer, CustomerContact, OutgoingEmail, Recording, Transaction
+    from models import Customer, CustomerContact, OutgoingEmail, Recording, Transaction, EmailReply
     from services.customer_phones import find_customer_by_phone
     customer = find_customer_by_phone(phone)
     if not customer:
         return {'ok': False, 'error': 'customer'}
     to_name = None
-    if contact_id:
+    thread_ref = None
+    if reply_id:
+        rep = EmailReply.query.filter_by(id=int(reply_id), customer_id=customer.id).first()
+        parent = OutgoingEmail.query.get(rep.outgoing_id) if rep else None
+        if not rep or not parent or not EMAIL_RE.match(rep.from_email or ''):
+            return {'ok': False, 'error': 'recipient'}
+        to_email = rep.from_email
+        to_name = parent.to_name if parent.to_email == to_email else None
+        thread_ref = parent.thread_ref or parent.ref
+    elif contact_id:
         c = CustomerContact.query.filter_by(id=int(contact_id), customer_id=customer.id).first()
         if not c:
             return {'ok': False, 'error': 'recipient'}
@@ -218,7 +255,9 @@ def send_from_phone(phone, rec_url, call_id, contact_id=None, email=None):
                     language='he', output_language='he', cost=cost, source_filename='מייל לאיש קשר')
     db.session.add(rec)
     db.session.flush()
-    out = OutgoingEmail(customer_id=customer.id, recording_id=rec.id, ref='M' + secrets.token_hex(3).upper(),
+    ref = _new_ref()
+    out = OutgoingEmail(customer_id=customer.id, recording_id=rec.id, ref=ref, thread_ref=thread_ref or ref,
+                        in_reply_to_id=int(reply_id) if reply_id else None,
                         to_email=to_email, to_name=to_name, duration_seconds=secs, cost=cost)
     db.session.add(out)
     customer.balance -= cost
@@ -247,7 +286,8 @@ def _process(app, out_id):
             from routes.recording_proxy import recording_download_url
             from routes.email_inbound import TRANSCRIBE_INBOUND_EMAIL
             name = sender_name(customer)
-            _send(out.to_email, f'הודעה מאת {name} [#{out.ref}]',
+            kind = 'תשובה' if out.in_reply_to_id else 'הודעה'
+            _send(out.to_email, f'{kind} מאת {name} (מס׳ {out.thread_ref or out.ref})',
                   outgoing_html(name, customer.phone, text, recording_download_url(rec.id)),
                   from_name=f'{name} (דרך תמלול פון)', reply_to=TRANSCRIBE_INBOUND_EMAIL)
             out.transcript = text
@@ -282,12 +322,13 @@ def _process(app, out_id):
 def handle_reply(subject, sender_email, body_text):
     """מייל נכנס שהוא תשובה למייל ששלחנו בשם לקוח ([#M...] בנושא). שומר את התגובה
     בחשבון הלקוח. מחזיר True אם זוהה וטופל."""
-    m = REF_RE.search(subject or '')
-    if not m:
+    ref = ref_in(subject)
+    if not ref:
         return False
     from app import db
     from models import OutgoingEmail, EmailReply
-    out = OutgoingEmail.query.filter_by(ref=m.group(1)).first()
+    out = (OutgoingEmail.query.filter((OutgoingEmail.thread_ref == ref) | (OutgoingEmail.ref == ref))
+           .order_by(OutgoingEmail.created_at.desc()).first())
     if not out:
         return False
     db.session.add(EmailReply(outgoing_id=out.id, customer_id=out.customer_id,
@@ -298,15 +339,25 @@ def handle_reply(subject, sender_email, body_text):
 
 
 def new_replies(customer):
+    return [r for r in recent_replies(customer) if r['new']]
+
+
+def recent_replies(customer, limit=15):
+    """תגובות לשמיעה בטלפון: קודם החדשות (מהישנה לחדשה), ואחריהן שכבר נשמעו (מהחדשה לישנה)."""
     from models import EmailReply, OutgoingEmail
-    rows = (EmailReply.query.filter_by(customer_id=customer.id, heard_at=None)
-            .order_by(EmailReply.created_at.asc()).all())
+    new = (EmailReply.query.filter_by(customer_id=customer.id, heard_at=None)
+           .order_by(EmailReply.created_at.asc()).limit(limit).all())
+    old = (EmailReply.query.filter(EmailReply.customer_id == customer.id, EmailReply.heard_at.isnot(None))
+           .order_by(EmailReply.created_at.desc()).limit(max(0, limit - len(new))).all())
+    rows = new + old
     outs = {o.id: o for o in OutgoingEmail.query.filter(OutgoingEmail.id.in_([r.outgoing_id for r in rows])).all()} if rows else {}
+    names = {c.email: c.name for c in contacts(customer)}
     res = []
     for r in rows:
         o = outs.get(r.outgoing_id)
-        who = (o.to_name if o and o.to_name and o.to_email == r.from_email else None) or r.from_email or ''
-        res.append({'id': r.id, 'from': who, 'body': r.body or ''})
+        who = names.get(r.from_email) or (o.to_name if o and o.to_email == r.from_email else None) or r.from_email or ''
+        res.append({'id': r.id, 'from': who, 'body': r.body or '', 'new': r.heard_at is None,
+                    'can_reply': bool(EMAIL_RE.match(r.from_email or ''))})
     return res
 
 
@@ -329,17 +380,35 @@ def is_contacts_subject(subject):
     return s.startswith('אנשי קשר')
 
 
+DELETE_RE = re.compile(r'^\s*(מחק|מחיקה|למחוק|הסר|הסרה)\b[\s:\-–]*(.*)$')
+
+
 def handle_contacts_email(customer, body_text, reply_to_email):
-    """מוסיף את אנשי הקשר מגוף המייל ושולח ללקוח את הרשימה המעודכנת + קישור לדף הניהול."""
-    added, errors = [], []
-    for name, email in parse_contact_lines(body_text):
-        c, err = add_contact(customer, email, name)
-        (added if c else errors).append(f'{email}' + (f' - {err}' if err else ''))
-    send_contacts_summary(customer, reply_to_email, added=added, errors=errors)
-    return len(added)
+    """מייל עם הנושא "אנשי קשר": כל שורה עם כתובת - הוספה (או עדכון שם); שורה שמתחילה
+    ב"מחק" - מחיקה לפי כתובת או שם. בסוף נשלחת ללקוח הרשימה המעודכנת."""
+    from app import db
+    added, removed, errors = [], [], []
+    for line in (body_text or '').splitlines():
+        if not line.strip():
+            continue
+        m = DELETE_RE.match(line)
+        if m:
+            c = find_contact_by_text(customer, m.group(2))
+            if c:
+                removed.append(c.name or c.email)
+                db.session.delete(c)
+                db.session.commit()
+            elif m.group(2).strip():
+                errors.append(f'{m.group(2).strip()} - לא נמצא למחיקה')
+            continue
+        for name, email in parse_contact_lines(line):
+            c, err = add_contact(customer, email, name)
+            (added if c else errors).append(f'{email}' + (f' - {err}' if err else ''))
+    send_contacts_summary(customer, reply_to_email, added=added, errors=errors, removed=removed)
+    return len(added) + len(removed)
 
 
-def send_contacts_summary(customer, to_email, added=None, errors=None):
+def send_contacts_summary(customer, to_email, added=None, errors=None, removed=None):
     from html import escape
     if not to_email:
         return
@@ -347,14 +416,18 @@ def send_contacts_summary(customer, to_email, added=None, errors=None):
     note = ''
     if added:
         note += f'<p style="color:#047857">נוספו / עודכנו: {escape(", ".join(added))}</p>'
+    if removed:
+        note += f'<p style="color:#047857">נמחקו: {escape(", ".join(removed))}</p>'
     if errors:
-        note += f'<p style="color:#b91c1c">לא נוספו: {escape(", ".join(errors))}</p>'
+        note += f'<p style="color:#b91c1c">לא בוצע: {escape(", ".join(errors))}</p>'
     html = f'''<div dir="rtl" style="font-family:Arial,sans-serif;max-width:600px;margin:auto;line-height:1.8">
 <h2 style="color:#1d4ed8">אנשי הקשר שלכם לשליחת מיילים מהטלפון</h2>{note}
 <ol style="padding-right:20px">{rows or '<li>עדיין אין אנשי קשר</li>'}</ol>
-<p><a href="{contacts_link(customer)}" style="background:#2563eb;color:#fff;text-decoration:none;padding:10px 22px;border-radius:8px;font-weight:700;display:inline-block">לניהול אנשי הקשר באתר</a></p>
-<p style="font-size:14px;color:#374151">אפשר גם להוסיף אנשי קשר במייל: שלחו מייל לכתובת המערכת עם הנושא <b>אנשי קשר</b>,
-ובגוף המייל שורה לכל איש קשר: שם, מקף וכתובת מייל (למשל: <span dir="rtl">משה כהן - moshe@gmail.com</span>).</p>
+<div style="background:#eff6ff;border-right:4px solid #3b82f6;padding:12px 14px;border-radius:8px;font-size:14px;color:#1f2937">
+<b>איך מעדכנים במייל:</b> שלחו מייל לכתובת המערכת עם הנושא <b>אנשי קשר</b>, ובגוף המייל שורה לכל פעולה:<br>
+• להוספה: שם, מקף וכתובת - למשל <span dir="rtl">משה כהן - moshe@gmail.com</span><br>
+• למחיקה: המילה מחק ואחריה הכתובת או השם - למשל <span dir="rtl">מחק - moshe@gmail.com</span><br>
+אפשר גם בטלפון: שלוחה 1, אחר כך 6 ואז 3 - הוספה, שינוי שם או כתובת, ומחיקה.</div>
 <p style="color:#6b7280;font-size:13px">מערכת תמלול פון 03-3131795</p></div>'''
     try:
         from services.email_layout import wrap_existing

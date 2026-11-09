@@ -78,11 +78,10 @@ def create_app():
     from routes.recording_proxy import download_bp
     from routes.dictate import dictate_bp
     from routes.student_link import student_link_bp
-    from routes.features import features_api, contacts_page_bp
+    from routes.features import features_api
 
     app.register_blueprint(student_link_bp)
     app.register_blueprint(features_api, url_prefix='/api')
-    app.register_blueprint(contacts_page_bp)
     app.register_blueprint(ivr_bp, url_prefix='/ivr')
     app.register_blueprint(admin_bp, url_prefix='/admin')
     app.register_blueprint(payment_bp, url_prefix='/payment')
@@ -538,6 +537,11 @@ def _migrate_db():
         "ALTER TABLE customers ADD COLUMN IF NOT EXISTS tzintuk_list VARCHAR(40)",
         # משימות: ערוץ יכול להיות שילוב (email,tzintuk / fax,tzintuk)
         "ALTER TABLE customer_tasks ALTER COLUMN channel TYPE VARCHAR(30)",
+        # מיילים לאחרים: שרשור (מענה לתגובה)
+        "ALTER TABLE outgoing_emails ADD COLUMN IF NOT EXISTS thread_ref VARCHAR(12)",
+        "ALTER TABLE outgoing_emails ADD COLUMN IF NOT EXISTS in_reply_to_id INTEGER",
+        "CREATE INDEX IF NOT EXISTS ix_outgoing_emails_thread_ref ON outgoing_emails (thread_ref)",
+        "UPDATE outgoing_emails SET thread_ref = ref WHERE thread_ref IS NULL",
         "CREATE INDEX IF NOT EXISTS ix_proofing_rounds_fax_campaign_id ON proofing_rounds (fax_campaign_id)",
         # שינוי מינוח: "מסמכים כלליים" -> "קלדנות דיגיטלית" (הלקוחות לא
         # אמורים לדעת שמדובר בהקראה בטלפון) - מתקן גם את לקוחות-הדמה

@@ -795,7 +795,9 @@ class OutgoingEmail(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     customer_id = db.Column(db.Integer, db.ForeignKey('customers.id'), nullable=False, index=True)
     recording_id = db.Column(db.Integer, nullable=True)       # Recording (בשביל קישור ההאזנה)
-    ref = db.Column(db.String(12), unique=True, index=True)   # מזהה בנושא המייל - לשיוך תגובות
+    ref = db.Column(db.String(12), unique=True, index=True)   # מזהה ההודעה
+    thread_ref = db.Column(db.String(12), index=True)         # מספר השרשור שבנושא המייל (מס׳ ...) - לשיוך תגובות
+    in_reply_to_id = db.Column(db.Integer, nullable=True)     # EmailReply שהלקוח ענה עליו (שרשור)
     to_email = db.Column(db.String(200), nullable=False)
     to_name = db.Column(db.String(120))
     transcript = db.Column(db.Text)

@@ -2,8 +2,8 @@
 משימות / תזכורות (שלוחה 1 ← 5).
 
 הלקוח מקליט את המשימה ואומר בדיבור חופשי מתי לקבל תזכורת (וגם אם היא חוזרת: כל
-יום / כל שבוע / כל חודש). ההקלטה מתומללת ב-OpenAI (gpt-transcribe), ומודל שפה
-מחלץ מהטקסט את תוכן המשימה, את מועד התזכורת (שעון ישראל) ואת החזרתיות. הלקוח
+יום / כל שבוע / כל חודש). Gemini מתמלל את ההקלטה ומחלץ ממנה בקריאה אחת את תוכן
+המשימה, את מועד התזכורת (שעון ישראל) ואת החזרתיות. הלקוח
 שומע מה הובן ומאשר, ובוחר איך לקבל את התזכורת:
   - מייל: הודעה עם תוכן המשימה וקישור להאזנה להקלטה (בלי קובץ Word).
   - פקס: בעלות נוספת לכל שליחה (task_fax_price).
@@ -88,64 +88,60 @@ def _wav_seconds(data):
         return 0
 
 
-def transcribe(data):
-    import io
-    from openai import OpenAI
-    client = OpenAI(api_key=os.environ.get('OPENAI_API_KEY'))
+_PROMPT = """בהקלטה המצורפת אדם מגדיר לעצמו משימה / תזכורת, ובתוכה הוא אומר בדיבור חופשי מתי לקבל את התזכורת.
+התאריך והשעה עכשיו (שעון ישראל): {now} (יום {weekday}).
+החזר JSON בלבד, במבנה:
+{{"transcript": "תמלול מלא ומדויק של כל מה שנאמר", "text": "תוכן המשימה עצמה, בלי ההוראות על הזמן", "due": "YYYY-MM-DD HH:MM" או null, "recurrence": "none" | "daily" | "weekly" | "monthly"}}
+כללים:
+- due בשעון ישראל, תמיד בעתיד. "מחר בבוקר" = מחר 08:00; "בערב" = 19:00; "בצהריים" = 12:00; "בעוד שעה" = עכשיו + שעה; "בעוד עשר דקות" = עכשיו + 10 דקות.
+- שעה בלי בוקר/ערב: לפי ההקשר - "בשמונה" בבוקר אם השעה עוד לא עברה היום, אחרת הקרובה בעתיד.
+- אם נאמר תאריך בלי שעה - 09:00. אם נאמרה שעה שכבר עברה היום - מחר באותה שעה.
+- יום בשבוע ("ביום שישי") או תאריך עברי ("בראש חודש") - חשב לתאריך הלועזי הקרוב בעתיד.
+- "כל יום" / "כל בוקר" = daily, "כל שבוע" / "כל יום שני" = weekly, "כל חודש" = monthly. אחרת none.
+- אם לא נאמר שום זמן - due = null."""
+
+
+def analyze(data, now=None):
+    """Gemini: מתמלל את ההקלטה ומחלץ ממנה את המשימה, המועד והחזרתיות - בקריאה אחת.
+    מחזיר (transcript, text, due_utc או None, recurrence)."""
+    from datetime import timezone
+    from google import genai
+    from google.genai import types as gtypes
+    tz = _tz()
+    now_il = (now or datetime.now(tz)).astimezone(tz)
+    client = genai.Client(api_key=os.environ.get('GOOGLE_API_KEY'))
+    prompt = _PROMPT.format(now=now_il.strftime('%Y-%m-%d %H:%M'), weekday=DAYS_HE[now_il.weekday()])
     last = None
     for attempt in range(3):
         try:
-            res = client.audio.transcriptions.create(
-                model=os.environ.get('TASKS_TRANSCRIBE_MODEL', 'gpt-transcribe'),
-                file=('task.wav', io.BytesIO(data), 'audio/wav'), language='he', response_format='text')
-            text = res if isinstance(res, str) else getattr(res, 'text', '')
-            return (text or '').strip()
+            res = client.models.generate_content(
+                model=os.environ.get('TASKS_GEMINI_MODEL', 'gemini-3.5-flash'),
+                contents=[prompt, gtypes.Part.from_bytes(data=data, mime_type='audio/wav')],
+                config=gtypes.GenerateContentConfig(
+                    response_mime_type='application/json',
+                    thinking_config=gtypes.ThinkingConfig(thinking_budget=1024)))
+            out = json.loads(res.text or '{}')
+            break
         except Exception as e:
             last = e
-            log.warning(f'tasks: תמלול נכשל (ניסיון {attempt + 1}): {e}')
+            log.warning(f'tasks: Gemini נכשל (ניסיון {attempt + 1}): {e}')
             time.sleep(2)
-    raise RuntimeError(f'התמלול נכשל: {last}')
-
-
-_PROMPT = """אתה מקבל תמלול של הודעה קולית שבה אדם מגדיר לעצמו משימה/תזכורת, ובתוכה הוא אומר בדיבור חופשי מתי לקבל את התזכורת.
-התאריך והשעה עכשיו (שעון ישראל): {now} (יום {weekday}).
-החזר JSON בלבד, בלי טקסט נוסף, במבנה:
-{{"text": "תוכן המשימה עצמה, בלי ההוראות על הזמן", "due": "YYYY-MM-DD HH:MM" או null, "recurrence": "none" | "daily" | "weekly" | "monthly"}}
-כללים:
-- due בשעון ישראל, תמיד בעתיד. "מחר בבוקר" = מחר 08:00; "בערב" = 19:00; "בצהריים" = 12:00; "בעוד שעה" = עכשיו + שעה.
-- אם נאמר תאריך בלי שעה - 09:00. אם נאמרה שעה שכבר עברה היום - מחר באותה שעה.
-- תאריך עברי (למשל "בראש חודש", "ביום שישי") - חשב לתאריך הלועזי הקרוב.
-- "כל יום" / "כל בוקר" = daily, "כל שבוע" / "כל יום שני" = weekly, "כל חודש" = monthly. אחרת none.
-- אם לא נאמר שום זמן - due = null.
-
-התמלול:
-{transcript}"""
-
-
-def extract_schedule(transcript, now=None):
-    """מחזיר (text, due_utc או None, recurrence)."""
-    from openai import OpenAI
-    tz = _tz()
-    now_il = (now or datetime.now(tz)).astimezone(tz)
-    client = OpenAI(api_key=os.environ.get('OPENAI_API_KEY'))
-    res = client.chat.completions.create(
-        model=os.environ.get('TASKS_LLM_MODEL', 'gpt-4o'),
-        response_format={'type': 'json_object'}, temperature=0,
-        messages=[{'role': 'user', 'content': _PROMPT.format(
-            now=now_il.strftime('%Y-%m-%d %H:%M'), weekday=DAYS_HE[now_il.weekday()], transcript=transcript)}])
-    data = json.loads(res.choices[0].message.content or '{}')
-    text = (data.get('text') or transcript or '').strip()
-    rec = data.get('recurrence') if data.get('recurrence') in RECURRENCES else 'none'
+    else:
+        raise RuntimeError(f'עיבוד ההקלטה נכשל: {last}')
+    transcript = (out.get('transcript') or '').strip()
+    text = (out.get('text') or transcript).strip()
+    rec = out.get('recurrence') if out.get('recurrence') in RECURRENCES else 'none'
     due_utc = None
-    if data.get('due'):
+    if out.get('due'):
         try:
-            due_il = datetime.strptime(data['due'].strip()[:16], '%Y-%m-%d %H:%M').replace(tzinfo=tz)
+            due_il = datetime.strptime(str(out['due']).strip()[:16], '%Y-%m-%d %H:%M').replace(tzinfo=tz)
             if due_il <= now_il:
                 due_il += timedelta(days=1)
-            due_utc = due_il.astimezone(__import__('datetime').timezone.utc).replace(tzinfo=None)
+            due_utc = due_il.astimezone(timezone.utc).replace(tzinfo=None)
         except ValueError:
             due_utc = None
-    return text, due_utc, rec
+    log.info(f'tasks: Gemini הבין: "{text[:80]}" | מועד {out.get("due")} | {rec}')
+    return transcript, text, due_utc, rec
 
 
 def when_text(due_utc, recurrence='none'):
@@ -186,10 +182,9 @@ def create_from_phone(phone, rec_url, call_id):
     if (customer.balance or 0) < cost:
         return {'ok': False, 'error': 'balance', 'cost': cost}
     try:
-        transcript = transcribe(data)
-        if not transcript:
+        transcript, text, due, rec_kind = analyze(data)
+        if not (transcript or text):
             return {'ok': False, 'error': 'empty'}
-        text, due, rec_kind = extract_schedule(transcript)
     except Exception as e:
         log.error(f'tasks: עיבוד המשימה נכשל: {e}')
         return {'ok': False, 'error': 'ai'}
