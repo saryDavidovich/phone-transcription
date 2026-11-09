@@ -545,6 +545,7 @@ def _migrate_db():
         # משימות: ערוץ יכול להיות שילוב (email,tzintuk / fax,tzintuk)
         "ALTER TABLE customer_tasks ALTER COLUMN channel TYPE VARCHAR(30)",
         # מיילים לאחרים: שרשור (מענה לתגובה)
+        "ALTER TABLE recordings ADD COLUMN IF NOT EXISTS alefbot_credits FLOAT",
         "ALTER TABLE outgoing_emails ADD COLUMN IF NOT EXISTS thread_ref VARCHAR(12)",
         "ALTER TABLE outgoing_emails ADD COLUMN IF NOT EXISTS in_reply_to_id INTEGER",
         "CREATE INDEX IF NOT EXISTS ix_outgoing_emails_thread_ref ON outgoing_emails (thread_ref)",

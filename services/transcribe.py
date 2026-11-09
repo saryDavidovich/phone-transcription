@@ -666,6 +666,27 @@ def _send_insufficient_balance_email(to_email, duration_seconds, cost, balance):
     log.info(f"Insufficient balance email sent to {to_email}")
 
 
+# הנחיית אוצר מילים לאלף בוט (user_prompt) - כמו בפרומפט של Gemini בתמלול הרגיל
+ALEFBOT_USER_PROMPT = ('תוכן תורני: פסוקים, משנה, גמרא, ארמית, ראשי תיבות ושמות רבנים וספרים - בכתיב הנכון. '
+                       'הדובר עשוי לדבר או לצטט בהגייה אשכנזית-חסידית (למשל "בוריך אתוה", "תוירה", "שבס") - '
+                       'יש לכתוב לפי הכתיב העברי התקני ("ברוך אתה", "תורה", "שבת") ולא לפי ההגייה. '
+                       'שמות אנשים ומקומות בדיוק כפי שנאמרו.')
+
+
+def alefbot_fetch_credits(job_id):
+    """כמה קרדיטים אלף בוט חייבו על תמלול (GET /transcriptions/<job>, credits_used). None אם לא ידוע."""
+    import requests
+    try:
+        r = requests.get(f'https://alef-bot.top/api/v1/transcriptions/{job_id}',
+                         headers={'Authorization': f'Bearer {os.environ.get("ALEFBOT_API_KEY", "")}'}, timeout=30)
+        r.raise_for_status()
+        v = r.json().get('credits_used')
+        return float(v) if v is not None else None
+    except Exception as e:
+        log.warning(f'AlefBot credits for {job_id}: {e}')
+        return None
+
+
 def _alefbot_submit(rec_url, call_id, model_tier='standard', translate_to_hebrew=False):
     """שולח ל-AlefBot ומחזיר job_id מיד.
     הקובץ לא נטען לזיכרון: נקרא מהדיסק (או מורד בזרימה), מומר ל-16kHz מונו
@@ -721,6 +742,7 @@ def _alefbot_submit(rec_url, call_id, model_tier='standard', translate_to_hebrew
                 'webhook_url': webhook_url,
                 'model_tier': model_tier,
                 'translate_to_hebrew': translate_to_hebrew,
+                'user_prompt': ALEFBOT_USER_PROMPT,
             },
             timeout=30
         )

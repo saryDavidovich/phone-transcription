@@ -360,6 +360,19 @@ def alefbot_webhook():
             transcript = r.text.strip()
             current_app.logger.info(f"AlefBot artifact fetched: {len(transcript)} chars for job {job_id}")
             finalize_alefbot_recording(call_id, transcript)
+            # כמה קרדיטים אלף בוט חייבו - לחישוב העלות האמיתית של תמלול מקצועי
+            try:
+                from services.transcribe import alefbot_fetch_credits
+                credits = alefbot_fetch_credits(job_id)
+                if credits is not None:
+                    r2 = Recording.query.filter_by(alefbot_job_id=job_id).first()
+                    if r2:
+                        r2.alefbot_credits = credits
+                        db.session.commit()
+                        current_app.logger.info(f"AlefBot job {job_id}: {credits} קרדיטים")
+            except Exception as ce:
+                db.session.rollback()
+                current_app.logger.warning(f"AlefBot credits save failed: {ce}")
         except Exception as e:
             current_app.logger.error(f"AlefBot webhook error: {e}")
             return jsonify({'ok': False, 'error': str(e)}), 500

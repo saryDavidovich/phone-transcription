@@ -154,6 +154,7 @@ class Recording(db.Model):
     delivery_method = db.Column(db.String(10))
     delivered_to = db.Column(db.String(200))
     alefbot_job_id = db.Column(db.String(100))
+    alefbot_credits = db.Column(db.Float, nullable=True)   # קרדיטים שאלף בוט חייב על התמלול (credits_used)
     rec_url = db.Column(db.String(500))
     source_filename = db.Column(db.String(255), nullable=True)
     fax_campaign_id = db.Column(db.String(64), nullable=True, index=True)

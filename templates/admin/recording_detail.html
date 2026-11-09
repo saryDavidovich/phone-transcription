@@ -49,6 +49,12 @@
     <div class="stat-label">עלות</div>
     <div style="font-size:18px;font-weight:700;color:#ef4444">₪{{ "%.2f"|format(recording.cost) }}</div>
   </div>
+  {% if recording.alefbot_credits is not none %}
+  <div class="stat-card">
+    <div class="stat-label">קרדיטים באלף בוט</div>
+    <div style="font-size:18px;font-weight:700">{{ '%g'|format(recording.alefbot_credits) }}</div>
+  </div>
+  {% endif %}
 </div>
 {% if recording.transcription_tier == 'excel' %}
 <div class="card" style="margin-bottom:20px">
