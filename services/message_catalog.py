@@ -12,6 +12,10 @@
 הנוסח שבקובץ הזה הוא נוסח ההתחלה בלבד: עריכה בממשק נשמרת במסד הנתונים (SystemMessage)
 ולא נדרסת. מספר חדש שמתווסף כאן נכנס לרשימה אוטומטית בפתיחת הדף.
 """
+import logging
+
+log = logging.getLogger(__name__)
+
 
 R, T, D, U = 'recorded', 'tts', 'dynamic', 'unused'
 
@@ -266,7 +270,12 @@ KIND_LABELS = {R: 'מוקלטת', T: 'הקראה ממוחשבת', D: 'משתנה
 
 
 def sync():
-    """מכניס למסד הנתונים הודעות חדשות מהרשימה. נוסח שנערך בממשק לא נדרס."""
+    """מכניס למסד הנתונים הודעות חדשות מהרשימה, ומעדכן הודעות שהנוסח שלהן השתנה כאן בקוד.
+
+    נוסח שהשתנה בקוד (default_text שונה) = התפריט עצמו השתנה (למשל נוספה אפשרות), ולכן:
+    הנוסח במסד מוחלף בנוסח החדש, והודעה בהקראה ממוחשבת שהוקלטה בקריין בנוסח הישן חוזרת
+    להקראה ממוחשבת (recorded=False) עד שתוקלט מחדש - אחרת הטלפון היה משמיע תפריט לא נכון.
+    עריכה בממשק בלי שינוי בקוד - לא נדרסת."""
     from app import db
     from models import SystemMessage
     have = {m.num: m for m in SystemMessage.query.all()}
@@ -277,8 +286,20 @@ def sync():
             db.session.add(SystemMessage(num=num, text=text, default_text=text, context=where, kind=kind,
                                          recorded=(kind == R)))
             changed = True
-        elif m.context != where or m.kind != kind:
+            continue
+        if m.context != where or m.kind != kind:
             m.context, m.kind = where, kind
+            changed = True
+        if (m.default_text or '') != text:
+            old_default = m.default_text
+            m.default_text = text
+            if kind == T:
+                m.text = text
+                if m.recorded:
+                    m.recorded = False
+                    log.warning(f'message_catalog: הודעה {num} - הנוסח השתנה, ההקלטה הישנה לא בשימוש עד הקלטה מחדש')
+            elif (m.text or '') in ('', old_default or ''):
+                m.text = text
             changed = True
     if changed:
         db.session.commit()
