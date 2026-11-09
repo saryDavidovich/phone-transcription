@@ -148,3 +148,29 @@ def tasks_discard():
 def tasks_cancel():
     customer, data, _p = _customer()
     return jsonify({'ok': bool(customer) and TK.cancel(customer, data.get('task_id'))})
+
+
+# ---------------------------------------------------------------------------
+# העלאת קוד לגיטהאב -> מצב תחזוקה עד שהגרסה החדשה עולה (services/maintenance.py)
+# ---------------------------------------------------------------------------
+@features_api.route('/github-push', methods=['POST'])
+def github_push():
+    import hashlib
+    import hmac
+    import os
+    secret = os.environ.get('GITHUB_WEBHOOK_SECRET', '')
+    if not secret:
+        return jsonify({'ok': False, 'error': 'GITHUB_WEBHOOK_SECRET לא מוגדר'}), 503
+    sig = request.headers.get('X-Hub-Signature-256', '')
+    want = 'sha256=' + hmac.new(secret.encode(), request.get_data(), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(sig, want):
+        return jsonify({'ok': False, 'error': 'bad signature'}), 401
+    event = request.headers.get('X-GitHub-Event', '')
+    if event == 'ping':
+        return jsonify({'ok': True, 'pong': True})
+    data = request.get_json(silent=True) or {}
+    branch = os.environ.get('GITHUB_DEPLOY_BRANCH', 'main')
+    if event != 'push' or data.get('ref') != f'refs/heads/{branch}':
+        return jsonify({'ok': True, 'ignored': True})
+    from services import maintenance as MT
+    return jsonify({'ok': True, 'maintenance_on': MT.on_github_push()})

@@ -5,6 +5,10 @@
 אותו דלוק והמערכת מושבתת: כשהגרסה החדשה עולה, אם המצב הודלק בגרסה הקודמת (מזהה
 הפריסה של Railway שונה), הוא נכבה אוטומטית אחרי כחצי דקה וכל מה שהמתין משתחרר.
 אפשר לבטל את הכיבוי האוטומטי בדף מצב התחזוקה (maintenance_auto_off = 0).
+
+הדלקה אוטומטית: גיטהאב שולח webhook בכל העלאה ל-main (/api/github-push, חתום ב-GITHUB_WEBHOOK_SECRET)
+והמצב נדלק מיד - כך שעבודות חדשות ממתינות בזמן הבנייה, והקיימות מסתיימות לפני שהגרסה מתחלפת.
+אם הגרסה החדשה לא עולה תוך 20 דקות (בנייה שנכשלה) - המצב נכבה והמנהל מקבל הודעה.
 """
 import logging
 import os
@@ -34,15 +38,67 @@ def release_all():
     return out
 
 
-def set_mode(on):
-    """הדלקה / כיבוי (מהממשק). בהדלקה נשמר מזהה הפריסה - לכיבוי האוטומטי בפריסה הבאה."""
+def set_mode(on, source='admin'):
+    """הדלקה / כיבוי. בהדלקה נשמר מזהה הפריסה - לכיבוי האוטומטי בפריסה הבאה.
+    source: 'admin' (מהממשק) / 'github' (אוטומטית בהעלאת קוד לגיטהאב)."""
     from routes.admin import set_setting
     set_setting('maintenance_mode', '1' if on else '0')
     if on:
         set_setting('maintenance_on_deploy', deployment_id())
         set_setting('maintenance_on_at', datetime.utcnow().isoformat(timespec='seconds'))
+        set_setting('maintenance_on_source', source)
         return None
+    set_setting('maintenance_on_source', '')
     return release_all()
+
+
+GITHUB_MAX_MINUTES = 20     # הודלק בהעלאה לגיטהאב ולא עלתה גרסה חדשה (בנייה נכשלה?) - כיבוי אחרי 20 דקות
+
+
+def on_github_push():
+    """העלאת קוד לגיטהאב (webhook): מדליק מצב תחזוקה עד שהגרסה החדשה עולה. כבר דלוק - לא נוגע."""
+    from routes.admin import get_setting
+    if get_setting('maintenance_mode', '0') == '1':
+        return False
+    set_mode(True, source='github')
+    log.warning('maintenance: הודלק אוטומטית - העלאת קוד לגיטהאב, ייכבה כשהגרסה החדשה תעלה')
+    return True
+
+
+def _watchdog_github(app):
+    """הודלק בהעלאה לגיטהאב אבל הגרסה החדשה לא עלתה תוך 20 דקות - מכבים ומודיעים למנהל."""
+    while True:
+        time.sleep(60)
+        try:
+            with app.app_context():
+                from app import db
+                from routes.admin import get_setting, set_setting
+                if get_setting('maintenance_mode', '0') != '1' or get_setting('maintenance_on_source', '') != 'github':
+                    continue
+                try:
+                    at = datetime.fromisoformat(get_setting('maintenance_on_at', ''))
+                except ValueError:
+                    continue
+                if (datetime.utcnow() - at).total_seconds() < GITHUB_MAX_MINUTES * 60:
+                    continue
+                if db.engine.dialect.name == 'postgresql':
+                    if not db.session.execute(db.text('SELECT pg_try_advisory_xact_lock(:k)'), {'k': _LOCK_KEY + 1}).scalar():
+                        db.session.rollback()
+                        continue
+                if get_setting('maintenance_mode', '0') != '1':
+                    continue
+                released = set_mode(False)
+                from models import ManagerMessage
+                db.session.add(ManagerMessage(
+                    phone='—', name='מצב תחזוקה', source='recording_error',
+                    transcript=(f'מצב התחזוקה הודלק בהעלאת קוד לגיטהאב, אבל גרסה חדשה לא עלתה תוך {GITHUB_MAX_MINUTES} '
+                                f'דקות (אולי הבנייה ב-Railway נכשלה). המצב כובה כדי שהמערכת לא תישאר מושבתת. '
+                                f'שוחררו: {released["calls"]} הקלטות, {released["ocr"]} תמונות OCR, '
+                                f'{released["email_out"]} מיילים לאנשי קשר.')))
+                db.session.commit()
+                log.warning('maintenance: כובה - גרסה חדשה לא עלתה תוך 20 דקות מההעלאה לגיטהאב')
+        except Exception as e:
+            log.warning(f'maintenance watchdog: {e}')
 
 
 def _auto_off(app):
@@ -87,3 +143,4 @@ def start(app):
         return
     _started = True
     threading.Thread(target=_auto_off, args=(app,), daemon=True, name='maintenance-auto-off').start()
+    threading.Thread(target=_watchdog_github, args=(app,), daemon=True, name='maintenance-watchdog').start()

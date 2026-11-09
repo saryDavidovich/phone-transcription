@@ -234,6 +234,7 @@ def _same_origin():
 API_KEY_EXEMPT_PREFIXES = (
     '/api/alefbot-webhook', '/api/fax-delivery-webhook', '/api/email-inbound',
     '/api/recordings-email/', '/api/email-choice/', '/api/nedarim/callback/',
+    '/api/github-push',          # חתום בנפרד (GITHUB_WEBHOOK_SECRET)
 )
 
 

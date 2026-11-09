@@ -164,7 +164,7 @@ function renderStatus(data) {
   const pill = document.getElementById('statusPill');
   const pillText = document.getElementById('statusPillText');
   pill.className = 'mt-statuspill ' + (maintenanceOn ? 'on' : 'off');
-  pillText.textContent = maintenanceOn ? 'מצב תחזוקה פעיל' : 'פעיל כרגיל';
+  pillText.textContent = maintenanceOn ? (data.on_source === 'github' ? 'מצב תחזוקה - עולה גרסה חדשה' : 'מצב תחזוקה פעיל') : 'פעיל כרגיל';
 
   const btn = document.getElementById('toggleBtn');
   const btnText = document.getElementById('toggleBtnText');

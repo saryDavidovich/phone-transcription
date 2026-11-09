@@ -1999,6 +1999,7 @@ def maintenance_status():
     from models import OutgoingEmail
     data['queued_email_out'] = OutgoingEmail.query.filter_by(status='queued').count()
     data['auto_off'] = get_setting('maintenance_auto_off', '1') == '1'
+    data['on_source'] = get_setting('maintenance_on_source', '')
     return jsonify(data)
 
 
