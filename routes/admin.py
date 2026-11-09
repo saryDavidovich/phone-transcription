@@ -996,6 +996,7 @@ def _mail_and_tasks_for(customer):
     return {'contacts': CustomerContact.query.filter_by(customer_id=customer.id).order_by(CustomerContact.id).all(),
             'outgoing_emails': outs, 'email_replies': replies, 'customer_tasks': tasks,
             'task_when': lambda t: TK.when_text(t.due_at, t.recurrence) if t.due_at else '—',
+            'task_channels': TK.channels_he,
             'new_replies_count': EmailReply.query.filter_by(customer_id=customer.id, heard_at=None).count()}
 
 

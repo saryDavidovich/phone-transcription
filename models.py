@@ -832,7 +832,7 @@ class CustomerTask(db.Model):
     duration_seconds = db.Column(db.Integer, default=0)
     due_at = db.Column(db.DateTime, index=True)     # UTC - מועד השליחה הבא
     recurrence = db.Column(db.String(10), default='none')   # none / daily / weekly / monthly
-    channel = db.Column(db.String(10))              # email / fax / tzintuk
+    channel = db.Column(db.String(30))              # email / fax / tzintuk, או שילוב: email,tzintuk / fax,tzintuk
     target = db.Column(db.String(200))              # כתובת מייל / מספר פקס
     status = db.Column(db.String(20), default='draft')      # draft / active / done / cancelled
     cost = db.Column(db.Float, default=0.0)

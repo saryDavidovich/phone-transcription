@@ -620,11 +620,11 @@ function confirmOcrDelete() {
 <details class="cd-sec" data-sec="tasks"><summary>⏰ משימות ותזכורות ({{ customer_tasks|selectattr('status', 'equalto', 'active')|list|length }} פעילות)</summary>
 <div id="sec-tasks" class="table-card" style="margin-top:12px">
   {% if customer_tasks %}
-  <table><thead><tr><th>המשימה</th><th style="width:200px">מתי</th><th style="width:80px">איך</th><th style="width:90px">סטטוס</th><th style="width:80px"></th></tr></thead><tbody>
+  <table><thead><tr><th>המשימה</th><th style="width:200px">מתי</th><th style="width:110px">איך</th><th style="width:90px">סטטוס</th><th style="width:80px"></th></tr></thead><tbody>
   {% for t in customer_tasks %}<tr style="vertical-align:top">
     <td style="font-size:13px">{{ t.text }}{% if t.last_error %}<div style="color:#ef4444;font-size:12px">⚠ {{ t.last_error }}</div>{% endif %}</td>
     <td style="font-size:12px">{{ task_when(t) if t.status == 'active' else (t.last_sent_at | il_time('%d/%m %H:%M') if t.last_sent_at else '—') }}{% if t.sent_count %}<div style="color:var(--text2)">נשלחה {{ t.sent_count }} פעמים</div>{% endif %}</td>
-    <td style="font-size:12px">{{ {'email': 'מייל', 'fax': 'פקס', 'tzintuk': 'צינתוק'}.get(t.channel, '—') }}</td>
+    <td style="font-size:12px">{{ task_channels(t.channel) }}</td>
     <td>{% if t.status == 'active' %}<span class="badge badge-amber">פעילה</span>{% elif t.status == 'done' %}<span class="badge badge-green">נשלחה</span>{% elif t.status == 'failed' %}<span class="badge badge-red">נכשלה</span>{% else %}<span class="badge badge-gray">בוטלה</span>{% endif %}</td>
     <td>{% if t.status == 'active' %}<form method="POST" action="{{ url_for('admin.customer_task_cancel', id=customer.id, tid=t.id) }}" onsubmit="return confirm('לבטל את המשימה?')"><button class="btn btn-ghost" type="submit" style="font-size:12px;padding:4px 10px">ביטול</button></form>{% endif %}</td>
   </tr>{% endfor %}

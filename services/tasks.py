@@ -209,6 +209,20 @@ def create_from_phone(phone, rec_url, call_id):
             'fax_price': fax_price(), 'tzintuk_registered': bool(customer.tzintuk_list)}
 
 
+CHANNELS = ('email', 'fax', 'tzintuk')
+CHANNEL_HE = {'email': 'מייל', 'fax': 'פקס', 'tzintuk': 'צינתוק'}
+
+
+def channels_of(value):
+    """'email,tzintuk' -> ['email', 'tzintuk'] (סדר קבוע, בלי כפילויות / ערכים לא מוכרים)."""
+    got = {(c or '').strip() for c in str(value or '').split(',')}
+    return [c for c in CHANNELS if c in got]
+
+
+def channels_he(value):
+    return ' + '.join(CHANNEL_HE[c] for c in channels_of(value)) or '—'
+
+
 def confirm(phone, task_id, channel):
     """הלקוח אישר ובחר ערוץ. מחייב ומפעיל. מחזיר dict."""
     from app import db
@@ -218,12 +232,14 @@ def confirm(phone, task_id, channel):
     t = CustomerTask.query.filter_by(id=int(task_id or 0), customer_id=customer.id if customer else -1).first()
     if not customer or not t or t.status != 'draft':
         return {'ok': False, 'error': 'task'}
-    if channel not in ('email', 'fax', 'tzintuk'):
+    chans = channels_of(channel)
+    if not chans or ('email' in chans and 'fax' in chans):
         return {'ok': False, 'error': 'channel'}
+    channel = ','.join(chans)
     if not t.due_at:
         return {'ok': False, 'error': 'time'}
-    target = customer.email if channel == 'email' else customer.fax if channel == 'fax' else None
-    if channel in ('email', 'fax') and not target:
+    target = customer.email if 'email' in chans else customer.fax if 'fax' in chans else None
+    if ('email' in chans or 'fax' in chans) and not target:
         return {'ok': False, 'error': 'no_target'}
     if (customer.balance or 0) < t.cost:
         return {'ok': False, 'error': 'balance', 'cost': t.cost}
@@ -233,7 +249,7 @@ def confirm(phone, task_id, channel):
     t.channel, t.target, t.status = channel, target, 'active'
     db.session.commit()
     tz_folder = None
-    if channel == 'tzintuk':
+    if 'tzintuk' in chans:
         from services import voice_messages as VM
         try:
             VM.sync_tzintuk(max_age=0)
@@ -312,17 +328,34 @@ def reminder_html(t, customer, listen_url):
 
 
 def deliver(t):
-    """שולח תזכורת אחת. זורק שגיאה אם נכשל."""
+    """שולח תזכורת אחת בכל הערוצים שנבחרו (מייל / פקס / צינתוק, או שילוב). זורק שגיאה
+    רק אם כל הערוצים נכשלו; כשל חלקי נרשם ב-last_error."""
+    customer_errors = []
+    sent = 0
+    for ch in channels_of(t.channel):
+        try:
+            _deliver_one(t, ch)
+            sent += 1
+        except Exception as e:
+            log.error(f'tasks: משימה {t.id} - {CHANNEL_HE[ch]} נכשל: {e}')
+            customer_errors.append(f'{CHANNEL_HE[ch]}: {e}')
+    if customer_errors and not sent:
+        raise RuntimeError('; '.join(customer_errors))
+    if customer_errors:
+        t.last_error = '; '.join(customer_errors)[:500]
+
+
+def _deliver_one(t, channel):
     from app import db
     from models import Customer, Transaction
     customer = Customer.query.get(t.customer_id)
-    if t.channel == 'email':
+    if channel == 'email':
         from services.customer_mail import _send
         from services.email_layout import wrap_existing
         from routes.recording_proxy import recording_download_url
         _send(t.target, f'תזכורת: {(t.text or "")[:60]}',
               wrap_existing(reminder_html(t, customer, recording_download_url(t.recording_id)), phone=customer.phone))
-    elif t.channel == 'fax':
+    elif channel == 'fax':
         price = fax_price()
         if (customer.balance or 0) < price:
             raise RuntimeError('אין מספיק יתרה לשליחת פקס')
@@ -334,7 +367,7 @@ def deliver(t):
         customer.balance -= price
         db.session.add(Transaction(customer_id=customer.id, amount=-price, type='debit', recording_id=t.recording_id,
                                    description='תזכורת בפקס'))
-    elif t.channel == 'tzintuk':
+    elif channel == 'tzintuk':
         from services import voice_messages as VM
         VM.create(customer.id, 'tts', text=f'תזכורת: {t.text or t.transcript or ""}')
         ok, msg = VM.tzintuk_customer(customer)
@@ -356,10 +389,10 @@ def run_due(now=None):
     for t in due:
         failed = False
         try:
+            t.last_error = None
             deliver(t)
             t.sent_count = (t.sent_count or 0) + 1
             t.last_sent_at = datetime.utcnow()
-            t.last_error = None
             n += 1
         except Exception as e:
             failed = True
