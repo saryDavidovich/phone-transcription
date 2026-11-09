@@ -602,17 +602,39 @@ function confirmOcrDelete() {
   </div>
 </div>
 <div class="table-card" style="margin-top:12px">
-  <div class="table-header"><span class="table-title">מיילים שהלקוח שלח מהטלפון</span></div>
-  {% if outgoing_emails %}
-  <table><thead><tr><th style="width:120px">נשלח</th><th style="width:200px">אל</th><th>תוכן ותגובות</th><th style="width:90px">סטטוס</th></tr></thead><tbody>
-  {% for o in outgoing_emails %}<tr style="vertical-align:top">
-    <td style="font-size:12px">{{ o.created_at | il_time('%d/%m %H:%M') }}<br><span style="color:var(--text2)">₪{{ '%.2f'|format(o.cost or 0) }}</span></td>
-    <td style="font-size:13px">{{ o.to_name or '' }}<div dir="ltr" style="text-align:right;color:var(--text2);font-size:12px">{{ o.to_email }}</div></td>
-    <td style="font-size:13px">{% if o.in_reply_to_id %}<div style="font-size:11px;color:var(--text2)">↪ תשובה לתגובה · שרשור מס׳ {{ o.thread_ref }}</div>{% endif %}{% if o.transcript %}<div class="msg-tx" onclick="this.classList.toggle('open')">{{ o.transcript }}</div>{% endif %}
-      {% for r in email_replies.get(o.id, []) %}<div class="mm-note" style="margin-top:6px">↩️ <b dir="ltr">{{ r.from_email }}</b> · {{ r.created_at | il_time('%d/%m %H:%M') }}{% if not r.heard_at %} · <span style="color:#f59e0b">לא נשמעה</span>{% endif %}<br>{{ r.body }}</div>{% endfor %}</td>
-    <td>{% if o.status == 'sent' %}<span class="badge badge-green">נשלח</span>{% elif o.status == 'failed' %}<span class="badge badge-red" title="{{ o.error or '' }}">נכשל (הוחזר)</span>{% else %}<span class="badge badge-amber">בטיפול</span>{% endif %}</td>
-  </tr>{% endfor %}
-  </tbody></table>
+  <div class="table-header"><span class="table-title">💬 שרשורי מיילים מהטלפון</span></div>
+  {% if mail_threads %}
+  <div style="padding:12px 16px;display:flex;flex-direction:column;gap:14px">
+  {% for th in mail_threads %}
+    <details class="mt-thread" {% if loop.first or th.new %}open{% endif %} style="border:1px solid var(--border);border-radius:12px;overflow:hidden">
+      <summary style="cursor:pointer;padding:10px 14px;background:var(--surface2);display:flex;gap:10px;align-items:center;flex-wrap:wrap;list-style:none">
+        <b>{{ th.name or th.email }}</b><span dir="ltr" style="color:var(--text2);font-size:12px">{{ th.email }}</span>
+        <span style="color:var(--text2);font-size:12px">· מס׳ {{ th.ref }} · {{ th['items']|length }} הודעות · {{ th.last | il_time('%d/%m %H:%M') }}</span>
+        {% if th.new %}<span class="badge badge-amber">{{ th.new }} תגובות שלא נשמעו</span>{% endif %}
+      </summary>
+      <div style="padding:14px;display:flex;flex-direction:column;gap:8px;max-height:420px;overflow-y:auto;background:var(--surface,transparent)">
+      {% for it in th['items'] %}
+        <div style="display:flex;justify-content:{{ 'flex-start' if it.dir == 'out' else 'flex-end' }}">
+          <div style="max-width:75%;width:fit-content;padding:8px 12px;border-radius:12px;font-size:13px;line-height:1.55;
+                      {% if it.dir == 'out' %}background:#1e3a8a;color:#fff;border-bottom-right-radius:3px{% else %}background:#2d3561;color:#e2e8f0;border-bottom-left-radius:3px{% endif %}">
+            <div style="font-size:11px;opacity:.75;margin-bottom:3px;white-space:normal">
+              {% if it.dir == 'out' %}🎙️ {{ customer.name or 'הלקוח' }} (מהטלפון){% if it.reply %} · ↪ תשובה{% endif %}
+              {% else %}<span dir="ltr">{{ it['from'] }}</span>{% endif %} · {{ it.at | il_time('%d/%m %H:%M') }}
+            </div>
+            <div style="white-space:pre-wrap">{{ it.body or '(ממתין לתמלול)' }}</div>
+            <div style="font-size:11px;opacity:.75;margin-top:4px">
+              {% if it.dir == 'out' %}
+                {% if it.status == 'sent' %}✓ נשלח{% elif it.status == 'failed' %}<span style="color:#fca5a5" title="{{ it.error or '' }}">✕ לא נשלח (החיוב הוחזר)</span>{% elif it.status == 'queued' %}⏸ ממתין (מצב תחזוקה){% else %}⏳ בטיפול{% endif %}
+                · ₪{{ '%.2f'|format(it.cost) }}{% if it.recording_id %} · <a href="{{ url_for('admin.recording_detail', id=it.recording_id) }}" style="color:#bfdbfe">🎧 ההקלטה</a>{% endif %}
+              {% else %}{{ '✓ נשמעה בטלפון' if it.heard else '● עוד לא נשמעה' }}{% endif %}
+            </div>
+          </div>
+        </div>
+      {% endfor %}
+      </div>
+    </details>
+  {% endfor %}
+  </div>
   {% else %}<div style="padding:0 16px 12px;color:var(--text2);font-size:13px">הלקוח עוד לא שלח מיילים מהטלפון.</div>{% endif %}
 </div>
 </details>

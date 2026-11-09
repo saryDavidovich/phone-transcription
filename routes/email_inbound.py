@@ -1795,7 +1795,7 @@ def email_inbound():
     # תשובה של נמען למייל שלקוח שלח מהטלפון (שלוחה 1 ← 6) - [#M...] בנושא. נשמרת בחשבון
     # הלקוח ומוקראת לו בטלפון (services/customer_mail).
     from services import customer_mail as _CM
-    if _CM.REF_RE.search(subject or ''):
+    if _CM.REF_RE.search(subject or '') and not _is_auto_generated(sender_email, raw_headers):
         body = _strip_quoted_reply(_clean_text((request.form.get('text') or '').strip()
                                                or _strip_html(request.form.get('html', ''))))
         with app.app_context():

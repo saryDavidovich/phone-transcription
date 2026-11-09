@@ -68,7 +68,12 @@
         כתבי-יד לא נכנסת לתור (זו פעולה שהמנהל מתחיל ידנית בסטודיו) - במקום זה
         פשוט חסומה זמנית, כדי לא להתחיל עבודה שעלולה להיקטע בדפלוי. העלאות מוסד
         ממשיכות כרגיל - יש לעקוב אחרי המונה שלהן למטה ולחכות שיתאפס לפני דפלוי.
+        גם מיילים לאנשי קשר (שלוחה 1 ← 6) ממתינים, ותזכורות של משימות נשלחות מיד אחרי הכיבוי (באיחור של דקות).
       </div>
+      <label style="display:flex;gap:8px;align-items:center;margin-top:10px;font-size:13px;cursor:pointer">
+        <input type="checkbox" id="autoOffBox" {% if auto_off %}checked{% endif %} onchange="setAutoOff(this.checked)">
+        לכבות אוטומטית כשעולה גרסה חדשה (דפלוי) - חצי דקה אחרי העלייה, וכל מה שהמתין משתחרר
+      </label>
     </div>
     <div style="display:flex;flex-direction:column;align-items:flex-end;gap:10px">
       <span id="statusPill" class="mt-statuspill {{ 'on' if maintenance_mode else 'off' }}">
@@ -95,6 +100,10 @@
     <div class="mt-queuedrow">
       <div class="mt-queuednum" id="queuedNum">-</div>
       <div>שיחות ממתינות בתור (מצב תחזוקה)</div>
+    </div>
+    <div class="mt-queuedrow">
+      <div class="mt-queuednum" id="queuedMailNum">-</div>
+      <div>מיילים לאנשי קשר ממתינים (מצב תחזוקה)</div>
     </div>
     <div class="mt-queuedrow">
       <div class="mt-queuednum" id="queuedOcrNum">-</div>
@@ -149,6 +158,7 @@ function renderStatus(data) {
   document.getElementById('totalNum').textContent = data.total;
   document.getElementById('queuedNum').textContent = data.queued_calls;
   document.getElementById('queuedOcrNum').textContent = data.queued_ocr;
+  document.getElementById('queuedMailNum').textContent = data.queued_email_out || 0;
   document.getElementById('lastUpdated').textContent = 'עודכן: ' + new Date().toLocaleTimeString('he-IL');
 
   const pill = document.getElementById('statusPill');
@@ -186,6 +196,12 @@ function renderStatus(data) {
   }
 }
 
+async function setAutoOff(on) {
+  const fd = new FormData();
+  fd.append('enable', on ? '1' : '0');
+  try { await fetch('/admin/maintenance/auto-off', { method: 'POST', body: fd }); } catch (e) { alert('השמירה נכשלה'); }
+}
+
 async function toggleMaintenance() {
   const btn = document.getElementById('toggleBtn');
   btn.disabled = true;
@@ -198,6 +214,7 @@ async function toggleMaintenance() {
     const parts = [];
     if (data.released_calls > 0) parts.push(`${data.released_calls} שיחות`);
     if (data.released_ocr > 0) parts.push(`${data.released_ocr} תמונות OCR`);
+    if (data.released_email_out > 0) parts.push(`${data.released_email_out} מיילים לאנשי קשר`);
     if (parts.length > 0) {
       alert(`שוחררו: ${parts.join(' + ')}`);
     }

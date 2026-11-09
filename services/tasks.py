@@ -27,6 +27,7 @@ log = logging.getLogger(__name__)
 
 DEFAULT_PRICE = '0.30'
 DEFAULT_FAX_PRICE = '1.00'
+MAX_ACTIVE = 50                     # משימות פעילות ללקוח
 RECURRENCES = ('none', 'daily', 'weekly', 'monthly')
 REC_HE = {'none': '', 'daily': 'כל יום', 'weekly': 'כל שבוע', 'monthly': 'כל חודש'}
 DAYS_HE = ['שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת', 'ראשון']
@@ -172,6 +173,11 @@ def create_from_phone(phone, rec_url, call_id):
     customer = find_customer_by_phone(phone)
     if not customer:
         return {'ok': False, 'error': 'customer'}
+    from services.customer_mail import is_yemot_url
+    if not is_yemot_url(rec_url):
+        return {'ok': False, 'error': 'recording'}
+    if CustomerTask.query.filter_by(customer_id=customer.id, status='active').count() >= MAX_ACTIVE:
+        return {'ok': False, 'error': 'limit'}
     try:
         data = _download(rec_url)
     except Exception as e:
@@ -373,6 +379,8 @@ def _deliver_one(t, channel):
 def run_due(now=None):
     from app import db
     from models import CustomerTask
+    if _setting('maintenance_mode', '0') == '1':
+        return 0          # מצב תחזוקה - התזכורות יישלחו מיד כשהמצב יכובה (באיחור של דקות)
     if db.engine.dialect.name == 'postgresql':
         if not db.session.execute(db.text('SELECT pg_try_advisory_xact_lock(:k)'), {'k': _LOCK_KEY}).scalar():
             db.session.rollback()
@@ -381,11 +389,13 @@ def run_due(now=None):
     due = (CustomerTask.query.filter(CustomerTask.status == 'active', CustomerTask.due_at <= now)
            .order_by(CustomerTask.due_at.asc()).limit(50).all())
     n = 0
+    from services.job_tracker import tracked
     for t in due:
         failed = False
         try:
             t.last_error = None
-            deliver(t)
+            with tracked('task', label=f'תזכורת #{t.id}'):
+                deliver(t)
             t.sent_count = (t.sent_count or 0) + 1
             t.last_sent_at = datetime.utcnow()
             n += 1

@@ -29,6 +29,8 @@ KIND_LABELS = {
     'dictation': 'הקראת כתב יד',
     'institution_student': 'תמלול תלמיד מוסד',
     'institution_upload': 'העלאת מוסד',
+    'email_out': 'מייל לאיש קשר',
+    'task': 'שליחת תזכורת',
 }
 
 # אם עבודה "פעילה" ישנה מזה יותר מהזמן הזה (בדקות) - כנראה שה-worker process

@@ -991,10 +991,26 @@ def _mail_and_tasks_for(customer):
         for r in (EmailReply.query.filter(EmailReply.outgoing_id.in_([o.id for o in outs]))
                   .order_by(EmailReply.created_at.asc()).all()):
             replies.setdefault(r.outgoing_id, []).append(r)
+    # שרשורים בתצוגת צ'אט: כל ההודעות (של הלקוח ושל הנמען) לפי סדר הזמן, שרשור אחרון למעלה
+    threads = {}
+    for o in sorted(outs, key=lambda x: x.created_at):
+        key = o.thread_ref or o.ref
+        th = threads.setdefault(key, {'ref': key, 'name': o.to_name, 'email': o.to_email, 'items': [], 'last': o.created_at})
+        th['items'].append({'dir': 'out', 'at': o.created_at, 'body': o.transcript or '', 'status': o.status,
+                            'error': o.error, 'cost': o.cost or 0, 'reply': bool(o.in_reply_to_id),
+                            'recording_id': o.recording_id})
+        for r in replies.get(o.id, []):
+            th['items'].append({'dir': 'in', 'at': r.created_at, 'body': r.body or '', 'from': r.from_email,
+                                'heard': bool(r.heard_at)})
+    for th in threads.values():
+        th['items'].sort(key=lambda i: i['at'])
+        th['last'] = th['items'][-1]['at']
+        th['new'] = sum(1 for i in th['items'] if i['dir'] == 'in' and not i['heard'])
+    mail_threads = sorted(threads.values(), key=lambda t: t['last'], reverse=True)
     tasks = (CustomerTask.query.filter(CustomerTask.customer_id == customer.id, CustomerTask.status != 'draft')
              .order_by(CustomerTask.created_at.desc()).limit(30).all())
     return {'contacts': CustomerContact.query.filter_by(customer_id=customer.id).order_by(CustomerContact.id).all(),
-            'outgoing_emails': outs, 'email_replies': replies, 'customer_tasks': tasks,
+            'outgoing_emails': outs, 'email_replies': replies, 'customer_tasks': tasks, 'mail_threads': mail_threads,
             'task_when': lambda t: TK.when_text(t.due_at, t.recurrence) if t.due_at else '—',
             'task_channels': TK.channels_he,
             'new_replies_count': EmailReply.query.filter_by(customer_id=customer.id, heard_at=None).count()}
@@ -1899,6 +1915,7 @@ def settings():
         set_setting('price_per_5min_email_out', request.form.get('price_per_5min_email_out') or '0.30')
         set_setting('price_per_2min_task', request.form.get('price_per_2min_task') or '0.30')
         set_setting('task_fax_price', request.form.get('task_fax_price') or '1.00')
+        set_setting('email_out_daily_limit', request.form.get('email_out_daily_limit') or '30')
         if request.form.get('_features_field') == '1':
             set_setting('email_out_enabled', '1' if request.form.get('email_out_enabled') == '1' else '0')
             set_setting('tasks_enabled', '1' if request.form.get('tasks_enabled') == '1' else '0')
@@ -1938,6 +1955,7 @@ def settings():
         'price_per_5min_email_out': get_setting('price_per_5min_email_out', '0.30'),
         'price_per_2min_task': get_setting('price_per_2min_task', '0.30'),
         'task_fax_price': get_setting('task_fax_price', '1.00'),
+        'email_out_daily_limit': get_setting('email_out_daily_limit', '30'),
         'email_out_enabled': get_setting('email_out_enabled', '0'),
         'tasks_enabled': get_setting('tasks_enabled', '0'),
         'fax_inbound_number': get_setting('fax_inbound_number', ''),
@@ -1965,7 +1983,8 @@ def settings():
 @login_required
 def maintenance():
     return render_template('admin/maintenance.html',
-                            maintenance_mode=(get_setting('maintenance_mode', '0') == '1'))
+                            maintenance_mode=(get_setting('maintenance_mode', '0') == '1'),
+                            auto_off=(get_setting('maintenance_auto_off', '1') == '1'))
 
 
 @admin_bp.route('/maintenance/status')
@@ -1977,28 +1996,32 @@ def maintenance_status():
     data['maintenance_mode'] = (get_setting('maintenance_mode', '0') == '1')
     data['queued_calls'] = Recording.query.filter_by(status='queued_maintenance').count()
     data['queued_ocr'] = OcrResult.query.filter_by(status='queued_maintenance').count()
+    from models import OutgoingEmail
+    data['queued_email_out'] = OutgoingEmail.query.filter_by(status='queued').count()
+    data['auto_off'] = get_setting('maintenance_auto_off', '1') == '1'
     return jsonify(data)
 
 
 @admin_bp.route('/maintenance/toggle', methods=['POST'])
 @login_required
 def maintenance_toggle():
+    from services import maintenance as MT
     turn_on = request.form.get('enable') == '1'
-    set_setting('maintenance_mode', '1' if turn_on else '0')
-    released_calls = 0
-    released_ocr = 0
-    if not turn_on:
-        # כבים מצב תחזוקה - משחררים שיחות ותמונות OCR שהצטברו בזמן שהמצב היה דלוק
-        from services.transcribe import resume_queued_recordings
-        from routes.email_inbound import resume_queued_ocr
-        released_calls = resume_queued_recordings()
-        released_ocr = resume_queued_ocr()
+    released = MT.set_mode(turn_on) or {'calls': 0, 'ocr': 0, 'email_out': 0}
     return jsonify({
         'ok': True, 'maintenance_mode': turn_on,
-        'released': released_calls,  # תאימות לאחור לשם השדה הקיים
-        'released_calls': released_calls,
-        'released_ocr': released_ocr,
+        'released': released['calls'],  # תאימות לאחור לשם השדה הקיים
+        'released_calls': released['calls'],
+        'released_ocr': released['ocr'],
+        'released_email_out': released['email_out'],
     })
+
+
+@admin_bp.route('/maintenance/auto-off', methods=['POST'])
+@login_required
+def maintenance_auto_off_toggle():
+    set_setting('maintenance_auto_off', '1' if request.form.get('enable') == '1' else '0')
+    return jsonify({'ok': True})
 
 
 @admin_bp.route('/maintenance/clear-stale', methods=['POST'])

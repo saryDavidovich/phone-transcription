@@ -553,7 +553,10 @@ def resume_queued_recordings():
     from models import Recording
 
     with app.app_context():
-        queued = Recording.query.filter_by(status='queued_maintenance').all()
+        # מיילים לאנשי קשר משוחררים בנפרד (services/customer_mail.resume_queued) - לא כתמלול רגיל
+        queued = (Recording.query.filter_by(status='queued_maintenance')
+                  .filter(db.or_(Recording.transcription_tier.is_(None),
+                                 Recording.transcription_tier.notin_(('email_out', 'task')))).all())
         if not queued:
             return 0
         released = []

@@ -61,6 +61,8 @@ def email_out_contact_name():
     """שם איש קשר מהקלטה (Gemini) - בטלפון אומרים את השם."""
     import os, requests as req
     data = request.get_json(silent=True) or {}
+    if not CM.is_yemot_url(data.get('rec_url', '')):
+        return jsonify({'name': '', 'error': 'recording'})
     try:
         from google import genai
         from google.genai import types as gtypes

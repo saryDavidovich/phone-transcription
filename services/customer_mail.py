@@ -43,6 +43,29 @@ def _new_ref():
     return 'M' + secrets.token_hex(3).upper()
 DEFAULT_PRICE = '0.30'
 MAX_CONTACTS = 99
+DEFAULT_DAILY_LIMIT = '30'          # מקסימום מיילים לאנשי קשר ללקוח ביום (הגנה מפני ניצול לספאם)
+REPLY_TTS_MAX = 1500                # תגובה ארוכה מוקראת עד כאן
+
+
+def is_yemot_url(url):
+    """רק הקלטות מימות (ה-IVR שלנו) - לא כתובת שרירותית (הגנה מ-SSRF / שימוש לרעה)."""
+    from urllib.parse import urlparse
+    try:
+        u = urlparse(url or '')
+    except Exception:
+        return False
+    return u.scheme == 'https' and (u.hostname or '').lower() in ('www.call2all.co.il', 'call2all.co.il')
+
+
+def daily_limit():
+    try:
+        return int(_setting('email_out_daily_limit', DEFAULT_DAILY_LIMIT))
+    except (TypeError, ValueError):
+        return int(DEFAULT_DAILY_LIMIT)
+
+
+def _one_line(v):
+    return re.sub(r'[\r\n\t]+', ' ', str(v or '')).strip()
 
 
 # ---------------------------------------------------------------------------
@@ -71,7 +94,7 @@ def cost_for(seconds):
 
 
 def sender_name(customer):
-    return (customer.name or '').strip() or customer.phone
+    return _one_line(customer.name)[:80] or customer.phone
 
 
 # ---------------------------------------------------------------------------
@@ -220,6 +243,15 @@ def send_from_phone(phone, rec_url, call_id, contact_id=None, email=None, reply_
     customer = find_customer_by_phone(phone)
     if not customer:
         return {'ok': False, 'error': 'customer'}
+    if not is_yemot_url(rec_url):
+        log.warning(f'email_out: נדחתה כתובת הקלטה שאינה מימות: {str(rec_url)[:80]}')
+        return {'ok': False, 'error': 'recording'}
+    from datetime import timedelta
+    today = OutgoingEmail.query.filter(OutgoingEmail.customer_id == customer.id,
+                                       OutgoingEmail.created_at > datetime.utcnow() - timedelta(hours=24)).count()
+    if today >= daily_limit():
+        log.warning(f'email_out: לקוח {customer.id} הגיע למכסה היומית ({today})')
+        return {'ok': False, 'error': 'limit'}
     to_name = None
     thread_ref = None
     if reply_id:
@@ -249,8 +281,10 @@ def send_from_phone(phone, rec_url, call_id, contact_id=None, email=None, reply_
     if (customer.balance or 0) < cost:
         return {'ok': False, 'error': 'balance', 'cost': cost}
 
+    maintenance_on = _setting('maintenance_mode', '0') == '1'
     rec = Recording(customer_id=customer.id, call_id=call_id or f'mail-{secrets.token_hex(8)}',
-                    duration_seconds=secs, status='transcribing', delivery_method='email',
+                    duration_seconds=secs, status='queued_maintenance' if maintenance_on else 'transcribing',
+                    delivery_method='email',
                     delivered_to=to_email, rec_url=rec_url, transcription_tier='email_out',
                     language='he', output_language='he', cost=cost, source_filename='מייל לאיש קשר')
     db.session.add(rec)
@@ -263,16 +297,37 @@ def send_from_phone(phone, rec_url, call_id, contact_id=None, email=None, reply_
     customer.balance -= cost
     db.session.add(Transaction(customer_id=customer.id, amount=-cost, type='debit', recording_id=rec.id,
                                description=f'מייל לאיש קשר ({to_email}), {max(1, math.ceil(secs / 300)) * 5} דק׳'))
+    if maintenance_on:
+        out.status = 'queued'      # מצב תחזוקה - יישלח כשהמצב יכובה (resume_queued)
     db.session.commit()
-    threading.Thread(target=_process, args=(app, out.id), daemon=True).start()
+    if not maintenance_on:
+        threading.Thread(target=_process, args=(app, out.id), daemon=True).start()
     log.info(f'email_out: {out.ref} ללקוח {customer.id} -> {to_email}, {secs}s, חויב {cost}')
     return {'ok': True, 'cost': cost, 'to': to_email, 'id': out.id}
+
+
+def resume_queued():
+    """כיבוי מצב תחזוקה: שולח את המיילים לאנשי קשר שהוקלטו בזמן התחזוקה. מחזיר כמה."""
+    from app import app, db
+    from models import OutgoingEmail, Recording
+    ids = [o.id for o in OutgoingEmail.query.filter_by(status='queued').all()]
+    for oid in ids:
+        o = OutgoingEmail.query.get(oid)
+        o.status = 'processing'
+        rec = Recording.query.get(o.recording_id) if o.recording_id else None
+        if rec and rec.status == 'queued_maintenance':
+            rec.status = 'transcribing'
+    db.session.commit()
+    for oid in ids:
+        threading.Thread(target=_process, args=(app, oid), daemon=True).start()
+    return len(ids)
 
 
 def _process(app, out_id):
     from app import db
     from models import OutgoingEmail, Recording, Customer, Transaction
-    with app.app_context():
+    from services.job_tracker import tracked
+    with app.app_context(), tracked('email_out', label=f'מייל לאיש קשר #{out_id}'):
         out = OutgoingEmail.query.get(out_id)
         rec = Recording.query.get(out.recording_id) if out else None
         if not out or not rec:
@@ -327,10 +382,16 @@ def handle_reply(subject, sender_email, body_text):
         return False
     from app import db
     from models import OutgoingEmail, EmailReply
-    out = (OutgoingEmail.query.filter((OutgoingEmail.thread_ref == ref) | (OutgoingEmail.ref == ref))
-           .order_by(OutgoingEmail.created_at.desc()).first())
-    if not out:
+    outs = (OutgoingEmail.query.filter((OutgoingEmail.thread_ref == ref) | (OutgoingEmail.ref == ref))
+            .order_by(OutgoingEmail.created_at.desc()).all())
+    if not outs:
         return False
+    # רק מי שהמייל נשלח אליו יכול להגיב (אחרת כל מי שמנחש מספר שרשור היה "מדבר" אל הלקוח)
+    sender = normalize_email(sender_email)
+    if sender not in {normalize_email(o.to_email) for o in outs}:
+        log.warning(f'email_out: תגובה לשרשור {ref} מכתובת שלא נשלח אליה ({sender}) - לא נשמרה כתגובה')
+        return False
+    out = outs[0]
     db.session.add(EmailReply(outgoing_id=out.id, customer_id=out.customer_id,
                               from_email=normalize_email(sender_email), body=(body_text or '').strip()[:5000]))
     db.session.commit()
@@ -356,7 +417,10 @@ def recent_replies(customer, limit=15):
     for r in rows:
         o = outs.get(r.outgoing_id)
         who = names.get(r.from_email) or (o.to_name if o and o.to_email == r.from_email else None) or r.from_email or ''
-        res.append({'id': r.id, 'from': who, 'body': r.body or '', 'new': r.heard_at is None,
+        body = (r.body or '')
+        if len(body) > REPLY_TTS_MAX:
+            body = body[:REPLY_TTS_MAX] + ' ... התגובה ארוכה, ההמשך במייל'
+        res.append({'id': r.id, 'from': who, 'body': body, 'new': r.heard_at is None,
                     'can_reply': bool(EMAIL_RE.match(r.from_email or ''))})
     return res
 

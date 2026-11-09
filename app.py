@@ -140,6 +140,13 @@ def create_app():
     except Exception as e:
         logging.getLogger(__name__).warning(f'tasks: לא הופעל ({e})')
 
+    # מצב תחזוקה שהודלק לפני הפריסה - נכבה אוטומטית בעליית הגרסה החדשה (services/maintenance.py)
+    try:
+        from services import maintenance as _mt
+        _mt.start(app)
+    except Exception as e:
+        logging.getLogger(__name__).warning(f'maintenance auto-off: לא הופעל ({e})')
+
     # התראה למנהל על הקלטות תקועות (services/stuck_watch.py), בדיקה כל 5 דקות
     try:
         from services import stuck_watch
