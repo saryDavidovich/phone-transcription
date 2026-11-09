@@ -956,6 +956,7 @@ def _gemini_from_url(url, language='he', output_language='he'):
 - כתוב רק מה שנאמר בפועל. אל תתקן ואל תחליף מילים.
 - שמות אנשים, רבנים, ספרים, מוסדות ומקומות - בדיוק כפי שנאמרו, גם אם אינם מוכרים לך.
 - מונחים תורניים, ארמית וראשי תיבות - בכתיב הנכון.
+- הדובר עשוי לדבר או לצטט בהגייה אשכנזית-חסידית (למשל "בוריך אתוה", "תוירה", "שבס", "אלוקיינו"). תמלל לפי הכתיב העברי התקני של המילה ("ברוך אתה", "תורה", "שבת", "אלוקינו") - לא לפי איך שהיא נשמעת.
 - החזר רק את התמלול."""
 
         # תמלול כל חלק של 5 דקות בנפרד (החלקים נקראים מהדיסק אחד-אחד)
@@ -975,6 +976,8 @@ def _gemini_from_url(url, language='he', output_language='he'):
                             prompt,
                             gtypes.Part.from_bytes(data=chunk_bytes, mime_type=mime_type),
                         ],
+                        # בלי "חשיבה": תמלול לא צריך אותה, והיא מחויבת כמו טקסט יוצא ($9 למיליון)
+                        config=gtypes.GenerateContentConfig(thinking_config=gtypes.ThinkingConfig(thinking_budget=0)),
                     )
                     chunk_transcript = response.text.strip()
                     log.info(f"Chunk {chunk_num} done, {len(chunk_transcript)} chars")
@@ -1005,6 +1008,7 @@ def _gemini_from_url(url, language='he', output_language='he'):
 
 טקסט לתרגום:
 {transcript}"""],
+                        config=gtypes.GenerateContentConfig(thinking_config=gtypes.ThinkingConfig(thinking_budget=0)),
                     )
                     transcript = translate_response.text.strip()
                     log.info(f"Translation completed, {len(transcript)} chars")

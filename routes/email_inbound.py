@@ -1802,14 +1802,22 @@ def email_inbound():
             if _CM.handle_reply(subject, sender_email, body):
                 return jsonify({'status': 'ok', 'reason': 'email_out_reply'}), 200
 
-    # "אנשי קשר" בנושא - הלקוח מוסיף אנשי קשר לשליחת מיילים מהטלפון (שורה לכל איש קשר)
-    if _CM.is_contacts_subject(subject):
+    # "<טלפון> אנשי קשר" בנושא - הלקוח מעדכן את אנשי הקשר לשליחת מיילים מהטלפון (שורה לכל
+    # איש קשר / "מחק ..."). הזיהוי לפי הטלפון שבנושא + המייל הרשום, כמו בשליחת קובץ לתמלול -
+    # כתובת מייל לבדה לא מספיקה (כמה לקוחות יכולים לחלוק אותה)
+    is_contacts, contacts_phone = _CM.contacts_subject(subject)
+    if is_contacts:
         with app.app_context():
-            cust = _find_customer_by_email(sender_email)
-            if cust:
-                body = (request.form.get('text') or '').strip() or _strip_html(request.form.get('html', ''))
-                n = _CM.handle_contacts_email(cust, _strip_quoted_reply(body), sender_email)
-                return jsonify({'status': 'ok', 'reason': 'contacts_updated', 'added': n}), 200
+            cust = find_customer_by_phone(contacts_phone) if contacts_phone else None
+            if not cust:
+                _send_guidance_email(sender_email, 'contacts_no_phone', phone=contacts_phone or '')
+                return jsonify({'status': 'rejected', 'reason': 'contacts_no_phone'}), 200
+            if not sender_is_registered(cust, sender_email):
+                _send_guidance_email(sender_email, 'email_mismatch', phone=contacts_phone)
+                return jsonify({'status': 'rejected', 'reason': 'email_mismatch'}), 200
+            body = (request.form.get('text') or '').strip() or _strip_html(request.form.get('html', ''))
+            n = _CM.handle_contacts_email(cust, _strip_quoted_reply(body), sender_email)
+            return jsonify({'status': 'ok', 'reason': 'contacts_updated', 'changed': n}), 200
 
     # העברה מג'מבו מייל (בלי קובץ מצורף, עם קישור להעברה): הנושא שהלקוח כתב
     # (טלפון / מקצועי / רגיל / שפה - כמו בכל מייל) וכתובת השולח נלקחים מההעברה
@@ -2350,6 +2358,11 @@ _GUIDANCE_MESSAGES = {
 יש לצרף את קובץ ההקלטה למייל, או לשלוח קישור Google Drive לקובץ משותף.<br><br>
 אם הקבצים גדולים מ-20MB בסך הכל, שלחו אותם דרך ג'מבו מייל (jumbomail.me) לכתובת המערכת עם אותה שורת נושא,
 או העלו אותם ל-Google Drive, שתפו ("כל מי שיש לו קישור יכול לצפות"), ושלחו את הקישורים בגוף המייל (ללא קובץ מצורף).
+''',
+    'contacts_no_phone': lambda phone: f'''
+לעדכון אנשי הקשר במייל צריך לכתוב בשורת הנושא את <b>מספר הטלפון שלכם ואחריו המילים אנשי קשר</b>
+(למשל: 0501234567 אנשי קשר), בדיוק כמו בשליחת קובץ לתמלול.{f'<br><br>המספר <b>{phone}</b> לא רשום במערכת.' if phone else ''}<br><br>
+בגוף המייל שורה לכל פעולה: להוספה - שם, מקף וכתובת (משה כהן - moshe@gmail.com); למחיקה - מחק ואחריו הכתובת.
 ''',
     'gdrive_download_failed': lambda phone: f'''
 לא הצלחנו להוריד את הקובץ מהקישור Google Drive שנשלח במייל עם הנושא <b>{phone}</b>.<br><br>

@@ -438,10 +438,25 @@ def mark_replies_heard(customer, ids):
 # ---------------------------------------------------------------------------
 # מייל "אנשי קשר" מהלקוח למערכת
 # ---------------------------------------------------------------------------
-def is_contacts_subject(subject):
-    s = (subject or '').strip()
-    s = re.sub(r'^\s*((re|fw|fwd)\s*:\s*)+', '', s, flags=re.I)
-    return s.startswith('אנשי קשר')
+CONTACTS_SUBJECT_RE = re.compile(r'^\s*((?:re|fw|fwd)\s*:\s*)*(?P<phone>[0-9][0-9\-\s]{7,14}[0-9])?\s*אנשי\s*קשר', re.I)
+
+
+def contacts_subject(subject):
+    """נושא של פקודת אנשי קשר: "<טלפון> אנשי קשר" (כמו בשליחת קובץ לתמלול).
+    מחזיר (True, טלפון או None) / (False, None)."""
+    m = CONTACTS_SUBJECT_RE.match(subject or '')
+    if not m:
+        return False, None
+    ph = re.sub(r'\D', '', m.group('phone') or '')
+    return True, (ph or None)
+
+
+def contacts_mailto(phone):
+    """קישור לטיוטה מוכנה: נושא "<טלפון> אנשי קשר" וגוף לדוגמה."""
+    from urllib.parse import quote
+    from routes.email_inbound import TRANSCRIBE_INBOUND_EMAIL
+    body = 'משה כהן - moshe@gmail.com\nמחק - old@gmail.com\n'
+    return f'mailto:{TRANSCRIBE_INBOUND_EMAIL}?subject={quote(f"{phone} אנשי קשר")}&body={quote(body)}'
 
 
 DELETE_RE = re.compile(r'^\s*(מחק|מחיקה|למחוק|הסר|הסרה)\b[\s:\-–]*(.*)$')
@@ -488,9 +503,11 @@ def send_contacts_summary(customer, to_email, added=None, errors=None, removed=N
 <h2 style="color:#1d4ed8">אנשי הקשר שלכם לשליחת מיילים מהטלפון</h2>{note}
 <ol style="padding-right:20px">{rows or '<li>עדיין אין אנשי קשר</li>'}</ol>
 <div style="background:#eff6ff;border-right:4px solid #3b82f6;padding:12px 14px;border-radius:8px;font-size:14px;color:#1f2937">
-<b>איך מעדכנים במייל:</b> שלחו מייל לכתובת המערכת עם הנושא <b>אנשי קשר</b>, ובגוף המייל שורה לכל פעולה:<br>
+<b>איך מעדכנים במייל:</b> שולחים מייל לכתובת המערכת מהמייל הרשום שלכם. בשורת הנושא - <b>מספר הטלפון שלכם ואחריו המילים אנשי קשר</b>
+(למשל: <span dir="rtl" style="white-space:nowrap">{customer.phone} אנשי קשר</span>), בדיוק כמו בשליחת קובץ לתמלול. בגוף המייל שורה לכל פעולה:<br>
 • להוספה: שם, מקף וכתובת - למשל <span dir="rtl">משה כהן - moshe@gmail.com</span><br>
 • למחיקה: המילה מחק ואחריה הכתובת או השם - למשל <span dir="rtl">מחק - moshe@gmail.com</span><br>
+<a href="{contacts_mailto(customer.phone)}" style="display:inline-block;margin:10px 0 6px;background:#2563eb;color:#fff;text-decoration:none;padding:9px 20px;border-radius:8px;font-weight:700">✉️ לטיוטה מוכנה</a><br>
 אפשר גם בטלפון: שלוחה 1, אחר כך 6 ואז 3 - הוספה, שינוי שם או כתובת, ומחיקה.</div>
 <p style="color:#6b7280;font-size:13px">מערכת תמלול פון 03-3131795</p></div>'''
     try:
