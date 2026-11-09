@@ -380,8 +380,6 @@ def _deliver_one(t, channel):
 def run_due(now=None):
     from app import db
     from models import CustomerTask
-    if _setting('maintenance_mode', '0') == '1':
-        return 0          # מצב תחזוקה - התזכורות יישלחו מיד כשהמצב יכובה (באיחור של דקות)
     if db.engine.dialect.name == 'postgresql':
         if not db.session.execute(db.text('SELECT pg_try_advisory_xact_lock(:k)'), {'k': _LOCK_KEY}).scalar():
             db.session.rollback()

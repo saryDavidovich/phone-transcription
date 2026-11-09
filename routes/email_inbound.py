@@ -321,8 +321,14 @@ def _extract_header(raw_headers, header_name):
     return m.group(1) if m else None
 
 
+# שורת הפתיחה של ציטוט - גם כשהיא נשברת לשתי שורות (Gmail בעברית: "בתאריך יום ב׳, 9 בנוב׳ 2026
+# ב-19:14 מאת ... <...>:"), עם סימני כיוון בתחילתה, וגם כותרות "מאת:"/"From:" של Outlook
+_BIDI = '[\u200e\u200f\u202a-\u202e\u2066-\u2069 \t]*'
 _QUOTE_MARKERS_RE = re.compile(
-    r'(^On .{0,100}\bwrote:|^בתאריך .{0,100}כתב|^-{2,}\s*Original Message\s*-{2,}|^_{5,}|^>)',
+    r'(^' + _BIDI + r'On\b[^\n]{0,200}(?:\n[^\n]{0,200})?\bwrote:'
+    r'|^' + _BIDI + r'בתאריך\b[^\n]{0,200}(?:\n[^\n]{0,200})?(?:כתב|מאת)'
+    r'|^' + _BIDI + r'(?:From|מאת)\s*:\s'
+    r'|^-{2,}\s*Original Message\s*-{2,}|^_{5,}|^' + _BIDI + r'>)',
     re.IGNORECASE | re.MULTILINE
 )
 
@@ -1799,7 +1805,7 @@ def email_inbound():
         body = _strip_quoted_reply(_clean_text((request.form.get('text') or '').strip()
                                                or _strip_html(request.form.get('html', ''))))
         with app.app_context():
-            if _CM.handle_reply(subject, sender_email, body):
+            if _CM.handle_reply(subject, sender_email, body, message_id=message_id):
                 return jsonify({'status': 'ok', 'reason': 'email_out_reply'}), 200
 
     # "<טלפון> אנשי קשר" בנושא - הלקוח מעדכן את אנשי הקשר לשליחת מיילים מהטלפון (שורה לכל

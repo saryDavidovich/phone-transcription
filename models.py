@@ -817,6 +817,7 @@ class EmailReply(db.Model):
     customer_id = db.Column(db.Integer, nullable=False, index=True)
     from_email = db.Column(db.String(200))
     body = db.Column(db.Text)
+    message_id = db.Column(db.String(300))                    # Message-ID של התגובה - כדי שמענה ימשיך את השרשור ב-Gmail
     heard_at = db.Column(db.DateTime)                          # None = עוד לא נשמעה בטלפון
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 

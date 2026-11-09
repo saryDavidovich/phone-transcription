@@ -680,11 +680,40 @@ def alefbot_fetch_credits(job_id):
         r = requests.get(f'https://alef-bot.top/api/v1/transcriptions/{job_id}',
                          headers={'Authorization': f'Bearer {os.environ.get("ALEFBOT_API_KEY", "")}'}, timeout=30)
         r.raise_for_status()
-        v = r.json().get('credits_used')
+        data = r.json()
+        v = data.get('credits_used')
+        if v is None:
+            log.info(f'AlefBot credits for {job_id}: עדיין לא ידוע (status={data.get("status")})')
         return float(v) if v is not None else None
     except Exception as e:
         log.warning(f'AlefBot credits for {job_id}: {e}')
         return None
+
+
+def save_alefbot_credits_async(call_id):
+    """ברקע: שומר על ההקלטה כמה קרדיטים אלף בוט חייבו (נקרא בסיום כל תמלול מקצועי - גם
+    כשהתוצאה הגיעה ב-webhook וגם כשנמשכה בבדיקה התקופתית). מנסה עד 5 פעמים, כל 20 שניות."""
+    import threading
+
+    def work():
+        from app import app, db
+        from models import Recording
+        with app.app_context():
+            rec = Recording.query.filter_by(call_id=call_id).first()
+            job_id = rec.alefbot_job_id if rec else None
+            if not job_id:
+                return
+            for attempt in range(5):
+                credits = alefbot_fetch_credits(job_id)
+                if credits is not None:
+                    rec = Recording.query.filter_by(call_id=call_id).first()
+                    rec.alefbot_credits = credits
+                    db.session.commit()
+                    log.info(f'AlefBot job {job_id}: {credits} קרדיטים נשמרו')
+                    return
+                time.sleep(20)
+            log.warning(f'AlefBot job {job_id}: לא התקבל credits_used אחרי 5 ניסיונות')
+    threading.Thread(target=work, daemon=True).start()
 
 
 def _alefbot_submit(rec_url, call_id, model_tier='standard', translate_to_hebrew=False):
@@ -761,7 +790,11 @@ def _alefbot_submit(rec_url, call_id, model_tier='standard', translate_to_hebrew
 
 
 def finalize_alefbot_recording(call_id, transcript_text):
-    """נקרא מה-webhook כשאלף בוט מסיים"""
+    """נקרא מה-webhook כשאלף בוט מסיים (או מהבדיקה התקופתית)"""
+    try:
+        save_alefbot_credits_async(call_id)
+    except Exception as e:
+        log.warning(f'AlefBot credits: {e}')
     from app import app, db
     from models import Recording, Customer, Transaction
 

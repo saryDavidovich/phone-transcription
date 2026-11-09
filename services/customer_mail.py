@@ -188,15 +188,18 @@ def find_contact_by_text(customer, text):
 # ---------------------------------------------------------------------------
 # שליחת מייל
 # ---------------------------------------------------------------------------
-def _send(to_email, subject, html, from_name=None, reply_to=None):
+def _send(to_email, subject, html, from_name=None, reply_to=None, headers=None):
     import sendgrid
-    from sendgrid.helpers.mail import Mail, Email, ReplyTo
+    from sendgrid.helpers.mail import Mail, Email, ReplyTo, Header
     sg = sendgrid.SendGridAPIClient(api_key=os.environ.get('SENDGRID_API_KEY'))
     msg = Mail(from_email=Email(os.environ.get('SENDGRID_FROM_EMAIL', os.environ.get('GMAIL_USER', '')),
                                 from_name or 'תמלול פון'),
                to_emails=to_email, subject=subject, html_content=html)
     if reply_to:
         msg.reply_to = ReplyTo(reply_to)
+    for k, v in (headers or {}).items():
+        if v:
+            msg.add_header(Header(k, v))
     resp = sg.send(msg)
     if getattr(resp, 'status_code', 202) >= 300:
         raise RuntimeError(f'SendGrid {resp.status_code}')
@@ -342,10 +345,19 @@ def _process(app, out_id):
             from routes.recording_proxy import recording_download_url
             from routes.email_inbound import TRANSCRIBE_INBOUND_EMAIL
             name = sender_name(customer)
-            kind = 'תשובה' if out.in_reply_to_id else 'הודעה'
-            _send(out.to_email, f'{kind} מאת {name} (מס׳ {out.thread_ref or out.ref})',
+            # מענה לתגובה: אותו נושא ("Re: ...") + In-Reply-To/References לתגובה שהתקבלה - כדי
+            # שאצל הנמען (Gmail וכו') זה ימשיך את אותה התכתבות ולא יפתח שרשור חדש
+            subject = f'הודעה מאת {name} (מס׳ {out.thread_ref or out.ref})'
+            headers = {}
+            if out.in_reply_to_id:
+                from models import EmailReply
+                rep = EmailReply.query.get(out.in_reply_to_id)
+                subject = 'Re: ' + subject
+                if rep and rep.message_id:
+                    headers = {'In-Reply-To': rep.message_id, 'References': rep.message_id}
+            _send(out.to_email, subject,
                   outgoing_html(name, customer.phone, text, recording_download_url(rec.id)),
-                  from_name=f'{name} (דרך תמלול פון)', reply_to=TRANSCRIBE_INBOUND_EMAIL)
+                  from_name=f'{name} (דרך תמלול פון)', reply_to=TRANSCRIBE_INBOUND_EMAIL, headers=headers)
             out.transcript = text
             out.status = 'sent'
             out.sent_at = datetime.utcnow()
@@ -375,7 +387,7 @@ def _process(app, out_id):
 # ---------------------------------------------------------------------------
 # תגובות של הנמענים
 # ---------------------------------------------------------------------------
-def handle_reply(subject, sender_email, body_text):
+def handle_reply(subject, sender_email, body_text, message_id=None):
     """מייל נכנס שהוא תשובה למייל ששלחנו בשם לקוח ([#M...] בנושא). שומר את התגובה
     בחשבון הלקוח. מחזיר True אם זוהה וטופל."""
     ref = ref_in(subject)
@@ -393,11 +405,29 @@ def handle_reply(subject, sender_email, body_text):
         log.warning(f'email_out: תגובה לשרשור {ref} מכתובת שלא נשלח אליה ({sender}) - לא נשמרה כתגובה')
         return False
     out = outs[0]
-    db.session.add(EmailReply(outgoing_id=out.id, customer_id=out.customer_id,
+    db.session.add(EmailReply(outgoing_id=out.id, customer_id=out.customer_id, message_id=(message_id or '')[:300] or None,
                               from_email=normalize_email(sender_email), body=(body_text or '').strip()[:5000]))
     db.session.commit()
     log.info(f'email_out: תגובה ל-{out.ref} מ-{sender_email} נשמרה ללקוח {out.customer_id}')
     return True
+
+
+def when_he(dt_utc):
+    """'היום בשעה 19:15' / 'אתמול בשעה ...' / 'ביום שני, 9 בנובמבר בשעה ...' (שעון ישראל)."""
+    from datetime import timezone, timedelta
+    from services.tasks import _tz, DAYS_HE, MONTHS_HE
+    if not dt_utc:
+        return ''
+    tz = _tz()
+    d = dt_utc.replace(tzinfo=timezone.utc).astimezone(tz)
+    today = datetime.now(tz).date()
+    if d.date() == today:
+        day = 'היום'
+    elif d.date() == today - timedelta(days=1):
+        day = 'אתמול'
+    else:
+        day = f'ביום {DAYS_HE[d.weekday()]}, {d.day} ב{MONTHS_HE[d.month]}'
+    return f'{day} בשעה {d.hour}:{d.minute:02d}'
 
 
 def new_replies(customer):
@@ -421,7 +451,7 @@ def recent_replies(customer, limit=15):
         body = (r.body or '')
         if len(body) > REPLY_TTS_MAX:
             body = body[:REPLY_TTS_MAX] + ' ... התגובה ארוכה, ההמשך במייל'
-        res.append({'id': r.id, 'from': who, 'body': body, 'new': r.heard_at is None,
+        res.append({'id': r.id, 'from': who, 'body': body, 'new': r.heard_at is None, 'when': when_he(r.created_at),
                     'can_reply': bool(EMAIL_RE.match(r.from_email or ''))})
     return res
 
