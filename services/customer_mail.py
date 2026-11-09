@@ -282,7 +282,8 @@ def send_from_phone(phone, rec_url, call_id, contact_id=None, email=None, reply_
         return {'ok': False, 'error': 'balance', 'cost': cost}
 
     maintenance_on = _setting('maintenance_mode', '0') == '1'
-    rec = Recording(customer_id=customer.id, call_id=call_id or f'mail-{secrets.token_hex(8)}',
+    # מזהה ייחודי לכל מייל: באותה שיחה אפשר לשלוח כמה (ומזהה השיחה כבר שמור בהקלטות אחרות)
+    rec = Recording(customer_id=customer.id, call_id=f'{call_id or "mail"}-m{secrets.token_hex(4)}',
                     duration_seconds=secs, status='queued_maintenance' if maintenance_on else 'transcribing',
                     delivery_method='email',
                     delivered_to=to_email, rec_url=rec_url, transcription_tier='email_out',

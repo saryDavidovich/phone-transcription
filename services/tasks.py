@@ -194,7 +194,8 @@ def create_from_phone(phone, rec_url, call_id):
     except Exception as e:
         log.error(f'tasks: עיבוד המשימה נכשל: {e}')
         return {'ok': False, 'error': 'ai'}
-    rec = Recording(customer_id=customer.id, call_id=call_id or f'task-{secrets.token_hex(8)}',
+    # מזהה ייחודי לכל משימה (באותה שיחה אפשר גם הקלטה, מייל ועוד משימה)
+    rec = Recording(customer_id=customer.id, call_id=f'{call_id or "task"}-t{secrets.token_hex(4)}',
                     duration_seconds=secs, status='delivered', rec_url=rec_url, transcription_tier='task',
                     language='he', output_language='he', transcript=transcript, cost=0.0,
                     source_filename='משימה / תזכורת')
