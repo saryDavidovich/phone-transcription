@@ -61,7 +61,6 @@
 <meta name="turbo-prefetch-cache-time" content="15000">
 <meta name="turbo-root" content="/admin">
 <script src="/static/vendor/turbo/turbo-8.0.13.js"></script>
-<script src="/static/js/keyboards.js?v=3" defer></script>
 <script>
   // טפסים: רק טופס שמסומן data-turbo="true" עובר ברענון פנימי (טופסי חיפוש/סינון - GET);
   // כל טופס ששומר/מוחק (POST) נשלח כרגיל, כמו תמיד.
@@ -389,7 +388,7 @@ table.as-cards textarea,table.as-cards input,table.as-cards select{min-width:0 !
   <form class="sidebar-search" action="/admin/customers" method="get">
     <input type="hidden" name="go" value="1">
     <span class="search-ic">{{ ic('search', 17) }}</span>
-    <input type="search" name="q" data-kb="num" placeholder="חיפוש לקוח: טלפון, שם, מייל" autocomplete="off" aria-label="חיפוש לקוח">
+    <input type="search" name="q" placeholder="חיפוש לקוח: טלפון, שם, מייל" autocomplete="off" aria-label="חיפוש לקוח">
   </form>
   <nav class="sidebar-nav">
     {% call nav('/admin/dashboard', 'dashboard', 'דשבורד', request.endpoint == 'admin.dashboard') %}
