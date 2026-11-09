@@ -1792,6 +1792,25 @@ def email_inbound():
         with app.app_context():
             return _handle_incoming_fax(sender_email, subject, db)
 
+    # תשובה של נמען למייל שלקוח שלח מהטלפון (שלוחה 1 ← 6) - [#M...] בנושא. נשמרת בחשבון
+    # הלקוח ומוקראת לו בטלפון (services/customer_mail).
+    from services import customer_mail as _CM
+    if _CM.REF_RE.search(subject or ''):
+        body = _strip_quoted_reply(_clean_text((request.form.get('text') or '').strip()
+                                               or _strip_html(request.form.get('html', ''))))
+        with app.app_context():
+            if _CM.handle_reply(subject, sender_email, body):
+                return jsonify({'status': 'ok', 'reason': 'email_out_reply'}), 200
+
+    # "אנשי קשר" בנושא - הלקוח מוסיף אנשי קשר לשליחת מיילים מהטלפון (שורה לכל איש קשר)
+    if _CM.is_contacts_subject(subject):
+        with app.app_context():
+            cust = _find_customer_by_email(sender_email)
+            if cust:
+                body = (request.form.get('text') or '').strip() or _strip_html(request.form.get('html', ''))
+                n = _CM.handle_contacts_email(cust, _strip_quoted_reply(body), sender_email)
+                return jsonify({'status': 'ok', 'reason': 'contacts_updated', 'added': n}), 200
+
     # העברה מג'מבו מייל (בלי קובץ מצורף, עם קישור להעברה): הנושא שהלקוח כתב
     # (טלפון / מקצועי / רגיל / שפה - כמו בכל מייל) וכתובת השולח נלקחים מההעברה
     # עצמה, כי המייל מגיע מכתובת של ג'מבו ולא מהלקוח. מכאן והלאה - טיפול רגיל.

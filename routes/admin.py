@@ -977,7 +977,66 @@ def customer_detail(id):
         voice_messages=_voice_messages_for(customer.id),
         recordings_total=recordings_total, transactions_total=transactions_total,
         msg_attachments=_attachments_for('customer_message_id', [m.id for t in threads for m in t.messages]),
-        all_institutions=Institution.query.order_by(Institution.name).all())
+        all_institutions=Institution.query.order_by(Institution.name).all(),
+        **_mail_and_tasks_for(customer))
+
+
+def _mail_and_tasks_for(customer):
+    """לכרטיס הלקוח: אנשי קשר, מיילים ששלח מהטלפון (עם התגובות), ומשימות."""
+    from models import CustomerContact, OutgoingEmail, EmailReply, CustomerTask
+    from services import tasks as TK
+    outs = OutgoingEmail.query.filter_by(customer_id=customer.id).order_by(OutgoingEmail.created_at.desc()).limit(30).all()
+    replies = {}
+    if outs:
+        for r in (EmailReply.query.filter(EmailReply.outgoing_id.in_([o.id for o in outs]))
+                  .order_by(EmailReply.created_at.asc()).all()):
+            replies.setdefault(r.outgoing_id, []).append(r)
+    tasks = (CustomerTask.query.filter(CustomerTask.customer_id == customer.id, CustomerTask.status != 'draft')
+             .order_by(CustomerTask.created_at.desc()).limit(30).all())
+    return {'contacts': CustomerContact.query.filter_by(customer_id=customer.id).order_by(CustomerContact.id).all(),
+            'outgoing_emails': outs, 'email_replies': replies, 'customer_tasks': tasks,
+            'task_when': lambda t: TK.when_text(t.due_at, t.recurrence) if t.due_at else '—',
+            'new_replies_count': EmailReply.query.filter_by(customer_id=customer.id, heard_at=None).count()}
+
+
+@admin_bp.route('/customers/<int:id>/contacts/add', methods=['POST'])
+@login_required
+def customer_contact_add(id):
+    from services import customer_mail as CM
+    customer = Customer.query.get_or_404(id)
+    c, err = CM.add_contact(customer, request.form.get('email'), request.form.get('name', ''))
+    flash('איש הקשר נשמר' if c else f'לא נשמר: {err}')
+    return redirect(url_for('admin.customer_detail', id=id) + '#sec-mail')
+
+
+@admin_bp.route('/customers/<int:id>/contacts/<int:cid>/delete', methods=['POST'])
+@login_required
+def customer_contact_delete(id, cid):
+    from services import customer_mail as CM
+    CM.delete_contact(Customer.query.get_or_404(id), cid)
+    flash('איש הקשר נמחק')
+    return redirect(url_for('admin.customer_detail', id=id) + '#sec-mail')
+
+
+@admin_bp.route('/customers/<int:id>/contacts/send-link', methods=['POST'])
+@login_required
+def customer_contacts_send_link(id):
+    from services import customer_mail as CM
+    customer = Customer.query.get_or_404(id)
+    if not customer.email:
+        flash('ללקוח אין כתובת מייל')
+    else:
+        CM.send_contacts_summary(customer, customer.email)
+        flash(f'נשלח ל-{customer.email} מייל עם אנשי הקשר וקישור לניהול שלהם')
+    return redirect(url_for('admin.customer_detail', id=id) + '#sec-mail')
+
+
+@admin_bp.route('/customers/<int:id>/tasks/<int:tid>/cancel', methods=['POST'])
+@login_required
+def customer_task_cancel(id, tid):
+    from services import tasks as TK
+    flash('המשימה בוטלה' if TK.cancel(Customer.query.get_or_404(id), tid) else 'המשימה לא נמצאה')
+    return redirect(url_for('admin.customer_detail', id=id) + '#sec-tasks')
 
 @admin_bp.route('/customers/<int:id>/link-institution', methods=['POST'])
 @login_required
@@ -1835,6 +1894,13 @@ def settings():
         set_setting('manuscript_char_unit_size', request.form.get('manuscript_char_unit_size', '1000'))
         set_setting('price_per_manuscript_char_unit', request.form.get('price_per_manuscript_char_unit', '0.10'))
         set_setting('price_manuscript_proofing', request.form.get('price_manuscript_proofing', '5.00'))
+        # מיילים לאחרים (שלוחה 1 ← 6) ומשימות (שלוחה 1 ← 5)
+        set_setting('price_per_5min_email_out', request.form.get('price_per_5min_email_out') or '0.30')
+        set_setting('price_per_2min_task', request.form.get('price_per_2min_task') or '0.30')
+        set_setting('task_fax_price', request.form.get('task_fax_price') or '1.00')
+        if request.form.get('_features_field') == '1':
+            set_setting('email_out_enabled', '1' if request.form.get('email_out_enabled') == '1' else '0')
+            set_setting('tasks_enabled', '1' if request.form.get('tasks_enabled') == '1' else '0')
         set_setting('fax_inbound_number', request.form.get('fax_inbound_number', ''))
         set_setting('yemot_token', request.form.get('yemot_token', ''))
         set_setting('yemot_log_path', request.form.get('yemot_log_path', 'ivr2:/199/LogCreditCardOK.ymgr'))
@@ -1868,6 +1934,11 @@ def settings():
         'manuscript_char_unit_size': get_setting('manuscript_char_unit_size', '1000'),
         'price_per_manuscript_char_unit': get_setting('price_per_manuscript_char_unit', '0.10'),
         'price_manuscript_proofing': get_setting('price_manuscript_proofing', '5.00'),
+        'price_per_5min_email_out': get_setting('price_per_5min_email_out', '0.30'),
+        'price_per_2min_task': get_setting('price_per_2min_task', '0.30'),
+        'task_fax_price': get_setting('task_fax_price', '1.00'),
+        'email_out_enabled': get_setting('email_out_enabled', '0'),
+        'tasks_enabled': get_setting('tasks_enabled', '0'),
         'fax_inbound_number': get_setting('fax_inbound_number', ''),
         'yemot_token': get_setting('yemot_token', ''),
         'yemot_log_path': get_setting('yemot_log_path', 'ivr2:/199/LogCreditCardOK.ymgr'),

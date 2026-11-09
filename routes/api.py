@@ -67,7 +67,18 @@ def get_customer(phone):
         'billing_unit': __import__('services.pricing', fromlist=['x']).unit_minutes(customer),
         'unit_prices': {k: __import__('services.pricing', fromlist=['x']).unit_price(customer, k)
                         for k in ('basic', 'premium', 'video', 'excel')},
+        'new_email_replies': _new_reply_count(customer),
     })
+
+
+def _new_reply_count(customer):
+    """תגובות חדשות למיילים שהלקוח שלח מהטלפון (שלוחה 1 ← 6) - מוכרזות בכניסה."""
+    try:
+        from models import EmailReply
+        return EmailReply.query.filter_by(customer_id=customer.id, heard_at=None).count()
+    except Exception:
+        db.session.rollback()
+        return 0
 
 @api_bp.route('/system-messages', methods=['GET'])
 def system_messages_for_ivr():
@@ -611,6 +622,11 @@ def get_public_settings():
         'price_per_20min_excel': get_setting('price_per_20min_excel', '1.50'),
         'price_per_1000_chars_ocr': get_setting('price_per_1000_chars_ocr', '0.10'),
         'min_balance': get_setting('min_balance', '5'),
+        # שלוחה 1 ← 6 (מיילים לאחרים) ו-1 ← 5 (משימות) - כבויות = רק המנהל שומע אותן
+        'email_out_enabled': get_setting('email_out_enabled', '0'),
+        'tasks_enabled': get_setting('tasks_enabled', '0'),
+        'price_per_5min_email_out': get_setting('price_per_5min_email_out', '0.30'),
+        'price_per_2min_task': get_setting('price_per_2min_task', '0.30'),
     }
     for i in range(1, 4):
         settings[f'bonus_threshold_{i}'] = get_setting(f'bonus_threshold_{i}', '')

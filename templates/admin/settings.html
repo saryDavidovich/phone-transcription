@@ -108,6 +108,29 @@
         <input class="form-input" name="price_manuscript_proofing" type="number" step="0.01" min="0" value="{{ settings.price_manuscript_proofing }}">
         <div style="font-size:11px;color:#4a5568;margin-top:4px">כשהלקוח שולח בחזרה תיקוני הגהה (קובץ Word, או תמונה/PDF של דף מודפס עם תיקונים בכתב יד) - הנציג מפעיל שעון עצר בזמן שהוא מתקן, וזה המחיר לכל דקת עבודה בפועל (מעוגל כלפי מעלה לדקה שלמה). מחויב רק כשהנציג מסמן את ההגהה כהושלמה.</div>
       </div>
+      <div style="border-top:2px solid #e2e8f0;margin:20px 0 12px;padding-top:16px">
+        <div style="font-size:14px;font-weight:700;margin-bottom:4px">📧 מיילים לאחרים ו-⏰ משימות (בטלפון: שלוחה 1 ואז 6 / 5)</div>
+        <div style="font-size:11px;color:#4a5568">כל עוד האפשרות כבויה - רק הטלפון של המנהל שומע אותה בתפריט (לבדיקה). מדליקים אחרי שבודקים ומקליטים את ההודעות בקריין.</div>
+      </div>
+      <input type="hidden" name="_features_field" value="1">
+      <div class="form-group" style="display:flex;gap:24px;flex-wrap:wrap">
+        <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" name="email_out_enabled" value="1" {% if settings.email_out_enabled == '1' %}checked{% endif %}> מיילים לאחרים פעיל לכל הלקוחות</label>
+        <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" name="tasks_enabled" value="1" {% if settings.tasks_enabled == '1' %}checked{% endif %}> משימות פעיל לכל הלקוחות</label>
+      </div>
+      <div class="form-group">
+        <label class="form-label">מייל לאיש קשר - מחיר לכל 5 דקות הקלטה (₪)</label>
+        <input class="form-input" name="price_per_5min_email_out" type="number" step="0.01" min="0" value="{{ settings.price_per_5min_email_out }}">
+        <div style="font-size:11px;color:#4a5568;margin-top:4px">כולל תמלול ושליחה. נגבה מראש; אם השליחה נכשלת - מוחזר.</div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">משימה / תזכורת - מחיר לכל 2 דקות הקלטה (₪)</label>
+        <input class="form-input" name="price_per_2min_task" type="number" step="0.01" min="0" value="{{ settings.price_per_2min_task }}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">תזכורת בפקס - תוספת לכל שליחה (₪)</label>
+        <input class="form-input" name="task_fax_price" type="number" step="0.01" min="0" value="{{ settings.task_fax_price }}">
+      </div>
+
       <div class="form-group">
         <label class="form-label">מספר הפקס לקבלת כתבי יד/הגהות (כולל קידומת 153)</label>
         <input class="form-input" name="fax_inbound_number" type="text" value="{{ settings.fax_inbound_number }}" placeholder="לדוגמה: 153-021234567">

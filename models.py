@@ -775,3 +775,68 @@ class SystemMessage(db.Model):
     kind = db.Column(db.String(10))
     recorded = db.Column(db.Boolean, default=False, nullable=False)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+# ---------------------------------------------------------------------------
+# מיילים לאחרים (שלוחה 1 ← 6): הלקוח מקליט הודעה, היא מתומללת ונשלחת במייל לאיש קשר.
+# תגובות של הנמען (מענה למייל) נשמרות בחשבון הלקוח ומוקראות לו בטלפון. services/customer_mail.py
+# ---------------------------------------------------------------------------
+class CustomerContact(db.Model):
+    __tablename__ = 'customer_contacts'
+    id = db.Column(db.Integer, primary_key=True)
+    customer_id = db.Column(db.Integer, db.ForeignKey('customers.id'), nullable=False, index=True)
+    name = db.Column(db.String(120))
+    email = db.Column(db.String(200), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class OutgoingEmail(db.Model):
+    __tablename__ = 'outgoing_emails'
+    id = db.Column(db.Integer, primary_key=True)
+    customer_id = db.Column(db.Integer, db.ForeignKey('customers.id'), nullable=False, index=True)
+    recording_id = db.Column(db.Integer, nullable=True)       # Recording (בשביל קישור ההאזנה)
+    ref = db.Column(db.String(12), unique=True, index=True)   # מזהה בנושא המייל - לשיוך תגובות
+    to_email = db.Column(db.String(200), nullable=False)
+    to_name = db.Column(db.String(120))
+    transcript = db.Column(db.Text)
+    duration_seconds = db.Column(db.Integer, default=0)
+    cost = db.Column(db.Float, default=0.0)
+    status = db.Column(db.String(20), default='processing')  # processing / sent / failed
+    error = db.Column(db.Text)
+    sent_at = db.Column(db.DateTime)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class EmailReply(db.Model):
+    __tablename__ = 'email_replies'
+    id = db.Column(db.Integer, primary_key=True)
+    outgoing_id = db.Column(db.Integer, db.ForeignKey('outgoing_emails.id'), nullable=False, index=True)
+    customer_id = db.Column(db.Integer, nullable=False, index=True)
+    from_email = db.Column(db.String(200))
+    body = db.Column(db.Text)
+    heard_at = db.Column(db.DateTime)                          # None = עוד לא נשמעה בטלפון
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+# ---------------------------------------------------------------------------
+# משימות / תזכורות (שלוחה 1 ← 5): הלקוח מקליט משימה ואומר בדיבור מתי לקבל תזכורת.
+# התזכורת נשלחת במייל / בפקס / בצינתוק (+ הקראה בכניסה למערכת). services/tasks.py
+# ---------------------------------------------------------------------------
+class CustomerTask(db.Model):
+    __tablename__ = 'customer_tasks'
+    id = db.Column(db.Integer, primary_key=True)
+    customer_id = db.Column(db.Integer, db.ForeignKey('customers.id'), nullable=False, index=True)
+    recording_id = db.Column(db.Integer, nullable=True)
+    transcript = db.Column(db.Text)                 # מה שהלקוח אמר (מלא)
+    text = db.Column(db.Text)                       # תוכן המשימה (בלי הוראות הזמן)
+    duration_seconds = db.Column(db.Integer, default=0)
+    due_at = db.Column(db.DateTime, index=True)     # UTC - מועד השליחה הבא
+    recurrence = db.Column(db.String(10), default='none')   # none / daily / weekly / monthly
+    channel = db.Column(db.String(10))              # email / fax / tzintuk
+    target = db.Column(db.String(200))              # כתובת מייל / מספר פקס
+    status = db.Column(db.String(20), default='draft')      # draft / active / done / cancelled
+    cost = db.Column(db.Float, default=0.0)
+    sent_count = db.Column(db.Integer, default=0)
+    last_sent_at = db.Column(db.DateTime)
+    last_error = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)

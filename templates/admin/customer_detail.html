@@ -581,6 +581,58 @@ function confirmOcrDelete() {
 </div>
 </details>
 
+<details class="cd-sec" data-sec="mail"><summary>📧 מיילים לאחרים ואנשי קשר ({{ contacts|length }} אנשי קשר{% if new_replies_count %}, {{ new_replies_count }} תגובות שלא נשמעו{% endif %})</summary>
+<div id="sec-mail" class="table-card" style="margin-top:12px">
+  <div class="table-header"><span class="table-title">אנשי קשר (בטלפון מוקראים לפי המספרים כאן)</span></div>
+  <form method="POST" action="{{ url_for('admin.customer_contact_add', id=customer.id) }}" style="padding:12px 16px;display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+    <div style="flex:1;min-width:140px"><label class="form-label">שם</label><input class="form-input" name="name" maxlength="120"></div>
+    <div style="flex:2;min-width:200px"><label class="form-label">מייל</label><input class="form-input" name="email" dir="ltr" required></div>
+    <button class="btn btn-primary" type="submit">➕ הוספה</button>
+  </form>
+  {% if contacts %}
+  <table><thead><tr><th style="width:40px">#</th><th>שם</th><th>מייל</th><th style="width:80px"></th></tr></thead><tbody>
+  {% for c in contacts %}<tr><td>{{ loop.index }}</td><td>{{ c.name }}</td><td dir="ltr" style="text-align:right">{{ c.email }}</td>
+    <td><form method="POST" action="{{ url_for('admin.customer_contact_delete', id=customer.id, cid=c.id) }}" onsubmit="return confirm('למחוק את איש הקשר?')"><button class="btn btn-ghost" type="submit" style="font-size:12px;padding:4px 10px">🗑️</button></form></td></tr>{% endfor %}
+  </tbody></table>
+  {% else %}<div style="padding:0 16px 12px;color:var(--text2);font-size:13px">עדיין אין אנשי קשר.</div>{% endif %}
+  <div style="padding:8px 16px 16px">
+    <form method="POST" action="{{ url_for('admin.customer_contacts_send_link', id=customer.id) }}">
+      <button class="btn btn-ghost" type="submit" {% if not customer.email %}disabled{% endif %}>📨 שלח ללקוח את אנשי הקשר וקישור לניהול שלהם</button>
+    </form>
+  </div>
+</div>
+<div class="table-card" style="margin-top:12px">
+  <div class="table-header"><span class="table-title">מיילים שהלקוח שלח מהטלפון</span></div>
+  {% if outgoing_emails %}
+  <table><thead><tr><th style="width:120px">נשלח</th><th style="width:200px">אל</th><th>תוכן ותגובות</th><th style="width:90px">סטטוס</th></tr></thead><tbody>
+  {% for o in outgoing_emails %}<tr style="vertical-align:top">
+    <td style="font-size:12px">{{ o.created_at | il_time('%d/%m %H:%M') }}<br><span style="color:var(--text2)">₪{{ '%.2f'|format(o.cost or 0) }}</span></td>
+    <td style="font-size:13px">{{ o.to_name or '' }}<div dir="ltr" style="text-align:right;color:var(--text2);font-size:12px">{{ o.to_email }}</div></td>
+    <td style="font-size:13px">{% if o.transcript %}<div class="msg-tx" onclick="this.classList.toggle('open')">{{ o.transcript }}</div>{% endif %}
+      {% for r in email_replies.get(o.id, []) %}<div class="mm-note" style="margin-top:6px">↩️ <b dir="ltr">{{ r.from_email }}</b> · {{ r.created_at | il_time('%d/%m %H:%M') }}{% if not r.heard_at %} · <span style="color:#f59e0b">לא נשמעה</span>{% endif %}<br>{{ r.body }}</div>{% endfor %}</td>
+    <td>{% if o.status == 'sent' %}<span class="badge badge-green">נשלח</span>{% elif o.status == 'failed' %}<span class="badge badge-red" title="{{ o.error or '' }}">נכשל (הוחזר)</span>{% else %}<span class="badge badge-amber">בטיפול</span>{% endif %}</td>
+  </tr>{% endfor %}
+  </tbody></table>
+  {% else %}<div style="padding:0 16px 12px;color:var(--text2);font-size:13px">הלקוח עוד לא שלח מיילים מהטלפון.</div>{% endif %}
+</div>
+</details>
+
+<details class="cd-sec" data-sec="tasks"><summary>⏰ משימות ותזכורות ({{ customer_tasks|selectattr('status', 'equalto', 'active')|list|length }} פעילות)</summary>
+<div id="sec-tasks" class="table-card" style="margin-top:12px">
+  {% if customer_tasks %}
+  <table><thead><tr><th>המשימה</th><th style="width:200px">מתי</th><th style="width:80px">איך</th><th style="width:90px">סטטוס</th><th style="width:80px"></th></tr></thead><tbody>
+  {% for t in customer_tasks %}<tr style="vertical-align:top">
+    <td style="font-size:13px">{{ t.text }}{% if t.last_error %}<div style="color:#ef4444;font-size:12px">⚠ {{ t.last_error }}</div>{% endif %}</td>
+    <td style="font-size:12px">{{ task_when(t) if t.status == 'active' else (t.last_sent_at | il_time('%d/%m %H:%M') if t.last_sent_at else '—') }}{% if t.sent_count %}<div style="color:var(--text2)">נשלחה {{ t.sent_count }} פעמים</div>{% endif %}</td>
+    <td style="font-size:12px">{{ {'email': 'מייל', 'fax': 'פקס', 'tzintuk': 'צינתוק'}.get(t.channel, '—') }}</td>
+    <td>{% if t.status == 'active' %}<span class="badge badge-amber">פעילה</span>{% elif t.status == 'done' %}<span class="badge badge-green">נשלחה</span>{% elif t.status == 'failed' %}<span class="badge badge-red">נכשלה</span>{% else %}<span class="badge badge-gray">בוטלה</span>{% endif %}</td>
+    <td>{% if t.status == 'active' %}<form method="POST" action="{{ url_for('admin.customer_task_cancel', id=customer.id, tid=t.id) }}" onsubmit="return confirm('לבטל את המשימה?')"><button class="btn btn-ghost" type="submit" style="font-size:12px;padding:4px 10px">ביטול</button></form>{% endif %}</td>
+  </tr>{% endfor %}
+  </tbody></table>
+  {% else %}<div style="padding:12px 16px;color:var(--text2);font-size:13px">אין משימות.</div>{% endif %}
+</div>
+</details>
+
 <details class="cd-sec" data-sec="threads"><summary>💬 שיחות עם הלקוח ({{ threads|length }})</summary>
 <div style="margin-top:20px" class="table-card">
   <div class="table-header"><span class="table-title">💬 שיחה חדשה עם הלקוח</span></div>

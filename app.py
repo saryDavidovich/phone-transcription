@@ -78,8 +78,11 @@ def create_app():
     from routes.recording_proxy import download_bp
     from routes.dictate import dictate_bp
     from routes.student_link import student_link_bp
+    from routes.features import features_api, contacts_page_bp
 
     app.register_blueprint(student_link_bp)
+    app.register_blueprint(features_api, url_prefix='/api')
+    app.register_blueprint(contacts_page_bp)
     app.register_blueprint(ivr_bp, url_prefix='/ivr')
     app.register_blueprint(admin_bp, url_prefix='/admin')
     app.register_blueprint(payment_bp, url_prefix='/payment')
@@ -130,6 +133,13 @@ def create_app():
         nedarim_messages.start(app)
     except Exception as e:
         logging.getLogger(__name__).warning(f'nedarim messages: לא הופעל ({e})')
+
+    # משימות / תזכורות - שליחה ברקע כשמגיע הזמן (services/tasks.py), בדיקה כל דקה
+    try:
+        from services import tasks as _tasks
+        _tasks.start(app)
+    except Exception as e:
+        logging.getLogger(__name__).warning(f'tasks: לא הופעל ({e})')
 
     # התראה למנהל על הקלטות תקועות (services/stuck_watch.py), בדיקה כל 5 דקות
     try:
