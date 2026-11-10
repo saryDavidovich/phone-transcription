@@ -1,3 +1,4 @@
+<script src="/static/js/voicefx.js?v=1"></script>
 {# הודעה קולית ללקוח (vm_customer_id) או תפוצתית (vm_customer_id=None). רשימה: voice_messages_list #}
 <div id="voice">
   <div style="font-size:13px;color:#8892b0;margin-bottom:12px">
@@ -36,10 +37,8 @@
     <div class="vm-upload" style="display:none">
       <input class="form-input" type="file" name="audio_file" accept="audio/*,video/*" style="max-width:360px">
     </div>
-    <div class="vm-record" style="display:none;align-items:center;gap:10px;flex-wrap:wrap">
-      <button type="button" class="btn btn-danger vm-rec-btn" onclick="vmRecToggle(this)">⏺ התחל הקלטה</button>
-      <span class="vm-rec-time" style="font-variant-numeric:tabular-nums;color:#8892b0"></span>
-      <audio class="vm-rec-preview" controls style="display:none;height:34px"></audio>
+    <div class="vm-record" style="display:none">
+      <div class="vm-vfx"></div>
       <input type="file" name="audio_record" style="display:none">
     </div>
     <div class="vm-save-tpl" style="margin-top:10px">
@@ -107,29 +106,16 @@ window.vmSrc = function (r) {
   f.querySelector('.vm-tts').style.display = (r.value === 'tts' || r.value === 'narrator') ? '' : 'none';
   f.querySelector('.vm-preview-btn').style.display = r.value === 'narrator' ? '' : 'none';
   f.querySelector('.vm-upload').style.display = r.value === 'upload' ? '' : 'none';
-  f.querySelector('.vm-record').style.display = r.value === 'record' ? 'flex' : 'none';
-};
-window.vmRecToggle = function (btn) {
-  var f = btn.form, st = window.__vmRec;
-  if (st && st.rec && st.rec.state === 'recording') { st.rec.stop(); return; }
-  if (!navigator.mediaDevices || !window.MediaRecorder) { alert('הדפדפן לא תומך בהקלטה'); return; }
-  navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
-    var chunks = [], rec = new MediaRecorder(stream), t0 = Date.now(), timeEl = f.querySelector('.vm-rec-time');
-    var tick = setInterval(function () { var s = Math.floor((Date.now() - t0) / 1000); timeEl.textContent = '🔴 ' + Math.floor(s / 60) + ':' + ('0' + s % 60).slice(-2); }, 250);
-    window.__vmRec = { rec: rec };
-    rec.ondataavailable = function (e) { if (e.data.size) chunks.push(e.data); };
-    rec.onstop = function () {
-      clearInterval(tick); stream.getTracks().forEach(function (t) { t.stop(); });
-      var type = rec.mimeType || 'audio/webm', blob = new Blob(chunks, { type: type });
-      var ext = type.indexOf('ogg') !== -1 ? 'ogg' : (type.indexOf('mp4') !== -1 ? 'm4a' : 'webm');
-      var dt = new DataTransfer(); dt.items.add(new File([blob], 'recording.' + ext, { type: type }));
-      f.querySelector('input[name=audio_record]').files = dt.files;
-      var pv = f.querySelector('.vm-rec-preview'); pv.src = URL.createObjectURL(blob); pv.style.display = '';
-      timeEl.textContent = '✔ הוקלט - אפשר להאזין לפני השמירה';
-      btn.textContent = '⏺ הקלטה מחדש';
-    };
-    rec.start(); btn.textContent = '⏹ עצור הקלטה';
-  }).catch(function () { alert('אין גישה למיקרופון - יש לאשר בדפדפן'); });
+  f.querySelector('.vm-record').style.display = r.value === 'record' ? '' : 'none';
+  var box = f.querySelector('.vm-vfx');
+  if (r.value === 'record' && !box.dataset.on && window.VoiceFX) {      // הקלטה עם מחליף קול (static/js/voicefx.js)
+    box.dataset.on = '1';
+    VoiceFX.mount(box, { onFile: function (file) {
+      var inp = f.querySelector('input[name=audio_record]'), dt = new DataTransfer();
+      if (file) dt.items.add(file);
+      inp.files = dt.files;
+    } });
+  }
 };
 window.vmTpl = function (sel) {
   var f = sel.form, o = sel.selectedOptions[0], au = f.querySelector('.vm-tpl-audio');

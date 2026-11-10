@@ -61,6 +61,19 @@
   </div>
 
   <div class="card">
+    <div style="font-size:15px;font-weight:700;margin-bottom:4px">🎙️ הקלטה במחשב - עם מחליף קול</div>
+    <div style="font-size:12px;color:#8892b0;margin-bottom:10px;line-height:1.6">מקליטים במיקרופון, והקול עובר עיבוד קבוע (בלי בינה מלאכותית - אותה תוצאה בכל פעם):
+      ניקוי, קול עמוק יותר, אקולייזר וקומפרסור של קריין. אחרי ההקלטה אפשר להחליף סגנון ולהשוות למקורי.</div>
+    <form method="POST" action="{{ url_for('admin.narrator_upload_file') }}" enctype="multipart/form-data" onsubmit="return nrBusy(this)" id="nrRecForm">
+      <input type="hidden" name="num" class="nr-num-field" value="{{ num }}">
+      <div id="nrVfx"></div>
+      <input type="file" name="audio_file" style="display:none">
+      <label style="font-size:13px;display:block;margin-top:10px"><input type="checkbox" name="trim" value="1" checked> חיתוך שקט בהתחלה ובסוף</label>
+      <button class="btn btn-primary" type="submit" id="nrRecSubmit" disabled style="margin-top:12px">⬆ הכן להעלאה</button>
+    </form>
+  </div>
+
+  <div class="card">
     <div style="font-size:15px;font-weight:700;margin-bottom:10px">📁 העלאת הקלטה מוכנה</div>
     <form method="POST" action="{{ url_for('admin.narrator_upload_file') }}" enctype="multipart/form-data" onsubmit="return nrBusy(this)">
       <input type="hidden" name="num" class="nr-num-field" value="{{ num }}">
@@ -233,6 +246,18 @@
   a.src = ['data', 'audio/mpeg;base64,'].join(':') + '{{ sel_b64 }}';
   document.getElementById('nrPreview').appendChild(a);
   {% endif %}
+})();
+</script>
+<script src="/static/js/voicefx.js?v=1"></script>
+<script>
+(function () {
+  var box = document.getElementById('nrVfx'); if (!box || !window.VoiceFX) return;
+  var f = document.getElementById('nrRecForm');
+  VoiceFX.mount(box, { onFile: function (file) {
+    var dt = new DataTransfer(); if (file) dt.items.add(file);
+    f.querySelector('input[name=audio_file]').files = dt.files;
+    document.getElementById('nrRecSubmit').disabled = !file;
+  } });
 })();
 </script>
 {% endblock %}
