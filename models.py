@@ -844,3 +844,28 @@ class CustomerTask(db.Model):
     last_sent_at = db.Column(db.DateTime)
     last_error = db.Column(db.Text)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+# ---------------------------------------------------------------------------
+# משימות למנהל (לוח שנה / לו"ז) - services/admin_tasks.py
+#   kind='scheduled' - תאריך ושעה חובה. בזמן שלה קופץ חלון בכל עמוד בממשק, ואי אפשר
+#                      לסגור אותו עד שמסמנים "בוצע" עם הסבר.
+#   kind='reminder'  - בלי תאריך: תזכורת כל X דקות. אפשר לסגור את החלון (חוזרת בפעם הבאה)
+#                      או לסמן בוצע (הסבר רשות).
+# ---------------------------------------------------------------------------
+class AdminTask(db.Model):
+    __tablename__ = 'admin_tasks'
+    id = db.Column(db.Integer, primary_key=True)
+    kind = db.Column(db.String(12), nullable=False, default='scheduled')
+    title = db.Column(db.String(200), nullable=False)
+    details = db.Column(db.Text)
+    due_at = db.Column(db.DateTime, index=True)                 # UTC - משימה מתוזמנת
+    interval_minutes = db.Column(db.Integer)                    # תזכורת - כל כמה דקות
+    next_remind_at = db.Column(db.DateTime, index=True)         # UTC - מתי התזכורת קופצת שוב
+    status = db.Column(db.String(12), nullable=False, default='open', index=True)   # open / done / cancelled
+    done_note = db.Column(db.Text)
+    done_at = db.Column(db.DateTime)
+    source = db.Column(db.String(10), default='web')            # web / phone
+    rec_url = db.Column(db.String(500))                         # הקלטה מהטלפון
+    customer_id = db.Column(db.Integer, nullable=True)          # קישור ללקוח (רשות)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)

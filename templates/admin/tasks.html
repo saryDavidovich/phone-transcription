@@ -1,0 +1,152 @@
+{% extends 'admin/base.html' %}
+{% block title %}משימות ולו"ז{% endblock %}
+{% block page_title %}📅 משימות ולו"ז{% endblock %}
+{% block content %}
+<style>
+  .tk-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:18px}
+  @media (max-width:900px){.tk-grid{grid-template-columns:1fr}}
+  .tk-card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:16px}
+  .tk-card h3{margin:0 0 4px;font-size:16px}
+  .tk-card .sub{font-size:12px;color:var(--text2);margin-bottom:12px;line-height:1.6}
+  .tk-card label{display:block;font-size:12px;color:var(--text2);margin:8px 0 4px}
+  .tk-row{display:flex;gap:10px;flex-wrap:wrap}.tk-row>*{flex:1;min-width:150px}
+  .cal{background:var(--surface);border:1px solid var(--border);border-radius:14px;overflow:hidden;margin-bottom:18px}
+  .cal-head{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--border)}
+  .cal-head b{font-size:17px}
+  .cal-head a{color:var(--text);text-decoration:none;padding:4px 12px;border:1px solid var(--border);border-radius:8px;font-size:13px}
+  .cal-days{display:grid;grid-template-columns:repeat(7,1fr)}
+  .cal-dn{padding:6px;text-align:center;font-size:12px;color:var(--text2);border-bottom:1px solid var(--border)}
+  .cal-cell{min-height:96px;border-left:1px solid var(--border);border-bottom:1px solid var(--border);padding:5px;cursor:pointer;position:relative}
+  .cal-cell:hover{background:var(--surface2)}
+  .cal-cell.out{opacity:.4}
+  .cal-cell.today{box-shadow:inset 0 0 0 2px var(--accent,#4f6ef7)}
+  .cal-num{font-size:12px;font-weight:700;margin-bottom:4px}
+  .chip{display:block;font-size:11px;border-radius:6px;padding:2px 6px;margin-bottom:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer}
+  .chip.open{background:rgba(79,110,247,.18);color:#93a8ff}
+  .chip.late{background:rgba(239,68,68,.2);color:#fca5a5}
+  .chip.done{background:rgba(16,185,129,.15);color:#6ee7b7;text-decoration:line-through}
+  .tk-list{background:var(--surface);border:1px solid var(--border);border-radius:14px;margin-bottom:16px}
+  .tk-list h3{margin:0;padding:12px 16px;font-size:15px;border-bottom:1px solid var(--border)}
+  .tk-item{display:flex;gap:12px;align-items:flex-start;padding:10px 16px;border-bottom:1px solid var(--border)}
+  .tk-item:last-child{border-bottom:0}
+  .tk-when{font-size:12px;color:var(--text2);min-width:92px}
+  .tk-body{flex:1;font-size:14px}.tk-body .d{font-size:12px;color:var(--text2);white-space:pre-wrap;margin-top:2px}
+  .tk-late{color:#ef4444;font-weight:700}
+  .tk-empty{padding:12px 16px;color:var(--text2);font-size:13px}
+  .tk-actions{display:flex;gap:6px;align-items:center}
+  .tk-actions button{font-size:12px;padding:4px 10px}
+</style>
+
+{% with flashed = get_flashed_messages() %}{% if flashed %}{% for m in flashed %}<div class="flash flash-success">{{ m }}</div>{% endfor %}{% endif %}{% endwith %}
+
+<div class="tk-grid">
+  <form class="tk-card" method="POST" action="{{ url_for('admin.admin_task_create') }}" id="schedForm">
+    <input type="hidden" name="kind" value="scheduled">
+    <h3>📌 משימה עם מועד</h3>
+    <div class="sub">בזמן שלה יקפוץ חלון בכל מקום בממשק, ולא ייסגר עד שתסמן "בוצע" עם הסבר.</div>
+    <label>המשימה</label><input class="form-input" name="title" required maxlength="200" placeholder="למשל: להתקשר ללקוח 050... לגבי הפקס">
+    <div class="tk-row">
+      <div><label>תאריך ושעה</label><input class="form-input" type="datetime-local" name="due" id="schedDue" required value="{{ default_dt }}"></div>
+      <div><label>לקוח (טלפון, רשות)</label><input class="form-input" name="customer_phone" placeholder="05..."></div>
+    </div>
+    <label>פירוט</label><textarea class="form-input" name="details" rows="3" required placeholder="מה בדיוק צריך לעשות"></textarea>
+    <button class="btn btn-primary" type="submit" style="margin-top:10px">➕ הוספה ללו"ז</button>
+  </form>
+  <form class="tk-card" method="POST" action="{{ url_for('admin.admin_task_create') }}">
+    <input type="hidden" name="kind" value="reminder">
+    <h3>🔔 תזכורת חוזרת (בלי תאריך)</h3>
+    <div class="sub">קופצת שוב ושוב לפי התדירות. אפשר לסגור אותה עד הפעם הבאה, או לסמן בוצע.</div>
+    <label>התזכורת</label><input class="form-input" name="title" required maxlength="200" placeholder="למשל: לבדוק פקסים שלא שויכו">
+    <div class="tk-row">
+      <div><label>כל כמה זמן</label><select class="form-input" name="interval">{% for v, l in intervals %}<option value="{{ v }}" {% if v == 180 %}selected{% endif %}>{{ l }}</option>{% endfor %}</select></div>
+      <div><label>לקוח (טלפון, רשות)</label><input class="form-input" name="customer_phone" placeholder="05..."></div>
+    </div>
+    <label>פירוט (רשות)</label><textarea class="form-input" name="details" rows="3"></textarea>
+    <button class="btn btn-primary" type="submit" style="margin-top:10px">➕ הוספת תזכורת</button>
+  </form>
+</div>
+
+<div class="cal">
+  <div class="cal-head">
+    <a href="{{ url_for('admin.admin_tasks', y=next_y, m=next_m) }}">← הבא</a>
+    <b>{{ month_name }} {{ y }}</b>
+    <a href="{{ url_for('admin.admin_tasks', y=prev_y, m=prev_m) }}">הקודם →</a>
+  </div>
+  <div class="cal-days">
+    {% for dn in ['ראשון','שני','שלישי','רביעי','חמישי','שישי','שבת'] %}<div class="cal-dn">{{ dn }}</div>{% endfor %}
+    {% for week in weeks %}{% for day in week %}
+      <div class="cal-cell {% if not day.in_month %}out{% endif %} {% if day.date == today_date %}today{% endif %}"
+           onclick="tkPickDay('{{ day.date.isoformat() }}')" title="לחיצה - משימה חדשה ביום הזה">
+        <div class="cal-num">{{ day.date.day }}</div>
+        {% for t in day.tasks %}
+          {% set loc = to_local(t.due_at) %}
+          <span class="chip {{ 'done' if t.status == 'done' else ('late' if t.due_at < now_utc else 'open') }}"
+                title="{{ loc.strftime('%H:%M') }} {{ t.title }}{% if t.details %} - {{ t.details }}{% endif %}{% if t.done_note %} | בוצע: {{ t.done_note }}{% endif %}"
+                onclick="event.stopPropagation()">{{ loc.strftime('%H:%M') }} {{ t.title }}</span>
+        {% endfor %}
+      </div>
+    {% endfor %}{% endfor %}
+  </div>
+</div>
+
+<div class="tk-grid">
+  <div>
+    <div class="tk-list">
+      <h3>📋 היום (ומה שעבר זמנו)</h3>
+      {% for t in today %}{% set loc = to_local(t.due_at) %}
+        <div class="tk-item">
+          <div class="tk-when {% if t.due_at < now_utc %}tk-late{% endif %}">{{ loc.strftime('%d/%m %H:%M') }}</div>
+          <div class="tk-body">{{ t.title }}{% if t.source == 'phone' %} 📞{% endif %}{% if t.customer_id %} · <a href="{{ url_for('admin.customer_detail', id=t.customer_id) }}">לקוח</a>{% endif %}
+            {% if t.details %}<div class="d">{{ t.details }}</div>{% endif %}</div>
+          <div class="tk-actions"><form method="POST" action="{{ url_for('admin.admin_task_cancel', tid=t.id) }}" onsubmit="return confirm('למחוק את המשימה?')"><button class="btn btn-ghost" type="submit">🗑️</button></form></div>
+        </div>
+      {% else %}<div class="tk-empty">אין משימות להיום.</div>{% endfor %}
+    </div>
+    <div class="tk-list">
+      <h3>🗓️ בהמשך</h3>
+      {% for t in upcoming %}{% set loc = to_local(t.due_at) %}
+        <div class="tk-item">
+          <div class="tk-when">{{ loc.strftime('%d/%m %H:%M') }}</div>
+          <div class="tk-body">{{ t.title }}{% if t.source == 'phone' %} 📞{% endif %}{% if t.customer_id %} · <a href="{{ url_for('admin.customer_detail', id=t.customer_id) }}">לקוח</a>{% endif %}
+            {% if t.details %}<div class="d">{{ t.details }}</div>{% endif %}</div>
+          <div class="tk-actions"><form method="POST" action="{{ url_for('admin.admin_task_cancel', tid=t.id) }}" onsubmit="return confirm('למחוק את המשימה?')"><button class="btn btn-ghost" type="submit">🗑️</button></form></div>
+        </div>
+      {% else %}<div class="tk-empty">אין משימות עתידיות.</div>{% endfor %}
+    </div>
+  </div>
+  <div>
+    <div class="tk-list">
+      <h3>🔔 תזכורות פעילות</h3>
+      {% for t in reminders %}{% set nx = to_local(t.next_remind_at) %}
+        <div class="tk-item">
+          <div class="tk-when">{{ interval_label(t.interval_minutes) }}<br><span style="font-size:11px">הבאה: {{ nx.strftime('%d/%m %H:%M') }}</span></div>
+          <div class="tk-body">{{ t.title }}{% if t.source == 'phone' %} 📞{% endif %}{% if t.details %}<div class="d">{{ t.details }}</div>{% endif %}</div>
+          <div class="tk-actions">
+            <form method="POST" action="{{ url_for('admin.admin_task_done', tid=t.id) }}"><button class="btn btn-ghost" type="submit">✔</button></form>
+            <form method="POST" action="{{ url_for('admin.admin_task_cancel', tid=t.id) }}" onsubmit="return confirm('למחוק את התזכורת?')"><button class="btn btn-ghost" type="submit">🗑️</button></form>
+          </div>
+        </div>
+      {% else %}<div class="tk-empty">אין תזכורות פעילות.</div>{% endfor %}
+    </div>
+    <div class="tk-list">
+      <h3>✅ בוצעו לאחרונה</h3>
+      {% for t in done %}
+        <div class="tk-item">
+          <div class="tk-when">{{ to_local(t.done_at).strftime('%d/%m %H:%M') }}</div>
+          <div class="tk-body">{{ t.title }}{% if t.done_note %}<div class="d">✔ {{ t.done_note }}</div>{% endif %}</div>
+        </div>
+      {% else %}<div class="tk-empty">עוד לא בוצעו משימות.</div>{% endfor %}
+    </div>
+  </div>
+</div>
+
+<script>
+function tkPickDay(iso) {
+  var f = document.getElementById('schedDue');
+  var cur = (f.value || '').split('T')[1] || '09:00';
+  f.value = iso + 'T' + cur;
+  document.getElementById('schedForm').scrollIntoView({behavior: 'smooth', block: 'start'});
+  document.querySelector('#schedForm input[name=title]').focus();
+}
+</script>
+{% endblock %}

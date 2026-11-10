@@ -803,6 +803,22 @@ def admin_phone_help():
     return jsonify({'ok': True, 'text': nedarim_commands.help_text()})
 
 
+@api_bp.route('/admin-phone/tasks/<action>', methods=['POST'])
+def admin_phone_tasks(action):
+    """תפריט מנהל ← 8: משימות ולו"ז (services/admin_tasks.py)."""
+    d = request.get_json(silent=True) or {}
+    if not _admin_token_ok(d.get('token'), d.get('call_id')):
+        return jsonify({'ok': False, 'reason': 'unauthorized'}), 401
+    from services import admin_tasks as AT
+    if action == 'create':
+        return jsonify(AT.create_from_phone(d.get('rec_url', '')))
+    if action == 'cancel':
+        return jsonify({'ok': AT.cancel(int(d.get('id') or 0))})
+    if action == 'agenda':
+        return jsonify({'ok': True, 'text': AT.agenda_text(1 if str(d.get('day')) == '1' else 0)})
+    return jsonify({'ok': False, 'reason': 'action'}), 404
+
+
 @api_bp.route('/tzintuk/prepare', methods=['POST'])
 def tzintuk_prepare():
     """שלוחה 9 ← 4: יוצר (פעם אחת) את שלוחת הצינתוקים האישית של המתקשר בימות, ומחזיר את הנתיב."""

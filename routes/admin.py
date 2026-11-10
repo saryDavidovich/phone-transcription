@@ -3669,3 +3669,109 @@ def dev_feature_delete(fid):
     db.session.commit()
     flash('ההסבר נמחק')
     return redirect(url_for('admin.dev_requests', tab='features'))
+
+
+# ---------------------------------------------------------------------------
+# משימות למנהל - לוח שנה, תזכורות, וחלון שקופץ בכל עמוד (services/admin_tasks.py)
+# ---------------------------------------------------------------------------
+@admin_bp.route('/tasks')
+@login_required
+def admin_tasks():
+    from services import admin_tasks as AT
+    from models import AdminTask
+    now_local = datetime.now(AT._tz())
+    try:
+        y = int(request.args.get('y') or now_local.year)
+        m = int(request.args.get('m') or now_local.month)
+        if not 1 <= m <= 12:
+            raise ValueError
+    except ValueError:
+        y, m = now_local.year, now_local.month
+    prev_y, prev_m = (y - 1, 12) if m == 1 else (y, m - 1)
+    next_y, next_m = (y + 1, 1) if m == 12 else (y, m + 1)
+    day_start = datetime(now_local.year, now_local.month, now_local.day)
+    today = (AdminTask.query.filter(AdminTask.kind == 'scheduled', AdminTask.status == 'open',
+                                    AdminTask.due_at < AT.to_utc(day_start + timedelta(days=1)))
+             .order_by(AdminTask.due_at).all())
+    upcoming = (AdminTask.query.filter(AdminTask.kind == 'scheduled', AdminTask.status == 'open',
+                                       AdminTask.due_at >= AT.to_utc(day_start + timedelta(days=1)))
+                .order_by(AdminTask.due_at).limit(30).all())
+    reminders = (AdminTask.query.filter_by(kind='reminder', status='open')
+                 .order_by(AdminTask.next_remind_at).all())
+    done = (AdminTask.query.filter(AdminTask.status == 'done')
+            .order_by(AdminTask.done_at.desc()).limit(30).all())
+    from services.tasks import MONTHS_HE
+    return render_template('admin/tasks.html', weeks=AT.month_grid(y, m), y=y, m=m, month_name=MONTHS_HE[m],
+                           prev_y=prev_y, prev_m=prev_m, next_y=next_y, next_m=next_m,
+                           today_date=now_local.date(), today=today, upcoming=upcoming, reminders=reminders,
+                           done=done, intervals=AT.INTERVALS, to_local=AT.to_local,
+                           interval_label=AT.interval_label, now_utc=datetime.utcnow(),
+                           default_dt=(now_local + timedelta(hours=1)).strftime('%Y-%m-%dT%H:00'))
+
+
+@admin_bp.route('/tasks/create', methods=['POST'])
+@login_required
+def admin_task_create():
+    from services import admin_tasks as AT
+    kind = request.form.get('kind', 'scheduled')
+    due_local = None
+    if kind == 'scheduled':
+        try:
+            due_local = datetime.strptime(request.form.get('due', ''), '%Y-%m-%dT%H:%M')
+        except ValueError:
+            due_local = None
+    cust_id = None
+    ph = (request.form.get('customer_phone') or '').strip()
+    if ph:
+        from services.customer_phones import find_customer_by_phone
+        c = find_customer_by_phone(ph)
+        cust_id = c.id if c else None
+    t, err = AT.create(request.form.get('title'), request.form.get('details'), kind=kind, due_local=due_local,
+                       interval_minutes=request.form.get('interval'), customer_id=cust_id)
+    flash('המשימה נשמרה' if t else f'לא נשמר: {err}')
+    return redirect(url_for('admin.admin_tasks'))
+
+
+@admin_bp.route('/tasks/due')
+@login_required
+def admin_tasks_due():
+    """נבדק מכל עמוד בממשק כל 30 שניות - המשימות שהחלון שלהן צריך להיות פתוח עכשיו."""
+    from services import admin_tasks as AT
+    from models import AdminTask
+    try:
+        due = AT.due_now()
+        now_local = datetime.now(AT._tz())
+        end = AT.to_utc(datetime(now_local.year, now_local.month, now_local.day) + timedelta(days=1))
+        today_open = AdminTask.query.filter(AdminTask.kind == 'scheduled', AdminTask.status == 'open',
+                                            AdminTask.due_at < end).count()
+        return jsonify({'ok': True, 'due': [AT.payload(t) for t in due], 'today_open': today_open})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'ok': False, 'error': str(e)[:200]})
+
+
+@admin_bp.route('/tasks/<int:tid>/done', methods=['POST'])
+@login_required
+def admin_task_done(tid):
+    from services import admin_tasks as AT
+    err = AT.mark_done(tid, request.form.get('note') or (request.get_json(silent=True) or {}).get('note', ''))
+    if request.accept_mimetypes.best == 'application/json' or request.is_json:
+        return jsonify({'ok': not err, 'error': err})
+    flash(err or 'סומן כבוצע')
+    return redirect(request.referrer or url_for('admin.admin_tasks'))
+
+
+@admin_bp.route('/tasks/<int:tid>/snooze', methods=['POST'])
+@login_required
+def admin_task_snooze(tid):
+    from services import admin_tasks as AT
+    err = AT.snooze(tid)
+    return jsonify({'ok': not err, 'error': err})
+
+
+@admin_bp.route('/tasks/<int:tid>/cancel', methods=['POST'])
+@login_required
+def admin_task_cancel(tid):
+    from services import admin_tasks as AT
+    flash('המשימה נמחקה' if AT.cancel(tid) else 'המשימה לא נמצאה')
+    return redirect(url_for('admin.admin_tasks'))
