@@ -62,28 +62,38 @@
 <meta name="turbo-root" content="/admin">
 <script src="/static/vendor/turbo/turbo-8.0.13.js"></script>
 <script>
-/* עמודים שמתרעננים בתוך עצמם (משימות ולו"ז): אחרי שליחת טופס / מעבר חודש / גרירה - נשארים באותו מקום בדף
-   במקום לקפוץ לראש הדף. עמוד שמסומן <body data-keep-scroll> או נתיב ברשימה. */
+/* בכל הממשק: פעולה / רענון שחוזרים לאותו עמוד (שליחת טופס, מעבר חודש, סינון, מחיקה...) - נשארים באותו מקום
+   בגלילה ולא קופצים לראש הדף. מעבר לעמוד אחר, או לעמוד אחר ברשימה (page=), מתחיל מלמעלה כרגיל.
+   קישור/טופס עם data-scroll-top - תמיד מלמעלה. */
 (function () {
   if (window.__keepScroll) return;
   window.__keepScroll = true;
-  var PATHS = ['/admin/tasks'];
-  function keep() { return PATHS.indexOf(location.pathname) !== -1; }
-  function save() {
-    if (!keep()) return;
-    try { sessionStorage.setItem('keepScroll', JSON.stringify({ p: location.pathname, y: window.scrollY, t: Date.now() })); } catch (e) {}
+  function pageOf(href) { try { return new URL(href, location.href).searchParams.get('page') || ''; } catch (e) { return ''; } }
+  function save(e) {
+    var el = e && e.target && e.target.closest && e.target.closest('[data-scroll-top]');
+    if (el) { try { sessionStorage.removeItem('keepScroll'); } catch (x) {} return; }
+    try { sessionStorage.setItem('keepScroll', JSON.stringify({ p: location.pathname, pg: pageOf(location.href), y: window.scrollY, t: Date.now() })); } catch (x) {}
   }
-  document.addEventListener('turbo:before-visit', save);
+  document.addEventListener('turbo:before-visit', function (e) {
+    if (e.target && e.target.closest) return save(e);
+    save();
+  });
   document.addEventListener('turbo:submit-start', save);
   document.addEventListener('submit', save, true);
+  document.addEventListener('click', function (e) {   // קישור עם data-scroll-top - לא שומרים
+    var a = e.target.closest && e.target.closest('a[data-scroll-top]');
+    if (a) { try { sessionStorage.removeItem('keepScroll'); } catch (x) {} }
+  }, true);
+  window.addEventListener('beforeunload', function () { save(); });   // רענון מלא (F5) / טופס בלי Turbo
   window.tkSaveScroll = save;
-  document.addEventListener('turbo:load', function () {
+  function restore() {
     var d = null;
     try { d = JSON.parse(sessionStorage.getItem('keepScroll') || 'null'); sessionStorage.removeItem('keepScroll'); } catch (e) {}
-    if (!d || d.p !== location.pathname || Date.now() - d.t > 20000) return;
+    if (!d || d.p !== location.pathname || d.pg !== pageOf(location.href) || location.hash || Date.now() - d.t > 30000) return;
     var go = function () { window.scrollTo(0, d.y); };
-    go(); requestAnimationFrame(go); setTimeout(go, 60);
-  });
+    go(); requestAnimationFrame(go); setTimeout(go, 80); setTimeout(go, 250);
+  }
+  document.addEventListener('turbo:load', restore);
 })();
 </script>
 <meta name="dial-tpl" content="{{ dial_tpl|default('tel:{phone}') }}">
@@ -505,6 +515,14 @@ textarea.form-input { resize:vertical; min-height:80px; }
 
 /* Flash messages */
 .flash { padding:12px 16px; border-radius:8px; margin-bottom:16px; font-size:13px; }
+#flashToasts{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);z-index:9500;display:flex;flex-direction:column;gap:8px;align-items:center;pointer-events:none;width:max-content;max-width:calc(100vw - 32px)}
+#flashToasts .flash{pointer-events:auto;margin:0;display:flex;gap:12px;align-items:center;padding:11px 18px;border-radius:12px;font-size:14px;font-weight:600;
+  color:#fff;border:0;box-shadow:0 10px 30px rgba(0,0,0,.35);background:#16a34a;animation:toastIn .25s ease-out;transition:opacity .4s,transform .4s}
+#flashToasts .flash.flash-error{background:#dc2626}
+#flashToasts .flash.flash-warning{background:#d97706}
+#flashToasts .flash.out{opacity:0;transform:translateY(12px)}
+#flashToasts .flash .x{background:none;border:0;color:inherit;opacity:.75;cursor:pointer;font-size:16px;padding:0 0 0 2px;line-height:1}
+@keyframes toastIn{from{opacity:0;transform:translateY(14px)}}
 .flash-success { background:rgba(16,185,129,0.15); color:var(--green); border:1px solid rgba(16,185,129,0.3); }
 .flash-error { background:rgba(239,68,68,0.15); color:var(--red); border:1px solid rgba(239,68,68,0.3); }
 
@@ -708,11 +726,25 @@ table.as-cards textarea,table.as-cards input,table.as-cards select{min-width:0 !
     .mt-banner{display:block;margin:12px 24px 0;padding:10px 16px;border-radius:10px;background:rgba(239,68,68,.12);border:1px solid #ef4444;color:#ef4444;text-decoration:none;font-size:14px}
   </style>
   <div class="content">
-    {% with messages = get_flashed_messages(with_categories=true) %}
+    {# הודעות (נשמר / נכשל) - בועה בתחתית המסך שנעלמת לבד, כדי שהדף יישאר במקום #}
+    {% with messages = get_flashed_messages(with_categories=true) %}{% if messages %}
+      <div id="flashToasts">
       {% for cat, msg in messages %}
-        <div class="flash flash-{{ 'success' if cat == 'message' else cat }}">{{ msg }}</div>
+        {% set m = msg|string %}
+        {% set bad = cat == 'error' or m.startswith('לא ') or m.startswith('✗') or m.startswith('⚠') or 'נכשל' in m or 'שגיאה' in m or 'לא תקין' in m or 'לא נמצא' in m %}
+        <div class="flash flash-{{ 'error' if bad else ('success' if cat == 'message' else cat) }}" role="status">
+          <span>{{ msg }}</span><button type="button" class="x" aria-label="סגירה" onclick="this.parentNode.remove()">×</button></div>
       {% endfor %}
-    {% endwith %}
+      </div>
+      <script>
+      (function () {
+        document.querySelectorAll('#flashToasts .flash').forEach(function (t, i) {
+          var ms = (t.classList.contains('flash-error') ? 7000 : 3800) + i * 600;
+          setTimeout(function () { t.classList.add('out'); setTimeout(function () { t.remove(); }, 450); }, ms);
+        });
+      })();
+      </script>
+    {% endif %}{% endwith %}
     {% block content %}{% endblock %}
   </div>
 </main>

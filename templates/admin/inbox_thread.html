@@ -23,13 +23,7 @@
 </div>
 {% endif %}
 
-{% with flashed = get_flashed_messages() %}
-  {% if flashed %}
-    {% for m in flashed %}
-      <div class="flash flash-success">{{ m }}</div>
-    {% endfor %}
-  {% endif %}
-{% endwith %}
+
 
 <div class="table-card" style="margin-bottom:20px">
   <div class="table-header">

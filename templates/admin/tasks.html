@@ -46,8 +46,7 @@
   .tk-actions button{font-size:12px;padding:4px 10px}
 </style>
 
-{% with flashed = get_flashed_messages() %}{% if flashed %}{% set ns = namespace(bad=false) %}{% for m in flashed %}{% if m.startswith('לא ') or m.startswith('השליחה נכשלה') or m.startswith('כתובת המייל') %}{% set ns.bad = true %}{% endif %}{% endfor %}{% set bad = ns.bad %}<div id="tkToast" style="position:fixed;bottom:22px;left:50%;transform:translateX(-50%);z-index:9000;background:{{ '#dc2626' if bad else '#16a34a' }};color:#fff;padding:10px 22px;border-radius:12px;box-shadow:0 8px 30px rgba(0,0,0,.4);font-size:14px;font-weight:600">{% for m in flashed %}{{ m }}{% if not loop.last %} · {% endif %}{% endfor %}</div>
-<script>setTimeout(function(){var t=document.getElementById('tkToast');if(t)t.remove()},3500)</script>{% endif %}{% endwith %}
+
 
 <div class="cal">
   <div class="cal-head">
