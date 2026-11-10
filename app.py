@@ -550,6 +550,8 @@ def _migrate_db():
         # משימות למנהל: קטגוריה (צבע) + צינתוק לטלפון המנהל
         "ALTER TABLE admin_tasks ADD COLUMN IF NOT EXISTS category VARCHAR(20) DEFAULT 'general'",
         "ALTER TABLE admin_tasks ADD COLUMN IF NOT EXISTS notified_at TIMESTAMP",
+        # הגדרות ארוכות (יומן עדכוני גרסה) - בלי מגבלת 500 תווים
+        "ALTER TABLE settings ALTER COLUMN value TYPE TEXT",
         "ALTER TABLE outgoing_emails ADD COLUMN IF NOT EXISTS thread_ref VARCHAR(12)",
         "ALTER TABLE outgoing_emails ADD COLUMN IF NOT EXISTS in_reply_to_id INTEGER",
         "CREATE INDEX IF NOT EXISTS ix_outgoing_emails_thread_ref ON outgoing_emails (thread_ref)",

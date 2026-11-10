@@ -663,6 +663,8 @@ table.as-cards textarea,table.as-cards input,table.as-cards select{min-width:0 !
     {% call nav('/admin/maintenance', 'maintenance', 'מצב תחזוקה', request.endpoint == 'admin.maintenance',
                 'style="background:rgba(239,68,68,.14);color:#ef4444;font-weight:700"' if maintenance_on else '') %}
       {% if maintenance_on %}<span class="mt-pulse nav-badge-text" title="מצב תחזוקה פעיל - הקלטות לא מתומללות">פעיל</span>{% endif %}
+      {% if not maintenance_on and deploy_last_status %}<span class="nav-badge-text" style="margin-right:auto;font-weight:700;font-size:14px;background:none;{% if deploy_last_status == 'ok' %}color:#22c55e{% elif deploy_last_status == 'failed' %}color:#ef4444{% else %}color:#eab308{% endif %}"
+        title="{{ {'ok':'עדכון הגרסה האחרון עבר תקין','failed':'עדכון הגרסה האחרון לא עלה - פרטים בדף','building':'עדכון גרסה בבנייה'}.get(deploy_last_status, '') }}">{{ {'ok':'✓','failed':'✗','building':'⏳'}.get(deploy_last_status, '') }}</span>{% endif %}
     {% endcall %}
     {{ nav('/admin/ocr', 'ocr', 'זיהוי כתב יד', request.endpoint in ['admin.ocr_list','admin.ocr_detail']) }}
     {% set dp = dictate_pending() if dictate_pending is defined else {'total': 0, 'open': 0, 'proof': 0, 'fax': 0} %}

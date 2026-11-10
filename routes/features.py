@@ -173,4 +173,5 @@ def github_push():
     if event != 'push' or data.get('ref') != f'refs/heads/{branch}':
         return jsonify({'ok': True, 'ignored': True})
     from services import maintenance as MT
-    return jsonify({'ok': True, 'maintenance_on': MT.on_github_push()})
+    head = data.get('head_commit') or {}
+    return jsonify({'ok': True, 'maintenance_on': MT.on_github_push(head.get('id', ''), head.get('message', ''))})

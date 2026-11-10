@@ -111,6 +111,31 @@
     </div>
   </div>
 
+  <div class="card">
+    <div style="font-size:15px;font-weight:700;margin-bottom:4px">📦 עדכוני גרסה (דפלוי)</div>
+    <div class="mt-note" style="margin-top:0">כל העלאה לגיטהאב נרשמת כאן: מתי הועלתה, מתי הגרסה החדשה עלתה ותוך כמה זמן,
+      או אם לא עלתה תוך 20 דקות (כנראה הבנייה ב-Railway נכשלה). התוצאה האחרונה מופיעה גם ליד "מצב תחזוקה" בתפריט: ✓ או ✗.</div>
+    {% if deploys %}
+    <div style="margin-top:10px">
+      {% for d in deploys %}
+      <div style="display:flex;gap:12px;align-items:flex-start;padding:9px 0;border-top:1px solid var(--border)">
+        <div style="font-size:18px;line-height:1.2;width:24px;text-align:center">{% if d.status == 'ok' %}<span style="color:#22c55e">✓</span>{% elif d.status == 'failed' %}<span style="color:#ef4444">✗</span>{% else %}⏳{% endif %}</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13px;font-weight:600">{{ d.msg or '—' }}{% if d.sha %} <span style="color:var(--text3);font-weight:400;font-family:monospace;font-size:11px">{{ d.sha }}</span>{% endif %}</div>
+          <div style="font-size:12px;color:var(--text2);margin-top:2px">
+            {% if d.pushed %}הועלה {{ d.pushed.strftime('%d/%m %H:%M') }}{% endif %}
+            {% if d.status == 'ok' and d.up %}{% if d.pushed %} · {% endif %}עלתה {{ d.up.strftime('%d/%m %H:%M') }}{% if d.dur %} (תוך {{ d.dur }} דק׳){% endif %}{% endif %}
+            {% if d.status == 'failed' %} · <span style="color:#ef4444">לא עלתה</span>{% endif %}
+            {% if d.status == 'building' %} · בבנייה...{% endif %}
+          </div>
+          {% if d.note %}<div style="font-size:12px;color:{{ '#ef4444' if d.status == 'failed' else 'var(--text3)' }};margin-top:2px">{{ d.note }}</div>{% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}<div class="mt-note">עוד לא נרשמו עדכונים. הרשימה תתחיל מההעלאה הבאה.</div>{% endif %}
+  </div>
+
   <div class="card mt-stalecard" id="staleCard" style="display:none">
     <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px">
       <div style="font-size:15px;font-weight:700">⚠️ עבודות תקועות (מעל שעה)</div>

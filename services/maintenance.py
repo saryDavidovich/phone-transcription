@@ -10,6 +10,7 @@
 והמצב נדלק מיד - כך שעבודות חדשות ממתינות בזמן הבנייה, והקיימות מסתיימות לפני שהגרסה מתחלפת.
 אם הגרסה החדשה לא עולה תוך 20 דקות (בנייה שנכשלה) - המצב נכבה והמנהל מקבל הודעה.
 """
+import json
 import logging
 import os
 import threading
@@ -55,14 +56,89 @@ def set_mode(on, source='admin'):
 GITHUB_MAX_MINUTES = 20     # הודלק בהעלאה לגיטהאב ולא עלתה גרסה חדשה (בנייה נכשלה?) - כיבוי אחרי 20 דקות
 
 
-def on_github_push():
-    """העלאת קוד לגיטהאב (webhook): מדליק מצב תחזוקה עד שהגרסה החדשה עולה. כבר דלוק - לא נוגע."""
+def on_github_push(sha='', message=''):
+    """העלאת קוד לגיטהאב (webhook): נרשם ביומן, ומדליק מצב תחזוקה עד שהגרסה החדשה עולה. כבר דלוק - לא נוגע."""
     from routes.admin import get_setting
-    if get_setting('maintenance_mode', '0') == '1':
+    already = get_setting('maintenance_mode', '0') == '1'
+    record_push(sha, message, maintenance_on=True)
+    if already:
         return False
     set_mode(True, source='github')
     log.warning('maintenance: הודלק אוטומטית - העלאת קוד לגיטהאב, ייכבה כשהגרסה החדשה תעלה')
     return True
+
+
+# ---------------------------------------------------------------------------
+# יומן עדכוני גרסה
+# ---------------------------------------------------------------------------
+_LOG_KEY = 'deploy_log'
+_LOG_MAX = 20
+
+
+def _released_text(r):
+    r = r or {}
+    return f'{r.get("calls", 0)} הקלטות, {r.get("ocr", 0)} תמונות OCR, {r.get("email_out", 0)} מיילים לאנשי קשר'
+
+
+def deploy_log():
+    from routes.admin import get_setting
+    try:
+        return json.loads(get_setting(_LOG_KEY, '') or '[]')
+    except ValueError:
+        return []
+
+
+def _save_log(items, last_status):
+    from routes.admin import set_setting
+    set_setting(_LOG_KEY, json.dumps(items[:_LOG_MAX], ensure_ascii=False))
+    set_setting('deploy_last_status', last_status)
+
+
+def record_push(sha='', message='', maintenance_on=False):
+    """העלאה לגיטהאב: רשומה חדשה במצב 'בבנייה'."""
+    items = deploy_log()
+    items.insert(0, {'sha': (sha or '')[:7], 'msg': (message or '').split('\n')[0][:200],
+                     'pushed_at': datetime.utcnow().isoformat(timespec='seconds'), 'status': 'building',
+                     'maintenance': bool(maintenance_on)})
+    _save_log(items, 'building')
+
+
+def mark_up(dep='', note=''):
+    """הגרסה החדשה עלתה. העלאות שעוד היו 'בבנייה' - הגרסה האחרונה כוללת אותן."""
+    items = deploy_log()
+    now = datetime.utcnow().isoformat(timespec='seconds')
+    building = [i for i in items if i.get('status') == 'building']
+    if building:
+        for i in building:
+            i.update(status='ok', up_at=now, deploy=(dep or '')[:8])
+        building[0]['note'] = note
+    else:            # עלתה גרסה בלי העלאה מגיטהאב (Redeploy / שינוי משתנה ב-Railway)
+        items.insert(0, {'sha': '', 'msg': 'הפעלה מחדש / פריסה מ-Railway', 'pushed_at': None, 'status': 'ok',
+                         'up_at': now, 'deploy': (dep or '')[:8], 'note': note})
+    _save_log(items, 'ok')
+
+
+def mark_failed(note=''):
+    items = deploy_log()
+    hit = False
+    for i in items:
+        if i.get('status') == 'building':
+            i.update(status='failed', failed_at=datetime.utcnow().isoformat(timespec='seconds'), note=note)
+            hit = True
+    if hit:
+        _save_log(items, 'failed')
+
+
+def _fail_stale_builds():
+    """העלאה שנשארה 'בבנייה' יותר מ-20 דקות (גם בלי מצב תחזוקה) - נכשלה."""
+    for i in deploy_log():
+        if i.get('status') == 'building' and i.get('pushed_at'):
+            try:
+                if (datetime.utcnow() - datetime.fromisoformat(i['pushed_at'])).total_seconds() > GITHUB_MAX_MINUTES * 60:
+                    mark_failed(f'גרסה חדשה לא עלתה תוך {GITHUB_MAX_MINUTES} דקות מההעלאה (אולי הבנייה ב-Railway נכשלה).')
+                    return
+            except ValueError:
+                pass
 
 
 def _watchdog_github(app):
@@ -74,6 +150,7 @@ def _watchdog_github(app):
                 from app import db
                 from routes.admin import get_setting, set_setting
                 if get_setting('maintenance_mode', '0') != '1' or get_setting('maintenance_on_source', '') != 'github':
+                    _fail_stale_builds()        # בלי מצב תחזוקה - רק מסמנים ביומן
                     continue
                 try:
                     at = datetime.fromisoformat(get_setting('maintenance_on_at', ''))
@@ -88,14 +165,8 @@ def _watchdog_github(app):
                 if get_setting('maintenance_mode', '0') != '1':
                     continue
                 released = set_mode(False)
-                from models import ManagerMessage
-                db.session.add(ManagerMessage(
-                    phone='—', name='מצב תחזוקה', source='recording_error',
-                    transcript=(f'מצב התחזוקה הודלק בהעלאת קוד לגיטהאב, אבל גרסה חדשה לא עלתה תוך {GITHUB_MAX_MINUTES} '
-                                f'דקות (אולי הבנייה ב-Railway נכשלה). המצב כובה כדי שהמערכת לא תישאר מושבתת. '
-                                f'שוחררו: {released["calls"]} הקלטות, {released["ocr"]} תמונות OCR, '
-                                f'{released["email_out"]} מיילים לאנשי קשר.')))
-                db.session.commit()
+                mark_failed(f'גרסה חדשה לא עלתה תוך {GITHUB_MAX_MINUTES} דקות (אולי הבנייה ב-Railway נכשלה). '
+                            f'מצב התחזוקה כובה. שוחררו: {_released_text(released)}.')
                 log.warning('maintenance: כובה - גרסה חדשה לא עלתה תוך 20 דקות מההעלאה לגיטהאב')
         except Exception as e:
             log.warning(f'maintenance watchdog: {e}')
@@ -113,22 +184,18 @@ def _auto_off(app):
                     return
             try:
                 dep = deployment_id()
+                new_version = bool(dep) and get_setting('deploy_last_seen', '') != dep
+                if new_version:
+                    set_setting('deploy_last_seen', dep)
                 if (get_setting('maintenance_mode', '0') != '1' or get_setting('maintenance_auto_off', '1') != '1'
                         or not dep or get_setting('maintenance_on_deploy', '') == dep):
+                    if new_version:
+                        mark_up(dep)
                     return
                 released = set_mode(False)
+                mark_up(dep, f'מצב התחזוקה כובה אוטומטית. שוחררו: {_released_text(released)}.')
                 set_setting('maintenance_auto_off_last', f'{datetime.utcnow().isoformat(timespec="seconds")}|{released}')
                 log.warning(f'maintenance: מצב תחזוקה כובה אוטומטית אחרי פריסה חדשה ({dep[:8]}), שוחררו: {released}')
-                try:
-                    from models import ManagerMessage
-                    db.session.add(ManagerMessage(
-                        phone='—', name='מצב תחזוקה', source='recording_error',
-                        transcript=(f'מצב התחזוקה כובה אוטומטית אחרי עליית גרסה חדשה. שוחררו: '
-                                    f'{released["calls"]} הקלטות, {released["ocr"]} תמונות OCR, '
-                                    f'{released["email_out"]} מיילים לאנשי קשר.')))
-                    db.session.commit()
-                except Exception:
-                    db.session.rollback()
             finally:
                 if db.engine.dialect.name == 'postgresql':
                     db.session.execute(db.text('SELECT pg_advisory_unlock(:k)'), {'k': _LOCK_KEY})

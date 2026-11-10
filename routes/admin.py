@@ -3,7 +3,7 @@ from flask_login import login_user, logout_user, login_required, current_user
 from werkzeug.security import check_password_hash
 from app import db, login_manager
 from models import Customer, Recording, Transaction, Settings, AdminUser, ManagerMessage, CustomerMessage, ConversationThread
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from sqlalchemy import func
 import io
 import os
@@ -63,11 +63,12 @@ def inject_new_messages_count():
         count = 0
     try:   # שאילתה אחת לשתי ההגדרות שבכל עמוד
         vals = dict(db.session.query(Settings.key, Settings.value)
-                    .filter(Settings.key.in_(['maintenance_mode', 'dial_url_template'])).all())
+                    .filter(Settings.key.in_(['maintenance_mode', 'dial_url_template', 'deploy_last_status'])).all())
     except Exception:
         vals = {}
     return {'new_messages_count': count, 'maintenance_on': vals.get('maintenance_mode') == '1',
-            'dial_tpl': (vals.get('dial_url_template') or '').strip() or 'tel:{phone}'}
+            'dial_tpl': (vals.get('dial_url_template') or '').strip() or 'tel:{phone}',
+            'deploy_last_status': vals.get('deploy_last_status') or ''}
 
 @login_manager.user_loader
 def load_user(user_id):
@@ -2002,9 +2003,24 @@ def settings():
 @admin_bp.route('/maintenance')
 @login_required
 def maintenance():
+    from services import maintenance as MT
+    from zoneinfo import ZoneInfo
+    def il(iso):
+        try:
+            return datetime.fromisoformat(iso).replace(tzinfo=timezone.utc).astimezone(ZoneInfo('Asia/Jerusalem'))
+        except (TypeError, ValueError):
+            return None
+    deploys = []
+    for d in MT.deploy_log():
+        p_at, u_at, f_at = il(d.get('pushed_at')), il(d.get('up_at')), il(d.get('failed_at'))
+        dur = None
+        if p_at and u_at:
+            sec = int((u_at - p_at).total_seconds())
+            dur = f'{sec // 60}:{sec % 60:02d}'
+        deploys.append({**d, 'pushed': p_at, 'up': u_at, 'failed': f_at, 'dur': dur})
     return render_template('admin/maintenance.html',
                             maintenance_mode=(get_setting('maintenance_mode', '0') == '1'),
-                            auto_off=(get_setting('maintenance_auto_off', '1') == '1'))
+                            auto_off=(get_setting('maintenance_auto_off', '1') == '1'), deploys=deploys)
 
 
 @admin_bp.route('/maintenance/status')
