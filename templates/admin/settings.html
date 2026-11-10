@@ -123,6 +123,11 @@
         <div style="font-size:11px;color:#4a5568;margin-top:4px">כולל תמלול ושליחה. נגבה מראש; אם השליחה נכשלת - מוחזר.</div>
       </div>
       <div class="form-group">
+        <label class="form-label">📞 כפתור חיוג ליד מספרי טלפון - כתובת החיוג</label>
+        <input class="form-input" name="dial_url_template" dir="ltr" value="{{ settings.dial_url_template }}" placeholder="tel:{phone}">
+        <div style="font-size:11px;color:#4a5568;margin-top:4px">{phone} = המספר (ספרות בלבד). ברירת המחדל tel:{phone} פותחת את תוכנת החיוג שמוגדרת ב-Windows לקישורי טלפון (למשל של נדרים פלוס). אם התוכנה משתמשת בקידומת אחרת (למשל callto:{phone}) - כותבים אותה כאן.</div>
+      </div>
+      <div class="form-group">
         <label class="form-label">מקסימום מיילים לאנשי קשר ללקוח ב-24 שעות</label>
         <input class="form-input" name="email_out_daily_limit" type="number" step="1" min="1" value="{{ settings.email_out_daily_limit }}">
         <div style="font-size:11px;color:#4a5568;margin-top:4px">הגנה מפני שימוש לרעה (ספאם בשם המערכת).</div>

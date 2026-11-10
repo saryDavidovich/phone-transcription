@@ -144,7 +144,7 @@
       <h3>✅ בוצעו לאחרונה</h3>
       {% for t in done %}
         <div class="tk-item">
-          <div class="tk-when">{{ to_local(t.done_at).strftime('%d/%m %H:%M') }}</div>
+          <div class="tk-when">{{ to_local(t.done_at).strftime('%d/%m %H:%M') if t.done_at else '' }}</div>
           <div class="tk-body"><span class="cat-dot" style="background:{{ cat_color.get(t.category or 'general', '#64748b') }}"></span>{{ t.title }}{% if t.done_note %}<div class="d">✔ {{ t.done_note }}</div>{% endif %}</div>
         </div>
       {% else %}<div class="tk-empty">עוד לא בוצעו משימות.</div>{% endfor %}
@@ -167,7 +167,7 @@
       <div class="rep-stat"><b>{{ report.added }}</b><span>נוספו</span></div>
     </div>
     {% for t in report.done %}<div class="tk-item">
-      <div class="tk-when">{{ to_local(t.done_at).strftime('%d/%m %H:%M') }}</div>
+      <div class="tk-when">{{ to_local(t.done_at).strftime('%d/%m %H:%M') if t.done_at else '' }}</div>
       <div class="tk-body">{{ t.title }}{% if t.id in report.late_ids %} <span class="tk-late">(באיחור)</span>{% endif %}{% if t.done_note %}<div class="d">✔ {{ t.done_note }}</div>{% endif %}</div>
     </div>{% endfor %}
     {% for t in report.missed %}<div class="tk-item">

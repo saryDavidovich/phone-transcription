@@ -61,11 +61,13 @@ def inject_new_messages_count():
         count = int(db.session.execute(select(mm + cm + gi + nm)).scalar() or 0)
     except Exception:
         count = 0
-    try:
-        maintenance_on = get_setting('maintenance_mode', '0') == '1'
+    try:   # שאילתה אחת לשתי ההגדרות שבכל עמוד
+        vals = dict(db.session.query(Settings.key, Settings.value)
+                    .filter(Settings.key.in_(['maintenance_mode', 'dial_url_template'])).all())
     except Exception:
-        maintenance_on = False
-    return {'new_messages_count': count, 'maintenance_on': maintenance_on}
+        vals = {}
+    return {'new_messages_count': count, 'maintenance_on': vals.get('maintenance_mode') == '1',
+            'dial_tpl': (vals.get('dial_url_template') or '').strip() or 'tel:{phone}'}
 
 @login_manager.user_loader
 def load_user(user_id):
@@ -1930,6 +1932,9 @@ def settings():
         set_setting('price_per_2min_task', request.form.get('price_per_2min_task') or '0.30')
         set_setting('task_fax_price', request.form.get('task_fax_price') or '1.00')
         set_setting('email_out_daily_limit', request.form.get('email_out_daily_limit') or '30')
+        if 'dial_url_template' in request.form:
+            _tpl = (request.form.get('dial_url_template') or '').strip()
+            set_setting('dial_url_template', _tpl if '{phone}' in _tpl else 'tel:{phone}')
         if request.form.get('_features_field') == '1':
             set_setting('email_out_enabled', '1' if request.form.get('email_out_enabled') == '1' else '0')
             set_setting('tasks_enabled', '1' if request.form.get('tasks_enabled') == '1' else '0')
@@ -1970,6 +1975,7 @@ def settings():
         'price_per_2min_task': get_setting('price_per_2min_task', '0.30'),
         'task_fax_price': get_setting('task_fax_price', '1.00'),
         'email_out_daily_limit': get_setting('email_out_daily_limit', '30'),
+        'dial_url_template': get_setting('dial_url_template', '') or 'tel:{phone}',
         'email_out_enabled': get_setting('email_out_enabled', '0'),
         'tasks_enabled': get_setting('tasks_enabled', '0'),
         'fax_inbound_number': get_setting('fax_inbound_number', ''),

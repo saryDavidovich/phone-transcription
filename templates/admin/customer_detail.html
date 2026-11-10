@@ -124,7 +124,7 @@
     <div style="font-size:12px;min-width:110px;{% if t.status == 'open' and t.kind == 'scheduled' and t.due_at < at_now %}color:#ef4444;font-weight:700{% else %}color:var(--text2){% endif %}">
       {% if t.kind == 'scheduled' %}{{ at_local(t.due_at).strftime('%d/%m %H:%M') }}{% else %}🔁 {{ at_interval(t.interval_minutes) }}{% endif %}</div>
     <div style="flex:1;font-size:13px">{{ t.title }}{% if t.details %}<div style="font-size:12px;color:var(--text2);white-space:pre-wrap">{{ t.details }}</div>{% endif %}
-      {% if t.status == 'done' %}<div style="font-size:12px;color:#10b981">✔ {{ at_local(t.done_at).strftime('%d/%m %H:%M') }}{% if t.done_note %} - {{ t.done_note }}{% endif %}</div>{% endif %}</div>
+      {% if t.status == 'done' %}<div style="font-size:12px;color:#10b981">✔ {{ at_local(t.done_at).strftime('%d/%m %H:%M') if t.done_at else '' }}{% if t.done_note %} - {{ t.done_note }}{% endif %}</div>{% endif %}</div>
     {% if t.status == 'open' %}<form method="POST" action="{{ url_for('admin.admin_task_cancel', tid=t.id) }}" onsubmit="return confirm('למחוק?')"><button class="btn btn-ghost" type="submit" style="font-size:12px;padding:4px 10px">🗑️</button></form>{% endif %}
   </div>{% endfor %}</div>{% endif %}
 </div>

@@ -61,6 +61,145 @@
 <meta name="turbo-prefetch-cache-time" content="15000">
 <meta name="turbo-root" content="/admin">
 <script src="/static/vendor/turbo/turbo-8.0.13.js"></script>
+<meta name="dial-tpl" content="{{ dial_tpl|default('tel:{phone}') }}">
+<style>
+  .pc-tools{display:inline-flex;gap:2px;vertical-align:middle;margin-inline-start:4px;white-space:nowrap}
+  .pc-btn{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:6px;border:1px solid transparent;
+    background:transparent;color:var(--text2,#8892b0);cursor:pointer;padding:0;text-decoration:none;opacity:.75;transition:all .15s}
+  .pc-btn:hover{opacity:1;background:var(--surface2,#232946);border-color:var(--border,#2d3561);color:var(--text,#e2e8f0)}
+  .pc-btn.dial:hover{color:#22c55e}
+  .pc-btn.ok{color:#22c55e;opacity:1}
+  .pc-btn svg{width:13px;height:13px}
+  @media print{.pc-tools{display:none}}
+</style>
+<script>
+/* בכל עמוד בממשק: ליד כל מספר טלפון - כפתור חיוג (קישור tel: שנפתח בתוכנת החיוג במחשב, ניתן לשינוי בהגדרות)
+   וכפתור העתקה; ליד כל מייל - כפתור העתקה. סורק את העמוד אחרי כל טעינה ואחרי שתוכן נטען בהמשך. */
+(function () {
+  if (window.__pcTools) return;
+  window.__pcTools = true;
+  var PHONE = /(^|[^\d\w@.\/:+-])(0(?:5\d|7\d|[23489])-?\d{3}-?\d{4})(?![\d\w@])/g;
+  var EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
+  var SKIP = {SCRIPT: 1, STYLE: 1, TEXTAREA: 1, INPUT: 1, SELECT: 1, OPTION: 1, BUTTON: 1, TITLE: 1, NOSCRIPT: 1, CODE: 1, PRE: 1};
+  var ICON_COPY = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+  var ICON_OK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>';
+  var ICON_DIAL = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.8 19.8 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.18 2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.96.36 1.9.7 2.81a2 2 0 0 1-.45 2.11L8.1 9.9a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.9.34 1.85.57 2.81.7A2 2 0 0 1 22 16.92z"/></svg>';
+
+  function dialUrl(digits) {
+    var m = document.querySelector('meta[name=dial-tpl]');
+    var tpl = (m && m.content) || 'tel:{phone}';
+    return tpl.split('{phone}').join(digits);
+  }
+  function tools(value, isPhone) {
+    var w = document.createElement('span');
+    w.className = 'pc-tools';
+    var digits = value.replace(/\D/g, '');
+    if (isPhone) {
+      var a = document.createElement('a');
+      a.className = 'pc-btn dial'; a.href = dialUrl(digits); a.title = 'חיוג ל-' + digits;
+      a.setAttribute('data-turbo', 'false'); a.innerHTML = ICON_DIAL;
+      a.addEventListener('click', function (e) { e.stopPropagation(); a.href = dialUrl(digits); });
+      w.appendChild(a);
+    }
+    var b = document.createElement('button');
+    b.type = 'button'; b.className = 'pc-btn copy'; b.title = 'העתקה: ' + (isPhone ? digits : value); b.innerHTML = ICON_COPY;
+    b.addEventListener('click', function (e) {
+      e.preventDefault(); e.stopPropagation();
+      copy(isPhone ? digits : value, function () {
+        b.classList.add('ok'); b.innerHTML = ICON_OK;
+        setTimeout(function () { b.classList.remove('ok'); b.innerHTML = ICON_COPY; }, 1200);
+      });
+    });
+    w.appendChild(b);
+    return w;
+  }
+  function copy(text, done) {
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(text).then(done, function () { fallback(text); done(); });
+    } else { fallback(text); done(); }
+  }
+  function fallback(text) {
+    var t = document.createElement('textarea');
+    t.value = text; t.style.position = 'fixed'; t.style.opacity = '0';
+    document.body.appendChild(t); t.select();
+    try { document.execCommand('copy'); } catch (e) {}
+    t.remove();
+  }
+  function skipEl(el) {
+    for (var e = el; e && e !== document.body; e = e.parentElement) {
+      if (SKIP[e.tagName] || e.isContentEditable || (e.classList && (e.classList.contains('pc-tools') || e.classList.contains('pc-val') ||
+          e.classList.contains('no-pc') || e.classList.contains('sidebar')))) return true;
+    }
+    return false;
+  }
+  function scan(root) {
+    if (!root || !root.querySelectorAll) return;
+    var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+      acceptNode: function (n) {
+        var v = n.nodeValue;
+        if (!v || v.length < 6 || (v.indexOf('@') < 0 && !/0\d/.test(v))) return NodeFilter.FILTER_REJECT;
+        return skipEl(n.parentElement) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT;
+      }
+    });
+    var nodes = [], n;
+    while ((n = walker.nextNode()) && nodes.length < 600) nodes.push(n);
+    nodes.forEach(handle);
+  }
+  function handle(node) {
+    var text = node.nodeValue, found = [], m;
+    PHONE.lastIndex = 0;
+    while ((m = PHONE.exec(text))) found.push({ i: m.index + m[1].length, v: m[2], phone: true });
+    EMAIL.lastIndex = 0;
+    while ((m = EMAIL.exec(text))) found.push({ i: m.index, v: m[0], phone: false });
+    if (!found.length) return;
+    found.sort(function (a, b) { return a.i - b.i; });
+    var link = node.parentElement && node.parentElement.closest('a');
+    if (link) {                                  // מספר בתוך קישור - הכפתורים אחרי הקישור (לא בתוכו)
+      if (link.dataset.pc) return;
+      link.dataset.pc = '1';
+      var after = link;
+      found.forEach(function (f) { var t = tools(f.v, f.phone); after.parentNode.insertBefore(t, after.nextSibling); after = t; });
+      return;
+    }
+    var frag = document.createDocumentFragment(), pos = 0;
+    found.forEach(function (f) {
+      if (f.i < pos) return;                     // חפיפה (מספר בתוך מייל)
+      frag.appendChild(document.createTextNode(text.slice(pos, f.i)));
+      var s = document.createElement('span'); s.className = 'pc-val'; s.textContent = f.v;
+      frag.appendChild(s); frag.appendChild(tools(f.v, f.phone));
+      pos = f.i + f.v.length;
+    });
+    frag.appendChild(document.createTextNode(text.slice(pos)));
+    node.parentNode.replaceChild(frag, node);
+  }
+  // תוכן שנטען אחר כך (רשימות שמתרעננות, חלונות) - סורקים שוב, באיחור קטן
+  var pending = null, timer = null;
+  function later(el) {
+    pending = pending || [];
+    pending.push(el);
+    if (timer) return;
+    timer = setTimeout(function () {
+      var list = pending; pending = null; timer = null;
+      list.forEach(function (e) { if (e.isConnected) scan(e); });
+    }, 120);
+  }
+  var obs = new MutationObserver(function (muts) {
+    muts.forEach(function (mu) {
+      mu.addedNodes.forEach(function (a) {
+        if (a.nodeType === 1 && !(a.classList && a.classList.contains('pc-tools')) && !a.classList.contains('pc-val')) later(a);
+        else if (a.nodeType === 3 && a.parentElement && !a.parentElement.classList.contains('pc-val')) later(a.parentElement);
+      });
+    });
+  });
+  function start() {
+    scan(document.body);
+    obs.disconnect();
+    obs.observe(document.body, { childList: true, subtree: true });
+  }
+  document.addEventListener('turbo:load', start);
+  if (document.readyState !== 'loading') start(); else document.addEventListener('DOMContentLoaded', start);
+})();
+</script>
 <script>
 /* משימות למנהל (/admin/tasks): כל 30 שניות בודקים אם הגיע זמן של משימה. משימה עם מועד - חלון
    על כל המסך שלא נסגר עד "בוצע" + הסבר. תזכורת - אפשר "הזכר שוב" או "בוצע". רץ פעם אחת, נשאר
