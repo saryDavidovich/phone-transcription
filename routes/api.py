@@ -814,6 +814,9 @@ def admin_phone_tasks(action):
         return jsonify(AT.create_from_phone(d.get('rec_url', '')))
     if action == 'cancel':
         return jsonify({'ok': AT.cancel(int(d.get('id') or 0))})
+    if action == 'week':
+        from datetime import datetime as _dt
+        return jsonify({'ok': True, 'text': AT.weekly_text(AT.week_start(_dt.now(AT._tz()).date()))})
     if action == 'agenda':
         return jsonify({'ok': True, 'text': AT.agenda_text(1 if str(d.get('day')) == '1' else 0)})
     return jsonify({'ok': False, 'reason': 'action'}), 404

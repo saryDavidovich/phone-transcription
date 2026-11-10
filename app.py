@@ -547,6 +547,9 @@ def _migrate_db():
         # מיילים לאחרים: שרשור (מענה לתגובה)
         "ALTER TABLE recordings ADD COLUMN IF NOT EXISTS alefbot_credits FLOAT",
         "ALTER TABLE email_replies ADD COLUMN IF NOT EXISTS message_id VARCHAR(300)",
+        # משימות למנהל: קטגוריה (צבע) + צינתוק לטלפון המנהל
+        "ALTER TABLE admin_tasks ADD COLUMN IF NOT EXISTS category VARCHAR(20) DEFAULT 'general'",
+        "ALTER TABLE admin_tasks ADD COLUMN IF NOT EXISTS notified_at TIMESTAMP",
         "ALTER TABLE outgoing_emails ADD COLUMN IF NOT EXISTS thread_ref VARCHAR(12)",
         "ALTER TABLE outgoing_emails ADD COLUMN IF NOT EXISTS in_reply_to_id INTEGER",
         "CREATE INDEX IF NOT EXISTS ix_outgoing_emails_thread_ref ON outgoing_emails (thread_ref)",

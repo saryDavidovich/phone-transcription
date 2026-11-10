@@ -868,4 +868,6 @@ class AdminTask(db.Model):
     source = db.Column(db.String(10), default='web')            # web / phone
     rec_url = db.Column(db.String(500))                         # הקלטה מהטלפון
     customer_id = db.Column(db.Integer, nullable=True)          # קישור ללקוח (רשות)
+    category = db.Column(db.String(20), default='general')      # צבע בלוח (admin_tasks.CATEGORIES)
+    notified_at = db.Column(db.DateTime)                        # מתי נשלח צינתוק לטלפון המנהל
     created_at = db.Column(db.DateTime, default=datetime.utcnow)

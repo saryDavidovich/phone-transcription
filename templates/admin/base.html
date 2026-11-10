@@ -93,7 +93,7 @@
         (sched ? '⏰ הגיע זמן משימה · ' : '🔔 תזכורת · ') + esc(t.when) + (state.due.length > 1 ? ' · עוד ' + (state.due.length - 1) + ' ממתינות' : '') + '</div>' +
       '<div style="font-size:20px;font-weight:700;margin-bottom:8px">' + esc(t.title) + '</div>' +
       (t.details ? '<div style="font-size:14px;white-space:pre-wrap;color:var(--text2,#a0aec0);margin-bottom:12px;max-height:200px;overflow:auto">' + esc(t.details) + '</div>' : '') +
-      (t.customer_id ? '<div style="margin-bottom:10px"><a href="/admin/customers/' + t.customer_id + '" style="color:#93a8ff" onclick="document.getElementById(\'tkOverlay\').style.display=\'none\';setTimeout(function(){var o=document.getElementById(\'tkOverlay\');if(o)o.style.display=\'flex\'},15000)">לכרטיס הלקוח (החלון יחזור תוך 15 שניות)</a></div>' : '') +
+      (t.customer_id ? '<div style="margin-bottom:10px"><a href="/admin/customers/' + t.customer_id + '" style="color:#93a8ff" onclick="document.getElementById(\'tkOverlay\').style.display=\'none\';setTimeout(function(){var o=document.getElementById(\'tkOverlay\');if(o)o.style.display=\'flex\'},15000)">👤 לכרטיס של ' + esc(t.customer_name || 'הלקוח') + ' (החלון יחזור תוך 15 שניות)</a></div>' : '') +
       '<textarea id="tkNote" rows="3" placeholder="' + (sched ? 'מה בוצע? (חובה)' : 'הערה (רשות)') +
         '" style="width:100%;box-sizing:border-box;border-radius:10px;border:1px solid var(--border,#2d3561);background:var(--surface2,#232946);color:inherit;padding:10px;font:inherit;font-size:14px"></textarea>' +
       '<div id="tkErr" style="color:#f87171;font-size:13px;min-height:18px;margin-top:4px"></div>' +

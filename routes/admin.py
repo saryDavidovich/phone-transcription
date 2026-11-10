@@ -1013,7 +1013,21 @@ def _mail_and_tasks_for(customer):
             'outgoing_emails': outs, 'email_replies': replies, 'customer_tasks': tasks, 'mail_threads': mail_threads,
             'task_when': lambda t: TK.when_text(t.due_at, t.recurrence) if t.due_at else '—',
             'task_channels': TK.channels_he,
-            'new_replies_count': EmailReply.query.filter_by(customer_id=customer.id, heard_at=None).count()}
+            'new_replies_count': EmailReply.query.filter_by(customer_id=customer.id, heard_at=None).count(),
+            **_admin_tasks_for(customer)}
+
+
+def _admin_tasks_for(customer):
+    """לכרטיס הלקוח: המשימות שלי (המנהל) שקשורות ללקוח - "לחזור אליו"."""
+    from models import AdminTask
+    from services import admin_tasks as AT
+    rows = (AdminTask.query.filter(AdminTask.customer_id == customer.id, AdminTask.status != 'cancelled')
+            .order_by(AdminTask.status.desc(), AdminTask.created_at.desc()).limit(20).all())
+    now_local = datetime.now(AT._tz())
+    return {'my_tasks': rows, 'my_tasks_open': sum(1 for t in rows if t.status == 'open'),
+            'at_local': AT.to_local, 'at_interval': AT.interval_label, 'at_intervals': AT.INTERVALS,
+            'at_now': datetime.utcnow(),
+            'at_default_dt': (now_local + timedelta(days=1)).strftime('%Y-%m-%dT10:00')}
 
 
 @admin_bp.route('/customers/<int:id>/contacts/add', methods=['POST'])
@@ -3701,7 +3715,21 @@ def admin_tasks():
     done = (AdminTask.query.filter(AdminTask.status == 'done')
             .order_by(AdminTask.done_at.desc()).limit(30).all())
     from services.tasks import MONTHS_HE
+    try:
+        wk = max(0, min(52, int(request.args.get('w') or 0)))      # 0 = השבוע, 1 = שבוע שעבר...
+    except ValueError:
+        wk = 0
+    report = AT.weekly_report(AT.week_start(now_local.date()) - timedelta(days=7 * wk))
+    cust_ids = {t.customer_id for t in today + upcoming + reminders + done if t.customer_id}
+    for wkrow in AT.month_grid(y, m):
+        for dd in wkrow:
+            cust_ids |= {t.customer_id for t in dd['tasks'] if t.customer_id}
+    cust_names = {c.id: (c.name or c.phone) for c in Customer.query.filter(Customer.id.in_(cust_ids)).all()} if cust_ids else {}
+    settings = {k: AT.get_setting(k) for k in AT.SETTING_DEFAULTS}
     return render_template('admin/tasks.html', weeks=AT.month_grid(y, m), y=y, m=m, month_name=MONTHS_HE[m],
+                           categories=AT.CATEGORIES, cat_color=AT.CAT_COLOR, cat_name=AT.CAT_NAME,
+                           report=report, wk=wk, cust_names=cust_names, settings=settings,
+                           report_email=AT.report_email(),
                            prev_y=prev_y, prev_m=prev_m, next_y=next_y, next_m=next_m,
                            today_date=now_local.date(), today=today, upcoming=upcoming, reminders=reminders,
                            done=done, intervals=AT.INTERVALS, to_local=AT.to_local,
@@ -3726,10 +3754,63 @@ def admin_task_create():
         from services.customer_phones import find_customer_by_phone
         c = find_customer_by_phone(ph)
         cust_id = c.id if c else None
+    if not cust_id and str(request.form.get('customer_id') or '').isdigit():      # מכרטיס לקוח
+        c = Customer.query.get(int(request.form.get('customer_id')))
+        cust_id = c.id if c else None
     t, err = AT.create(request.form.get('title'), request.form.get('details'), kind=kind, due_local=due_local,
-                       interval_minutes=request.form.get('interval'), customer_id=cust_id)
+                       interval_minutes=request.form.get('interval'), customer_id=cust_id,
+                       category=request.form.get('category'))
     flash('המשימה נשמרה' if t else f'לא נשמר: {err}')
+    if request.form.get('back') == 'customer' and cust_id:
+        return redirect(url_for('admin.customer_detail', id=cust_id) + '#sec-mytasks')
     return redirect(url_for('admin.admin_tasks'))
+
+
+@admin_bp.route('/tasks/<int:tid>/move', methods=['POST'])
+@login_required
+def admin_task_move(tid):
+    """גרירת משימה ליום אחר בלוח."""
+    from services import admin_tasks as AT
+    err = AT.move(tid, (request.get_json(silent=True) or {}).get('date'))
+    return jsonify({'ok': not err, 'error': err})
+
+
+@admin_bp.route('/tasks/settings', methods=['POST'])
+@login_required
+def admin_tasks_settings():
+    from services import admin_tasks as AT
+    for k in ('admin_tasks_tzintuk', 'admin_tasks_tzintuk_reminders', 'admin_tasks_weekly_email'):
+        AT.set_setting(k, '1' if request.form.get(k) else '0')
+    email = (request.form.get('admin_tasks_report_email') or '').strip()
+    if email and '@' not in email:
+        flash('כתובת המייל לא תקינה')
+    else:
+        AT.set_setting('admin_tasks_report_email', email)
+        flash('ההגדרות נשמרו')
+    return redirect(url_for('admin.admin_tasks'))
+
+
+@admin_bp.route('/tasks/report/send', methods=['POST'])
+@login_required
+def admin_tasks_report_send():
+    """שליחת הדוח השבועי במייל עכשיו (לבדיקה)."""
+    from services import admin_tasks as AT
+    from services.customer_mail import _send
+    to = AT.report_email()
+    if not to:
+        flash('לא הוגדרה כתובת מייל לדוח')
+        return redirect(url_for('admin.admin_tasks'))
+    try:
+        wk = max(0, int(request.form.get('w') or 0))
+    except ValueError:
+        wk = 0
+    start = AT.week_start(datetime.now(AT._tz()).date()) - timedelta(days=7 * wk)
+    try:
+        _send(to, f'דוח משימות שבועי {start.strftime("%d/%m")}', AT.weekly_html(start), from_name='מערכת התמלול')
+        flash(f'הדוח נשלח ל-{to}')
+    except Exception as e:
+        flash(f'השליחה נכשלה: {str(e)[:150]}')
+    return redirect(url_for('admin.admin_tasks', w=wk))
 
 
 @admin_bp.route('/tasks/due')
@@ -3774,4 +3855,4 @@ def admin_task_snooze(tid):
 def admin_task_cancel(tid):
     from services import admin_tasks as AT
     flash('המשימה נמחקה' if AT.cancel(tid) else 'המשימה לא נמצאה')
-    return redirect(url_for('admin.admin_tasks'))
+    return redirect(request.referrer or url_for('admin.admin_tasks'))

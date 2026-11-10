@@ -416,17 +416,23 @@ def run_due(now=None):
 def _loop(app):
     time.sleep(45)
     while True:
-        try:
-            with app.app_context():
-                run_due()
-        except Exception as e:
-            log.warning(f'tasks loop: {e}')
+        for job in ('tasks', 'admin'):
             try:
                 with app.app_context():
-                    from app import db
-                    db.session.rollback()
-            except Exception:
-                pass
+                    if job == 'tasks':
+                        run_due()
+                    else:                                   # משימות המנהל: צינתוק + דוח שבועי
+                        from services import admin_tasks as AT
+                        AT.run_notify()
+                        AT.run_weekly_email()
+            except Exception as e:
+                log.warning(f'{job} loop: {e}')
+                try:
+                    with app.app_context():
+                        from app import db
+                        db.session.rollback()
+                except Exception:
+                    pass
         time.sleep(60)
 
 

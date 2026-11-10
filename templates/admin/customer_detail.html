@@ -104,7 +104,31 @@
   </div>
 </div>
 
+<div style="margin-bottom:10px"><button type="button" class="btn btn-ghost" style="font-size:13px" onclick="var d=document.getElementById('sec-mytasks');d.open=true;d.scrollIntoView({behavior:'smooth',block:'start'});setTimeout(function(){document.querySelector('#myTaskForm textarea').focus()},300)">🔔 תזכיר לי לחזור אליו</button></div>
 <div class="cd-tools"><button type="button" class="btn btn-ghost" style="font-size:12px" onclick="cdAll(true)">⬇ פתח הכל</button><button type="button" class="btn btn-ghost" style="font-size:12px" onclick="cdAll(false)">⬆ סגור הכל</button></div>
+<details class="cd-sec" data-sec="mytasks" id="sec-mytasks"{% if my_tasks_open %} data-auto-open{% endif %}><summary>🔔 לחזור ללקוח - המשימות שלי{% if my_tasks_open %} <span class="badge badge-amber" style="font-size:11px">{{ my_tasks_open }} פתוחות</span>{% endif %}</summary>
+<div class="table-card" style="margin-top:12px;padding:14px 16px">
+  <form method="POST" action="{{ url_for('admin.admin_task_create') }}" id="myTaskForm" style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:10px;align-items:end">
+    <input type="hidden" name="customer_id" value="{{ customer.id }}"><input type="hidden" name="back" value="customer"><input type="hidden" name="category" value="customers">
+    <div style="grid-column:1/-1"><label class="form-label">מה לעשות</label><input class="form-input" name="title" required maxlength="200" value="לחזור ל{{ customer.name or customer.phone }}"></div>
+    <div><label class="form-label">מתי</label>
+      <select class="form-input" name="kind" onchange="var r=this.value==='reminder';document.getElementById('myDue').style.display=r?'none':'';document.getElementById('myDue').required=!r;document.getElementById('myInt').style.display=r?'':'none'">
+        <option value="scheduled">בתאריך ושעה</option><option value="reminder">תזכורת חוזרת</option></select></div>
+    <div><label class="form-label">&nbsp;</label><input class="form-input" type="datetime-local" name="due" id="myDue" required value="{{ at_default_dt }}">
+      <select class="form-input" name="interval" id="myInt" style="display:none">{% for v, l in at_intervals %}<option value="{{ v }}" {% if v == 1440 %}selected{% endif %}>{{ l }}</option>{% endfor %}</select></div>
+    <div><button class="btn btn-primary" type="submit">➕ הוספה ללו"ז</button></div>
+    <div style="grid-column:1/-1"><label class="form-label">פרטים - מה לחזור אליו (רשות)</label><textarea class="form-input" name="details" rows="2" placeholder="למשל: ביקש הצעת מחיר לתמלול של 3 שעות"></textarea></div>
+  </form>
+  {% if my_tasks %}<div style="margin-top:14px;border-top:1px solid var(--border)">
+  {% for t in my_tasks %}<div style="display:flex;gap:12px;align-items:flex-start;padding:9px 0;border-bottom:1px solid var(--border);{% if t.status == 'done' %}opacity:.6{% endif %}">
+    <div style="font-size:12px;min-width:110px;{% if t.status == 'open' and t.kind == 'scheduled' and t.due_at < at_now %}color:#ef4444;font-weight:700{% else %}color:var(--text2){% endif %}">
+      {% if t.kind == 'scheduled' %}{{ at_local(t.due_at).strftime('%d/%m %H:%M') }}{% else %}🔁 {{ at_interval(t.interval_minutes) }}{% endif %}</div>
+    <div style="flex:1;font-size:13px">{{ t.title }}{% if t.details %}<div style="font-size:12px;color:var(--text2);white-space:pre-wrap">{{ t.details }}</div>{% endif %}
+      {% if t.status == 'done' %}<div style="font-size:12px;color:#10b981">✔ {{ at_local(t.done_at).strftime('%d/%m %H:%M') }}{% if t.done_note %} - {{ t.done_note }}{% endif %}</div>{% endif %}</div>
+    {% if t.status == 'open' %}<form method="POST" action="{{ url_for('admin.admin_task_cancel', tid=t.id) }}" onsubmit="return confirm('למחוק?')"><button class="btn btn-ghost" type="submit" style="font-size:12px;padding:4px 10px">🗑️</button></form>{% endif %}
+  </div>{% endfor %}</div>{% endif %}
+</div>
+</details>
 <details class="cd-sec" data-sec="institution"><summary>🏫 שיוך למוסד</summary>
 <div class="card" style="margin-top:20px">
   <div style="font-size:14px;font-weight:600;margin-bottom:12px">🏫 שיוך למוסד</div>
@@ -756,7 +780,10 @@ function confirmOcrDelete() {
   try {
     localStorage.removeItem('cdOpenSections');   // ניקוי הזיכרון הישן
     if (sessionStorage.getItem('admPath') === location.pathname) open = JSON.parse(sessionStorage.getItem(key) || '[]');
-    else sessionStorage.removeItem(key);
+    else {                          // כניסה מחודשת: הכל סגור, חוץ ממה שמסומן data-auto-open (למשל משימות פתוחות ללקוח)
+      sessionStorage.removeItem(key);
+      document.querySelectorAll('details.cd-sec[data-auto-open]').forEach(function (d) { open.push(d.dataset.sec); });
+    }
   } catch (e) { open = []; }
   secs.forEach(function (d) { d.open = open.indexOf(d.dataset.sec) !== -1; });
   function save() {

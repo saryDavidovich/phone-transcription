@@ -9,7 +9,7 @@
   .tk-card h3{margin:0 0 4px;font-size:16px}
   .tk-card .sub{font-size:12px;color:var(--text2);margin-bottom:12px;line-height:1.6}
   .tk-card label{display:block;font-size:12px;color:var(--text2);margin:8px 0 4px}
-  .tk-row{display:flex;gap:10px;flex-wrap:wrap}.tk-row>*{flex:1;min-width:150px}
+  .tk-row{display:flex;gap:10px;flex-wrap:wrap}.tk-row>*{flex:1;min-width:120px}
   .cal{background:var(--surface);border:1px solid var(--border);border-radius:14px;overflow:hidden;margin-bottom:18px}
   .cal-head{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--border)}
   .cal-head b{font-size:17px}
@@ -22,9 +22,16 @@
   .cal-cell.today{box-shadow:inset 0 0 0 2px var(--accent,#4f6ef7)}
   .cal-num{font-size:12px;font-weight:700;margin-bottom:4px}
   .chip{display:block;font-size:11px;border-radius:6px;padding:2px 6px;margin-bottom:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer}
-  .chip.open{background:rgba(79,110,247,.18);color:#93a8ff}
-  .chip.late{background:rgba(239,68,68,.2);color:#fca5a5}
-  .chip.done{background:rgba(16,185,129,.15);color:#6ee7b7;text-decoration:line-through}
+  .chip{border-right:4px solid var(--cc,#64748b);background:color-mix(in srgb,var(--cc,#64748b) 18%,transparent);color:var(--text)}
+  .chip.open[draggable=true]{cursor:grab}
+  .cal-cell.drop{background:rgba(79,110,247,.15);box-shadow:inset 0 0 0 2px #4f6ef7}
+  .cal-heb{font-size:11px;color:var(--text2);font-weight:400;margin-inline-start:6px}
+  .cat-dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-inline-end:4px;vertical-align:middle}
+  .rep-stats{display:flex;gap:10px;flex-wrap:wrap;padding:12px 16px}
+  .rep-stat{flex:1;min-width:110px;background:var(--surface2);border-radius:10px;padding:10px;text-align:center}
+  .rep-stat b{display:block;font-size:22px}.rep-stat span{font-size:12px;color:var(--text2)}
+  .chip.late{background:rgba(239,68,68,.22);color:#fca5a5;font-weight:700}
+  .chip.done{opacity:.55;text-decoration:line-through}
   .tk-list{background:var(--surface);border:1px solid var(--border);border-radius:14px;margin-bottom:16px}
   .tk-list h3{margin:0;padding:12px 16px;font-size:15px;border-bottom:1px solid var(--border)}
   .tk-item{display:flex;gap:12px;align-items:flex-start;padding:10px 16px;border-bottom:1px solid var(--border)}
@@ -32,6 +39,7 @@
   .tk-when{font-size:12px;color:var(--text2);min-width:92px}
   .tk-body{flex:1;font-size:14px}.tk-body .d{font-size:12px;color:var(--text2);white-space:pre-wrap;margin-top:2px}
   .tk-late{color:#ef4444;font-weight:700}
+  .tk-body a,.tk-list h3 a{color:#93a8ff;text-decoration:none}
   .tk-empty{padding:12px 16px;color:var(--text2);font-size:13px}
   .tk-actions{display:flex;gap:6px;align-items:center}
   .tk-actions button{font-size:12px;padding:4px 10px}
@@ -48,6 +56,7 @@
     <div class="tk-row">
       <div><label>תאריך ושעה</label><input class="form-input" type="datetime-local" name="due" id="schedDue" required value="{{ default_dt }}"></div>
       <div><label>לקוח (טלפון, רשות)</label><input class="form-input" name="customer_phone" placeholder="05..."></div>
+      <div><label>קטגוריה</label><select class="form-input" name="category">{% for k, n, c in categories %}<option value="{{ k }}">{{ n }}</option>{% endfor %}</select></div>
     </div>
     <label>פירוט</label><textarea class="form-input" name="details" rows="3" required placeholder="מה בדיוק צריך לעשות"></textarea>
     <button class="btn btn-primary" type="submit" style="margin-top:10px">➕ הוספה ללו"ז</button>
@@ -60,6 +69,7 @@
     <div class="tk-row">
       <div><label>כל כמה זמן</label><select class="form-input" name="interval">{% for v, l in intervals %}<option value="{{ v }}" {% if v == 180 %}selected{% endif %}>{{ l }}</option>{% endfor %}</select></div>
       <div><label>לקוח (טלפון, רשות)</label><input class="form-input" name="customer_phone" placeholder="05..."></div>
+      <div><label>קטגוריה</label><select class="form-input" name="category">{% for k, n, c in categories %}<option value="{{ k }}">{{ n }}</option>{% endfor %}</select></div>
     </div>
     <label>פירוט (רשות)</label><textarea class="form-input" name="details" rows="3"></textarea>
     <button class="btn btn-primary" type="submit" style="margin-top:10px">➕ הוספת תזכורת</button>
@@ -69,19 +79,21 @@
 <div class="cal">
   <div class="cal-head">
     <a href="{{ url_for('admin.admin_tasks', y=next_y, m=next_m) }}">← הבא</a>
-    <b>{{ month_name }} {{ y }}</b>
+    <div style="text-align:center"><b>{{ month_name }} {{ y }}</b> <span id="calHebMonth" class="cal-heb"></span>
+      <div style="font-size:11px;color:var(--text2);margin-top:3px">{% for k, n, c in categories %}<span style="margin:0 5px"><span class="cat-dot" style="background:{{ c }}"></span>{{ n }}</span>{% endfor %} · אפשר לגרור משימה ליום אחר</div></div>
     <a href="{{ url_for('admin.admin_tasks', y=prev_y, m=prev_m) }}">הקודם →</a>
   </div>
   <div class="cal-days">
     {% for dn in ['ראשון','שני','שלישי','רביעי','חמישי','שישי','שבת'] %}<div class="cal-dn">{{ dn }}</div>{% endfor %}
     {% for week in weeks %}{% for day in week %}
-      <div class="cal-cell {% if not day.in_month %}out{% endif %} {% if day.date == today_date %}today{% endif %}"
+      <div class="cal-cell {% if not day.in_month %}out{% endif %} {% if day.date == today_date %}today{% endif %}" data-date="{{ day.date.isoformat() }}"
            onclick="tkPickDay('{{ day.date.isoformat() }}')" title="לחיצה - משימה חדשה ביום הזה">
-        <div class="cal-num">{{ day.date.day }}</div>
+        <div class="cal-num">{{ day.date.day }}<span class="cal-heb" data-heb="{{ day.date.isoformat() }}"></span></div>
         {% for t in day.tasks %}
           {% set loc = to_local(t.due_at) %}
-          <span class="chip {{ 'done' if t.status == 'done' else ('late' if t.due_at < now_utc else 'open') }}"
-                title="{{ loc.strftime('%H:%M') }} {{ t.title }}{% if t.details %} - {{ t.details }}{% endif %}{% if t.done_note %} | בוצע: {{ t.done_note }}{% endif %}"
+          <span class="chip {{ 'done' if t.status == 'done' else ('late' if t.due_at < now_utc else 'open') }}" style="--cc:{{ cat_color.get(t.category or 'general', '#64748b') }}"
+                {% if t.status == 'open' %}draggable="true" data-id="{{ t.id }}"{% endif %}
+                title="{{ cat_name.get(t.category or 'general', '') }} · {{ loc.strftime('%H:%M') }} {{ t.title }}{% if t.customer_id %} ({{ cust_names.get(t.customer_id, '') }}){% endif %}{% if t.details %} - {{ t.details }}{% endif %}{% if t.done_note %} | בוצע: {{ t.done_note }}{% endif %}"
                 onclick="event.stopPropagation()">{{ loc.strftime('%H:%M') }} {{ t.title }}</span>
         {% endfor %}
       </div>
@@ -96,7 +108,7 @@
       {% for t in today %}{% set loc = to_local(t.due_at) %}
         <div class="tk-item">
           <div class="tk-when {% if t.due_at < now_utc %}tk-late{% endif %}">{{ loc.strftime('%d/%m %H:%M') }}</div>
-          <div class="tk-body">{{ t.title }}{% if t.source == 'phone' %} 📞{% endif %}{% if t.customer_id %} · <a href="{{ url_for('admin.customer_detail', id=t.customer_id) }}">לקוח</a>{% endif %}
+          <div class="tk-body"><span class="cat-dot" style="background:{{ cat_color.get(t.category or 'general', '#64748b') }}"></span>{{ t.title }}{% if t.source == 'phone' %} 📞{% endif %}{% if t.customer_id %} · <a href="{{ url_for('admin.customer_detail', id=t.customer_id) }}">{{ cust_names.get(t.customer_id, 'לקוח') }}</a>{% endif %}
             {% if t.details %}<div class="d">{{ t.details }}</div>{% endif %}</div>
           <div class="tk-actions"><form method="POST" action="{{ url_for('admin.admin_task_cancel', tid=t.id) }}" onsubmit="return confirm('למחוק את המשימה?')"><button class="btn btn-ghost" type="submit">🗑️</button></form></div>
         </div>
@@ -107,7 +119,7 @@
       {% for t in upcoming %}{% set loc = to_local(t.due_at) %}
         <div class="tk-item">
           <div class="tk-when">{{ loc.strftime('%d/%m %H:%M') }}</div>
-          <div class="tk-body">{{ t.title }}{% if t.source == 'phone' %} 📞{% endif %}{% if t.customer_id %} · <a href="{{ url_for('admin.customer_detail', id=t.customer_id) }}">לקוח</a>{% endif %}
+          <div class="tk-body"><span class="cat-dot" style="background:{{ cat_color.get(t.category or 'general', '#64748b') }}"></span>{{ t.title }}{% if t.source == 'phone' %} 📞{% endif %}{% if t.customer_id %} · <a href="{{ url_for('admin.customer_detail', id=t.customer_id) }}">{{ cust_names.get(t.customer_id, 'לקוח') }}</a>{% endif %}
             {% if t.details %}<div class="d">{{ t.details }}</div>{% endif %}</div>
           <div class="tk-actions"><form method="POST" action="{{ url_for('admin.admin_task_cancel', tid=t.id) }}" onsubmit="return confirm('למחוק את המשימה?')"><button class="btn btn-ghost" type="submit">🗑️</button></form></div>
         </div>
@@ -120,7 +132,7 @@
       {% for t in reminders %}{% set nx = to_local(t.next_remind_at) %}
         <div class="tk-item">
           <div class="tk-when">{{ interval_label(t.interval_minutes) }}<br><span style="font-size:11px">הבאה: {{ nx.strftime('%d/%m %H:%M') }}</span></div>
-          <div class="tk-body">{{ t.title }}{% if t.source == 'phone' %} 📞{% endif %}{% if t.details %}<div class="d">{{ t.details }}</div>{% endif %}</div>
+          <div class="tk-body"><span class="cat-dot" style="background:{{ cat_color.get(t.category or 'general', '#64748b') }}"></span>{{ t.title }}{% if t.source == 'phone' %} 📞{% endif %}{% if t.details %}<div class="d">{{ t.details }}</div>{% endif %}</div>
           <div class="tk-actions">
             <form method="POST" action="{{ url_for('admin.admin_task_done', tid=t.id) }}"><button class="btn btn-ghost" type="submit">✔</button></form>
             <form method="POST" action="{{ url_for('admin.admin_task_cancel', tid=t.id) }}" onsubmit="return confirm('למחוק את התזכורת?')"><button class="btn btn-ghost" type="submit">🗑️</button></form>
@@ -133,14 +145,100 @@
       {% for t in done %}
         <div class="tk-item">
           <div class="tk-when">{{ to_local(t.done_at).strftime('%d/%m %H:%M') }}</div>
-          <div class="tk-body">{{ t.title }}{% if t.done_note %}<div class="d">✔ {{ t.done_note }}</div>{% endif %}</div>
+          <div class="tk-body"><span class="cat-dot" style="background:{{ cat_color.get(t.category or 'general', '#64748b') }}"></span>{{ t.title }}{% if t.done_note %}<div class="d">✔ {{ t.done_note }}</div>{% endif %}</div>
         </div>
       {% else %}<div class="tk-empty">עוד לא בוצעו משימות.</div>{% endfor %}
     </div>
   </div>
 </div>
 
+<div class="tk-grid">
+  <div class="tk-list">
+    <h3 style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+      <span>📊 דוח שבועי · {{ report.start.strftime('%d/%m') }}–{{ report.end.strftime('%d/%m') }}</span>
+      <span style="font-size:12px;font-weight:400">
+        <a href="{{ url_for('admin.admin_tasks', y=y, m=m, w=wk + 1) }}">→ שבוע קודם</a>
+        {% if wk > 0 %} · <a href="{{ url_for('admin.admin_tasks', y=y, m=m, w=wk - 1) }}">שבוע הבא ←</a>{% endif %}</span></h3>
+    <div class="rep-stats">
+      <div class="rep-stat"><b style="color:#10b981">{{ report.on_time }}</b><span>בוצעו בזמן</span></div>
+      <div class="rep-stat"><b style="color:#f59e0b">{{ report.late }}</b><span>בוצעו באיחור</span></div>
+      <div class="rep-stat"><b style="color:#ef4444">{{ report.missed|length }}</b><span>לא בוצעו</span></div>
+      <div class="rep-stat"><b>{{ report.reminders_done }}</b><span>תזכורות שהסתיימו</span></div>
+      <div class="rep-stat"><b>{{ report.added }}</b><span>נוספו</span></div>
+    </div>
+    {% for t in report.done %}<div class="tk-item">
+      <div class="tk-when">{{ to_local(t.done_at).strftime('%d/%m %H:%M') }}</div>
+      <div class="tk-body">{{ t.title }}{% if t.id in report.late_ids %} <span class="tk-late">(באיחור)</span>{% endif %}{% if t.done_note %}<div class="d">✔ {{ t.done_note }}</div>{% endif %}</div>
+    </div>{% endfor %}
+    {% for t in report.missed %}<div class="tk-item">
+      <div class="tk-when tk-late">{{ to_local(t.due_at).strftime('%d/%m %H:%M') }}</div>
+      <div class="tk-body">{{ t.title }} <span class="tk-late">(לא בוצעה)</span></div>
+    </div>{% endfor %}
+    <form method="POST" action="{{ url_for('admin.admin_tasks_report_send') }}" style="padding:10px 16px"><input type="hidden" name="w" value="{{ wk }}">
+      <button class="btn btn-ghost" type="submit" style="font-size:12px">📧 שליחת הדוח הזה במייל עכשיו{% if report_email %} ({{ report_email }}){% endif %}</button></form>
+  </div>
+  <form class="tk-list" method="POST" action="{{ url_for('admin.admin_tasks_settings') }}" style="padding-bottom:12px">
+    <h3>⚙️ הגדרות</h3>
+    <div style="padding:10px 16px;font-size:14px;line-height:2.1">
+      <label><input type="checkbox" name="admin_tasks_tzintuk" value="1" {% if settings.admin_tasks_tzintuk == '1' %}checked{% endif %}> צינתוק לטלפון שלי (0527134491) כשמגיע זמן של משימה עם מועד</label><br>
+      <label><input type="checkbox" name="admin_tasks_tzintuk_reminders" value="1" {% if settings.admin_tasks_tzintuk_reminders == '1' %}checked{% endif %}> צינתוק גם על תזכורות חוזרות</label><br>
+      <label><input type="checkbox" name="admin_tasks_weekly_email" value="1" {% if settings.admin_tasks_weekly_email == '1' %}checked{% endif %}> דוח שבועי במייל - כל יום ראשון ב-8:00 בבוקר</label>
+      <div style="margin-top:6px"><span style="font-size:12px;color:var(--text2)">כתובת לדוח (ריק = כתובת הכניסה לממשק{% if report_email and not settings.admin_tasks_report_email %}: {{ report_email }}{% endif %})</span>
+        <input class="form-input" name="admin_tasks_report_email" value="{{ settings.admin_tasks_report_email }}" placeholder="name@example.com" dir="ltr"></div>
+      <div style="font-size:12px;color:var(--text2);margin-top:6px;line-height:1.6">בצינתוק, ההקראה של המשימה מחכה לך בכניסה למערכת (אם המספר שלך רשום כלקוח). לו"ז ודוח שבועי בטלפון: תפריט מנהל ← 8.</div>
+      <button class="btn btn-primary" type="submit" style="margin-top:10px">שמירה</button>
+    </div>
+  </form>
+</div>
+
 <script>
+(function () {
+  // תאריך עברי לכל יום (מהדפדפן - לוח עברי מובנה), היום באותיות: א׳, ט״ו...
+  function gim(n) {
+    var ones = ['', 'א', 'ב', 'ג', 'ד', 'ה', 'ו', 'ז', 'ח', 'ט'], tens = ['', 'י', 'כ', 'ל'];
+    var s = n === 15 ? 'טו' : n === 16 ? 'טז' : tens[Math.floor(n / 10)] + ones[n % 10];
+    return s.length > 1 ? s.slice(0, -1) + '״' + s.slice(-1) : s + '׳';
+  }
+  var fmtD, fmtM;
+  try {
+    fmtD = new Intl.DateTimeFormat('he-u-ca-hebrew', { day: 'numeric', timeZone: 'UTC' });
+    fmtM = new Intl.DateTimeFormat('he-u-ca-hebrew', { month: 'long', timeZone: 'UTC' });
+  } catch (e) { return; }
+  var months = {};
+  document.querySelectorAll('[data-heb]').forEach(function (el) {
+    var d = new Date(el.dataset.heb + 'T12:00:00Z');
+    var day = parseInt(fmtD.format(d), 10), mon = fmtM.format(d);
+    el.textContent = gim(day) + (day === 1 ? ' ' + mon : '');
+    if (!el.closest('.out')) months[mon] = 1;
+  });
+  var hm = document.getElementById('calHebMonth');
+  if (hm) hm.textContent = Object.keys(months).join('–');
+})();
+
+(function () {
+  // גרירת משימה ליום אחר (אותה שעה)
+  var dragId = null;
+  document.querySelectorAll('.chip[draggable=true]').forEach(function (c) {
+    c.addEventListener('dragstart', function (e) { dragId = c.dataset.id; e.dataTransfer.setData('text/plain', dragId); e.dataTransfer.effectAllowed = 'move'; });
+    c.addEventListener('dragend', function () { dragId = null; document.querySelectorAll('.cal-cell.drop').forEach(function (x) { x.classList.remove('drop'); }); });
+  });
+  document.querySelectorAll('.cal-cell[data-date]').forEach(function (cell) {
+    cell.addEventListener('dragover', function (e) { if (dragId) { e.preventDefault(); cell.classList.add('drop'); } });
+    cell.addEventListener('dragleave', function () { cell.classList.remove('drop'); });
+    cell.addEventListener('drop', function (e) {
+      e.preventDefault(); cell.classList.remove('drop');
+      var id = dragId || e.dataTransfer.getData('text/plain'); if (!id) return;
+      fetch('/admin/tasks/' + id + '/move', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify({ date: cell.dataset.date }) })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          if (!d.ok) { alert(d.error || 'ההזזה נכשלה'); return; }
+          if (window.Turbo) Turbo.visit(location.href, { action: 'replace' }); else location.reload();
+        });
+    });
+  });
+})();
+
 function tkPickDay(iso) {
   var f = document.getElementById('schedDue');
   var cur = (f.value || '').split('T')[1] || '09:00';
