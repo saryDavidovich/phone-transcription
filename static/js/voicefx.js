@@ -1,7 +1,11 @@
 /*
- * מחליף קול לקריינות - בלי בינה מלאכותית. עיבוד קבוע בדפדפן (Web Audio), אותה תוצאה בכל פעם:
- *   ניקוי (סינון זמזום) -> הורדת גובה הקול (pitch) -> שער רעשים -> אקולייזר "קריין" (חום, בהירות, נוכחות)
- *   -> קומפרסור (עוצמה אחידה) -> נרמול עוצמה.
+ * מחליף קול לקריינות - בלי בינה מלאכותית. עיבוד קבוע בדפדפן, אותה תוצאה בכל פעם.
+ * כדי שלא יזהו את הקול: מפרידים את הקול לשני חלקים ומשנים כל אחד בנפרד (כמו מחליפי קול גבר<->אישה):
+ *   1. גובה הקול (pitch) - מיתרי הקול.
+ *   2. "גוון" / גודל הגרון (פורמנטים) - מה שבעיקר מזהה אדם. גרון גדול = קול של גבר גדול יותר, וכו'.
+ * שיטה: וֹוקוֹדר LPC - מנתחים כל 5 מ"ש את מסנן הגרון, מוציאים ממנו את "צליל המיתרים" (residual), מזיזים
+ * את הגובה של צליל המיתרים, מותחים/מכווצים את מסנן הגרון, ומרכיבים מחדש. אחר כך: סינון זמזום,
+ * שער רעשים, אקולייזר קריין, קומפרסור ונרמול עוצמה.
  * מקליטים את הקול המקורי, והעיבוד נעשה עליו במחשב תוך שנייה - כך אפשר להחליף סגנון על אותה הקלטה
  * ולהשוות. אפשר גם לשמוע את הקול המעובד בזמן אמת באוזניות בזמן ההקלטה.
  *
@@ -10,13 +14,19 @@
 (function () {
   if (window.VoiceFX) return;
 
+  // pitch = גובה הקול (1 = כמו המקור), formant = גודל הגרון (פחות מ-1 = גרון גדול יותר / קול "גדול")
+  var EQ = { low: 4, mud: -3, presence: 3, air: 2, gate: 0.012 };
   var PRESETS = {
-    deep:     { label: 'קריין עמוק',        ratio: 0.87, low: 5, mud: -3, presence: 3.5, air: 2.5, gate: 0.012 },
-    narrator: { label: 'קריין',             ratio: 0.93, low: 4, mud: -3, presence: 3,   air: 2,   gate: 0.012 },
-    clean:    { label: 'ניקוי ושיפור בלבד', ratio: 1,    low: 2, mud: -2, presence: 2,   air: 1.5, gate: 0.010 },
-    none:     { label: 'בלי עיבוד (מקורי)', ratio: 1,    none: true }
+    man_deep:  { label: 'גבר אחר - קריין עמוק', pitch: 0.86, formant: 0.86 },
+    man_mid:   { label: 'גבר אחר - קריין',      pitch: 0.95, formant: 0.88 },
+    man_young: { label: 'גבר אחר - צעיר',       pitch: 1.10, formant: 1.07 },
+    woman:     { label: 'קול אישה',              pitch: 1.70, formant: 1.18 },
+    clean:     { label: 'רק ניקוי ושיפור (הקול שלי)', pitch: 1, formant: 1, low: 2, mud: -2, presence: 2, air: 1.5, gate: 0.010 },
+    none:      { label: 'בלי עיבוד (מקורי)',     pitch: 1, formant: 1, none: true },
+    custom:    { label: 'מותאם אישית',            pitch: 0.92, formant: 0.9 }
   };
-  var STORE = 'voicefxPreset';
+  Object.keys(PRESETS).forEach(function (k) { var p = PRESETS[k]; for (var e in EQ) if (p[e] === undefined) p[e] = EQ[e]; p.ratio = 1; });
+  var STORE = 'voicefxPreset2', STORE_CUSTOM = 'voicefxCustom';
 
   // מעבד הזזת גובה (granular, שני חלונות חופפים) + שער רעשים עדין - רץ בתוך AudioWorklet
   var WORKLET = [
@@ -56,12 +66,112 @@
     return ctx.audioWorklet.addModule(workletUrl);
   }
 
+  // ---------------------------------------------------------------------------
+  // וֹוקוֹדר LPC: גובה וגוון בנפרד (על מערך דגימות, sr)
+  // ---------------------------------------------------------------------------
+  function levinson(r, order) {          // -> {k: מקדמי החזרה, a: מקדמי המסנן, e: שגיאת חיזוי}
+    var a = new Float64Array(order + 1), k = new Float64Array(order + 1), tmp = new Float64Array(order + 1), e = r[0];
+    a[0] = 1;
+    for (var m = 1; m <= order; m++) {
+      var acc = r[m];
+      for (var i = 1; i < m; i++) acc += a[i] * r[m - i];
+      var km = e > 1e-12 ? -acc / e : 0;
+      if (km > 0.995) km = 0.995; else if (km < -0.995) km = -0.995;
+      k[m] = km;
+      for (i = 1; i < m; i++) tmp[i] = a[i] + km * a[m - i];
+      for (i = 1; i < m; i++) a[i] = tmp[i];
+      a[m] = km;
+      e *= (1 - km * km);
+    }
+    return { k: k, a: a, e: e };
+  }
+
+  function granularShift(x, sr, ratio) {   // הזזת גובה בזמן (שני חלונות חופפים) - על צליל המיתרים
+    if (ratio === 1) return x;
+    var W = Math.round(sr * 0.03), N = x.length, y = new Float32Array(N), ph = 0;
+    function rd(pos) { if (pos < 0) return 0; var i = Math.floor(pos), f = pos - i; return i + 1 < N ? x[i] + (x[i + 1] - x[i]) * f : 0; }
+    for (var n = 0; n < N; n++) {
+      ph += (1 - ratio) / W; if (ph >= 1) ph -= 1; if (ph < 0) ph += 1;
+      var p2 = (ph + 0.5) % 1;
+      y[n] = Math.sin(Math.PI * ph) * rd(n - ph * W) + Math.sin(Math.PI * p2) * rd(n - p2 * W);
+    }
+    return y;
+  }
+
+  function vocoder(x, sr, pitch, formant) {
+    if (pitch === 1 && formant === 1) return x;
+    var N = x.length, order = Math.min(30, Math.round(sr / 1000) + 4);
+    var hop = Math.round(sr * 0.005), win = Math.round(sr * 0.032), K = 256;
+    var pre = new Float32Array(N);                         // הדגשת גבוהים (סטנדרטי ב-LPC)
+    pre[0] = x[0]; for (var n = 1; n < N; n++) pre[n] = x[n] - 0.94 * x[n - 1];
+    var hann = new Float32Array(win); for (n = 0; n < win; n++) hann[n] = 0.5 - 0.5 * Math.cos(2 * Math.PI * n / (win - 1));
+    var cosT = new Float32Array((order + 1) * K);           // טבלת קוסינוסים לחישוב ספקטרום/אוטוקורלציה
+    for (var m = 0; m <= order; m++) for (var j = 0; j < K; j++) cosT[m * K + j] = Math.cos(m * Math.PI * (j + 0.5) / K);
+    var nh = Math.ceil(N / hop), kA = [], kS = [], r = new Float64Array(order + 1), frame = new Float32Array(win);
+    var P = new Float64Array(K), Pw = new Float64Array(K), rw = new Float64Array(order + 1);
+    for (var h = 0; h < nh; h++) {
+      var c = h * hop + (hop >> 1) - (win >> 1);
+      for (n = 0; n < win; n++) { var idx = c + n; frame[n] = (idx >= 0 && idx < N ? pre[idx] : 0) * hann[n]; }
+      for (m = 0; m <= order; m++) { var acc = 0; for (n = m; n < win; n++) acc += frame[n] * frame[n - m]; r[m] = acc; }
+      r[0] = r[0] * 1.0001 + 1e-9;
+      for (m = 1; m <= order; m++) r[m] *= Math.exp(-0.5 * Math.pow(2 * Math.PI * 60 * m / sr, 2));   // החלקה קלה
+      var L = levinson(r, order);
+      kA.push(L.k);
+      // ספקטרום המעטפת (מסנן הגרון) -> מתיחה/כיווץ בתדר -> חזרה למקדמים
+      for (j = 0; j < K; j++) {
+        var re = 0, im = 0;
+        for (m = 0; m <= order; m++) { var w = m * Math.PI * (j + 0.5) / K; re += L.a[m] * Math.cos(w); im -= L.a[m] * Math.sin(w); }
+        P[j] = L.e / (re * re + im * im + 1e-12);
+      }
+      for (j = 0; j < K; j++) {
+        var src = (j + 0.5) / formant - 0.5;
+        if (src >= K - 1) Pw[j] = P[K - 1] * 0.25;
+        else if (src <= 0) Pw[j] = P[0];
+        else { var i0 = Math.floor(src), fr = src - i0; Pw[j] = P[i0] * (1 - fr) + P[i0 + 1] * fr; }
+      }
+      for (m = 0; m <= order; m++) { acc = 0; for (j = 0; j < K; j++) acc += Pw[j] * cosT[m * K + j]; rw[m] = acc; }
+      rw[0] = rw[0] * 1.0001 + 1e-9;
+      kS.push(levinson(rw, order).k);
+    }
+    // צליל המיתרים: מסנן הפוך (lattice) עם המקדמים של כל 5 מ"ש
+    var res = new Float32Array(N), bA = new Float64Array(order + 1), bPrev = new Float64Array(order + 1), f;
+    for (n = 0; n < N; n++) {
+      var kk = kA[Math.min(nh - 1, (n / hop) | 0)];
+      f = pre[n]; bA[0] = f;
+      for (m = 1; m <= order; m++) { var fn = f + kk[m] * bPrev[m - 1]; bA[m] = bPrev[m - 1] + kk[m] * f; f = fn; }
+      res[n] = f;
+      var t = bPrev; bPrev = bA; bA = t;
+    }
+    res = granularShift(res, sr, pitch);
+    // הרכבה מחדש עם הגרון החדש (lattice הפוך - יציב גם כשהמקדמים משתנים)
+    var out = new Float32Array(N), b = new Float64Array(order + 1);
+    for (n = 0; n < N; n++) {
+      kk = kS[Math.min(nh - 1, (n / hop) | 0)];
+      f = res[n];
+      for (m = order; m >= 1; m--) { f = f - kk[m] * b[m - 1]; b[m] = b[m - 1] + kk[m] * f; }
+      b[0] = f;
+      out[n] = f;
+    }
+    // התאמת עוצמה לאורך הזמן (שהדיבור יישאר באותה עוצמה) + ביטול הדגשת הגבוהים
+    var seg = hop * 4, gPrev = 1;
+    for (var s0 = 0; s0 < N; s0 += hop) {
+      var e1 = 1e-9, e2 = 1e-9, a0 = Math.max(0, s0 - seg), a1 = Math.min(N, s0 + hop + seg);
+      for (n = a0; n < a1; n++) { e1 += pre[n] * pre[n]; e2 += out[n] * out[n]; }
+      var g = Math.sqrt(e1 / e2); if (g > 8) g = 8; if (g < 0.05) g = 0.05;
+      for (n = s0; n < Math.min(N, s0 + hop); n++) { var tt = (n - s0) / hop; out[n] *= gPrev + (g - gPrev) * tt; }
+      gPrev = g;
+    }
+    var y = new Float32Array(N), prev = 0;
+    for (n = 0; n < N; n++) { prev = out[n] + 0.94 * prev; y[n] = prev; }
+    return y;
+  }
+
   // שרשרת העיבוד - אותה שרשרת בזמן אמת ובעיבוד הסופי
   function buildChain(ctx, src, p) {
     if (p.none) { var pass = ctx.createGain(); src.connect(pass); return pass; }
     var hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 85; hp.Q.value = 0.7;
     var sh = new AudioWorkletNode(ctx, 'vfx-shift', { outputChannelCount: [1] });
-    sh.parameters.get('ratio').value = p.ratio; sh.parameters.get('gate').value = p.gate;
+    sh.parameters.get('ratio').value = p.live ? p.pitch : 1; sh.parameters.get('gate').value = p.gate;
     var low = ctx.createBiquadFilter(); low.type = 'lowshelf'; low.frequency.value = 160; low.gain.value = p.low;
     var mud = ctx.createBiquadFilter(); mud.type = 'peaking'; mud.frequency.value = 380; mud.Q.value = 1.1; mud.gain.value = p.mud;
     var pres = ctx.createBiquadFilter(); pres.type = 'peaking'; pres.frequency.value = 3200; pres.Q.value = 0.8; pres.gain.value = p.presence;
@@ -75,15 +185,25 @@
     return makeup;
   }
 
-  // עיבוד סופי של ההקלטה (מהיר מזמן אמת) + נרמול ל- -1dB
+  // עיבוד סופי של ההקלטה: המרה ל-24kHz -> וֹוקוֹדר (גובה + גוון) -> ניקוי/אקולייזר/קומפרסור -> נרמול ל- -1dB
   function render(raw, p) {
     var rate = 24000, len = Math.ceil(raw.duration * rate) + rate / 4;
-    var ctx = new OfflineAudioContext(1, len, rate);
-    return addWorklet(ctx).then(function () {
-      var s = ctx.createBufferSource(); s.buffer = raw;
-      buildChain(ctx, s, p).connect(ctx.destination);
-      s.start();
-      return ctx.startRendering();
+    var c1 = new OfflineAudioContext(1, len, rate), s1 = c1.createBufferSource();
+    s1.buffer = raw; s1.connect(c1.destination); s1.start();
+    return c1.startRendering().then(function (mono) {
+      var src = mono;
+      if (!p.none && (p.pitch !== 1 || p.formant !== 1)) {
+        var y = vocoder(mono.getChannelData(0), rate, p.pitch, p.formant);
+        src = new AudioBuffer({ length: y.length, numberOfChannels: 1, sampleRate: rate });
+        src.copyToChannel(y, 0);
+      }
+      var ctx = new OfflineAudioContext(1, len, rate);
+      return addWorklet(ctx).then(function () {
+        var s = ctx.createBufferSource(); s.buffer = src;
+        buildChain(ctx, s, p).connect(ctx.destination);
+        s.start();
+        return ctx.startRendering();
+      });
     }).then(function (buf) {
       var d = buf.getChannelData(0), peak = 0;
       for (var i = 0; i < d.length; i++) { var a = Math.abs(d[i]); if (a > peak) peak = a; }
@@ -109,16 +229,24 @@
 
   function mount(root, opts) {
     opts = opts || {};
-    var preset = 'narrator';
-    try { preset = localStorage.getItem(STORE) || 'narrator'; } catch (e) {}
-    if (!PRESETS[preset]) preset = 'narrator';
+    var preset = 'man_mid';
+    try {
+      preset = localStorage.getItem(STORE) || 'man_mid';
+      var cu = JSON.parse(localStorage.getItem(STORE_CUSTOM) || 'null');
+      if (cu && cu.pitch && cu.formant) { PRESETS.custom.pitch = cu.pitch; PRESETS.custom.formant = cu.formant; }
+    } catch (e) {}
+    if (!PRESETS[preset]) preset = 'man_mid';
     root.innerHTML =
       '<div class="vfx" style="display:flex;flex-direction:column;gap:10px">' +
       '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">' +
         '<label style="font-size:13px">קול: <select class="form-input vfx-preset" style="width:auto;display:inline-block;padding:4px 8px">' +
           Object.keys(PRESETS).map(function (k) { return '<option value="' + k + '"' + (k === preset ? ' selected' : '') + '>' + PRESETS[k].label + '</option>'; }).join('') +
         '</select></label>' +
-        '<label style="font-size:13px;cursor:pointer" title="שומעים את הקול המעובד תוך כדי הקלטה. רק עם אוזניות - אחרת נוצרת שריקה"><input type="checkbox" class="vfx-monitor"> 🎧 לשמוע באוזניות תוך כדי</label>' +
+        '<label style="font-size:13px;cursor:pointer" title="בזמן ההקלטה שומעים רק את שינוי הגובה; שינוי הגרון נעשה בסוף. רק עם אוזניות - אחרת נוצרת שריקה"><input type="checkbox" class="vfx-monitor"> 🎧 לשמוע באוזניות תוך כדי</label>' +
+      '</div>' +
+      '<div class="vfx-tune" style="display:flex;gap:18px;flex-wrap:wrap;font-size:12px;color:#8892b0">' +
+        '<label style="display:flex;align-items:center;gap:6px">גובה הקול <input type="range" dir="ltr" class="vfx-pitch" min="-8" max="10" step="0.5" style="width:120px"> <b class="vfx-pitch-v" style="min-width:52px"></b></label>' +
+        '<label style="display:flex;align-items:center;gap:6px" title="הכי חשוב כדי שלא יזהו: גרון גדול יותר = נשמע כמו אדם אחר, גדול יותר">גודל הגרון <input type="range" dir="ltr" class="vfx-formant" min="0.77" max="1.33" step="0.01" style="width:120px"> <b class="vfx-formant-v" style="min-width:64px"></b></label>' +
       '</div>' +
       '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">' +
         '<button type="button" class="btn btn-danger vfx-rec">⏺ התחל הקלטה</button>' +
@@ -134,11 +262,35 @@
     var $ = function (s) { return root.querySelector(s); };
     var sel = $('.vfx-preset'), btn = $('.vfx-rec'), timeEl = $('.vfx-time'), meter = $('.vfx-meter'), bar = meter.firstChild;
     var raw = null, rawUrl = null, live = null, origAudio = new Audio();
+    var pitchEl = $('.vfx-pitch'), formEl = $('.vfx-formant'), debounce = null;
+    function semis(r) { return Math.round(12 * Math.log(r) / Math.LN2 * 2) / 2; }
+    function showTune() {
+      var p = PRESETS[sel.value], dis = !!p.none;
+      pitchEl.value = semis(p.pitch); formEl.value = (1 / p.formant).toFixed(2);   // גודל הגרון = 1 / הזזת הפורמנטים
+      pitchEl.disabled = formEl.disabled = dis;
+      var st = semis(p.pitch);
+      $('.vfx-pitch-v').textContent = st === 0 ? 'כמו שלי' : (st > 0 ? '+' : '') + st + ' טון';
+      var fp = Math.round((1 / p.formant - 1) * 100);
+      $('.vfx-formant-v').textContent = fp === 0 ? 'כמו שלי' : (fp > 0 ? 'גדול ב-' + fp + '%' : 'קטן ב-' + (-fp) + '%');
+    }
+    function liveP() { var p = PRESETS[sel.value], o = {}; for (var k in p) o[k] = p[k]; o.live = true; return o; }
+    function onTune() {
+      PRESETS.custom.pitch = Math.pow(2, parseFloat(pitchEl.value) / 12);
+      PRESETS.custom.formant = 1 / parseFloat(formEl.value);
+      sel.value = 'custom';
+      try { localStorage.setItem(STORE, 'custom'); localStorage.setItem(STORE_CUSTOM, JSON.stringify({ pitch: PRESETS.custom.pitch, formant: PRESETS.custom.formant })); } catch (e) {}
+      showTune();
+      if (live && live.out) { try { live.out.disconnect(); } catch (e) {} live.out = buildChain(live.ctx, live.src, liveP()); if ($('.vfx-monitor').checked) live.out.connect(live.ctx.destination); }
+      clearTimeout(debounce); debounce = setTimeout(process, 450);
+    }
+    pitchEl.addEventListener('input', onTune); formEl.addEventListener('input', onTune);
+    showTune();
 
     function process() {
       if (!raw) return;
       var p = PRESETS[sel.value];
-      $('.vfx-status').textContent = 'מעבד...';
+      $('.vfx-status').textContent = 'מעבד... (הקלטה ארוכה - כמה שניות)';
+      $('.vfx-result').style.display = 'flex';
       render(raw, p).then(function (buf) {
         var wav = toWav(buf), pl = $('.vfx-play');
         if (pl.src) URL.revokeObjectURL(pl.src);
@@ -154,9 +306,10 @@
 
     sel.addEventListener('change', function () {
       try { localStorage.setItem(STORE, sel.value); } catch (e) {}
+      showTune();
       if (live && live.out) {            // תוך כדי הקלטה - מחליפים את השרשרת של ההאזנה
         try { live.out.disconnect(); } catch (e) {}
-        live.out = buildChain(live.ctx, live.src, PRESETS[sel.value]);
+        live.out = buildChain(live.ctx, live.src, liveP());
         if ($('.vfx-monitor').checked) live.out.connect(live.ctx.destination);
       }
       process();
@@ -186,7 +339,7 @@
             src.connect(an);
             var chunks = [], rec = new MediaRecorder(stream), t0 = Date.now(), data = new Float32Array(an.fftSize);
             live = { ctx: ctx, src: src, rec: rec, stream: stream };
-            live.out = buildChain(ctx, src, PRESETS[sel.value]);
+            live.out = buildChain(ctx, src, liveP());
             if ($('.vfx-monitor').checked) live.out.connect(ctx.destination);
             meter.style.display = 'inline-block';
             var tick = setInterval(function () {
@@ -219,5 +372,5 @@
     });
   }
 
-  window.VoiceFX = { mount: mount, presets: PRESETS };
+  window.VoiceFX = { mount: mount, presets: PRESETS, _vocoder: vocoder };
 })();
