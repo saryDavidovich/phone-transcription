@@ -61,6 +61,31 @@
 <meta name="turbo-prefetch-cache-time" content="15000">
 <meta name="turbo-root" content="/admin">
 <script src="/static/vendor/turbo/turbo-8.0.13.js"></script>
+<script>
+/* עמודים שמתרעננים בתוך עצמם (משימות ולו"ז): אחרי שליחת טופס / מעבר חודש / גרירה - נשארים באותו מקום בדף
+   במקום לקפוץ לראש הדף. עמוד שמסומן <body data-keep-scroll> או נתיב ברשימה. */
+(function () {
+  if (window.__keepScroll) return;
+  window.__keepScroll = true;
+  var PATHS = ['/admin/tasks'];
+  function keep() { return PATHS.indexOf(location.pathname) !== -1; }
+  function save() {
+    if (!keep()) return;
+    try { sessionStorage.setItem('keepScroll', JSON.stringify({ p: location.pathname, y: window.scrollY, t: Date.now() })); } catch (e) {}
+  }
+  document.addEventListener('turbo:before-visit', save);
+  document.addEventListener('turbo:submit-start', save);
+  document.addEventListener('submit', save, true);
+  window.tkSaveScroll = save;
+  document.addEventListener('turbo:load', function () {
+    var d = null;
+    try { d = JSON.parse(sessionStorage.getItem('keepScroll') || 'null'); sessionStorage.removeItem('keepScroll'); } catch (e) {}
+    if (!d || d.p !== location.pathname || Date.now() - d.t > 20000) return;
+    var go = function () { window.scrollTo(0, d.y); };
+    go(); requestAnimationFrame(go); setTimeout(go, 60);
+  });
+})();
+</script>
 <meta name="dial-tpl" content="{{ dial_tpl|default('tel:{phone}') }}">
 <style>
   .pc-tools{display:inline-flex;gap:2px;vertical-align:middle;margin-inline-start:4px;white-space:nowrap}

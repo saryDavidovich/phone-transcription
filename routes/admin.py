@@ -3707,6 +3707,10 @@ def admin_tasks():
             raise ValueError
     except ValueError:
         y, m = now_local.year, now_local.month
+    try:
+        picked = datetime.strptime(request.args.get('d') or '', '%Y-%m-%d').date()
+    except ValueError:
+        picked = None
     prev_y, prev_m = (y - 1, 12) if m == 1 else (y, m - 1)
     next_y, next_m = (y + 1, 1) if m == 12 else (y, m + 1)
     day_start = datetime(now_local.year, now_local.month, now_local.day)
@@ -3733,7 +3737,7 @@ def admin_tasks():
     cust_names = {c.id: (c.name or c.phone) for c in Customer.query.filter(Customer.id.in_(cust_ids)).all()} if cust_ids else {}
     settings = {k: AT.get_setting(k) for k in AT.SETTING_DEFAULTS}
     return render_template('admin/tasks.html', weeks=AT.month_grid(y, m), y=y, m=m, month_name=MONTHS_HE[m],
-                           categories=AT.CATEGORIES, cat_color=AT.CAT_COLOR, cat_name=AT.CAT_NAME,
+                           categories=AT.CATEGORIES, cat_color=AT.CAT_COLOR, cat_name=AT.CAT_NAME, picked=picked,
                            report=report, wk=wk, cust_names=cust_names, settings=settings,
                            report_email=AT.report_email(),
                            prev_y=prev_y, prev_m=prev_m, next_y=next_y, next_m=next_m,
@@ -3741,6 +3745,16 @@ def admin_tasks():
                            done=done, intervals=AT.INTERVALS, to_local=AT.to_local,
                            interval_label=AT.interval_label, now_utc=datetime.utcnow(),
                            default_dt=(now_local + timedelta(hours=1)).strftime('%Y-%m-%dT%H:00'))
+
+
+def _tasks_back():
+    """אחרי פעולה - חזרה לאותו עמוד בדיוק (אותו חודש / כרטיס לקוח), לא לחודש הנוכחי."""
+    from urllib.parse import urlparse
+    ref = request.referrer or ''
+    u = urlparse(ref)
+    if u.path.startswith('/admin/') and (not u.netloc or u.netloc == request.host):
+        return u.path + ('?' + u.query if u.query else '')
+    return url_for('admin.admin_tasks')
 
 
 @admin_bp.route('/tasks/create', methods=['POST'])
@@ -3769,7 +3783,7 @@ def admin_task_create():
     flash('המשימה נשמרה' if t else f'לא נשמר: {err}')
     if request.form.get('back') == 'customer' and cust_id:
         return redirect(url_for('admin.customer_detail', id=cust_id) + '#sec-mytasks')
-    return redirect(url_for('admin.admin_tasks'))
+    return redirect(_tasks_back())
 
 
 @admin_bp.route('/tasks/<int:tid>/move', methods=['POST'])
@@ -3793,7 +3807,7 @@ def admin_tasks_settings():
     else:
         AT.set_setting('admin_tasks_report_email', email)
         flash('ההגדרות נשמרו')
-    return redirect(url_for('admin.admin_tasks'))
+    return redirect(_tasks_back())
 
 
 @admin_bp.route('/tasks/report/send', methods=['POST'])
@@ -3845,7 +3859,7 @@ def admin_task_done(tid):
     if request.accept_mimetypes.best == 'application/json' or request.is_json:
         return jsonify({'ok': not err, 'error': err})
     flash(err or 'סומן כבוצע')
-    return redirect(request.referrer or url_for('admin.admin_tasks'))
+    return redirect(_tasks_back())
 
 
 @admin_bp.route('/tasks/<int:tid>/snooze', methods=['POST'])
@@ -3861,4 +3875,4 @@ def admin_task_snooze(tid):
 def admin_task_cancel(tid):
     from services import admin_tasks as AT
     flash('המשימה נמחקה' if AT.cancel(tid) else 'המשימה לא נמצאה')
-    return redirect(request.referrer or url_for('admin.admin_tasks'))
+    return redirect(_tasks_back())

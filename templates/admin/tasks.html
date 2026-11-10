@@ -19,6 +19,7 @@
   .cal-cell{min-height:96px;border-left:1px solid var(--border);border-bottom:1px solid var(--border);padding:5px;cursor:pointer;position:relative}
   .cal-cell:hover{background:var(--surface2)}
   .cal-cell.out{opacity:.4}
+  .cal-cell.picked{box-shadow:inset 0 0 0 2px #eab308;background:rgba(234,179,8,.08)}
   .cal-cell.today{box-shadow:inset 0 0 0 2px var(--accent,#4f6ef7)}
   .cal-num{font-size:12px;font-weight:700;margin-bottom:4px}
   .chip{display:block;font-size:11px;border-radius:6px;padding:2px 6px;margin-bottom:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer}
@@ -45,7 +46,38 @@
   .tk-actions button{font-size:12px;padding:4px 10px}
 </style>
 
-{% with flashed = get_flashed_messages() %}{% if flashed %}{% for m in flashed %}<div class="flash flash-success">{{ m }}</div>{% endfor %}{% endif %}{% endwith %}
+{% with flashed = get_flashed_messages() %}{% if flashed %}{% set ns = namespace(bad=false) %}{% for m in flashed %}{% if m.startswith('לא ') or m.startswith('השליחה נכשלה') or m.startswith('כתובת המייל') %}{% set ns.bad = true %}{% endif %}{% endfor %}{% set bad = ns.bad %}<div id="tkToast" style="position:fixed;bottom:22px;left:50%;transform:translateX(-50%);z-index:9000;background:{{ '#dc2626' if bad else '#16a34a' }};color:#fff;padding:10px 22px;border-radius:12px;box-shadow:0 8px 30px rgba(0,0,0,.4);font-size:14px;font-weight:600">{% for m in flashed %}{{ m }}{% if not loop.last %} · {% endif %}{% endfor %}</div>
+<script>setTimeout(function(){var t=document.getElementById('tkToast');if(t)t.remove()},3500)</script>{% endif %}{% endwith %}
+
+<div class="cal">
+  <div class="cal-head">
+    <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+      <a href="{{ url_for('admin.admin_tasks', y=next_y, m=next_m) }}">← הבא</a>
+      <a href="{{ url_for('admin.admin_tasks') }}">היום</a>
+      <input type="date" id="calJump" class="form-input" style="width:150px;padding:4px 8px;font-size:13px" title="מעבר לתאריך"
+             value="{{ picked.isoformat() if picked else '' }}" onchange="tkJump(this.value)">
+    </div>
+    <div style="text-align:center"><b>{{ month_name }} {{ y }}</b> <span id="calHebMonth" class="cal-heb"></span>
+      <div style="font-size:11px;color:var(--text2);margin-top:3px">{% for k, n, c in categories %}<span style="margin:0 5px"><span class="cat-dot" style="background:{{ c }}"></span>{{ n }}</span>{% endfor %} · אפשר לגרור משימה ליום אחר</div></div>
+    <a href="{{ url_for('admin.admin_tasks', y=prev_y, m=prev_m) }}">הקודם →</a>
+  </div>
+  <div class="cal-days">
+    {% for dn in ['ראשון','שני','שלישי','רביעי','חמישי','שישי','שבת'] %}<div class="cal-dn">{{ dn }}</div>{% endfor %}
+    {% for week in weeks %}{% for day in week %}
+      <div class="cal-cell {% if not day.in_month %}out{% endif %} {% if day.date == today_date %}today{% endif %} {% if picked and day.date == picked %}picked{% endif %}" data-date="{{ day.date.isoformat() }}"
+           onclick="tkPickDay('{{ day.date.isoformat() }}')" title="לחיצה - משימה חדשה ביום הזה">
+        <div class="cal-num">{{ day.date.day }}<span class="cal-heb" data-heb="{{ day.date.isoformat() }}"></span></div>
+        {% for t in day.tasks %}
+          {% set loc = to_local(t.due_at) %}
+          <span class="chip {{ 'done' if t.status == 'done' else ('late' if t.due_at < now_utc else 'open') }}" style="--cc:{{ cat_color.get(t.category or 'general', '#64748b') }}"
+                {% if t.status == 'open' %}draggable="true" data-id="{{ t.id }}"{% endif %}
+                title="{{ cat_name.get(t.category or 'general', '') }} · {{ loc.strftime('%H:%M') }} {{ t.title }}{% if t.customer_id %} ({{ cust_names.get(t.customer_id, '') }}){% endif %}{% if t.details %} - {{ t.details }}{% endif %}{% if t.done_note %} | בוצע: {{ t.done_note }}{% endif %}"
+                onclick="event.stopPropagation()">{{ loc.strftime('%H:%M') }} {{ t.title }}</span>
+        {% endfor %}
+      </div>
+    {% endfor %}{% endfor %}
+  </div>
+</div>
 
 <div class="tk-grid">
   <form class="tk-card" method="POST" action="{{ url_for('admin.admin_task_create') }}" id="schedForm">
@@ -74,31 +106,6 @@
     <label>פירוט (רשות)</label><textarea class="form-input" name="details" rows="3"></textarea>
     <button class="btn btn-primary" type="submit" style="margin-top:10px">➕ הוספת תזכורת</button>
   </form>
-</div>
-
-<div class="cal">
-  <div class="cal-head">
-    <a href="{{ url_for('admin.admin_tasks', y=next_y, m=next_m) }}">← הבא</a>
-    <div style="text-align:center"><b>{{ month_name }} {{ y }}</b> <span id="calHebMonth" class="cal-heb"></span>
-      <div style="font-size:11px;color:var(--text2);margin-top:3px">{% for k, n, c in categories %}<span style="margin:0 5px"><span class="cat-dot" style="background:{{ c }}"></span>{{ n }}</span>{% endfor %} · אפשר לגרור משימה ליום אחר</div></div>
-    <a href="{{ url_for('admin.admin_tasks', y=prev_y, m=prev_m) }}">הקודם →</a>
-  </div>
-  <div class="cal-days">
-    {% for dn in ['ראשון','שני','שלישי','רביעי','חמישי','שישי','שבת'] %}<div class="cal-dn">{{ dn }}</div>{% endfor %}
-    {% for week in weeks %}{% for day in week %}
-      <div class="cal-cell {% if not day.in_month %}out{% endif %} {% if day.date == today_date %}today{% endif %}" data-date="{{ day.date.isoformat() }}"
-           onclick="tkPickDay('{{ day.date.isoformat() }}')" title="לחיצה - משימה חדשה ביום הזה">
-        <div class="cal-num">{{ day.date.day }}<span class="cal-heb" data-heb="{{ day.date.isoformat() }}"></span></div>
-        {% for t in day.tasks %}
-          {% set loc = to_local(t.due_at) %}
-          <span class="chip {{ 'done' if t.status == 'done' else ('late' if t.due_at < now_utc else 'open') }}" style="--cc:{{ cat_color.get(t.category or 'general', '#64748b') }}"
-                {% if t.status == 'open' %}draggable="true" data-id="{{ t.id }}"{% endif %}
-                title="{{ cat_name.get(t.category or 'general', '') }} · {{ loc.strftime('%H:%M') }} {{ t.title }}{% if t.customer_id %} ({{ cust_names.get(t.customer_id, '') }}){% endif %}{% if t.details %} - {{ t.details }}{% endif %}{% if t.done_note %} | בוצע: {{ t.done_note }}{% endif %}"
-                onclick="event.stopPropagation()">{{ loc.strftime('%H:%M') }} {{ t.title }}</span>
-        {% endfor %}
-      </div>
-    {% endfor %}{% endfor %}
-  </div>
 </div>
 
 <div class="tk-grid">
@@ -233,11 +240,18 @@
         .then(function (r) { return r.json(); })
         .then(function (d) {
           if (!d.ok) { alert(d.error || 'ההזזה נכשלה'); return; }
-          if (window.Turbo) Turbo.visit(location.href, { action: 'replace' }); else location.reload();
+          if (window.tkSaveScroll) tkSaveScroll(); if (window.Turbo) Turbo.visit(location.href, { action: 'replace' }); else location.reload();
         });
     });
   });
 })();
+
+function tkJump(iso) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(iso || '')) return;
+  var p = iso.split('-');
+  var url = '/admin/tasks?y=' + p[0] + '&m=' + parseInt(p[1], 10) + '&d=' + iso;
+  if (window.tkSaveScroll) tkSaveScroll(); if (window.Turbo) Turbo.visit(url); else location.href = url;
+}
 
 function tkPickDay(iso) {
   var f = document.getElementById('schedDue');
