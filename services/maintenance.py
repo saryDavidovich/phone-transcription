@@ -60,10 +60,19 @@ def on_github_push(sha='', message=''):
     """העלאת קוד לגיטהאב (webhook): נרשם ביומן, ומדליק מצב תחזוקה עד שהגרסה החדשה עולה. כבר דלוק - לא נוגע."""
     from routes.admin import get_setting
     already = get_setting('maintenance_mode', '0') == '1'
-    record_push(sha, message, maintenance_on=True)
+    if not already:
+        set_mode(True, source='github')       # קודם מצב תחזוקה - היומן לא יכול לעכב אותו
+    try:
+        record_push(sha, message, maintenance_on=True)
+    except Exception as e:
+        log.error(f'maintenance: רישום ההעלאה ביומן נכשל: {e}')
+        try:
+            from app import db
+            db.session.rollback()
+        except Exception:
+            pass
     if already:
         return False
-    set_mode(True, source='github')
     log.warning('maintenance: הודלק אוטומטית - העלאת קוד לגיטהאב, ייכבה כשהגרסה החדשה תעלה')
     return True
 
@@ -89,9 +98,15 @@ def deploy_log():
 
 
 def _save_log(items, last_status):
+    """שמירה. היומן הוא תוספת - שגיאה בו לא עוצרת את מצב התחזוקה (נרשמת בלוג בלבד)."""
+    from app import db
     from routes.admin import set_setting
-    set_setting(_LOG_KEY, json.dumps(items[:_LOG_MAX], ensure_ascii=False))
-    set_setting('deploy_last_status', last_status)
+    try:
+        set_setting('deploy_last_status', last_status)
+        set_setting(_LOG_KEY, json.dumps(items[:_LOG_MAX], ensure_ascii=False))
+    except Exception as e:
+        db.session.rollback()
+        log.error(f'maintenance: שמירת יומן העדכונים נכשלה: {e}')
 
 
 def record_push(sha='', message='', maintenance_on=False):
