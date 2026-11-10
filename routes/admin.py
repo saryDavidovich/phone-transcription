@@ -2963,9 +2963,10 @@ def calls_report_export():
 
 def _broadcast_recipient_emails():
     """כתובות מייל ייחודיות של כל הלקוחות עם מייל רשום, בלי קשר לחסימה/יתרה -
-    זו הודעה כללית, לא תמלול בתשלום."""
+    זו הודעה כללית, לא תמלול בתשלום. בלי מי שהסיר את עצמו מהתפוצה (בסנדגריד)."""
+    from services import broadcast_unsub as BU
     rows = Customer.query.filter(Customer.email.isnot(None), Customer.email != '').all()
-    seen = set()
+    seen = set(BU.suppressed_emails() or ())
     emails = []
     for c in rows:
         e = (c.email or '').strip()
@@ -2975,15 +2976,17 @@ def _broadcast_recipient_emails():
     return emails
 
 
-def _broadcast_email_html(subject, body):
+def _broadcast_email_html(subject, body, unsub_link='#'):
     """המייל המלא - אותה פונקציה משמשת לתצוגה המקדימה בעמוד, לשליחת הניסיון ולשליחה לכולם,
     כך שמה שרואים בצד הוא בדיוק מה שיישלח. התוכן מהעורך המעוצב (HTML מנוקה, ראה
     services/rich_email.py) או טקסט רגיל."""
     from markupsafe import escape
     from services import email_layout as L
     from services.rich_email import body_block
+    from services.broadcast_unsub import footer_html
     card = L.title(str(escape(subject))) + body_block(body) + L.signature(can_reply=True)
-    return L.wrap(card)
+    # קישור ההסרה: בשליחה - תגית שסנדגריד מחליף בקישור לדף ההסרה שלו (לא האתר שלנו)
+    return L.wrap(card) + (footer_html(unsub_link) if unsub_link else '')
 
 
 def _send_broadcast_email(to_email, subject, html):
@@ -2991,8 +2994,12 @@ def _send_broadcast_email(to_email, subject, html):
     לפי כתובת המייל שלו, או לתיבה הכללית) - לא הולכת לאיבוד."""
     import sendgrid
     from sendgrid.helpers.mail import Mail, Email, ReplyTo
+    from sendgrid.helpers.mail import Asm, GroupId
     from routes.email_inbound import TRANSCRIBE_INBOUND_EMAIL
+    from services import broadcast_unsub as BU
     sg = sendgrid.SendGridAPIClient(api_key=os.environ.get('SENDGRID_API_KEY'))
+    gid = BU.group_id()
+    html = BU.finalize(html, gid)
     message = Mail(
         from_email=Email(os.environ.get('SENDGRID_FROM_EMAIL', os.environ.get('GMAIL_USER', '')), 'תמלול פון'),
         to_emails=to_email,
@@ -3000,6 +3007,8 @@ def _send_broadcast_email(to_email, subject, html):
         html_content=html,
     )
     message.reply_to = ReplyTo(TRANSCRIBE_INBOUND_EMAIL, 'תמלול פון')
+    if gid:   # שיוך לקבוצת ההסרה - סנדגריד ממלא את הקישור, מוסיף כותרת List-Unsubscribe, ולא שולח למי שהוסר
+        message.asm = Asm(GroupId(gid))
     sg.send(message)
 
 
@@ -3018,6 +3027,27 @@ def _send_broadcast_bg(subject, html, recipient_emails):
     log.info(f"הודעה תפוצתית הסתיימה: נשלחו {sent}, נכשלו {failed} (מתוך {len(recipient_emails)})")
 
 
+def _broadcast_unsub_ctx():
+    """לעמוד: האם יש קבוצת הסרה בסנדגריד, ומי הסיר את עצמו (עם השם, אם הוא לקוח)."""
+    from services import broadcast_unsub as BU
+    gid = BU.group_id()
+    emails = BU.suppressed_emails() if gid else None
+    rows = []
+    for e in sorted(emails or ()):
+        c = Customer.query.filter(func.lower(Customer.email) == e).first()
+        rows.append({'email': e, 'name': (c.name or c.phone) if c else '', 'cid': c.id if c else None})
+    return {'unsub_group': gid, 'unsub_list': rows, 'unsub_known': emails is not None}
+
+
+@admin_bp.route('/broadcast/unsub/restore', methods=['POST'])
+@login_required
+def broadcast_unsub_restore():
+    from services import broadcast_unsub as BU
+    email = (request.form.get('email') or '').strip()
+    flash(f'{email} הוחזר לרשימת התפוצה' if BU.restore(email) else 'ההחזרה לרשימה נכשלה')
+    return redirect(url_for('admin.broadcast_message'))
+
+
 @admin_bp.route('/broadcast', methods=['GET'])
 @login_required
 def broadcast_message():
@@ -3025,7 +3055,7 @@ def broadcast_message():
         'admin/broadcast.html', voice_broadcasts=_voice_messages_for(None),
         subject='', body='', test_email='',
         recipient_count=len(_broadcast_recipient_emails()),
-        result=None,
+        result=None, **_broadcast_unsub_ctx(),
     )
 
 
@@ -3057,7 +3087,7 @@ def broadcast_test():
         result = {'ok': False, 'text': 'יש להזין כתובת מייל לבדיקה.'}
     else:
         try:
-            html = _broadcast_email_html(subject, body)
+            html = _broadcast_email_html(subject, body, unsub_link='#BCUNSUB#')
             _send_broadcast_email(test_email, f'[בדיקה] {subject}', html)
             result = {'ok': True, 'text': f'נשלח מייל בדיקה אל {test_email}. ההודעה נשארה כאן למטה - אפשר להמשיך לערוך או ללחוץ "שלח לכולם".'}
         except Exception as e:
@@ -3067,7 +3097,7 @@ def broadcast_test():
     return render_template(
         'admin/broadcast.html', voice_broadcasts=_voice_messages_for(None),
         subject=subject, body=body, test_email=test_email,
-        recipient_count=recipient_count, result=result,
+        recipient_count=recipient_count, result=result, **_broadcast_unsub_ctx(),
     )
 
 
@@ -3086,7 +3116,7 @@ def broadcast_send():
     elif not recipient_emails:
         result = {'ok': False, 'text': 'אין כרגע אף לקוח עם מייל פעיל לשלוח אליו.'}
     else:
-        html = _broadcast_email_html(subject, body)
+        html = _broadcast_email_html(subject, body, unsub_link='#BCUNSUB#')
         threading.Thread(
             target=_send_broadcast_bg,
             args=(subject, html, recipient_emails),
@@ -3097,7 +3127,7 @@ def broadcast_send():
     return render_template(
         'admin/broadcast.html', voice_broadcasts=_voice_messages_for(None),
         subject=subject, body=body, test_email='',
-        recipient_count=len(recipient_emails), result=result,
+        recipient_count=len(recipient_emails), result=result, **_broadcast_unsub_ctx(),
     )
 
 

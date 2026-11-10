@@ -31,6 +31,36 @@
   </p>
 </div>
 
+<div class="card" style="margin-bottom:20px">
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+    <div style="font-size:14px;font-weight:600">🚫 הסרה מרשימת התפוצה</div>
+    {% if unsub_group %}<span class="badge badge-green" style="font-size:11px">פעיל - קבוצה {{ unsub_group }} בסנדגריד</span>
+    {% else %}<span class="badge badge-red" style="font-size:11px">לא פעיל</span>{% endif %}
+  </div>
+  {% if unsub_group %}
+  <p style="color:var(--text2);font-size:13px;line-height:1.7;margin:8px 0 0">
+    בתחתית כל הודעה תפוצתית יש קישור "להסרה מרשימת התפוצה". הקישור מוביל לדף של <b>SendGrid</b> (לא לאתר שלנו).
+    מי שנרשם להסרה לא יקבל יותר הודעות תפוצה - אבל ממשיך לקבל את התמלולים וכל שאר המיילים של המערכת כרגיל.
+  </p>
+  {% if unsub_list %}
+  <details style="margin-top:10px"><summary style="cursor:pointer;font-size:13px">{{ unsub_list|length }} כתובות הסירו את עצמן</summary>
+    <div style="margin-top:8px">{% for u in unsub_list %}
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--border);font-size:13px">
+        <span>{{ u.email }}{% if u.cid %} · <a href="{{ url_for('admin.customer_detail', id=u.cid) }}">{{ u.name }}</a>{% endif %}</span>
+        <form method="POST" action="{{ url_for('admin.broadcast_unsub_restore') }}" onsubmit="return confirm('להחזיר את {{ u.email }} לרשימת התפוצה? (רק אם הלקוח ביקש)')">
+          <input type="hidden" name="email" value="{{ u.email }}"><button class="btn btn-ghost" type="submit" style="font-size:12px;padding:3px 10px">החזרה לרשימה</button></form>
+      </div>{% endfor %}</div>
+  </details>
+  {% elif unsub_known %}<div style="font-size:12px;color:var(--text2);margin-top:6px">אף אחד לא הסיר את עצמו עד עכשיו.</div>{% endif %}
+  {% else %}
+  <p style="color:#ef4444;font-size:13px;line-height:1.7;margin:8px 0 0">
+    לא הצלחנו ליצור קבוצת הסרה בסנדגריד (כנראה למפתח ה-API אין הרשאה ל-"Suppressions"). אפשר ליצור ידנית:
+    SendGrid ← Suppressions ← Unsubscribe Groups ← Create New Group, ואת המספר שלה לשים במשתנה הסביבה
+    <code>SENDGRID_UNSUBSCRIBE_GROUP_ID</code> ב-Railway. עד אז ההודעות נשלחות בלי קישור הסרה.
+  </p>
+  {% endif %}
+</div>
+
 {% if result %}
 <div class="flash {{ 'flash-success' if result.ok else 'flash-error' }}">
   {{ '✓' if result.ok else '✗' }} {{ result.text }}
