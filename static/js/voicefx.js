@@ -17,16 +17,19 @@
   // pitch = גובה הקול (1 = כמו המקור), formant = גודל הגרון (פחות מ-1 = גרון גדול יותר / קול "גדול")
   var EQ = { low: 4, mud: -3, presence: 3, air: 2, gate: 0.012 };
   var PRESETS = {
+    broadcaster:  { label: '🎙️ שדרן כריזמטי',        pitch: 0.90, formant: 0.84, broadcast: true },
+    broadcaster2: { label: '🎙️ שדרן - עמוק מאוד',     pitch: 0.84, formant: 0.80, broadcast: true },
+    broadcaster3: { label: '🎙️ שדרן - צלול ואנרגטי',  pitch: 0.97, formant: 0.88, broadcast: true },
     man_deep:  { label: 'גבר אחר - קריין עמוק', pitch: 0.86, formant: 0.86 },
     man_mid:   { label: 'גבר אחר - קריין',      pitch: 0.95, formant: 0.88 },
     man_young: { label: 'גבר אחר - צעיר',       pitch: 1.10, formant: 1.07 },
     woman:     { label: 'קול אישה',              pitch: 1.70, formant: 1.18 },
     clean:     { label: 'רק ניקוי ושיפור (הקול שלי)', pitch: 1, formant: 1, low: 2, mud: -2, presence: 2, air: 1.5, gate: 0.010 },
     none:      { label: 'בלי עיבוד (מקורי)',     pitch: 1, formant: 1, none: true },
-    custom:    { label: 'מותאם אישית',            pitch: 0.92, formant: 0.9 }
+    custom:    { label: 'מותאם אישית',            pitch: 0.9, formant: 0.84, broadcast: true }
   };
   Object.keys(PRESETS).forEach(function (k) { var p = PRESETS[k]; for (var e in EQ) if (p[e] === undefined) p[e] = EQ[e]; p.ratio = 1; });
-  var STORE = 'voicefxPreset2', STORE_CUSTOM = 'voicefxCustom';
+  var STORE = 'voicefxPreset3', STORE_CUSTOM = 'voicefxCustom';
 
   // מעבד הזזת גובה (granular, שני חלונות חופפים) + שער רעשים עדין - רץ בתוך AudioWorklet
   var WORKLET = [
@@ -167,8 +170,45 @@
   }
 
   // שרשרת העיבוד - אותה שרשרת בזמן אמת ובעיבוד הסופי
+  function shaper(ctx, k) {          // רוויה רכה (tanh) - מייצר הרמוניות, כמו במכשירי רדיו אנלוגיים
+    var ws = ctx.createWaveShaper(), n = 2048, c = new Float32Array(n), t = Math.tanh(k);
+    for (var i = 0; i < n; i++) { var x = i / (n - 1) * 2 - 1; c[i] = Math.tanh(k * x) / t; }
+    ws.curve = c; ws.oversample = '2x';
+    return ws;
+  }
+  function bq(ctx, type, f, g, q) { var b = ctx.createBiquadFilter(); b.type = type; b.frequency.value = f; if (g !== undefined) b.gain.value = g; if (q) b.Q.value = q; return b; }
+
+  // שרשרת "שדרן" (כמו מעבדי שידור - APHEX / Big Bottom / דחיסת רדיו): בלי בינה מלאכותית
+  function broadcastChain(ctx, src, p) {
+    var hp = bq(ctx, 'highpass', 70, undefined, 0.7);
+    var sh = new AudioWorkletNode(ctx, 'vfx-shift', { outputChannelCount: [1] });
+    sh.parameters.get('ratio').value = p.live ? p.pitch : 1; sh.parameters.get('gate').value = 0.014;
+    src.connect(hp); hp.connect(sh);
+    // הקול הישיר: חזה, בלי "בוץ", נוכחות, בלי ס/ש חדים, אוויר
+    var chest = bq(ctx, 'lowshelf', 120, 6), mud = bq(ctx, 'peaking', 320, -4, 1.2), pres = bq(ctx, 'peaking', 3300, 4, 0.9);
+    var ess = bq(ctx, 'peaking', 6800, -5, 2.5), air = bq(ctx, 'highshelf', 10000, 3);
+    sh.connect(chest); chest.connect(mud); mud.connect(pres); pres.connect(ess); ess.connect(air);
+    var mix = ctx.createGain(); air.connect(mix);
+    // בס סינתטי (Big Bottom): מהתדרים הנמוכים יוצרים הרמוניות של חזה עמוק
+    var bLp = bq(ctx, 'lowpass', 180, undefined, 0.7), bSh = shaper(ctx, 3.5), bLp2 = bq(ctx, 'lowpass', 260, undefined, 0.7), bG = ctx.createGain();
+    bG.gain.value = 0.32;
+    sh.connect(bLp); bLp.connect(bSh); bSh.connect(bLp2); bLp2.connect(bG); bG.connect(mix);
+    // Exciter: הרמוניות גבוהות - ברק ונוכחות של מיקרופון אולפן
+    var eHp = bq(ctx, 'highpass', 2800, undefined, 0.7), eSh = shaper(ctx, 4), eHp2 = bq(ctx, 'highpass', 3500, undefined, 0.7), eG = ctx.createGain();
+    eG.gain.value = 0.14;
+    sh.connect(eHp); eHp.connect(eSh); eSh.connect(eHp2); eHp2.connect(eG); eG.connect(mix);
+    // דחיסת רדיו בשני שלבים + מגביל
+    var c1 = ctx.createDynamicsCompressor(); c1.threshold.value = -30; c1.knee.value = 10; c1.ratio.value = 3; c1.attack.value = 0.012; c1.release.value = 0.22;
+    var c2 = ctx.createDynamicsCompressor(); c2.threshold.value = -14; c2.knee.value = 4; c2.ratio.value = 8; c2.attack.value = 0.002; c2.release.value = 0.08;
+    var mk = ctx.createGain(); mk.gain.value = 2.4;
+    var lim = ctx.createDynamicsCompressor(); lim.threshold.value = -3; lim.knee.value = 0; lim.ratio.value = 20; lim.attack.value = 0.001; lim.release.value = 0.05;
+    mix.connect(c1); c1.connect(c2); c2.connect(mk); mk.connect(lim);
+    return lim;
+  }
+
   function buildChain(ctx, src, p) {
     if (p.none) { var pass = ctx.createGain(); src.connect(pass); return pass; }
+    if (p.broadcast) return broadcastChain(ctx, src, p);
     var hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 85; hp.Q.value = 0.7;
     var sh = new AudioWorkletNode(ctx, 'vfx-shift', { outputChannelCount: [1] });
     sh.parameters.get('ratio').value = p.live ? p.pitch : 1; sh.parameters.get('gate').value = p.gate;
@@ -229,13 +269,13 @@
 
   function mount(root, opts) {
     opts = opts || {};
-    var preset = 'man_mid';
+    var preset = 'broadcaster';
     try {
-      preset = localStorage.getItem(STORE) || 'man_mid';
+      preset = localStorage.getItem(STORE) || 'broadcaster';
       var cu = JSON.parse(localStorage.getItem(STORE_CUSTOM) || 'null');
-      if (cu && cu.pitch && cu.formant) { PRESETS.custom.pitch = cu.pitch; PRESETS.custom.formant = cu.formant; }
+      if (cu && cu.pitch && cu.formant) { PRESETS.custom.pitch = cu.pitch; PRESETS.custom.formant = cu.formant; if (cu.broadcast !== undefined) PRESETS.custom.broadcast = cu.broadcast; }
     } catch (e) {}
-    if (!PRESETS[preset]) preset = 'man_mid';
+    if (!PRESETS[preset]) preset = 'broadcaster';
     root.innerHTML =
       '<div class="vfx" style="display:flex;flex-direction:column;gap:10px">' +
       '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">' +
@@ -279,10 +319,11 @@
     }
     function liveP() { var p = PRESETS[sel.value], o = {}; for (var k in p) o[k] = p[k]; o.live = true; return o; }
     function onTune() {
+      if (sel.value !== 'custom') PRESETS.custom.broadcast = !!PRESETS[sel.value].broadcast;
       PRESETS.custom.pitch = Math.pow(2, parseFloat(pitchEl.value) / 12);
       PRESETS.custom.formant = 1 / parseFloat(formEl.value);
       sel.value = 'custom';
-      try { localStorage.setItem(STORE, 'custom'); localStorage.setItem(STORE_CUSTOM, JSON.stringify({ pitch: PRESETS.custom.pitch, formant: PRESETS.custom.formant })); } catch (e) {}
+      try { localStorage.setItem(STORE, 'custom'); localStorage.setItem(STORE_CUSTOM, JSON.stringify({ pitch: PRESETS.custom.pitch, formant: PRESETS.custom.formant, broadcast: PRESETS.custom.broadcast })); } catch (e) {}
       showTune();
       if (live && live.out) { try { live.out.disconnect(); } catch (e) {} live.out = buildChain(live.ctx, live.src, liveP()); if ($('.vfx-monitor').checked) live.out.connect(live.ctx.destination); }
       clearTimeout(debounce); debounce = setTimeout(process, 450);
