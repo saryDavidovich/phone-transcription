@@ -248,16 +248,25 @@
   {% endif %}
 })();
 </script>
-<script src="/static/js/voicefx.js?v=2"></script>
+<script src="/static/js/voicefx.js?v=3"></script>
 <script>
 (function () {
   var box = document.getElementById('nrVfx'); if (!box || !window.VoiceFX) return;
   var f = document.getElementById('nrRecForm');
-  VoiceFX.mount(box, { onFile: function (file) {
-    var dt = new DataTransfer(); if (file) dt.items.add(file);
-    f.querySelector('input[name=audio_file]').files = dt.files;
-    document.getElementById('nrRecSubmit').disabled = !file;
-  } });
+  VoiceFX.mount(box, {
+    onFile: function (file) {
+      var dt = new DataTransfer(); if (file) dt.items.add(file);
+      f.querySelector('input[name=audio_file]').files = dt.files;
+      document.getElementById('nrRecSubmit').disabled = !file;
+    },
+    narrator: { url: '{{ url_for("admin.narrator_transcribe") }}', onText: function (text) {   // -> טופס "הקראה בקול הקריין"
+      var ta = document.querySelector('form[action="{{ url_for("admin.narrator_generate") }}"] textarea[name=text]');
+      ta.value = text;
+      ta.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      ta.style.boxShadow = '0 0 0 3px #22c55e'; setTimeout(function () { ta.style.boxShadow = ''; }, 2500);
+      ta.focus();
+    } }
+  });
 })();
 </script>
 {% endblock %}

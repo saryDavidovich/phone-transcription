@@ -209,3 +209,25 @@ def upload(num, wav_bytes):
         raise RuntimeError(f'ימות דחו את ההעלאה ({r.status_code}): {body}')
     log.info(f'narrator: הועלה {path} ({len(wav_bytes)} בתים)')
     return path
+
+
+def transcribe_for_narrator(audio_bytes, mime='audio/wav'):
+    """הקלטה של המנהל -> הנוסח המדויק שנאמר (Gemini), כדי שהקריין יקריא אותו בקול שלו."""
+    from google import genai
+    from google.genai import types
+    if not audio_bytes:
+        raise ValueError('לא התקבלה הקלטה')
+    if len(audio_bytes) > 20 * 1024 * 1024:
+        raise ValueError('ההקלטה ארוכה מדי')
+    client = genai.Client(api_key=os.environ.get('GOOGLE_API_KEY'))
+    res = client.models.generate_content(
+        model='gemini-3.5-flash',
+        contents=['תמלל בעברית את מה שנאמר בהקלטה, מילה במילה, עם סימני פיסוק נכונים (פסיקים ונקודות) '
+                  'כדי שקריין יוכל להקריא את זה בטבעיות. בלי היסוסים ("אֶה", "אמ"), בלי חזרות ובלי הערות. '
+                  'מספרי טלפון ומספרים - בספרות. החזר רק את הטקסט.',
+                  types.Part.from_bytes(data=audio_bytes, mime_type=mime)],
+        config=types.GenerateContentConfig(thinking_config=types.ThinkingConfig(thinking_budget=0), temperature=0))
+    text = (res.text or '').strip().strip('"')
+    if not text:
+        raise RuntimeError('לא זוהה דיבור בהקלטה')
+    return text

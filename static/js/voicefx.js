@@ -258,6 +258,10 @@
         '<button type="button" class="btn btn-ghost vfx-orig" style="font-size:12px">▶ המקורי להשוואה</button>' +
         '<span class="vfx-status" style="font-size:12px;color:#8892b0"></span>' +
       '</div>' +
+      (opts.narrator ? '<div class="vfx-nr" style="display:none;gap:10px;align-items:center;flex-wrap:wrap;padding:10px 12px;border:1px dashed rgba(127,127,127,.4);border-radius:10px">' +
+        '<button type="button" class="btn btn-primary vfx-nr-btn">🗣️ להפוך לקול הקריין</button>' +
+        '<span style="font-size:12px;color:#8892b0">קול אחר לגמרי, בלי שום קשר לקול שלך: המערכת מתמללת מה אמרת, והקריין המקצועי מקריא את זה.</span>' +
+        '<span class="vfx-nr-status" style="font-size:12px"></span></div>' : '') +
       '</div>';
     var $ = function (s) { return root.querySelector(s); };
     var sel = $('.vfx-preset'), btn = $('.vfx-rec'), timeEl = $('.vfx-time'), meter = $('.vfx-meter'), bar = meter.firstChild;
@@ -284,6 +288,22 @@
       clearTimeout(debounce); debounce = setTimeout(process, 450);
     }
     pitchEl.addEventListener('input', onTune); formEl.addEventListener('input', onTune);
+    if (opts.narrator) {
+      $('.vfx-nr-btn').addEventListener('click', function () {
+        if (!raw) return;
+        var b = this, st = $('.vfx-nr-status');
+        b.disabled = true; st.style.color = '#8892b0'; st.textContent = 'מתמלל את מה שאמרת...';
+        render(raw, PRESETS.none).then(function (buf) {
+          var fd = new FormData(); fd.append('audio', toWav(buf), 'recording.wav');
+          return fetch(opts.narrator.url, { method: 'POST', body: fd }).then(function (r) { return r.json(); });
+        }).then(function (d) {
+          b.disabled = false;
+          if (!d.ok) { st.style.color = '#ef4444'; st.textContent = '⚠ ' + (d.error || 'התמלול נכשל'); return; }
+          st.style.color = '#22c55e'; st.textContent = '✔ הנוסח הועבר לקריין - בדוק אותו ולחץ להפקה';
+          opts.narrator.onText(d.text);
+        }).catch(function (e) { b.disabled = false; st.style.color = '#ef4444'; st.textContent = '⚠ ' + e.message; });
+      });
+    }
     showTune();
 
     function process() {
@@ -296,6 +316,7 @@
         if (pl.src) URL.revokeObjectURL(pl.src);
         pl.src = URL.createObjectURL(wav);
         $('.vfx-result').style.display = 'flex';
+        if (opts.narrator) $('.vfx-nr').style.display = 'flex';
         $('.vfx-status').textContent = '✔ מוכן (' + p.label + ', ' + fmt(raw.duration) + ') - אפשר להחליף קול למעלה ולהשוות';
         if (opts.onFile) opts.onFile(new File([wav], 'recording.wav', { type: 'audio/wav' }));
       }).catch(function (e) {

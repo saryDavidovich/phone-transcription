@@ -2339,6 +2339,20 @@ def narrator_generate():
     return redirect(url_for('admin.narrator', clip=clip.id))
 
 
+@admin_bp.route('/narrator/transcribe', methods=['POST'])
+@login_required
+def narrator_transcribe():
+    """מחליף קול "קריין אמיתי": ההקלטה של המנהל -> טקסט, שהקריין יקריא (בדף הקריין / בהודעה ללקוח)."""
+    from services import narrator as N
+    f = request.files.get('audio')
+    try:
+        text = N.transcribe_for_narrator(f.read() if f else b'', (f.mimetype if f else '') or 'audio/wav')
+    except Exception as e:
+        logging.getLogger(__name__).warning(f'narrator transcribe: {e}')
+        return jsonify({'ok': False, 'error': str(e)[:200]})
+    return jsonify({'ok': True, 'text': text})
+
+
 @admin_bp.route('/narrator/upload-file', methods=['POST'])
 @login_required
 def narrator_upload_file():
