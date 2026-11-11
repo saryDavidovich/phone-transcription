@@ -28,8 +28,11 @@
 </div>
 
 <details class="card" style="margin-bottom:20px;padding:12px 18px">
-  <summary style="cursor:pointer;font-weight:700">🔒 קול יציב - אותו קול בדיוק בכל הפקה (הפעלה חד-פעמית)</summary>
+  <summary style="cursor:pointer;font-weight:700">🔒 קול קבוע - אותו קול ואותה מנגינה בכל הפקה (הפעלה חד-פעמית)</summary>
   <div style="font-size:13px;line-height:1.9;margin-top:8px">
+    <b>שני סוגי קולות:</b> "🔒 קבוע לחלוטין" (WaveNet של גוגל) - אותו טקסט יוצא תמיד אותו שמע בדיוק, וכל ההודעות באותה מנגינה.
+    זה הסטנדרט של מערכות טלפוניות - מומלץ, כדי שהלקוח ישמע קריין אחד. "✨ טבעי יותר" (Chirp / Gemini) - נשמע אנושי יותר,
+    אבל הקול והמנגינה משתנים מעט בין הפקות. הקול שנבחר משמש גם להודעות קוליות ללקוחות.<br>
     הקריין משתמש קודם בשירות Chirp 3 HD של גוגל - אותם קולות (כולל יאפטוס), אבל הקול זהה בכל הפקה.
     כל עוד השירות לא מופעל, ההקראה נעשית ב-Gemini, שהקול שלו משתנה מעט בין הפקות.<br>
     <b>להפעלה:</b> 1. להיכנס ל-<b>console.cloud.google.com</b> עם החשבון שבו נוצר מפתח ה-Gemini, ולבחור למעלה את הפרויקט שלו.
@@ -47,8 +50,13 @@
       <textarea class="form-input" name="text" rows="5" style="width:100%" placeholder="הנוסח שהקריין יקריא. אפשר להוסיף ניקוד למילה שמוקראת לא נכון.">{{ sel.text if sel and sel.source == 'tts' else '' }}</textarea>
       <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-top:10px">
         <div><label class="form-label">קול (נשמר - תמיד אותו קול)</label>
-          <select class="form-input" name="voice" style="width:230px">
-            {% for k, v in voices.items() %}<option value="{{ k }}" {% if k == voice %}selected{% endif %}>{{ v }}</option>{% endfor %}
+          <select class="form-input" name="voice" style="width:260px">
+            {% if fixed_voices %}<optgroup label="🔒 קבוע לחלוטין - אותו קול ומנגינה בכל פעם (מומלץ)">
+              {% for k, v in fixed_voices.items() %}<option value="{{ k }}" {% if k == voice %}selected{% endif %}>{{ v }}</option>{% endfor %}
+            </optgroup>{% endif %}
+            <optgroup label="✨ טבעי יותר - הקול והמנגינה משתנים מעט בין הפקות">
+              {% for k, v in voices.items() %}<option value="{{ k }}" {% if k == voice %}selected{% endif %}>{{ v }}</option>{% endfor %}
+            </optgroup>
           </select></div>
         <div><label class="form-label">קצב</label>
           <select class="form-input" name="speed" style="width:130px">

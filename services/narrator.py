@@ -41,9 +41,46 @@ def _setting(key, default=''):
     return s.value if s and s.value else default
 
 
+# קולות "קבועים לחלוטין" של Google (WaveNet / Neural2 / Standard): לא גנרטיביים - אותו טקסט = אותו שמע בדיוק,
+# ואותה מנגינה בכל ההודעות. פחות "אנושיים" מ-Chirp, אבל זה הסטנדרט של מערכות טלפוניות.
+_FIXED_CACHE = {'at': 0, 'voices': None}
+_TYPE_HE = {'Wavenet': 'WaveNet', 'Neural2': 'Neural2', 'Standard': 'רגיל'}
+
+
+def fixed_voices():
+    """{'he-IL-Wavenet-B': 'גבר · WaveNet B', ...} - מהרשימה של גוגל (נשמרת 6 שעות בזיכרון)."""
+    import time
+    if _FIXED_CACHE['voices'] is not None and time.time() - _FIXED_CACHE['at'] < 6 * 3600:
+        return _FIXED_CACHE['voices']
+    out = {}
+    try:
+        key = os.environ.get('GOOGLE_TTS_API_KEY') or os.environ.get('GOOGLE_API_KEY')
+        r = requests.get('https://texttospeech.googleapis.com/v1/voices', params={'languageCode': 'he-IL', 'key': key}, timeout=15)
+        for v in (r.json().get('voices') or []) if r.status_code == 200 else []:
+            name = v.get('name', '')
+            parts = name.split('-')                       # he-IL-Wavenet-B
+            if len(parts) == 4 and parts[2] in _TYPE_HE:
+                g = {'MALE': 'גבר', 'FEMALE': 'אישה'}.get(v.get('ssmlGender'), '')
+                out[name] = f'{g} · {_TYPE_HE[parts[2]]} {parts[3]}'.strip(' ·')
+    except Exception as e:
+        log.warning(f'narrator: רשימת הקולות הקבועים נכשלה: {e}')
+    order = {'Wavenet': 0, 'Neural2': 1, 'Standard': 2}
+    out = dict(sorted(out.items(), key=lambda kv: (order.get(kv[0].split('-')[2], 9), kv[0])))
+    _FIXED_CACHE.update(at=time.time() if out else 0, voices=out)
+    return out
+
+
+def is_fixed(voice):
+    return bool(voice) and voice.startswith('he-IL-')
+
+
+def voice_label(voice):
+    return VOICES.get(voice) or fixed_voices().get(voice) or voice
+
+
 def current_voice():
     v = _setting('narrator_voice', 'Charon')
-    return v if v in VOICES else 'Charon'
+    return v if (v in VOICES or is_fixed(v)) else 'Charon'
 
 
 SPEEDS = {'1.0': 'רגיל', '1.1': 'מהיר', '1.2': 'מהיר מאוד'}
@@ -60,8 +97,13 @@ def synthesize(text, voice=None, speed=None):
     text = (text or '').strip()
     if not text:
         raise ValueError('יש לכתוב נוסח להקראה')
-    voice = voice if voice in VOICES else current_voice()
+    voice = voice if (voice in VOICES or is_fixed(voice)) else current_voice()
     speed = speed if speed in SPEEDS else current_speed()
+    if is_fixed(voice):                       # קול קבוע לחלוטין - בלי גיבוי לקול אחר (שלא יישמע שונה)
+        try:
+            return _cloud_tts(text, voice, speed), 'fixed'
+        except Exception as e:
+            raise RuntimeError(f'ההקראה בקול הקבוע נכשלה: {e}. צריך שה-Cloud Text-to-Speech API יהיה מופעל (הסבר בראש הדף).')
     errors = []
     try:
         return _chirp(text, voice, speed), 'chirp'
@@ -78,9 +120,13 @@ def synthesize(text, voice=None, speed=None):
 def _chirp(text, voice, speed):
     """Google Cloud Text-to-Speech, קול Chirp 3 HD בעברית (he-IL-Chirp3-HD-<קול>).
     קול יציב - אותו קול בכל הפקה. דורש להפעיל פעם אחת את Cloud Text-to-Speech API בפרויקט של המפתח."""
+    return _cloud_tts(text, f'he-IL-Chirp3-HD-{voice}', speed)
+
+
+def _cloud_tts(text, name, speed):
     key = os.environ.get('GOOGLE_TTS_API_KEY') or os.environ.get('GOOGLE_API_KEY')
     body = {'input': {'text': text},
-            'voice': {'languageCode': 'he-IL', 'name': f'he-IL-Chirp3-HD-{voice}'},
+            'voice': {'languageCode': 'he-IL', 'name': name},
             'audioConfig': {'audioEncoding': 'LINEAR16', 'sampleRateHertz': 24000, 'speakingRate': float(speed)}}
     r = requests.post('https://texttospeech.googleapis.com/v1/text:synthesize', params={'key': key}, json=body, timeout=60)
     if r.status_code == 400 and 'speakingRate' in r.text:          # אם הקול לא תומך בשינוי מהירות
@@ -95,7 +141,7 @@ def _chirp(text, voice, speed):
     audio = base64.b64decode(r.json().get('audioContent') or b'')
     if not audio:
         raise RuntimeError('לא התקבל שמע')
-    log.info(f'narrator: הופקה הקראה (Chirp 3 HD, {voice}, מהירות {speed})')
+    log.info(f'narrator: הופקה הקראה ({name}, מהירות {speed})')
     return audio
 
 

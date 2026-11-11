@@ -2296,7 +2296,8 @@ def narrator():
     catalog = SystemMessage.query.order_by(SystemMessage.num).all()
     return render_template('admin/narrator.html', clips=clips, sel=sel, sel_b64=sel_b64,
                            catalog=catalog, kind_labels=MC.KIND_LABELS,
-                           voices=N.VOICES, voice=N.current_voice(), speeds=N.SPEEDS, speed=N.current_speed(),
+                           voices=N.VOICES, fixed_voices=N.fixed_voices(), voice=N.current_voice(),
+                           speeds=N.SPEEDS, speed=N.current_speed(),
                            num=request.args.get('num') or (f'{sel.msg_num:03d}' if sel else ''))
 
 
@@ -2316,7 +2317,7 @@ def narrator_generate():
     if num is None:
         flash('⚠ יש להקליד מספר הודעה (1-999), למשל 083')
         return redirect(url_for('admin.narrator'))
-    if voice != N.current_voice() and voice in N.VOICES:
+    if voice != N.current_voice() and (voice in N.VOICES or N.is_fixed(voice)):
         set_setting('narrator_voice', voice)          # הקול שנבחר נשמר - מעכשיו תמיד הוא
     speed = request.form.get('speed') if request.form.get('speed') in N.SPEEDS else N.current_speed()
     if speed != N.current_speed():
@@ -2327,12 +2328,13 @@ def narrator_generate():
     except Exception as e:
         flash(f'⚠ {e}')
         return redirect(url_for('admin.narrator', num=f'{num:03d}'))
-    clip = NarratorClip(msg_num=num, text=text, voice=f'{voice} ({"קול יציב" if engine == "chirp" else "Gemini"})',
+    clip = NarratorClip(msg_num=num, text=text,
+                        voice=(f'{N.voice_label(voice)} (קבוע)' if engine == 'fixed' else f'{voice} ({"קול יציב" if engine == "chirp" else "Gemini"})'),
                         source='tts', audio=wav, duration=secs)
     db.session.add(clip)
     db.session.commit()
-    if engine == 'chirp':
-        flash(f'✔ ההקראה מוכנה ({secs} שניות, קול יציב) - האזן, ואם טוב: "העלה לימות"')
+    if engine in ('chirp', 'fixed'):
+        flash(f'✔ ההקראה מוכנה ({secs} שניות{", קול קבוע" if engine == "fixed" else ", קול יציב"}) - האזן, ואם טוב: "העלה לימות"')
     else:
         flash(f'✔ ההקראה מוכנה ({secs} שניות) - הופקה ב-Gemini, שהקול שלו משתנה מעט בין הפקות. '
               'לקול זהה בכל פעם יש להפעיל את Cloud Text-to-Speech API בחשבון גוגל (הסבר בראש הדף)')
