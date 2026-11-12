@@ -139,6 +139,101 @@
     return { f0: out, hop: hopD * dec };
   }
 
+  // ---------------------------------------------------------------------------
+  // STFT: הפחתת רעשים + איזון צלילי אוטומטי לעקומת "שדרן בטלפון"
+  // ---------------------------------------------------------------------------
+  function fft(re, im) {                    // radix-2, במקום
+    var n = re.length, i, j = 0, k, len, t;
+    for (i = 1; i < n; i++) { var bit = n >> 1; for (; j & bit; bit >>= 1) j ^= bit; j ^= bit; if (i < j) { t = re[i]; re[i] = re[j]; re[j] = t; t = im[i]; im[i] = im[j]; im[j] = t; } }
+    for (len = 2; len <= n; len <<= 1) {
+      var ang = -2 * Math.PI / len, wr = Math.cos(ang), wi = Math.sin(ang);
+      for (i = 0; i < n; i += len) {
+        var cr = 1, ci = 0;
+        for (k = 0; k < len / 2; k++) {
+          var a = i + k, b = a + len / 2, xr = re[b] * cr - im[b] * ci, xi = re[b] * ci + im[b] * cr;
+          re[b] = re[a] - xr; im[b] = im[a] - xi; re[a] += xr; im[a] += xi;
+          t = cr * wr - ci * wi; ci = cr * wi + ci * wr; cr = t;
+        }
+      }
+    }
+  }
+  // עקומת היעד (dB, יחסי) - קול שדרן שנשמע ברור ומלא דווקא בקו טלפון
+  var TARGET = [[60, -24], [100, -10], [160, -3], [250, -1], [400, -2], [700, -4], [1000, -5], [1600, -6],
+                [2500, -7.5], [3200, -9], [4200, -13], [6000, -18], [9000, -24], [12000, -30]];
+  function targetDb(f) {
+    if (f <= TARGET[0][0]) return TARGET[0][1];
+    for (var i = 1; i < TARGET.length; i++) if (f <= TARGET[i][0]) {
+      var a = TARGET[i - 1], b = TARGET[i], t = Math.log(f / a[0]) / Math.log(b[0] / a[0]);
+      return a[1] + (b[1] - a[1]) * t;
+    }
+    return TARGET[TARGET.length - 1][1];
+  }
+  function spectralClean(x, sr, opt) {      // opt: { nr: עוצמת הפחתת רעש 0..1, match: איזון לעקומה }
+    var Nf = 1024, H = 256, N = x.length, K = Nf / 2 + 1, frames = Math.ceil((N + Nf) / H);
+    var win = new Float32Array(Nf); for (var i = 0; i < Nf; i++) win[i] = Math.sqrt(0.5 - 0.5 * Math.cos(2 * Math.PI * i / Nf));
+    var mags = [], energies = new Float32Array(frames), re = new Float64Array(Nf), im = new Float64Array(Nf), specs = [];
+    for (var f = 0; f < frames; f++) {
+      var st = f * H - Nf;
+      for (i = 0; i < Nf; i++) { var v = x[st + i]; re[i] = (v || 0) * win[i]; im[i] = 0; }
+      fft(re, im);
+      var m = new Float32Array(K), sre = new Float32Array(K), sim = new Float32Array(K), e = 0;
+      for (var k = 0; k < K; k++) { sre[k] = re[k]; sim[k] = im[k]; m[k] = Math.sqrt(re[k] * re[k] + im[k] * im[k]); e += m[k] * m[k]; }
+      mags.push(m); specs.push([sre, sim]); energies[f] = e;
+    }
+    var order = Array.prototype.slice.call(energies).map(function (e, i) { return [e, i]; }).sort(function (a, b) { return a[0] - b[0]; });
+    var maxE = order[order.length - 1][0] || 1;
+    // פרופיל רעש: 15% מהחלונות השקטים ביותר (שאינם שקט מוחלט)
+    var noise = new Float32Array(K), cnt = 0;
+    for (var q = 0; q < order.length && cnt < Math.max(3, frames * 0.15); q++) {
+      if (order[q][0] < maxE * 1e-9) continue;
+      var mm = mags[order[q][1]]; for (k = 0; k < K; k++) noise[k] += mm[k]; cnt++;
+    }
+    for (k = 0; k < K; k++) noise[k] = cnt ? noise[k] / cnt : 0;
+    // איזון צלילי: ספקטרום ממוצע של חלונות הדיבור -> תיקון לעקומת היעד (עד ±10dB, מוחלק)
+    var eq = new Float32Array(K); for (k = 0; k < K; k++) eq[k] = 1;
+    if (opt.match) {
+      var lt = new Float64Array(K), nsp = 0;
+      for (f = 0; f < frames; f++) if (energies[f] > maxE * 0.02) { for (k = 0; k < K; k++) lt[k] += mags[f][k] * mags[f][k]; nsp++; }
+      if (nsp > 5) {
+        var corr = new Float32Array(K), ref = 0, nref = 0;
+        for (k = 1; k < K; k++) {
+          var fk = k * sr / Nf, lo = Math.max(1, Math.floor(k / 1.12)), hi = Math.min(K - 1, Math.ceil(k * 1.12)), acc = 0;
+          for (var j = lo; j <= hi; j++) acc += lt[j];
+          var meas = 10 * Math.log10(acc / (hi - lo + 1) / nsp + 1e-12);
+          corr[k] = targetDb(fk) - meas;
+          if (fk >= 300 && fk <= 3000) { ref += corr[k]; nref++; }
+        }
+        ref = nref ? ref / nref : 0;
+        for (k = 1; k < K; k++) { var c = corr[k] - ref; if (c > 10) c = 10; if (c < -14) c = -14; eq[k] = Math.pow(10, c / 20); }
+        eq[0] = eq[1];
+      }
+    }
+    // סינתזה: מסכת הפחתת רעש (מוחלקת בזמן) * איזון
+    var out = new Float32Array(N + Nf), gPrev = new Float32Array(K), strength = opt.nr || 0;
+    for (k = 0; k < K; k++) gPrev[k] = 1;
+    for (f = 0; f < frames; f++) {
+      var sp2 = specs[f], mg = mags[f];
+      for (k = 0; k < K; k++) {
+        var g = 1;
+        if (strength > 0 && mg[k] > 0) { g = 1 - strength * 1.6 * noise[k] / mg[k]; if (g < 0.1) g = 0.1; }
+        g = g > gPrev[k] ? 0.6 * g + 0.4 * gPrev[k] : 0.25 * g + 0.75 * gPrev[k];
+        gPrev[k] = g;
+        var tg = g * eq[k];
+        re[k] = sp2[0][k] * tg; im[k] = sp2[1][k] * tg;
+        if (k > 0 && k < Nf / 2) { re[Nf - k] = re[k]; im[Nf - k] = -im[k]; }
+      }
+      for (k = 0; k < Nf; k++) im[k] = -im[k];
+      fft(re, im);
+      st = f * H - Nf;
+      for (i = 0; i < Nf; i++) { var o = st + i; if (o >= 0 && o < N) out[o] += re[i] / Nf * win[i]; }
+    }
+    // חלונות sqrt-Hann עם חפיפה של 75% - נרמול קבוע
+    var y = new Float32Array(N), sc, wsum = 0; for (i = 0; i < H; i++) { var a2 = 0; for (var r2 = i; r2 < Nf; r2 += H) a2 += win[r2] * win[r2]; wsum += a2; }
+    sc = H / wsum;
+    for (i = 0; i < N; i++) y[i] = out[i] * sc;
+    return y;
+  }
+
   // WSOLA: מתיחת זמן בלי לשנות גובה (חלונות 40 מ"ש שמותאמים זה לזה לפי דמיון מרבי - בלי "רובוטיות")
   function wsola(x, sr, alpha) {          // אורך הפלט = אורך הקלט * alpha
     if (Math.abs(alpha - 1) < 1e-3) return x;
@@ -288,17 +383,17 @@
     sh.parameters.get('ratio').value = p.live ? (p.liveRatio || p.pitch) : 1; sh.parameters.get('gate').value = 0.014;
     src.connect(hp); hp.connect(sh);
     // הקול הישיר: חזה, בלי "בוץ", נוכחות, בלי ס/ש חדים, אוויר
-    var chest = bq(ctx, 'lowshelf', 120, 6), mud = bq(ctx, 'peaking', 320, -4, 1.2), pres = bq(ctx, 'peaking', 3300, 4, 0.9);
+    var chest = bq(ctx, 'lowshelf', 140, 3), mud = bq(ctx, 'peaking', 320, -2.5, 1.2), pres = bq(ctx, 'peaking', 2600, 3, 0.9);
     var ess = bq(ctx, 'peaking', 6800, -5, 2.5), air = bq(ctx, 'highshelf', 10000, 3);
     sh.connect(chest); chest.connect(mud); mud.connect(pres); pres.connect(ess); ess.connect(air);
     var mix = ctx.createGain(); air.connect(mix);
     // בס סינתטי (Big Bottom): מהתדרים הנמוכים יוצרים הרמוניות של חזה עמוק
     var bLp = bq(ctx, 'lowpass', 180, undefined, 0.7), bSh = shaper(ctx, 3.5), bLp2 = bq(ctx, 'lowpass', 260, undefined, 0.7), bG = ctx.createGain();
-    bG.gain.value = 0.32;
+    bG.gain.value = 0.16;
     sh.connect(bLp); bLp.connect(bSh); bSh.connect(bLp2); bLp2.connect(bG); bG.connect(mix);
     // Exciter: הרמוניות גבוהות - ברק ונוכחות של מיקרופון אולפן
     var eHp = bq(ctx, 'highpass', 2800, undefined, 0.7), eSh = shaper(ctx, 4), eHp2 = bq(ctx, 'highpass', 3500, undefined, 0.7), eG = ctx.createGain();
-    eG.gain.value = 0.14;
+    eG.gain.value = 0.10;
     sh.connect(eHp); eHp.connect(eSh); eSh.connect(eHp2); eHp2.connect(eG); eG.connect(mix);
     // דחיסת רדיו בשני שלבים + מגביל
     var c1 = ctx.createDynamicsCompressor(); c1.threshold.value = -30; c1.knee.value = 10; c1.ratio.value = 3; c1.attack.value = 0.012; c1.release.value = 0.22;
@@ -335,9 +430,12 @@
     s1.buffer = raw; s1.connect(c1.destination); s1.start();
     return c1.startRendering().then(function (mono) {
       var src = mono;
-      if (!p.none && (p.pitch !== 1 || p.formant !== 1 || p.targetF0 || p.tempo !== 1)) {
-        var y = vocoder(mono.getChannelData(0), rate, p.pitch, p.formant,
-                        { targetF0: p.targetF0 || 0, tempo: p.tempo || 1 });
+      if (!p.none) {
+        var y = mono.getChannelData(0);
+        y = spectralClean(y, rate, { nr: 0.8, match: false });                    // 1. הפחתת רעשים
+        if (p.pitch !== 1 || p.formant !== 1 || p.targetF0 || p.tempo !== 1)        // 2. גובה / גרון / קצב
+          y = vocoder(y, rate, p.pitch, p.formant, { targetF0: p.targetF0 || 0, tempo: p.tempo || 1 });
+        y = spectralClean(y, rate, { nr: 0, match: true });                       // 3. איזון צלילי קבוע
         src = new AudioBuffer({ length: y.length, numberOfChannels: 1, sampleRate: rate });
         len = y.length + rate / 4;
         src.copyToChannel(y, 0);
@@ -402,6 +500,7 @@
       '<div class="vfx-result" style="display:none;gap:10px;align-items:center;flex-wrap:wrap">' +
         '<audio class="vfx-play" controls style="height:34px"></audio>' +
         '<button type="button" class="btn btn-ghost vfx-orig" style="font-size:12px">▶ המקורי להשוואה</button>' +
+        '<button type="button" class="btn btn-ghost vfx-phone" style="font-size:12px" title="איך הלקוח ישמע את זה בשיחת טלפון (קו טלפון מעביר רק 300-3400 הרץ)">📞 כמו בטלפון</button>' +
         '<span class="vfx-status" style="font-size:12px;color:#8892b0"></span>' +
       '</div>' +
       (opts.narrator ? '<div class="vfx-nr" style="display:none;gap:10px;align-items:center;flex-wrap:wrap;padding:10px 12px;border:1px dashed rgba(127,127,127,.4);border-radius:10px">' +
@@ -411,7 +510,7 @@
       '</div>';
     var $ = function (s) { return root.querySelector(s); };
     var sel = $('.vfx-preset'), btn = $('.vfx-rec'), timeEl = $('.vfx-time'), meter = $('.vfx-meter'), bar = meter.firstChild;
-    var raw = null, rawUrl = null, live = null, origAudio = new Audio();
+    var raw = null, rawUrl = null, live = null, origAudio = new Audio(), lastBuf = null, phoneAudio = new Audio();
     var pitchEl = $('.vfx-pitch'), formEl = $('.vfx-formant'), debounce = null;
     function semis(r) { return Math.round(12 * Math.log(r) / Math.LN2 * 2) / 2; }
     var tempoEl = $('.vfx-tempo');
@@ -472,6 +571,7 @@
       $('.vfx-status').textContent = 'מעבד... (הקלטה ארוכה - כמה שניות)';
       $('.vfx-result').style.display = 'flex';
       render(raw, p).then(function (buf) {
+        lastBuf = buf;
         var wav = toWav(buf), pl = $('.vfx-play');
         if (pl.src) URL.revokeObjectURL(pl.src);
         pl.src = URL.createObjectURL(wav);
@@ -499,6 +599,23 @@
       if (!live || !live.out) return;
       try { live.out.disconnect(); } catch (e) {}
       if (this.checked) live.out.connect(live.ctx.destination);
+    });
+    $('.vfx-phone').addEventListener('click', function () {
+      if (!lastBuf) return;
+      var b = this;
+      if (!phoneAudio.paused) { phoneAudio.pause(); b.textContent = '📞 כמו בטלפון'; return; }
+      $('.vfx-play').pause(); origAudio.pause();
+      var ctx = new OfflineAudioContext(1, Math.ceil(lastBuf.duration * 8000), 8000), s = ctx.createBufferSource();
+      s.buffer = lastBuf;
+      var h1 = bq(ctx, 'highpass', 300, undefined, 0.7), h2 = bq(ctx, 'highpass', 300, undefined, 0.7);
+      var l1 = bq(ctx, 'lowpass', 3400, undefined, 0.7), l2 = bq(ctx, 'lowpass', 3400, undefined, 0.7);
+      s.connect(h1); h1.connect(h2); h2.connect(l1); l1.connect(l2); l2.connect(ctx.destination); s.start();
+      ctx.startRendering().then(function (pb) {
+        if (phoneAudio.src) URL.revokeObjectURL(phoneAudio.src);
+        phoneAudio.src = URL.createObjectURL(toWav(pb)); phoneAudio.play();
+        b.textContent = '⏸ עצור';
+        phoneAudio.onended = function () { b.textContent = '📞 כמו בטלפון'; };
+      });
     });
     $('.vfx-orig').addEventListener('click', function () {
       if (!rawUrl) return;
@@ -553,5 +670,5 @@
     });
   }
 
-  window.VoiceFX = { mount: mount, presets: PRESETS, _vocoder: vocoder, _trackF0: trackF0, _wsola: wsola };
+  window.VoiceFX = { mount: mount, presets: PRESETS, _vocoder: vocoder, _trackF0: trackF0, _wsola: wsola, _clean: spectralClean };
 })();
