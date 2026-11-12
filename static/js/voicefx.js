@@ -17,19 +17,20 @@
   // pitch = גובה הקול (1 = כמו המקור), formant = גודל הגרון (פחות מ-1 = גרון גדול יותר / קול "גדול")
   var EQ = { low: 4, mud: -3, presence: 3, air: 2, gate: 0.012 };
   var PRESETS = {
-    broadcaster:  { label: '🎙️ שדרן כריזמטי',        pitch: 0.90, formant: 0.84, broadcast: true },
-    broadcaster2: { label: '🎙️ שדרן - עמוק מאוד',     pitch: 0.84, formant: 0.80, broadcast: true },
-    broadcaster3: { label: '🎙️ שדרן - צלול ואנרגטי',  pitch: 0.97, formant: 0.88, broadcast: true },
+    // targetF0 = גובה ממוצע קבוע (הרץ) - כל הקלטה מגיעה לאותו גובה, בלי קשר לגובה שבו דיברתי; tempo = קצב
+    broadcaster:  { label: '🎙️ שדרן כריזמטי',        targetF0: 100, formant: 0.84, tempo: 0.94, broadcast: true },
+    broadcaster2: { label: '🎙️ שדרן - עמוק מאוד',     targetF0: 84,  formant: 0.80, tempo: 0.92, broadcast: true },
+    broadcaster3: { label: '🎙️ שדרן - צלול ואנרגטי',  targetF0: 122, formant: 0.88, tempo: 1.0,  broadcast: true },
     man_deep:  { label: 'גבר אחר - קריין עמוק', pitch: 0.86, formant: 0.86 },
     man_mid:   { label: 'גבר אחר - קריין',      pitch: 0.95, formant: 0.88 },
     man_young: { label: 'גבר אחר - צעיר',       pitch: 1.10, formant: 1.07 },
-    woman:     { label: 'קול אישה',              pitch: 1.70, formant: 1.18 },
+    woman:     { label: 'קול אישה',              targetF0: 205, formant: 1.18, tempo: 1 },
     clean:     { label: 'רק ניקוי ושיפור (הקול שלי)', pitch: 1, formant: 1, low: 2, mud: -2, presence: 2, air: 1.5, gate: 0.010 },
     none:      { label: 'בלי עיבוד (מקורי)',     pitch: 1, formant: 1, none: true },
-    custom:    { label: 'מותאם אישית',            pitch: 0.9, formant: 0.84, broadcast: true }
+    custom:    { label: 'מותאם אישית',            targetF0: 100, formant: 0.84, tempo: 0.94, broadcast: true }
   };
-  Object.keys(PRESETS).forEach(function (k) { var p = PRESETS[k]; for (var e in EQ) if (p[e] === undefined) p[e] = EQ[e]; p.ratio = 1; });
-  var STORE = 'voicefxPreset3', STORE_CUSTOM = 'voicefxCustom';
+  Object.keys(PRESETS).forEach(function (k) { var p = PRESETS[k]; for (var e in EQ) if (p[e] === undefined) p[e] = EQ[e]; p.ratio = 1; if (!p.pitch) p.pitch = 1; if (!p.tempo) p.tempo = 1; });
+  var STORE = 'voicefxPreset4', STORE_CUSTOM = 'voicefxCustom4';
 
   // מעבד הזזת גובה (granular, שני חלונות חופפים) + שער רעשים עדין - רץ בתוך AudioWorklet
   var WORKLET = [
@@ -101,8 +102,108 @@
     return y;
   }
 
-  function vocoder(x, sr, pitch, formant) {
-    if (pitch === 1 && formant === 1) return x;
+  // מעקב גובה (YIN) - כל 5 מ"ש: גובה הקול בהרץ, או 0 כשאין קול (עיצורים / שקט)
+  function trackF0(x, sr) {
+    var dec = Math.max(1, Math.round(sr / 8000)), r = sr / dec, n = Math.floor(x.length / dec), d = new Float32Array(n);
+    for (var i = 0; i < n; i++) { var a = 0; for (var j = 0; j < dec; j++) a += x[i * dec + j]; d[i] = a / dec; }
+    var W = Math.round(r * 0.04), hopD = Math.round(r * 0.005), tMin = Math.floor(r / 420), tMax = Math.ceil(r / 55);
+    var frames = Math.ceil(n / hopD), f0 = new Float32Array(frames), rms = new Float32Array(frames), dd = new Float32Array(tMax + 1), maxR = 0;
+    for (var f = 0; f < frames; f++) {
+      var st = f * hopD - (W >> 1), e = 0;
+      for (i = 0; i < W; i++) { var v = d[st + i] || 0; e += v * v; }
+      rms[f] = Math.sqrt(e / W); if (rms[f] > maxR) maxR = rms[f];
+    }
+    for (f = 0; f < frames; f++) {
+      if (rms[f] < maxR * 0.06) continue;
+      st = f * hopD - (W >> 1);
+      var run = 0, best = -1, bestV = 1;
+      for (var t = 1; t <= tMax; t++) {
+        var acc = 0;
+        for (i = 0; i < W; i++) { var df = (d[st + i] || 0) - (d[st + i + t] || 0); acc += df * df; }
+        run += acc; dd[t] = run > 0 ? acc * t / run : 1;
+      }
+      for (t = tMin; t <= tMax; t++) {
+        if (dd[t] < 0.15) { while (t + 1 <= tMax && dd[t + 1] < dd[t]) t++; best = t; bestV = dd[t]; break; }
+        if (dd[t] < bestV) { bestV = dd[t]; best = t; }
+      }
+      if (best > 0 && bestV < 0.35) f0[f] = r / best;
+    }
+    var out = new Float32Array(frames);                       // חציון 5 - בלי קפיצות אוקטבה
+    for (f = 0; f < frames; f++) {
+      if (!f0[f]) continue;
+      var w = [];
+      for (var k = -2; k <= 2; k++) if (f0[f + k]) w.push(f0[f + k]);
+      w.sort(function (a, b) { return a - b; });
+      out[f] = w[w.length >> 1];
+    }
+    return { f0: out, hop: hopD * dec };
+  }
+
+  // WSOLA: מתיחת זמן בלי לשנות גובה (חלונות 40 מ"ש שמותאמים זה לזה לפי דמיון מרבי - בלי "רובוטיות")
+  function wsola(x, sr, alpha) {          // אורך הפלט = אורך הקלט * alpha
+    if (Math.abs(alpha - 1) < 1e-3) return x;
+    var N = x.length, W = Math.round(sr * 0.04), Hs = W >> 1, Ha = Hs / alpha, tol = Math.round(sr * 0.012);
+    var M = Math.round(N * alpha), y = new Float32Array(M + W), wsum = new Float32Array(M + W), win = new Float32Array(W);
+    for (var i = 0; i < W; i++) win[i] = 0.5 - 0.5 * Math.cos(2 * Math.PI * i / W);
+    var prevEnd = 0;                        // מאיפה ממשיכים טבעית (ההמשך של החלון הקודם)
+    for (var k = 0; k * Hs < M; k++) {
+      var nominal = Math.round(k * Ha), best = nominal;
+      if (k > 0) {
+        var bestC = -Infinity, lo = Math.max(0, nominal - tol), hi = Math.min(N - W, nominal + tol);
+        for (var c = lo; c <= hi; c += 2) {                 // התאמה להמשך הטבעי של החלון הקודם
+          var acc = 0;
+          for (i = 0; i < W; i += 4) acc += x[c + i] * (x[prevEnd + i] || 0);
+          if (acc > bestC) { bestC = acc; best = c; }
+        }
+      }
+      var o = k * Hs;
+      for (i = 0; i < W; i++) { var si = best + i; if (si >= N) break; y[o + i] += x[si] * win[i]; wsum[o + i] += win[i]; }
+      prevEnd = Math.min(N - W, best + Hs);
+      if (prevEnd < 0) prevEnd = 0;
+    }
+    var out = new Float32Array(M);
+    for (i = 0; i < M; i++) out[i] = wsum[i] > 1e-3 ? y[i] / wsum[i] : 0;
+    return out;
+  }
+
+  // דגימה מחדש באיכות גבוהה (sinc עם חלון), לאורך חדש - משנה גובה וגרון יחד
+  function resampleTo(x, M) {
+    var N = x.length, r = N / M, cut = Math.min(1, 1 / r), H = 12, out = new Float32Array(M);
+    for (var n = 0; n < M; n++) {
+      var t = n * r, c = Math.floor(t), acc = 0, ws = 0;
+      for (var j = c - H + 1; j <= c + H; j++) {
+        if (j < 0 || j >= N) continue;
+        var d = t - j, sx = d * cut, s = Math.abs(sx) < 1e-9 ? 1 : Math.sin(Math.PI * sx) / (Math.PI * sx);
+        var w = 0.5 + 0.5 * Math.cos(Math.PI * d / H), k = s * w * cut;
+        acc += x[j] * k; ws += k;
+      }
+      out[n] = ws ? acc / ws : 0;
+    }
+    return out;
+  }
+
+  // גובה מוחלט: היחס הנדרש כדי שהגובה הממוצע של ההקלטה יגיע ליעד (אותו גובה בכל הקלטה)
+  function pitchRatioFor(x, sr, targetF0) {
+    var f0 = trackF0(x, sr).f0, v = [];
+    for (var i = 0; i < f0.length; i++) if (f0[i]) v.push(f0[i]);
+    if (v.length < 10) return 1;
+    v.sort(function (a, b) { return a - b; });
+    var r = targetF0 / v[v.length >> 1];
+    return Math.max(0.5, Math.min(2.2, r));
+  }
+
+  function vocoder(x, sr, pitch, formant, opt) {
+    opt = opt || {};
+    if (opt.targetF0 || (opt.tempo && opt.tempo !== 1)) {
+      // גובה + קצב: מתיחת זמן (WSOLA) ואז דגימה מחדש - הגובה זז, והגרון זז איתו פי r;
+      // אחר כך מתקנים את הגרון לערך המבוקש (formant / r). כל שלב נקי, בלי זיהוי מחזורים.
+      var r = opt.targetF0 ? pitchRatioFor(x, sr, opt.targetF0) : pitch, tp = opt.tempo || 1;
+      var stretched = wsola(x, sr, r / tp);
+      var y1 = resampleTo(stretched, Math.round(x.length / tp));
+      var fc = formant / r;
+      return Math.abs(fc - 1) < 0.005 ? y1 : vocoder(y1, sr, 1, fc);
+    }
+    if (pitch === 1 && formant === 1 && !opt.targetF0 && !(opt.tempo && opt.tempo !== 1)) return x;
     var N = x.length, order = Math.min(30, Math.round(sr / 1000) + 4);
     var hop = Math.round(sr * 0.005), win = Math.round(sr * 0.032), K = 256;
     var pre = new Float32Array(N);                         // הדגשת גבוהים (סטנדרטי ב-LPC)
@@ -145,11 +246,13 @@
       res[n] = f;
       var t = bPrev; bPrev = bA; bA = t;
     }
+    var tempo = opt.tempo || 1, M = N;
     res = granularShift(res, sr, pitch);
+    tempo = 1;
     // הרכבה מחדש עם הגרון החדש (lattice הפוך - יציב גם כשהמקדמים משתנים)
-    var out = new Float32Array(N), b = new Float64Array(order + 1);
-    for (n = 0; n < N; n++) {
-      kk = kS[Math.min(nh - 1, (n / hop) | 0)];
+    var out = new Float32Array(M), b = new Float64Array(order + 1);
+    for (n = 0; n < M; n++) {
+      kk = kS[Math.min(nh - 1, (n * tempo / hop) | 0)];
       f = res[n];
       for (m = order; m >= 1; m--) { f = f - kk[m] * b[m - 1]; b[m] = b[m - 1] + kk[m] * f; }
       b[0] = f;
@@ -157,15 +260,15 @@
     }
     // התאמת עוצמה לאורך הזמן (שהדיבור יישאר באותה עוצמה) + ביטול הדגשת הגבוהים
     var seg = hop * 4, gPrev = 1;
-    for (var s0 = 0; s0 < N; s0 += hop) {
-      var e1 = 1e-9, e2 = 1e-9, a0 = Math.max(0, s0 - seg), a1 = Math.min(N, s0 + hop + seg);
-      for (n = a0; n < a1; n++) { e1 += pre[n] * pre[n]; e2 += out[n] * out[n]; }
+    for (var s0 = 0; s0 < M; s0 += hop) {
+      var e1 = 1e-9, e2 = 1e-9, a0 = Math.max(0, s0 - seg), a1 = Math.min(M, s0 + hop + seg);
+      for (n = a0; n < a1; n++) { var src = Math.min(N - 1, Math.round(n * tempo)); e1 += pre[src] * pre[src]; e2 += out[n] * out[n]; }
       var g = Math.sqrt(e1 / e2); if (g > 8) g = 8; if (g < 0.05) g = 0.05;
-      for (n = s0; n < Math.min(N, s0 + hop); n++) { var tt = (n - s0) / hop; out[n] *= gPrev + (g - gPrev) * tt; }
+      for (n = s0; n < Math.min(M, s0 + hop); n++) { var tt = (n - s0) / hop; out[n] *= gPrev + (g - gPrev) * tt; }
       gPrev = g;
     }
-    var y = new Float32Array(N), prev = 0;
-    for (n = 0; n < N; n++) { prev = out[n] + 0.94 * prev; y[n] = prev; }
+    var y = new Float32Array(M), prev = 0;
+    for (n = 0; n < M; n++) { prev = out[n] + 0.94 * prev; y[n] = prev; }
     return y;
   }
 
@@ -182,7 +285,7 @@
   function broadcastChain(ctx, src, p) {
     var hp = bq(ctx, 'highpass', 70, undefined, 0.7);
     var sh = new AudioWorkletNode(ctx, 'vfx-shift', { outputChannelCount: [1] });
-    sh.parameters.get('ratio').value = p.live ? p.pitch : 1; sh.parameters.get('gate').value = 0.014;
+    sh.parameters.get('ratio').value = p.live ? (p.liveRatio || p.pitch) : 1; sh.parameters.get('gate').value = 0.014;
     src.connect(hp); hp.connect(sh);
     // הקול הישיר: חזה, בלי "בוץ", נוכחות, בלי ס/ש חדים, אוויר
     var chest = bq(ctx, 'lowshelf', 120, 6), mud = bq(ctx, 'peaking', 320, -4, 1.2), pres = bq(ctx, 'peaking', 3300, 4, 0.9);
@@ -211,7 +314,7 @@
     if (p.broadcast) return broadcastChain(ctx, src, p);
     var hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 85; hp.Q.value = 0.7;
     var sh = new AudioWorkletNode(ctx, 'vfx-shift', { outputChannelCount: [1] });
-    sh.parameters.get('ratio').value = p.live ? p.pitch : 1; sh.parameters.get('gate').value = p.gate;
+    sh.parameters.get('ratio').value = p.live ? (p.liveRatio || p.pitch) : 1; sh.parameters.get('gate').value = p.gate;
     var low = ctx.createBiquadFilter(); low.type = 'lowshelf'; low.frequency.value = 160; low.gain.value = p.low;
     var mud = ctx.createBiquadFilter(); mud.type = 'peaking'; mud.frequency.value = 380; mud.Q.value = 1.1; mud.gain.value = p.mud;
     var pres = ctx.createBiquadFilter(); pres.type = 'peaking'; pres.frequency.value = 3200; pres.Q.value = 0.8; pres.gain.value = p.presence;
@@ -232,9 +335,11 @@
     s1.buffer = raw; s1.connect(c1.destination); s1.start();
     return c1.startRendering().then(function (mono) {
       var src = mono;
-      if (!p.none && (p.pitch !== 1 || p.formant !== 1)) {
-        var y = vocoder(mono.getChannelData(0), rate, p.pitch, p.formant);
+      if (!p.none && (p.pitch !== 1 || p.formant !== 1 || p.targetF0 || p.tempo !== 1)) {
+        var y = vocoder(mono.getChannelData(0), rate, p.pitch, p.formant,
+                        { targetF0: p.targetF0 || 0, tempo: p.tempo || 1 });
         src = new AudioBuffer({ length: y.length, numberOfChannels: 1, sampleRate: rate });
+        len = y.length + rate / 4;
         src.copyToChannel(y, 0);
       }
       var ctx = new OfflineAudioContext(1, len, rate);
@@ -273,7 +378,7 @@
     try {
       preset = localStorage.getItem(STORE) || 'broadcaster';
       var cu = JSON.parse(localStorage.getItem(STORE_CUSTOM) || 'null');
-      if (cu && cu.pitch && cu.formant) { PRESETS.custom.pitch = cu.pitch; PRESETS.custom.formant = cu.formant; if (cu.broadcast !== undefined) PRESETS.custom.broadcast = cu.broadcast; }
+      if (cu && cu.formant) { for (var ck in cu) if (cu[ck] !== undefined && cu[ck] !== null) PRESETS.custom[ck] = cu[ck]; }
     } catch (e) {}
     if (!PRESETS[preset]) preset = 'broadcaster';
     root.innerHTML =
@@ -287,6 +392,7 @@
       '<div class="vfx-tune" style="display:flex;gap:18px;flex-wrap:wrap;font-size:12px;color:#8892b0">' +
         '<label style="display:flex;align-items:center;gap:6px">גובה הקול <input type="range" dir="ltr" class="vfx-pitch" min="-8" max="10" step="0.5" style="width:120px"> <b class="vfx-pitch-v" style="min-width:52px"></b></label>' +
         '<label style="display:flex;align-items:center;gap:6px" title="הכי חשוב כדי שלא יזהו: גרון גדול יותר = נשמע כמו אדם אחר, גדול יותר">גודל הגרון <input type="range" dir="ltr" class="vfx-formant" min="0.77" max="1.33" step="0.01" style="width:120px"> <b class="vfx-formant-v" style="min-width:64px"></b></label>' +
+        '<label style="display:flex;align-items:center;gap:6px" title="קצב הדיבור - שדרנים מדברים מעט לאט ומדוד">קצב <input type="range" dir="ltr" class="vfx-tempo" min="0.82" max="1.12" step="0.01" style="width:100px"> <b class="vfx-tempo-v" style="min-width:52px"></b></label>' +
       '</div>' +
       '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">' +
         '<button type="button" class="btn btn-danger vfx-rec">⏺ התחל הקלטה</button>' +
@@ -308,27 +414,40 @@
     var raw = null, rawUrl = null, live = null, origAudio = new Audio();
     var pitchEl = $('.vfx-pitch'), formEl = $('.vfx-formant'), debounce = null;
     function semis(r) { return Math.round(12 * Math.log(r) / Math.LN2 * 2) / 2; }
+    var tempoEl = $('.vfx-tempo');
     function showTune() {
       var p = PRESETS[sel.value], dis = !!p.none;
-      pitchEl.value = semis(p.pitch); formEl.value = (1 / p.formant).toFixed(2);   // גודל הגרון = 1 / הזזת הפורמנטים
-      pitchEl.disabled = formEl.disabled = dis;
-      var st = semis(p.pitch);
-      $('.vfx-pitch-v').textContent = st === 0 ? 'כמו שלי' : (st > 0 ? '+' : '') + st + ' טון';
+      if (p.targetF0) {          // גובה מוחלט (הרץ) - אותו גובה בכל הקלטה
+        pitchEl.min = 70; pitchEl.max = 240; pitchEl.step = 1; pitchEl.value = p.targetF0;
+        $('.vfx-pitch-v').textContent = Math.round(p.targetF0) + ' הרץ';
+      } else {
+        pitchEl.min = -8; pitchEl.max = 10; pitchEl.step = 0.5; pitchEl.value = semis(p.pitch);
+        var st = semis(p.pitch);
+        $('.vfx-pitch-v').textContent = st === 0 ? 'כמו שלי' : (st > 0 ? '+' : '') + st + ' טון';
+      }
+      formEl.value = (1 / p.formant).toFixed(2);   // גודל הגרון = 1 / הזזת הפורמנטים
+      tempoEl.value = p.tempo || 1;
+      pitchEl.disabled = formEl.disabled = tempoEl.disabled = dis;
       var fp = Math.round((1 / p.formant - 1) * 100);
       $('.vfx-formant-v').textContent = fp === 0 ? 'כמו שלי' : (fp > 0 ? 'גדול ב-' + fp + '%' : 'קטן ב-' + (-fp) + '%');
+      var tp = Math.round(((p.tempo || 1) - 1) * 100);
+      $('.vfx-tempo-v').textContent = tp === 0 ? 'רגיל' : (tp < 0 ? 'איטי ב-' + (-tp) + '%' : 'מהיר ב-' + tp + '%');
     }
-    function liveP() { var p = PRESETS[sel.value], o = {}; for (var k in p) o[k] = p[k]; o.live = true; return o; }
+    function liveP() { var p = PRESETS[sel.value], o = {}; for (var k in p) o[k] = p[k]; o.live = true; if (p.targetF0) o.liveRatio = Math.max(0.5, Math.min(2, p.targetF0 / 110)); return o; }
     function onTune() {
-      if (sel.value !== 'custom') PRESETS.custom.broadcast = !!PRESETS[sel.value].broadcast;
-      PRESETS.custom.pitch = Math.pow(2, parseFloat(pitchEl.value) / 12);
-      PRESETS.custom.formant = 1 / parseFloat(formEl.value);
+      var c = PRESETS.custom, from = PRESETS[sel.value];
+      if (sel.value !== 'custom') { c.broadcast = !!from.broadcast; c.targetF0 = from.targetF0 || 0; }
+      if (c.targetF0) { c.targetF0 = parseFloat(pitchEl.value); c.pitch = 1; }
+      else c.pitch = Math.pow(2, parseFloat(pitchEl.value) / 12);
+      c.formant = 1 / parseFloat(formEl.value);
+      c.tempo = parseFloat(tempoEl.value);
       sel.value = 'custom';
-      try { localStorage.setItem(STORE, 'custom'); localStorage.setItem(STORE_CUSTOM, JSON.stringify({ pitch: PRESETS.custom.pitch, formant: PRESETS.custom.formant, broadcast: PRESETS.custom.broadcast })); } catch (e) {}
+      try { localStorage.setItem(STORE, 'custom'); localStorage.setItem(STORE_CUSTOM, JSON.stringify({ pitch: c.pitch, targetF0: c.targetF0, formant: c.formant, tempo: c.tempo, broadcast: c.broadcast })); } catch (e) {}
       showTune();
       if (live && live.out) { try { live.out.disconnect(); } catch (e) {} live.out = buildChain(live.ctx, live.src, liveP()); if ($('.vfx-monitor').checked) live.out.connect(live.ctx.destination); }
       clearTimeout(debounce); debounce = setTimeout(process, 450);
     }
-    pitchEl.addEventListener('input', onTune); formEl.addEventListener('input', onTune);
+    pitchEl.addEventListener('input', onTune); formEl.addEventListener('input', onTune); tempoEl.addEventListener('input', onTune);
     if (opts.narrator) {
       $('.vfx-nr-btn').addEventListener('click', function () {
         if (!raw) return;
@@ -434,5 +553,5 @@
     });
   }
 
-  window.VoiceFX = { mount: mount, presets: PRESETS, _vocoder: vocoder };
+  window.VoiceFX = { mount: mount, presets: PRESETS, _vocoder: vocoder, _trackF0: trackF0, _wsola: wsola };
 })();
