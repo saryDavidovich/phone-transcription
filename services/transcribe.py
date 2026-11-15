@@ -521,6 +521,8 @@ def process_pending_recordings(customer_id):
                     _send_email(rec.delivered_to, rec.transcript, customer, recording_download_url(rec.id), rec.duration_seconds or 0, is_premium=(rec.transcription_tier == 'premium'))
                 elif rec.delivery_method == 'fax' and rec.delivered_to:
                     _send_fax(rec.delivered_to, rec.transcript, customer, rec.duration_seconds or 0, rec.call_id)
+                rec.status = 'delivered'          # בלי זה ההקלטה נשארה "שולחת ללקוח" והתריעה כתקועה
+                db.session.commit()
                 continue
 
             # אין טרנסקריפט — תמלל מחדש (קובץ מייל - קודם משחזרים מהגיבוי אם נמחק בדפלוי)

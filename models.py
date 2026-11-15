@@ -177,6 +177,7 @@ class Recording(db.Model):
     excel_template_id = db.Column(db.Integer, nullable=True)
     excel_mode = db.Column(db.String(10), nullable=True)      # 'new' / 'continue'
     excel_file = db.Column(db.LargeBinary, nullable=True)     # הקובץ שנשלח - לשליחה חוזרת בשלוחה 8
+    status_at = db.Column(db.DateTime, nullable=True)   # מתי הסטטוס השתנה לאחרונה (לזיהוי "תקועה")
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
 
@@ -649,6 +650,14 @@ class StudentLinkRequest(db.Model):
 # --------------------------------------------------------------------------
 from sqlalchemy import event as _sa_event, inspect as _sa_inspect
 from sqlalchemy.orm import Session as _SASession
+
+
+@_sa_event.listens_for(Recording.status, 'set')
+def _recording_status_at(target, value, oldvalue, initiator):
+    """כל שינוי סטטוס של הקלטה - נרשם מתי (services/stuck_watch מודד "תקועה" מהרגע הזה,
+    לא מרגע ההקלטה: הקלטה שחיכתה שעות לתשלום ושוחררה עכשיו - לא תקועה)."""
+    if value != oldvalue:
+        target.status_at = datetime.utcnow()
 
 
 @_sa_event.listens_for(_SASession, 'before_flush')

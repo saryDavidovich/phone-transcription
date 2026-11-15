@@ -552,6 +552,14 @@ def _migrate_db():
         "ALTER TABLE admin_tasks ADD COLUMN IF NOT EXISTS notified_at TIMESTAMP",
         # הגדרות ארוכות (יומן עדכוני גרסה) - בלי מגבלת 500 תווים
         "ALTER TABLE settings ALTER COLUMN value TYPE TEXT",
+        "ALTER TABLE recordings ADD COLUMN IF NOT EXISTS status_at TIMESTAMP",
+        # תיקון חד-פעמי: הקלטות שחיכו לתשלום ונשלחו אחרי טעינה, אבל נשארו "שולחת ללקוח" (באג שתוקן) -
+        # רק כאלה שחויבו בפועל וקיבלו התראת "תקועה". ההתראות עצמן נסגרות לבד ב-stuck_watch.
+        "UPDATE recordings r SET status = 'delivered' WHERE r.status = 'transcribed' AND r.cost > 0 "
+        "AND r.created_at < now() - interval '1 hour' "
+        "AND EXISTS (SELECT 1 FROM transactions t WHERE t.recording_id = r.id AND t.type = 'debit') "
+        "AND EXISTS (SELECT 1 FROM manager_messages m WHERE m.call_id = r.call_id AND m.source = 'recording_error' "
+        "AND m.transcript LIKE '%תקועה%')",
         "ALTER TABLE outgoing_emails ADD COLUMN IF NOT EXISTS thread_ref VARCHAR(12)",
         "ALTER TABLE outgoing_emails ADD COLUMN IF NOT EXISTS in_reply_to_id INTEGER",
         "CREATE INDEX IF NOT EXISTS ix_outgoing_emails_thread_ref ON outgoing_emails (thread_ref)",
