@@ -878,6 +878,33 @@ def finalize_alefbot_recording(call_id, transcript_text):
                                    mark_error=False)
 
 
+_TS_RE = re.compile(r'(?<![\d:/.])\d{1,2}:\d{2}(?::\d{2})?(?![\d:])')
+_PREAMBLE_RE = re.compile(r'^\W{0,3}[\u0600-\u06FF]*\s*(?:\S+\s+){0,2}(?:תמלול|transcri)\S*(?:\s+\S+){0,3}\s*:\s*$', re.I)
+
+
+def clean_model_transcript(text, output_language='he'):
+    """ניקוי "תוספות" של המודל לתמלול של חלק:
+    - חותמות זמן (00:03, 4:57) - רק כשהמודל עבר ל"מצב זמנים" (3 ומעלה בחלק), כדי לא למחוק שעה אמיתית
+      שנאמרה ("בשעה 8:00"). זמן שנכנס באמצע מילה ("ד 0:35וח") - המילה מחוברת בחזרה.
+    - שורת פתיחה כמו "הנה התמלול:" / "إليكم תמלול השמע:".
+    - אותיות ערביות בודדות בתמלול עברי."""
+    if not text:
+        return text
+    t = text
+    if len(_TS_RE.findall(t)) >= 3:
+        t = re.sub(r'[ \t]?' + _TS_RE.pattern + r'(?=[\u0590-\u05FF])', '', t)   # באמצע מילה - מחברים
+        t = re.sub(r'[ \t]?' + _TS_RE.pattern + r'[ \t]?', ' ', t)
+        t = re.sub(r'[ \t]{2,}', ' ', t)
+        t = re.sub(r' +([.,:;?!])', r'\1', t)
+    lines = t.split('\n')
+    while lines and (not lines[0].strip() or _PREAMBLE_RE.match(lines[0].strip())):
+        lines.pop(0)
+    t = '\n'.join(lines)
+    if output_language in ('he', 'yi'):
+        t = re.sub(r'[\u0600-\u06FF]+', '', t)
+    return '\n'.join(l.strip() for l in t.split('\n')).strip()
+
+
 def _split_wav_chunks(audio_content, mime_type, chunk_seconds=300):
     """
     מפצל audio_content לחלקים של chunk_seconds שניות.
@@ -1012,7 +1039,8 @@ def _gemini_from_url(url, language='he', output_language='he'):
 - שמות אנשים, רבנים, ספרים, מוסדות ומקומות - בדיוק כפי שנאמרו, גם אם אינם מוכרים לך.
 - מונחים תורניים, ארמית וראשי תיבות - בכתיב הנכון.
 - הדובר עשוי לדבר או לצטט בהגייה אשכנזית-חסידית (למשל "בוריך אתוה", "תוירה", "שבס", "אלוקיינו"). תמלל לפי הכתיב העברי התקני של המילה ("ברוך אתה", "תורה", "שבת", "אלוקינו") - לא לפי איך שהיא נשמעת.
-- החזר רק את התמלול."""
+- בלי חותמות זמן (כמו 00:03), בלי כותרות, בלי משפט פתיחה (כמו "הנה התמלול") ובלי הערות.
+- החזר רק את התמלול, כטקסט רציף עם פסקאות."""
 
         # תמלול כל חלק של 5 דקות בנפרד (החלקים נקראים מהדיסק אחד-אחד)
         log.info(f"Split into {n_chunks} chunks of up to {CHUNK_SECONDS}s each")
@@ -1034,7 +1062,7 @@ def _gemini_from_url(url, language='he', output_language='he'):
                         # בלי "חשיבה": תמלול לא צריך אותה, והיא מחויבת כמו טקסט יוצא ($9 למיליון)
                         config=gtypes.GenerateContentConfig(thinking_config=gtypes.ThinkingConfig(thinking_budget=0)),
                     )
-                    chunk_transcript = response.text.strip()
+                    chunk_transcript = clean_model_transcript(response.text.strip(), output_language)
                     log.info(f"Chunk {chunk_num} done, {len(chunk_transcript)} chars")
                     break
                 except Exception as ge:
