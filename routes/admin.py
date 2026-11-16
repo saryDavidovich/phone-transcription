@@ -1426,7 +1426,12 @@ def bulk_delete_recordings():
     if not recording_ids:
         flash('לא נבחרו הקלטות')
     else:
-        count = Recording.query.filter(Recording.id.in_(recording_ids)).delete(synchronize_session=False)
+        ids = [int(x) for x in recording_ids if str(x).isdigit()]
+        # שורות חיוב/זיכוי של ההקלטה נשארות בהיסטוריה הכספית של הלקוח - רק מנותקות מההקלטה
+        # (אחרת המחיקה נחסמת: transactions.recording_id מצביע על ההקלטה)
+        Transaction.query.filter(Transaction.recording_id.in_(ids)).update(
+            {Transaction.recording_id: None}, synchronize_session=False)
+        count = Recording.query.filter(Recording.id.in_(ids)).delete(synchronize_session=False)
         db.session.commit()
         flash(f'{count} הקלטות נמחקו בהצלחה')
     next_url = request.form.get('next') or url_for('admin.recordings')
