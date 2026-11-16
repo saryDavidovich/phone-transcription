@@ -239,11 +239,23 @@ def process(call_id, customer_id, segments):
                 rec.rec_url = joined_url
             rec.transcript = text
             rec.duration_seconds = int(total_secs)
-            # חיוב לפי אורך ההקלטה, במחיר של "הקלטה עם עריכה" (ברירת מחדל: כמו אקסל).
-            # היתרה נבדקה לפני ההקלטה (יחידה אחת); הקלטה ארוכה מהיתרה - נחייבת במלואה (היתרה יכולה לרדת למינוס).
+            # חיוב לפי אורך ההקלטה, במחיר של "הקלטה עם עריכה" (ברירת מחדל: כמו אקסל) - בדיוק כמו בשאר ההקלטות:
+            # אין מספיק יתרה -> "ממתינה לתשלום" (72 שעות) + מייל ללקוח; אחרי טעינה נשלח אוטומטית
+            # (services/transcribe.process_pending_recordings - קובץ ה-Word נשמר ב-rec.excel_file).
             from services import pricing as P
             from models import Transaction
-            cost = P.cost_for(customer, total_secs, 'phone_edit') if customer.phone != DEFAULT_ALLOWED else 0.0
+            docx = _build_manuscript_docx(customer.name or '', 'הקלטה עם עריכה', content,
+                                          title_text='תמלול - הקלטה עם עריכה')
+            free = customer.phone == DEFAULT_ALLOWED
+            cost = 0.0 if free else P.cost_for(customer, total_secs, 'phone_edit')
+            fax_extra = 0.0 if free else P.fax_surcharge(customer, total_secs, rec.delivery_method)
+            if cost and (customer.balance or 0) < cost + fax_extra:
+                from services.transcribe import _save_pending_payment
+                rec.excel_file = docx
+                _save_pending_payment(rec, customer, int(total_secs), P.unit_price(customer, 'phone_edit'),
+                                      rec.delivery_method, rec.delivered_to, 'phone_edit', 'he', 'he', transcript=text)
+                log.info(f"phone_edit {call_id}: אין מספיק יתרה ({customer.balance} < {cost + fax_extra}) - ממתינה לתשלום")
+                return
             if cost > 0:
                 customer.balance = round((customer.balance or 0) - cost, 2)
                 db.session.add(Transaction(customer_id=customer.id, amount=-cost, type='debit', recording_id=rec.id,
@@ -251,22 +263,10 @@ def process(call_id, customer_id, segments):
             rec.cost = cost
             rec.status = 'transcribed'
             db.session.commit()
-            if rec.delivery_method == 'fax':
+            if fax_extra:
                 P.charge_fax_surcharge(customer, rec.id, total_secs, rec.delivery_method)
 
-            docx = _build_manuscript_docx(customer.name or '', 'הקלטה עם עריכה', content,
-                                          title_text='תמלול - הקלטה עם עריכה')
-            if rec.delivery_method == 'fax' and rec.delivered_to:
-                from services.transcribe import convert_docx_bytes_to_pdf_bytes, send_pdf_fax
-                res = send_pdf_fax(rec.delivered_to, convert_docx_bytes_to_pdf_bytes(docx),
-                                   filename_hint=f'phone_edit_{rec.id}.pdf')
-                if not res.get('ok'):
-                    raise RuntimeError(f"שליחת פקס נכשלה: {res.get('error')}")
-            else:
-                from routes.recording_proxy import recording_download_url
-                _send_email(rec.delivered_to, customer, docx, text, recording_download_url(rec.id))
-            rec.status = 'delivered'
-            db.session.commit()
+            deliver(rec, customer, docx, text)
             log.info(f"phone_edit {call_id}: {len(audio_idx)} קטעים, {total_secs}s, נשלח ל-{rec.delivered_to}")
         except Exception as e:
             log.error(f"phone_edit {call_id} error: {e}", exc_info=True)
@@ -278,6 +278,22 @@ def process(call_id, customer_id, segments):
         finally:
             if keep_dir:
                 shutil.rmtree(keep_dir, ignore_errors=True)
+
+
+def deliver(rec, customer, docx, text):
+    """שליחת קובץ ה-Word ללקוח (מייל / פקס) וסימון 'נשלחה'. גם אחרי טעינת ארנק (ממתינה לתשלום)."""
+    from app import db
+    if rec.delivery_method == 'fax' and rec.delivered_to:
+        from services.transcribe import convert_docx_bytes_to_pdf_bytes, send_pdf_fax
+        res = send_pdf_fax(rec.delivered_to, convert_docx_bytes_to_pdf_bytes(docx),
+                           filename_hint=f'phone_edit_{rec.id}.pdf')
+        if not res.get('ok'):
+            raise RuntimeError(f"שליחת פקס נכשלה: {res.get('error')}")
+    else:
+        from routes.recording_proxy import recording_download_url
+        _send_email(rec.delivered_to, customer, docx, text, recording_download_url(rec.id))
+    rec.status = 'delivered'
+    db.session.commit()
 
 
 def _send_email(to, customer, docx_bytes, text, rec_link=None):

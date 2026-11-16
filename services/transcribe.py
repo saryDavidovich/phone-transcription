@@ -495,6 +495,25 @@ def process_pending_recordings(customer_id):
 
             log.info(f"process_pending_recordings: processing rec {rec.id} for customer {customer_id}")
 
+            # הקלטה עם עריכה - קובץ ה-Word המוכן נשמר ב-excel_file: מחייבים ושולחים אותו
+            if rec.transcription_tier == 'phone_edit' and rec.excel_file:
+                from models import Transaction
+                from services import phone_edit as PE
+                customer.balance -= cost
+                db.session.add(Transaction(customer_id=customer_id, amount=-cost, type='debit', recording_id=rec.id,
+                                           description=f'הקלטה עם עריכה {max(1, round((rec.duration_seconds or 0) / 60))} דקות'))
+                rec.status = 'transcribed'
+                rec.cost = cost
+                db.session.commit()
+                P.charge_fax_surcharge(customer, rec.id, rec.duration_seconds or 0, rec.delivery_method)
+                try:
+                    PE.deliver(rec, customer, rec.excel_file, rec.transcript or '')
+                except Exception as e:
+                    log.error(f"process_pending_recordings: שליחת הקלטה עם עריכה {rec.call_id} נכשלה: {e}")
+                    from services.recording_alerts import notify_recording_error
+                    notify_recording_error(rec.call_id, f'הקלטה עם עריכה (אחרי טעינה): {e}')
+                continue
+
             # אם יש כבר טרנסקריפט שמור — לא לתמלל שוב, רק לחייב ולשלוח
             # (טבלת אקסל תמיד עוברת עיבוד מלא - היא לא נשמרת כטקסט בהמתנה)
             if rec.transcript and rec.transcription_tier != 'excel':
