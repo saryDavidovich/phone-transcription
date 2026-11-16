@@ -169,6 +169,13 @@ def phone_edit():
     return jsonify(body), status
 
 
+@api_bp.route('/phone-edit/check', methods=['GET'])
+def phone_edit_check():
+    """לפני "הקלטה עם עריכה": מותר / רשום / יש יתרה ליחידה אחת."""
+    from services import phone_edit as pe
+    return jsonify(pe.check((request.args.get('phone') or '').strip()))
+
+
 @api_bp.route('/customer/pending-recordings', methods=['GET'])
 def get_pending_recordings():
     """
@@ -625,6 +632,9 @@ def get_public_settings():
         # שלוחה 1 ← 6 (מיילים לאחרים) ו-1 ← 5 (משימות) - כבויות = רק המנהל שומע אותן
         'email_out_enabled': get_setting('email_out_enabled', '0'),
         'tasks_enabled': get_setting('tasks_enabled', '0'),
+        # שלוחה 1 ← 3 (אקסל) ו-1 ← 4 (הקלטה עם עריכה) - פתוחים לכל הלקוחות כברירת מחדל
+        'excel_enabled': get_setting('excel_enabled', '1'),
+        'phone_edit_enabled': get_setting('phone_edit_enabled', '1'),
         'price_per_5min_email_out': get_setting('price_per_5min_email_out', '0.30'),
         'price_per_2min_task': get_setting('price_per_2min_task', '0.30'),
     }

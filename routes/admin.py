@@ -1925,7 +1925,8 @@ def settings():
         set_setting('price_per_20min_premium', request.form.get('price_per_20min_premium', '1.90'))
         set_setting('price_per_20min_video', request.form.get('price_per_20min_video', '1.50'))
         set_setting('price_per_20min_excel', request.form.get('price_per_20min_excel', '1.50'))
-        for _k in ('basic', 'premium', 'video', 'excel'):
+        set_setting('price_per_20min_phone_edit', (request.form.get('price_per_20min_phone_edit') or '').strip())
+        for _k in ('basic', 'premium', 'video', 'excel', 'phone_edit'):
             set_setting(f'price_per_5min_{_k}', (request.form.get(f'price_per_5min_{_k}') or '').strip())
         set_setting('fax_surcharge_5min', request.form.get('fax_surcharge_5min') or '0.30')
         set_setting('price_per_1000_chars_ocr', request.form.get('price_per_1000_chars_ocr', '0.10'))
@@ -1944,6 +1945,8 @@ def settings():
         if request.form.get('_features_field') == '1':
             set_setting('email_out_enabled', '1' if request.form.get('email_out_enabled') == '1' else '0')
             set_setting('tasks_enabled', '1' if request.form.get('tasks_enabled') == '1' else '0')
+            set_setting('excel_enabled', '1' if request.form.get('excel_enabled') == '1' else '0')
+            set_setting('phone_edit_enabled', '1' if request.form.get('phone_edit_enabled') == '1' else '0')
         set_setting('fax_inbound_number', request.form.get('fax_inbound_number', ''))
         set_setting('yemot_token', request.form.get('yemot_token', ''))
         set_setting('yemot_log_path', request.form.get('yemot_log_path', 'ivr2:/199/LogCreditCardOK.ymgr'))
@@ -1971,6 +1974,10 @@ def settings():
         'price_per_5min_premium': get_setting('price_per_5min_premium', ''),
         'price_per_5min_video': get_setting('price_per_5min_video', ''),
         'price_per_5min_excel': get_setting('price_per_5min_excel', ''),
+        'price_per_20min_phone_edit': get_setting('price_per_20min_phone_edit', ''),
+        'price_per_5min_phone_edit': get_setting('price_per_5min_phone_edit', ''),
+        'excel_enabled': get_setting('excel_enabled', '1'),
+        'phone_edit_enabled': get_setting('phone_edit_enabled', '1'),
         'fax_surcharge_5min': get_setting('fax_surcharge_5min', '0.30'),
         'price_per_1000_chars_ocr': get_setting('price_per_1000_chars_ocr', '0.10'),
         'ocr_engine': get_setting('ocr_engine', 'gemini'),

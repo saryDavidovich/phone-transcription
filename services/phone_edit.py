@@ -36,9 +36,36 @@ CHUNK_SECONDS = 600         # 10 דקות = כ-19MB ב-WAV 16kHz מונו, מת�
 CHUNK_SEARCH_SECONDS = 120  # החיתוך ברגע השקט ביותר בשתי הדקות האחרונות של כל חלק
 
 
+def enabled():
+    """פתוח לכל הלקוחות (הגדרות ← phone_edit_enabled). כבוי - רק המנהל / PHONE_EDIT_PHONES."""
+    from models import Settings
+    r = Settings.query.filter_by(key='phone_edit_enabled').first()
+    return (r.value if r and r.value else '1') == '1'
+
+
 def allowed_phone(phone):
     allowed = [p.strip() for p in os.environ.get('PHONE_EDIT_PHONES', DEFAULT_ALLOWED).split(',') if p.strip()]
-    return (phone or '').strip() in allowed
+    return (phone or '').strip() in allowed or enabled()
+
+
+def unit_cost(customer):
+    """המחיר המינימלי (יחידה אחת) - צריך לפחות אותו ביתרה כדי להתחיל."""
+    from services import pricing as P
+    return P.unit_price(customer, 'phone_edit')
+
+
+def check(phone):
+    """לפני ההקלטה (ה-IVR): מותר? רשום? יש יתרה ליחידה אחת?"""
+    from services.customer_phones import find_customer_by_phone
+    customer = find_customer_by_phone(phone)
+    if not allowed_phone(phone):
+        return {'ok': False, 'error': 'not_allowed'}
+    if not customer:
+        return {'ok': False, 'error': 'customer_not_found'}
+    price = unit_cost(customer)
+    if (customer.balance or 0) < price and phone != DEFAULT_ALLOWED:
+        return {'ok': False, 'error': 'balance', 'cost': price}
+    return {'ok': True, 'price': price}
 
 
 def _clean_segments(raw):
@@ -212,9 +239,20 @@ def process(call_id, customer_id, segments):
                 rec.rec_url = joined_url
             rec.transcript = text
             rec.duration_seconds = int(total_secs)
-            rec.cost = 0.0
+            # חיוב לפי אורך ההקלטה, במחיר של "הקלטה עם עריכה" (ברירת מחדל: כמו אקסל).
+            # היתרה נבדקה לפני ההקלטה (יחידה אחת); הקלטה ארוכה מהיתרה - נחייבת במלואה (היתרה יכולה לרדת למינוס).
+            from services import pricing as P
+            from models import Transaction
+            cost = P.cost_for(customer, total_secs, 'phone_edit') if customer.phone != DEFAULT_ALLOWED else 0.0
+            if cost > 0:
+                customer.balance = round((customer.balance or 0) - cost, 2)
+                db.session.add(Transaction(customer_id=customer.id, amount=-cost, type='debit', recording_id=rec.id,
+                                           description=f'הקלטה עם עריכה {max(1, round(total_secs / 60))} דקות'))
+            rec.cost = cost
             rec.status = 'transcribed'
             db.session.commit()
+            if rec.delivery_method == 'fax':
+                P.charge_fax_surcharge(customer, rec.id, total_secs, rec.delivery_method)
 
             docx = _build_manuscript_docx(customer.name or '', 'הקלטה עם עריכה', content,
                                           title_text='תמלול - הקלטה עם עריכה')
@@ -274,6 +312,8 @@ def start(phone, call_id, raw_segments):
     customer = find_customer_by_phone(phone)
     if not customer:
         return {'ok': False, 'error': 'customer_not_found'}, 404
+    if (customer.balance or 0) < unit_cost(customer) and phone != DEFAULT_ALLOWED:
+        return {'ok': False, 'error': 'balance'}, 402
     segments = _clean_segments(raw_segments)
     log.info(f"phone_edit start {call_id}: התקבלו {len(raw_segments or [])} קטעים, תקינים {len(segments)}")
     if not any(s['type'] == 'audio' for s in segments):

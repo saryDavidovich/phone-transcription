@@ -35,8 +35,8 @@ def char_cost(char_count, unit_size, price_per_unit):
 # ---------------------------------------------------------------------------
 import math
 
-DEFAULT_PRICES = {20: {'basic': 0.90, 'premium': 1.90, 'video': 1.50, 'excel': 1.50}}
-KIND_NAMES = {'basic': 'רגיל', 'premium': 'מקצועי', 'video': 'וידאו', 'excel': 'אקסל'}
+DEFAULT_PRICES = {20: {'basic': 0.90, 'premium': 1.90, 'video': 1.50, 'excel': 1.50, 'phone_edit': 1.50}}
+KIND_NAMES = {'basic': 'רגיל', 'premium': 'מקצועי', 'video': 'וידאו', 'excel': 'אקסל', 'phone_edit': 'הקלטה עם עריכה'}
 FAX_SURCHARGE_DEFAULT = 0.30
 FAX_SURCHARGE_MIN_UNITS = 4
 
@@ -54,12 +54,16 @@ def unit_minutes(customer):
 def kind_for_tier(tier, is_video=False):
     if tier == 'excel':
         return 'excel'
+    if tier == 'phone_edit':
+        return 'phone_edit'
     if tier == 'premium':
         return 'premium'
     return 'video' if is_video else 'basic'
 
 
 def price_20(kind):
+    if kind == 'phone_edit' and _setting('price_per_20min_phone_edit', '') in ('', None):
+        return price_20('excel')                       # כל עוד לא הוגדר מחיר משלה - כמו אקסל
     try:
         return float(_setting(f'price_per_20min_{kind}', DEFAULT_PRICES[20][kind]))
     except (TypeError, ValueError):
@@ -69,6 +73,8 @@ def price_20(kind):
 def price_5(kind):
     """מחיר ל-5 דקות מההגדרות; כל עוד לא הוגדר - רבע ממחיר 20 הדקות."""
     v = _setting(f'price_per_5min_{kind}', '')
+    if kind == 'phone_edit' and v in ('', None) and _setting('price_per_20min_phone_edit', '') in ('', None):
+        return price_5('excel')
     try:
         return float(v) if v not in ('', None) else round(price_20(kind) / 4, 2)
     except (TypeError, ValueError):
