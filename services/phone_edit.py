@@ -65,7 +65,9 @@ def check(phone):
     price = unit_cost(customer)
     if (customer.balance or 0) < price and phone != DEFAULT_ALLOWED:
         return {'ok': False, 'error': 'balance', 'cost': price}
-    return {'ok': True, 'price': price}
+    from services.document_history import delivery_target
+    via, _to = delivery_target(customer)
+    return {'ok': True, 'price': price, 'has_target': bool(via)}   # אין מייל/פקס - ה-IVR שואל לפני ההקלטה
 
 
 def _clean_segments(raw):
