@@ -176,6 +176,19 @@ def phone_edit_check():
     return jsonify(pe.check((request.args.get('phone') or '').strip()))
 
 
+@api_bp.route('/phone-edit/instructions-email', methods=['POST'])
+def phone_edit_instructions_email():
+    from services import phone_edit as pe
+    from services.customer_phones import find_customer_by_phone
+    customer = find_customer_by_phone(((request.get_json(silent=True) or {}).get('phone') or '').strip())
+    if not customer:
+        return jsonify({'ok': False, 'error': 'customer'})
+    try:
+        return jsonify(pe.send_instructions_email(customer))
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)[:200]})
+
+
 @api_bp.route('/customer/pending-recordings', methods=['GET'])
 def get_pending_recordings():
     """

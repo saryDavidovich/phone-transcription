@@ -298,6 +298,38 @@ def deliver(rec, customer, docx, text):
     db.session.commit()
 
 
+EDIT_KEYS_HE = [('סולמית ואז 1', 'ירידת שורה'), ('סולמית ואז 2', 'הדגשה (שוב - סיום ההדגשה)'),
+                ('סולמית ואז 3', 'קו תחתון (שוב - סיום)'), ('סולמית ואז 4', 'סוגריים מרובעים [ ] (שוב - סגירה)'),
+                ('סולמית ואז 5', 'סוגריים עגולים ( ) (שוב - סגירה)'), ('סולמית ואז 6', 'מקף -'),
+                ('סולמית ואז 7', 'נקודתיים :'), ('סולמית ואז 8', 'סימן שאלה ?'), ('סולמית ואז 9', 'מירכאות " (שוב - סגירה)'),
+                ('סולמית ואז 0', 'רשימת המקשים בקול'),
+                ('סולמית בלבד', 'עצירה: 1 - המשך הקלטה, 2 - רשימת המקשים, 3 - סיום ושליחה לתמלול')]
+
+
+def send_instructions_email(customer):
+    """הוראות "הקלטה עם עריכה" במייל ללקוח (מהתפריט שלפני ההקלטה, מקש 3)."""
+    import sendgrid
+    from sendgrid.helpers.mail import Mail, Email
+    from services import email_layout as L
+    to = (customer.email or '').strip()
+    if not to:
+        return {'ok': False, 'error': 'no_email'}
+    rows = ''.join(f'<tr><td style="padding:7px 10px;border-bottom:1px solid #e3ecf7;font-weight:bold;white-space:nowrap">{k}</td>'
+                   f'<td style="padding:7px 10px;border-bottom:1px solid #e3ecf7">{v}</td></tr>' for k, v in EDIT_KEYS_HE)
+    card = (L.title('הוראות - הקלטה עם עריכה')
+            + L.text_block('בשלוחה 1 הקישו 4. מקליטים כרגיל, ותוך כדי ההקלטה מוסיפים עיצוב: מקישים סולמית ומיד אחריה ספרה, '
+                           'וההקלטה ממשיכה לבד. בסיום מקבלים קובץ Word מעוצב במייל (או בפקס).')
+            + f'<table style="width:100%;border-collapse:collapse;font-size:14px;margin:10px 0">{rows}</table>'
+            + L.text_block('טיפ: את הספרה מקישים מיד אחרי הסולמית (תוך שתי שניות). אם עברו שתי שניות - נפתח תפריט ההשהיה, '
+                           'ומשם אפשר להמשיך להקליט, לשמוע את המקשים או לסיים.')
+            + L.signature(can_reply=True))
+    msg = Mail(from_email=Email(os.environ.get('SENDGRID_FROM_EMAIL', os.environ.get('GMAIL_USER', '')), 'תמלול פון'),
+               to_emails=to, subject='הוראות - הקלטה עם עריכה', html_content=L.wrap(card, phone=customer.phone))
+    sendgrid.SendGridAPIClient(api_key=os.environ.get('SENDGRID_API_KEY')).send(msg)
+    log.info(f'phone_edit: נשלחו הוראות במייל ללקוח {customer.id}')
+    return {'ok': True}
+
+
 def _send_email(to, customer, docx_bytes, text, rec_link=None):
     import sendgrid
     from html import escape
