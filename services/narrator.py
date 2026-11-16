@@ -123,8 +123,42 @@ def _chirp(text, voice, speed):
     return _cloud_tts(text, f'he-IL-Chirp3-HD-{voice}', speed)
 
 
+def split_long_sentences(text, limit=110):
+    """גוגל (Chirp) דוחה משפט ארוך מדי בלי נקודה. משפט ארוך - מפוצל לפי הפסיקים למשפטים קצרים
+    ("לתמלול רגיל הקישו 1. לתמלול מקצועי הקישו 2." - כך נשמעים תפריטים טלפוניים). בלי פסיקים -
+    לפי מילים. משפטים קצרים נשארים כמו שהם."""
+    out = []
+    for line in (text or '').split('\n'):
+        line = line.strip()
+        if not line:
+            continue
+        # ירידת שורה = סוף משפט: שורה בלי סימן פיסוק בסוף מתחברת אצל גוגל לשורה הבאה למשפט אחד ארוך
+        if line[-1] not in '.!?':
+            line = line.rstrip(':;,-–') + '.'
+        parts = re.split(r'(?<=[.!?])\s+', line)
+        fixed = []
+        for sent in parts:
+            if len(sent) <= limit:
+                fixed.append(sent)
+                continue
+            pieces = [p.strip() for p in re.split(r'[,،;]\s*', sent) if p.strip()]
+            chunks = []
+            for pc in pieces:
+                while len(pc) > limit:                       # גם קטע בלי פסיקים - חותכים לפי מילים
+                    cut = pc.rfind(' ', 0, limit)
+                    cut = cut if cut > 20 else limit
+                    chunks.append(pc[:cut].strip())
+                    pc = pc[cut:].strip()
+                if pc:
+                    chunks.append(pc)
+            fixed.append(' '.join(c if c[-1:] in '.!?' else c + '.' for c in chunks))
+        out.append(' '.join(x for x in fixed if x))
+    return '\n'.join(out).strip()
+
+
 def _cloud_tts(text, name, speed):
     key = os.environ.get('GOOGLE_TTS_API_KEY') or os.environ.get('GOOGLE_API_KEY')
+    text = split_long_sentences(text)
     body = {'input': {'text': text},
             'voice': {'languageCode': 'he-IL', 'name': name},
             'audioConfig': {'audioEncoding': 'LINEAR16', 'sampleRateHertz': 24000, 'speakingRate': float(speed)}}
@@ -149,7 +183,9 @@ def _gemini(text, voice):
     """גיבוי: Gemini TTS. הגדרות קבועות (בלי אקראיות, זרע קבוע, עברית) כדי לצמצם הבדלים בין הפקות."""
     from google import genai
     from google.genai import types
-    client = genai.Client(api_key=os.environ.get('GOOGLE_API_KEY'))   # נשמר במשתנה עד סוף הבקשה
+    # הקראה (speech_config) קיימת רק ב-v1beta; גרסאות חדשות של הספרייה פונות כברירת מחדל ל-v1 ונדחות
+    client = genai.Client(api_key=os.environ.get('GOOGLE_API_KEY'),
+                          http_options=types.HttpOptions(api_version='v1beta'))   # נשמר במשתנה עד סוף הבקשה
     cfg = types.GenerateContentConfig(
         response_modalities=['AUDIO'], temperature=0.0, seed=7,
         speech_config=types.SpeechConfig(language_code='he-IL', voice_config=types.VoiceConfig(
