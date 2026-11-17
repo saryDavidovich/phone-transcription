@@ -80,30 +80,16 @@
 </div>
 
 <div class="card">
-  <h3 style="font-size:15px; margin-bottom:12px;">קוד כניסה</h3>
-  <p style="font-size:12px; color:var(--text3); margin-bottom:10px;">
-    ליצירת קוד זמני חדש - שימושי לכל מורשה כניסה חדש, או במקרה של שכחת הסיסמה (ראו גם "שכחתי סיסמה" בדף הכניסה - זוהי הדרך הנוחה יותר לכך).
-  </p>
-  <form method="post" action="{{ url_for('institution.regenerate_code') }}" onsubmit="return confirm('ליצור קוד כניסה זמני חדש? הסיסמה הקבועה תתאפס.')">
-    <button type="submit" class="btn btn-secondary btn-block">יצירת קוד חדש</button>
+  <h3 style="font-size:15px; margin-bottom:12px;">{{ 'החלפת סיסמה' if inst.password_hash else 'הגדרת סיסמה' }}</h3>
+  <form method="post" action="{{ url_for('institution.change_password') }}" autocomplete="off">
+    {% if inst.password_hash %}
+    <div class="field"><label>הסיסמה הנוכחית</label><input class="input" type="password" name="current_password" required autocomplete="current-password"></div>
+    {% endif %}
+    <div class="field"><label>סיסמה חדשה</label><input class="input" type="password" name="password" required minlength="8" autocomplete="new-password"></div>
+    <div class="field"><label>אימות הסיסמה החדשה</label><input class="input" type="password" name="password2" required minlength="8" autocomplete="new-password"></div>
+    <div style="font-size:12px; color:var(--text3); margin-bottom:10px;">לפחות 8 תווים, עם אותיות וגם ספרות.</div>
+    <button type="submit" class="btn btn-block">שמירת הסיסמה</button>
   </form>
-</div>
-
-<div class="card">
-  <h3 style="font-size:15px; margin-bottom:6px;">אבטחה וכניסות אחרונות</h3>
-  <p style="font-size:12px; color:var(--text3); margin-bottom:10px; line-height:1.7;">
-    הסיסמה וקוד הכניסה נשמרים אצלנו רק בגיבוב חד-כיווני (גם אנחנו לא יכולים לראות אותם). אחרי 10 ניסיונות שגויים
-    החשבון ננעל לרבע שעה, והחלפת סיסמה מנתקת את כל שאר המחוברים. פרטי אשראי מוזנים רק בחלון המאובטח של נדרים פלוס ולא מגיעים אלינו.
-    לא מזהים כניסה ברשימה? צרו קוד חדש (למעלה) - זה מאפס את הסיסמה ומנתק את כולם.
-  </p>
-  {% for l in logins %}
-  <div style="display:flex; justify-content:space-between; gap:8px; padding:6px 0; border-bottom:1px solid var(--border); font-size:12.5px;">
-    <span>{{ l.local_time }} · {{ {'password':'סיסמה','code':'קוד','google':'גוגל'}.get(l.method, l.method) }}</span>
-    <span style="color:{{ 'var(--text2)' if l.success else 'var(--red)' }};">{{ 'הצליחה' if l.success else 'נכשלה' }} · {{ l.ip or '' }}</span>
-  </div>
-  {% else %}
-  <p style="font-size:12.5px; color:var(--text2);">עדיין אין כניסות רשומות.</p>
-  {% endfor %}
 </div>
 </div>
 </div>

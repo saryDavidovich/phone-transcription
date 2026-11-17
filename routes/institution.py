@@ -299,21 +299,31 @@ def google_auth_callback():
     return redirect(url_for('institution.dashboard'))
 
 
+def password_error(pw1, pw2):
+    import re as _re
+    if len(pw1) < 8 or not _re.search(r'\d', pw1) or not _re.search(r'[^\d]', pw1):
+        return 'הסיסמה חייבת להיות באורך 8 תווים לפחות, ולכלול גם ספרות וגם אותיות'
+    if len(set(pw1)) < 4:
+        return 'הסיסמה פשוטה מדי - בחרו סיסמה מגוונת יותר'
+    if pw1 != pw2:
+        return 'הסיסמאות אינן תואמות'
+    return None
+
+
 @institution_bp.route('/set-password', methods=['GET', 'POST'])
 @institution_login_required
 def set_password():
     """מוצג בכניסה ראשונה בלבד (עוד אין password_hash) - מחליף את הקוד
     הזמני בסיסמה קבועה שהמוסד בוחר בעצמו."""
+    if current_user.password_hash and not session.get('must_set_password'):
+        # כבר יש סיסמה - החלפה רק דרך ההגדרות, עם הסיסמה הנוכחית
+        return redirect(url_for('institution.settings'))
     if request.method == 'POST':
         pw1 = request.form.get('password') or ''
         pw2 = request.form.get('password2') or ''
-        import re as _re
-        if len(pw1) < 8 or not _re.search(r'\d', pw1) or not _re.search(r'[^\d]', pw1):
-            flash('הסיסמה חייבת להיות באורך 8 תווים לפחות, ולכלול גם ספרות וגם אותיות')
-        elif pw1.isdigit() or len(set(pw1)) < 4:
-            flash('הסיסמה פשוטה מדי - בחרו סיסמה מגוונת יותר')
-        elif pw1 != pw2:
-            flash('הסיסמאות אינן תואמות')
+        err = password_error(pw1, pw2)
+        if err:
+            flash(err)
         else:
             current_user.password_hash = generate_password_hash(pw1)
             current_user.reset_requested_at = None
@@ -413,14 +423,7 @@ def settings():
         flash('ההגדרות נשמרו')
         return redirect(url_for('institution.settings'))
     from services.student_links import global_self_topup_enabled
-    from models import InstitutionLoginLog
-    logins = InstitutionLoginLog.query.filter_by(institution_id=inst.id).order_by(
-        InstitutionLoginLog.created_at.desc()).limit(15).all()
-    from zoneinfo import ZoneInfo
-    for l in logins:
-        l.local_time = l.created_at.replace(tzinfo=ZoneInfo('UTC')).astimezone(ZoneInfo('Asia/Jerusalem')).strftime('%d/%m/%Y %H:%M') if l.created_at else ''
-    return render_template('institution/settings.html', inst=inst, topup_global_on=global_self_topup_enabled(),
-                           logins=logins)
+    return render_template('institution/settings.html', inst=inst, topup_global_on=global_self_topup_enabled())
 
 
 @institution_bp.route('/settings/add-authorized', methods=['POST'])
@@ -456,23 +459,40 @@ def remove_authorized():
     return redirect(url_for('institution.settings'))
 
 
-@institution_bp.route('/settings/regenerate-code', methods=['POST'])
+@institution_bp.route('/settings/change-password', methods=['POST'])
 @institution_login_required
-def regenerate_code():
-    """יצירת קוד כניסה זמני חדש - שימושי כדי לתת אותו למורשה כניסה נוסף
-    להתחברות ראשונה, או אם רוצים לאפס גישה. מאפס גם את הסיסמה הקבועה
-    הקיימת (המשותפת לכל מורשי הכניסה) - אחרת הקוד החדש לא באמת עוזר,
-    כי הכניסה תמיד מעדיפה סיסמה קבועה קיימת אם יש כזו."""
-    import random, string
-    inst = current_user
+def change_password():
+    """החלפת סיסמה מתוך ההגדרות - חובה להזין את הסיסמה הנוכחית. אחרי ההחלפה כל שאר
+    המחוברים לחשבון מתנתקים (הסשן הנוכחי נשאר מחובר)."""
     from services import security as sec
-    code = sec.issue_login_code(inst)
-    inst.password_hash = None
+    inst = current_user
+    cur = request.form.get('current_password') or ''
+    pw1 = request.form.get('password') or ''
+    pw2 = request.form.get('password2') or ''
+    ip_key = 'chpw:' + sec.client_ip()
+    if sec.hits_blocked(ip_key, 5, 15 * 60) or sec.inst_locked(inst):
+        flash('יותר מדי ניסיונות. נסו שוב בעוד כרבע שעה.')
+        return redirect(url_for('institution.settings'))
+    if inst.password_hash and not check_password_hash(inst.password_hash, cur):
+        sec.hits_add(ip_key)
+        sec.inst_register_fail(inst)
+        db.session.commit()
+        flash('הסיסמה הנוכחית שגויה')
+        return redirect(url_for('institution.settings'))
+    err = password_error(pw1, pw2)
+    if not err and inst.password_hash and check_password_hash(inst.password_hash, pw1):
+        err = 'הסיסמה החדשה זהה לנוכחית'
+    if err:
+        flash(err)
+        return redirect(url_for('institution.settings'))
+    inst.password_hash = generate_password_hash(pw1)
+    inst.reset_requested_at = None
+    sec.issue_login_code(inst)         # קוד זמני ישן (אם היה) כבר לא תקף
     sec.inst_clear_fails(inst)
     db.session.commit()
     sec.inst_mark_session(inst)
-    session['must_set_password'] = True
-    flash(f'קוד כניסה חדש: {code} (הסיסמה הקבועה הקודמת אופסה - הכניסה הבאה תבקש להגדיר סיסמה חדשה)')
+    sec.log_inst_login(inst, 'pw_change', True)
+    flash('הסיסמה הוחלפה. שאר המכשירים שהיו מחוברים לחשבון נותקו.')
     return redirect(url_for('institution.settings'))
 
 

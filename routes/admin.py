@@ -3515,7 +3515,10 @@ def institution_detail(inst_id):
     inst = Institution.query.get_or_404(inst_id)
     students = Customer.query.filter_by(institution_id=inst.id).all()
     charges = InstitutionChargeLog.query.filter_by(institution_id=inst.id).order_by(InstitutionChargeLog.created_at.desc()).limit(20).all()
-    return render_template('admin/institution_detail.html', inst=inst, students=students, charges=charges,
+    from models import InstitutionLoginLog
+    logins = InstitutionLoginLog.query.filter_by(institution_id=inst.id).order_by(
+        InstitutionLoginLog.created_at.desc()).limit(15).all()
+    return render_template('admin/institution_detail.html', inst=inst, students=students, charges=charges, logins=logins,
                            now_utc=__import__('datetime').datetime.utcnow())
 
 
