@@ -3,7 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>{% block title %}איזור מוסד{% endblock %} | מערכת תמלול</title>
+{% set _inst_name = current_user.name if (current_user.is_authenticated and current_user.__class__.__name__ == 'Institution') else '' %}
+<title>{% if _inst_name %}מוסד - {{ _inst_name }}{% else %}כניסת מוסד{% endif %} - תמלול - תכלס מערכות</title>
 <link rel="manifest" href="/institution/manifest.webmanifest?v=1">
 <meta name="theme-color" content="#10b981">
 <link rel="icon" type="image/png" sizes="192x192" href="https://raw.githubusercontent.com/saryDavidovich/phone-transcription/main/static/pwa/inst-icon-192.png">
@@ -44,7 +45,8 @@ a { color:inherit; }
   width:240px; min-height:100vh; background:var(--surface); border-left:1px solid var(--border);
   padding:22px 0; position:fixed; right:0; top:0; bottom:0; z-index:100; display:flex; flex-direction:column;
 }
-.sidebar-logo { padding:0 22px 20px; margin-bottom:6px; border-bottom:1px solid var(--border); font-weight:800; font-size:17px; color:var(--text); display:flex; align-items:center; gap:8px; }
+.sidebar-logo { padding:0 18px 18px; margin-bottom:6px; border-bottom:1px solid var(--border); display:flex; align-items:center; gap:10px; }
+.inst-name { font-weight:800; font-size:19px; line-height:1.25; color:var(--accent2); overflow-wrap:anywhere; }
 .logo-ic { width:30px; height:30px; border-radius:9px; background:var(--accent); color:#fff; display:inline-flex; align-items:center; justify-content:center; box-shadow:0 4px 12px -4px rgba(16,185,129,.55); flex:none; }
 .ico { display:block; flex-shrink:0; }
 .sidebar-nav a .ico { opacity:.8; }
@@ -233,12 +235,12 @@ window.IC = {
 <body class="{{ 'no-sidebar' if not inst_logged_in }}">
 {% if inst_logged_in %}
 <div class="topbar">
-  <div class="t-title"><span class="logo-ic">{{ ic('logo', 16, 2) }}</span> אזור מוסד</div>
+  <div class="t-title"><span class="logo-ic">{{ ic('logo', 16, 2) }}</span> <span class="inst-name" style="font-size:17px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:62vw;">{{ current_user.name }}</span></div>
   <button type="button" aria-label="תפריט" onclick="document.body.classList.toggle('nav-open')">{{ ic('menu', 20) }}</button>
 </div>
 <div class="nav-backdrop" onclick="document.body.classList.remove('nav-open')"></div>
 <aside class="sidebar">
-  <div class="sidebar-logo"><span class="logo-ic">{{ ic('logo', 16, 2) }}</span> אזור מוסד</div>
+  <div class="sidebar-logo"><span class="logo-ic">{{ ic('logo', 16, 2) }}</span> <span class="inst-name">{{ current_user.name }}</span></div>
   {% set ep = request.endpoint or '' %}
   {% set self_page = student is defined and student.is_institution_self %}
   <nav class="sidebar-nav">
