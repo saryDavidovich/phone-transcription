@@ -24,7 +24,8 @@
 
 <div style="display:flex; gap:16px; flex-wrap:wrap; margin-bottom:20px;">
   <div class="table-card" style="padding:16px; flex:1; min-width:260px;">
-    <div class="table-title" style="margin-bottom:10px;">דוח עלויות (Excel)</div>
+    <div class="table-title" style="margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;gap:8px">דוח עלויות (Excel)
+      <a class="btn btn-sm" href="{{ url_for('admin.institution_chat', inst_id=inst.id) }}" style="font-weight:400">💬 התכתבות עם המוסד</a></div>
     <div style="display:flex; gap:8px; align-items:flex-end; flex-wrap:wrap;">
       <input class="form-input" type="date" id="icrFrom" style="width:auto">
       <input class="form-input" type="date" id="icrTo" style="width:auto">

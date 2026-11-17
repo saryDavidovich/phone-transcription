@@ -51,6 +51,8 @@ a { color:inherit; }
 .ico { display:block; flex-shrink:0; }
 .sidebar-nav a .ico { opacity:.8; }
 .sidebar-nav a.active .ico { opacity:1; }
+.nav-badge { margin-inline-start:auto; min-width:20px; height:20px; padding:0 6px; border-radius:10px; background:var(--red); color:#fff; font-size:11.5px; font-weight:700; display:inline-flex; align-items:center; justify-content:center; }
+.sidebar-nav a.active .nav-badge { background:#fff; color:var(--accent2); }
 .sidebar-footer a { display:inline-flex; align-items:center; gap:8px; }
 .sidebar-nav { flex:1; padding:14px 14px; display:flex; flex-direction:column; gap:3px; }
 .sidebar-nav a {
@@ -123,7 +125,7 @@ body.no-sidebar main .flash { max-width:380px; width:100%; }
   width:100%; padding:10px 12px; border-radius:10px; border:1px solid var(--border); background:var(--surface2); color:var(--text);
   font-family:inherit; font-size:14px; transition:.15s;
 }
-.field input:focus, .field select:focus, .field textarea:focus, input.input:focus {
+.field input:focus, .field select:focus, .field textarea:focus, input.input:focus, textarea.input:focus, select.input:focus {
   outline:none; border-color:var(--accent); background:var(--surface); box-shadow:0 0 0 3px var(--accent-soft);
 }
 .form-grid { display:grid; grid-template-columns:1fr 1fr; gap:0 14px; }
@@ -250,7 +252,7 @@ window.IC = {
     <a href="{{ url_for('institution_transcribe.transcribe_tab') }}" class="{{ 'active' if ep == 'institution_transcribe.transcribe_tab' }}">{{ ic('mic') }}<span>יצירת תמלול</span></a>
     <a href="{{ url_for('institution.settings') }}" class="{{ 'active' if ep == 'institution.settings' }}">{{ ic('settings') }}<span>הגדרות מוסד</span></a>
     <a href="{{ url_for('institution_billing.billing_tab') }}" class="{{ 'active' if ep == 'institution_billing.billing_tab' }}">{{ ic('card') }}<span>הגדרות חיוב</span></a>
-    <a href="{{ url_for('institution.contact') }}" class="{{ 'active' if ep == 'institution.contact' }}">{{ ic('mail') }}<span>צור קשר</span></a>
+    <a href="{{ url_for('institution.contact') }}" class="{{ 'active' if ep == 'institution.contact' }}">{{ ic('mail') }}<span>צור קשר</span>{% if inst_chat_unread %}<b class="nav-badge">{{ inst_chat_unread }}</b>{% endif %}</a>
   </nav>
   <button type="button" id="pwaInstall" class="btn btn-secondary btn-sm sidebar-install" style="display:none" onclick="pwaInstall()">{{ ic('install', 16) }} התקנה כתוכנה במחשב</button>
   <div class="sidebar-footer">

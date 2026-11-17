@@ -183,6 +183,7 @@ def login():
         session.clear()                      # סשן חדש בכל כניסה (מונע קיבוע סשן)
         login_user(inst)
         sec.inst_mark_session(inst)
+        session['inst_login_as'] = identifier[:200]
         sec.log_inst_login(inst, 'code' if via_code else 'password', True)
         if via_code or not inst.password_hash:
             session['must_set_password'] = True
@@ -584,18 +585,54 @@ def change_password():
 @institution_bp.route('/contact', methods=['GET', 'POST'])
 @institution_login_required
 def contact():
+    """התכתבות עם הנהלת המערכת (צ'אט). תשובות המנהל מגיעות גם למייל של המוסד."""
+    from models import InstitutionChatMessage
+    from services import institution_chat as ICH
     if request.method == 'POST':
-        from models import ManagerMessage
-        msg = ManagerMessage(
-            phone=current_user.phone or f'inst-{current_user.id}',
-            name=f'מוסד: {current_user.name}',
-            email=current_user.email,
-            transcript=request.form.get('message', ''),
-            status='new',
-            source='institution_contact',
-        )
-        db.session.add(msg)
-        db.session.commit()
-        flash('ההודעה נשלחה להנהלת המערכת')
+        body = request.form.get('message') or (request.get_json(silent=True) or {}).get('message') or ''
+        m = ICH.add_from_institution(current_user, body, via='web', sender=session.get('inst_login_as') or current_user.email)
+        if request.headers.get('X-Requested-With') == 'fetch':
+            return jsonify({'ok': bool(m), 'message': ICH.serialize(m) if m else None})
+        if m:
+            flash('ההודעה נשלחה')
         return redirect(url_for('institution.contact'))
-    return render_template('institution/contact.html')
+    msgs = (InstitutionChatMessage.query.filter_by(institution_id=current_user.id)
+            .order_by(InstitutionChatMessage.created_at.asc()).all())
+    # הודעות המנהל נחשבות "נקראו" כשהמוסד פותח את ההתכתבות
+    InstitutionChatMessage.query.filter_by(institution_id=current_user.id, direction='out', is_read=False).update(
+        {InstitutionChatMessage.is_read: True}, synchronize_session=False)
+    db.session.commit()
+    return render_template('institution/contact.html', messages=[ICH.serialize(m) for m in msgs])
+
+
+@institution_bp.route('/contact/messages')
+@institution_login_required
+def contact_messages():
+    """הודעות חדשות להתכתבות (נבדק כל כמה שניות מהדף הפתוח)."""
+    from models import InstitutionChatMessage
+    from services import institution_chat as ICH
+    after = request.args.get('after', type=int) or 0
+    msgs = (InstitutionChatMessage.query.filter_by(institution_id=current_user.id)
+            .filter(InstitutionChatMessage.id > after).order_by(InstitutionChatMessage.id.asc()).all())
+    if any(m.direction == 'out' and not m.is_read for m in msgs):
+        for m in msgs:
+            if m.direction == 'out':
+                m.is_read = True
+        db.session.commit()
+    # גם סטטוס "נקרא" של ההודעות שהמוסד שלח
+    read_ids = [m.id for m in InstitutionChatMessage.query.filter_by(
+        institution_id=current_user.id, direction='in', is_read=True).with_entities(InstitutionChatMessage.id).all()]
+    return jsonify({'messages': [ICH.serialize(m) for m in msgs], 'read': read_ids[-200:]})
+
+
+@institution_bp.app_context_processor
+def _inst_chat_badge():
+    """מספר הודעות שלא נקראו מהמנהל - לתג בתפריט "צור קשר"."""
+    try:
+        if current_user.is_authenticated and isinstance(current_user._get_current_object(), Institution) \
+                and (request.path or '').startswith('/institution'):
+            from services.institution_chat import unread_for_institution
+            return {'inst_chat_unread': unread_for_institution(current_user.id)}
+    except Exception:
+        pass
+    return {'inst_chat_unread': 0}

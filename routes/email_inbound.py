@@ -1852,6 +1852,17 @@ def email_inbound():
             log.info(f"email-inbound: התקבל סבב הגהה חדש (round={round_.id}) לדף כתב-יד {page_id} מלקוח {phone}")
             return jsonify({'status': 'ok', 'reason': 'proofing_received', 'round_id': round_.id}), 200
 
+    # תשובה של מוסד במייל להודעה מהנהלת המערכת (נושא עם "מוסד #<מספר>", או In-Reply-To להודעה שלנו) -
+    # נכנסת להתכתבות של המוסד (services/institution_chat.py), לא לתיבה הכללית
+    _irt = _extract_header(raw_headers, 'In-Reply-To') or ''
+    if 'inst-chat-' in _irt or re.search(r'מוסד\s*#\s*\d+', subject or ''):
+        with app.app_context():
+            from services import institution_chat as ICH
+            _body = _clean_text((request.form.get('text') or '').strip() or _strip_html(request.form.get('html') or ''))
+            _body = _strip_quoted_reply(_body)
+            if ICH.handle_inbound_email(subject, sender_email, _body, _irt.strip() or None):
+                return jsonify({'status': 'ok', 'reason': 'institution_chat_reply'}), 200
+
     # תגובת לקוח בהתכתבות עם המנהל - נושא שונה לגמרי ("שירות לקוחות {טלפון}"),
     # לא תלויה ביתרה, לא דורשת קובץ מצורף, ולא עוברת בתמלול/OCR בכלל.
     # נבדק לפני _parse_subject הרגיל כי הפורמט שונה (הטלפון לא באסימון הראשון).

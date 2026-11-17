@@ -7,7 +7,7 @@
 
   {# ארבע לשוניות - על כל אחת מספר הפריטים שממתינים לטיפול #}
   <nav class="mm-tabs">
-    {% for key, icon, label in [('phone','📞','הודעות טלפון'),('inbox','📥','תיבה כללית'),('customers','💬','הודעות מלקוחות'),('nedarim','💳','נדרים פלוס')] %}
+    {% for key, icon, label in [('phone','📞','הודעות טלפון'),('inbox','📥','תיבה כללית'),('customers','💬','הודעות מלקוחות'),('nedarim','💳','נדרים פלוס'),('institutions','🏫','מוסדות')] %}
     <a href="{{ url_for('admin.manager_messages', tab=key) }}" class="mm-tab {{ 'on' if tab == key }}">
       <span>{{ icon }} {{ label }}</span>
       {% if counts[key] %}<b class="mm-count">{{ counts[key] }}</b>{% endif %}
@@ -143,6 +143,7 @@
   {% endif %}
   {% elif tab == 'inbox' %}{% include 'admin/_mm_inbox.html' %}
   {% elif tab == 'customers' %}{% include 'admin/_mm_customers.html' %}
+  {% elif tab == 'institutions' %}{% include 'admin/_mm_institutions.html' %}
   {% else %}{% include 'admin/_mm_nedarim.html' %}
   {% endif %}
 </div>

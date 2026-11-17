@@ -1,0 +1,37 @@
+<div class="mm-info">
+  <div class="mm-info-icon">🏫</div>
+  <div>
+    <div class="mm-info-title">התכתבויות עם מוסדות</div>
+    <div class="mm-info-text">
+      הודעות שמוסדות שלחו מלשונית "צור קשר" באזור המוסד, או בתשובה למייל ממך.
+      <ul>
+        <li>💬 תשובה שלך מופיעה אצל המוסד בצ'אט, ונשלחת גם למייל שלו.</li>
+        <li>✔ התשובה מסמנת את ההתכתבות כנקראה. אפשר גם לסמן כנקרא בלי לענות.</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<div class="table-card">
+  <div class="table-header"><span class="table-title">מוסדות</span></div>
+  {% if not inst_threads %}
+  <div style="padding:16px;color:var(--text2);font-size:13px">עדיין אין התכתבויות עם מוסדות.</div>
+  {% else %}
+  <table>
+    <thead><tr><th style="width:150px">עדכון אחרון</th><th>מוסד</th><th>הודעה אחרונה</th><th style="width:90px"></th></tr></thead>
+    <tbody>
+    {% for r in inst_threads %}
+      <tr style="{% if r.unread %}font-weight:700{% endif %}">
+        <td style="font-size:12px">{{ r.last.created_at | il_time }}</td>
+        <td><a href="{{ url_for('admin.institution_chat', inst_id=r.inst.id) }}" style="color:var(--accent);text-decoration:none">
+          {% if r.unread %}<span class="mm-new-dot">●</span> {% endif %}{{ r.inst.name }}</a>
+          {% if r.unread %}<b class="mm-count" style="margin-right:6px">{{ r.unread }}</b>{% endif %}</td>
+        <td style="font-size:13px;color:var(--text2);font-weight:400;max-width:420px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+          {{ 'אתה: ' if r.last.direction == 'out' }}{{ r.last.body[:140] }}</td>
+        <td><a class="btn btn-sm btn-primary" href="{{ url_for('admin.institution_chat', inst_id=r.inst.id) }}">פתיחה</a></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>

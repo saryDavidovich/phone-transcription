@@ -58,7 +58,10 @@ def inject_new_messages_count():
         from models import NedarimMessage
         nm = select(func.count()).select_from(NedarimMessage).where(
             NedarimMessage.is_read.is_(False)).scalar_subquery()
-        count = int(db.session.execute(select(mm + cm + gi + nm)).scalar() or 0)
+        from models import InstitutionChatMessage
+        im = select(func.count(func.distinct(InstitutionChatMessage.institution_id))).where(
+            InstitutionChatMessage.direction == 'in', InstitutionChatMessage.is_read.is_(False)).scalar_subquery()
+        count = int(db.session.execute(select(mm + cm + gi + nm + im)).scalar() or 0)
     except Exception:
         count = 0
     try:   # שאילתה אחת לשתי ההגדרות שבכל עמוד
@@ -2123,7 +2126,7 @@ def manager_messages():
         for row in Customer.query.filter(Customer.phone.in_(phones)).with_entities(Customer.phone, Customer.id):
             customer_ids[row[0]] = row[1]
     tab = request.args.get('tab', 'phone')
-    if tab not in ('phone', 'inbox', 'customers', 'nedarim'):
+    if tab not in ('phone', 'inbox', 'customers', 'nedarim', 'institutions'):
         tab = 'phone'
     ctx = dict(messages=messages, status_filter=status_filter, timedelta=timedelta,
                customer_ids=customer_ids, tab=tab, counts=_message_tab_counts())
@@ -2133,6 +2136,8 @@ def manager_messages():
             GeneralInboxMessage.is_read.asc(), GeneralInboxMessage.updated_at.desc()).all()
     elif tab == 'customers':
         ctx.update(_customer_threads_overview())
+    elif tab == 'institutions':
+        ctx['inst_threads'] = _institution_chats_overview()
     elif tab == 'nedarim':
         from models import NedarimMessage
         from services import nedarim_messages as NM
@@ -2202,9 +2207,53 @@ def _message_tab_counts():
     inbox = GeneralInboxMessage.query.filter_by(is_read=False).count()
     customers = (db.session.query(_f.count(_f.distinct(CustomerMessage.thread_id)))
                  .filter(CustomerMessage.direction == 'in', CustomerMessage.is_read.is_(False)).scalar() or 0)
-    from models import NedarimMessage
+    from models import NedarimMessage, InstitutionChatMessage
     nedarim = NedarimMessage.query.filter_by(is_read=False).count()
-    return {'phone': phone, 'inbox': inbox, 'customers': int(customers), 'nedarim': nedarim}
+    insts = (db.session.query(_f.count(_f.distinct(InstitutionChatMessage.institution_id)))
+             .filter(InstitutionChatMessage.direction == 'in', InstitutionChatMessage.is_read.is_(False)).scalar() or 0)
+    return {'phone': phone, 'inbox': inbox, 'customers': int(customers), 'nedarim': nedarim, 'institutions': int(insts)}
+
+
+def _institution_chats_overview():
+    """התכתבויות עם מוסדות: מוסד, הודעה אחרונה, כמה לא נקראו - ממתינים קודם."""
+    from sqlalchemy import func as _f
+    from models import InstitutionChatMessage, Institution
+    last_ids = dict(db.session.query(InstitutionChatMessage.institution_id, _f.max(InstitutionChatMessage.id))
+                    .group_by(InstitutionChatMessage.institution_id).all())
+    if not last_ids:
+        return []
+    unread = dict(db.session.query(InstitutionChatMessage.institution_id, _f.count(InstitutionChatMessage.id))
+                  .filter(InstitutionChatMessage.direction == 'in', InstitutionChatMessage.is_read.is_(False))
+                  .group_by(InstitutionChatMessage.institution_id).all())
+    lasts = {m.institution_id: m for m in InstitutionChatMessage.query.filter(InstitutionChatMessage.id.in_(last_ids.values()))}
+    insts = {i.id: i for i in Institution.query.filter(Institution.id.in_(last_ids.keys()))}
+    rows = [{'inst': insts[i], 'last': lasts[i], 'unread': unread.get(i, 0)} for i in last_ids if i in insts and i in lasts]
+    rows.sort(key=lambda r: (r['unread'] == 0, -(r['last'].id)))
+    return rows
+
+
+@admin_bp.route('/institution-chat/<int:inst_id>', methods=['GET', 'POST'])
+@login_required
+def institution_chat(inst_id):
+    """התכתבות עם מוסד (כמו ווטסאפ). תשובה נשלחת גם במייל למוסד."""
+    from models import Institution, InstitutionChatMessage
+    from services import institution_chat as ICH
+    inst = Institution.query.get_or_404(inst_id)
+    if request.method == 'POST':
+        body = (request.form.get('body') or '').strip()
+        if request.form.get('action') == 'read':
+            InstitutionChatMessage.query.filter_by(institution_id=inst.id, direction='in', is_read=False).update(
+                {InstitutionChatMessage.is_read: True}, synchronize_session=False)
+            db.session.commit()
+            flash('✔ סומן כנקרא')
+        elif body:
+            ICH.add_from_admin(inst, body)
+            flash('✔ התשובה נשלחה' + (' - וגם למייל של המוסד' if (inst.notify_email or inst.email) else ''))
+        return redirect(url_for('admin.institution_chat', inst_id=inst.id) + '#end')
+    msgs = (InstitutionChatMessage.query.filter_by(institution_id=inst.id)
+            .order_by(InstitutionChatMessage.created_at.asc()).all())
+    return render_template('admin/institution_chat.html', inst=inst, msgs=[ICH.serialize(m) | {'sender': m.sender} for m in msgs],
+                           unread=sum(1 for m in msgs if m.direction == 'in' and not m.is_read))
 
 
 def _customer_threads_overview():
@@ -3599,6 +3648,8 @@ def delete_institution(inst_id):
     InstitutionChargeLog.query.filter_by(institution_id=inst.id).delete()
     from models import InstitutionLoginLog
     InstitutionLoginLog.query.filter_by(institution_id=inst.id).delete()
+    from models import InstitutionChatMessage
+    InstitutionChatMessage.query.filter_by(institution_id=inst.id).delete()
     InstitutionUpload.query.filter_by(institution_id=inst.id).delete()
     StudentLinkRequest.query.filter_by(institution_id=inst.id).delete()
     db.session.delete(inst)

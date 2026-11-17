@@ -174,6 +174,21 @@ class StudentGroup(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
 
+class InstitutionChatMessage(db.Model):
+    """התכתבות בין מוסד להנהלת המערכת (לשונית "צור קשר" באזור המוסד ו"מוסדות" בהודעות למנהל).
+    in = מהמוסד (מהאתר או בתשובה למייל), out = מהמנהל (נשלח גם במייל למוסד)."""
+    __tablename__ = 'institution_chat_messages'
+    id = db.Column(db.Integer, primary_key=True)
+    institution_id = db.Column(db.Integer, db.ForeignKey('institutions.id', ondelete='CASCADE'), nullable=False, index=True)
+    direction = db.Column(db.String(4), nullable=False)          # 'in' / 'out'
+    body = db.Column(db.Text, nullable=False)
+    via = db.Column(db.String(10), default='web')                # web / email
+    sender = db.Column(db.String(200))                           # מי שלח (מייל המוסד / מורשה כניסה)
+    is_read = db.Column(db.Boolean, default=False)                # נקרא ע"י הצד השני
+    message_id = db.Column(db.String(255), index=True)           # Message-ID של המייל היוצא (לשרשור תגובות)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
+
 class InstitutionLoginLog(db.Model):
     """יומן כניסות לאזור המוסד - זמן, שיטה (סיסמה/קוד/גוגל), הצלחה, IP. בלי סיסמאות או קודים."""
     __tablename__ = 'institution_login_logs'
