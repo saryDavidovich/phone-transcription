@@ -4,22 +4,31 @@
 <h1>ניהול תלמידים</h1>
 
 <div style="display:flex; gap:12px; margin-bottom:20px; flex-wrap:wrap;">
-  <button class="btn" onclick="document.getElementById('addForm').style.display='block'">+ הוספת תלמיד</button>
+  <button class="btn" onclick="openAddModal()">+ הוספת תלמיד</button>
   <button class="btn btn-secondary" onclick="openImportModal()">📥 ייבוא מאקסל</button>
   <a href="{{ url_for('institution_students.export_excel') }}" class="btn btn-secondary" style="text-decoration:none;">📤 ייצוא לאקסל</a>
 </div>
 
-<div id="addForm" class="card" style="display:none; max-width:480px; margin-bottom:20px;">
-  <h3 style="font-size:15px; margin-bottom:12px;">הוספת תלמיד</h3>
-  <form method="post" action="{{ url_for('institution_students.add_student') }}">
-    <div class="field"><label>שם</label><input class="input" name="name" required></div>
-    <div class="field"><label>טלפון (רשות - אם ריק, ייווצר מספר תלמיד אוטומטי)</label><input class="input" name="phone">
-      <div style="font-size:12px;color:var(--text3);margin-top:4px">אם המספר כבר קיים במערכת כלקוח - נשלח אליו מייל לאישור הצירוף כתלמיד שלכם.</div></div>
-    <div class="field"><label>מייל (רשות)</label><input class="input" name="email"></div>
-    <div class="field"><label>פקס (רשות)</label><input class="input" name="fax"></div>
-    <div class="field"><label>זיכוי פתיחה (רשות)</label><input class="input" name="initial_balance" type="number" step="0.01"></div>
-    <button type="submit" class="btn">הוספה</button>
-  </form>
+<div id="addModal" class="modal-backdrop hidden">
+  <div class="modal-box" style="max-width:460px;" role="dialog" aria-labelledby="addTitle">
+    <button type="button" class="modal-close" onclick="closeAddModal()" aria-label="סגירה">✕</button>
+    <h3 id="addTitle">הוספת תלמיד</h3>
+    <form method="post" action="{{ url_for('institution_students.add_student') }}">
+      <div class="field"><label>שם</label><input class="input" name="name" id="addName" required></div>
+      <div class="field"><label>טלפון (רשות - אם ריק, ייווצר מספר תלמיד אוטומטי)</label><input class="input" name="phone" inputmode="tel">
+        <div class="hint">אם המספר כבר קיים במערכת כלקוח - נשלח אליו מייל לאישור הצירוף כתלמיד שלכם.</div></div>
+      <div class="row-2">
+        <div class="field"><label>מייל (רשות)</label><input class="input" name="email" type="email"></div>
+        <div class="field"><label>פקס (רשות)</label><input class="input" name="fax" inputmode="tel"></div>
+      </div>
+      <div class="field"><label>זיכוי פתיחה (רשות, ₪)</label><input class="input" name="initial_balance" type="number" step="0.01" min="0">
+        <div class="hint">יורד מיתרת המוסד.</div></div>
+      <div style="display:flex; gap:10px; margin-top:6px;">
+        <button type="submit" class="btn" style="flex:1;">הוספה</button>
+        <button type="button" class="btn btn-secondary" style="flex:1;" onclick="closeAddModal()">ביטול</button>
+      </div>
+    </form>
+  </div>
 </div>
 
 <div id="importModal" class="modal-backdrop hidden">
@@ -108,6 +117,13 @@
 
 <script>
 var importModal = document.getElementById('importModal');
+var addModal = document.getElementById('addModal');
+function openAddModal() { addModal.classList.remove('hidden'); setTimeout(function () { document.getElementById('addName').focus(); }, 30); }
+function closeAddModal() { addModal.classList.add('hidden'); addModal.querySelector('form').reset(); }
+addModal.addEventListener('click', function (e) { if (e.target === addModal) closeAddModal(); });
+document.addEventListener('keydown', function (e) {
+  if (e.key === 'Escape') { closeAddModal(); closeImportModal(); }
+});
 function openImportModal() { importModal.classList.remove('hidden'); }
 function closeImportModal() { importModal.classList.add('hidden'); }
 importModal.addEventListener('click', function (e) { if (e.target === importModal) closeImportModal(); });
