@@ -1,0 +1,444 @@
+{% extends "institution/base.html" %}
+{% from "institution/_icons.html" import ic %}
+{% block head %}
+<style>
+.tr-head { display:flex; align-items:flex-start; gap:14px; flex-wrap:wrap; margin:10px 0 18px; }
+.tr-head .tt { flex:1; min-width:220px; }
+.tr-title { display:flex; align-items:center; gap:8px; font-size:20px; font-weight:800; line-height:1.35; }
+.tr-title .name { overflow-wrap:anywhere; }
+.tr-title input { font:inherit; font-size:18px; font-weight:700; padding:6px 10px; border-radius:10px; border:1px solid var(--accent); width:100%; max-width:520px; }
+.tr-meta { font-size:13px; color:var(--text2); margin-top:4px; display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+.tr-actions { display:flex; gap:8px; flex-wrap:wrap; }
+
+.player { position:sticky; top:14px; z-index:20; margin-bottom:16px; padding:14px 18px; }
+.pl-row { display:flex; align-items:center; gap:12px; }
+.pl-main { width:48px; height:48px; border-radius:50%; background:var(--accent); color:#fff; border:0; cursor:pointer; display:flex; align-items:center; justify-content:center; flex:none; box-shadow:0 6px 16px -6px rgba(16,185,129,.7); transition:.15s; }
+.pl-main:hover { background:var(--accent2); transform:scale(1.04); }
+.pl-main .ico { width:22px; height:22px; }
+.pl-skip { background:none; border:0; color:var(--text2); cursor:pointer; padding:6px; border-radius:8px; display:flex; }
+.pl-skip:hover { background:var(--surface2); color:var(--text); }
+.pl-skip .ico { width:22px; height:22px; }
+.pl-track { flex:1; min-width:0; display:flex; flex-direction:column; gap:4px; }
+.pl-bar { position:relative; height:8px; border-radius:6px; background:var(--surface3); cursor:pointer; touch-action:none; }
+.pl-bar .buf { position:absolute; inset:0 auto 0 0; background:#dfe5ef; border-radius:6px; width:0; }
+.pl-bar .fill { position:absolute; inset:0 auto 0 0; background:var(--accent); border-radius:6px; width:0; }
+.pl-bar .knob { position:absolute; top:50%; width:16px; height:16px; border-radius:50%; background:#fff; border:3px solid var(--accent); transform:translate(-50%,-50%); left:0; box-shadow:var(--shadow); }
+[dir=rtl] .pl-bar { direction:ltr; }
+.pl-times { display:flex; justify-content:space-between; font-size:12px; color:var(--text2); font-variant-numeric:tabular-nums; direction:ltr; }
+.pl-speed { border:1px solid var(--border); background:var(--surface2); border-radius:8px; padding:5px 8px; font-family:inherit; font-size:12.5px; font-weight:700; color:var(--text); cursor:pointer; }
+.pl-opts { display:flex; align-items:center; gap:14px; margin-top:10px; font-size:12.5px; color:var(--text2); flex-wrap:wrap; }
+.pl-opts label { display:inline-flex; align-items:center; gap:6px; cursor:pointer; }
+.pl-opts input { accent-color:var(--accent); }
+.pl-state { display:flex; align-items:center; gap:10px; font-size:13.5px; color:var(--text2); }
+
+.tx-tools { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:14px; }
+.tx-search { position:relative; flex:1; min-width:200px; max-width:340px; }
+.tx-search input { padding-right:34px; }
+.tx-search .ico { position:absolute; right:10px; top:50%; transform:translateY(-50%); color:var(--text3); }
+.tx-count { font-size:12.5px; color:var(--text2); }
+.tx { font-size:16px; line-height:2; color:var(--text); }
+.tx p { margin:0 0 12px; }
+.seg { border-radius:6px; padding:2px 1px; cursor:pointer; transition:background .25s, color .25s; box-decoration-break:clone; -webkit-box-decoration-break:clone; }
+.seg:hover { background:var(--surface3); }
+.seg.past { color:var(--text); }
+.seg.now { background:var(--accent-soft); color:#065f46; box-shadow:0 0 0 2px var(--accent-soft); }
+.seg.anchor { text-decoration:underline dotted var(--accent); text-underline-offset:5px; }
+mark.hit { background:#fde68a; color:inherit; border-radius:3px; padding:0 1px; }
+mark.hit.cur { background:#f59e0b; color:#fff; }
+.tx-edit { width:100%; min-height:420px; font-family:inherit; font-size:15.5px; line-height:1.9; padding:16px; border-radius:12px; border:1px solid var(--accent); background:var(--surface); resize:vertical; color:var(--text); box-shadow:0 0 0 3px var(--accent-soft); }
+.tx-edit:focus { outline:none; }
+.edit-bar { display:flex; gap:10px; align-items:center; margin-top:12px; flex-wrap:wrap; }
+.edit-bar .saved { font-size:12.5px; color:var(--text2); margin-inline-start:auto; }
+.sync-note { font-size:12px; color:var(--text3); display:flex; align-items:center; gap:6px; }
+.badge-edit { background:var(--blue-soft); color:var(--blue); }
+@media (hover:none) { .sync-note { display:none; } }
+@media (max-width:900px) {
+  .player { top:68px; padding:12px; }
+  .pl-main { width:44px; height:44px; }
+  .tx { font-size:15.5px; line-height:1.95; }
+}
+@media (max-width:560px) {
+  .tr-actions { width:100%; }
+  .tr-actions .btn { flex:1; white-space:nowrap; padding:10px 8px; font-size:13px; }
+  .pl-skip.hide-sm { display:none; }
+}
+@media print {
+  .sidebar, .topbar, .player, .tx-tools, .tr-actions, .back-link, .sync-note { display:none !important; }
+  main { margin:0 !important; padding:0 !important; }
+  .card { box-shadow:none; border:0; padding:0; }
+  .seg.now { background:none; box-shadow:none; color:inherit; }
+}
+</style>
+{% endblock %}
+{% block content %}
+<div class="page" id="trPage" data-kind="{{ kind }}" data-id="{{ obj.id }}">
+  <a class="back-link" href="{{ back }}">{{ ic('arrow-right', 15) }} חזרה</a>
+
+  <div class="tr-head">
+    <div class="tt">
+      <div class="tr-title" id="titleBox">
+        <span class="name" id="titleText">{{ title }}</span>
+        <button type="button" class="icon-btn" title="שינוי שם" onclick="renameStart()">{{ ic('pen', 15) }}</button>
+      </div>
+      <div class="tr-meta">
+        <span>{{ meta }}</span>
+        <span class="badge badge-edit {{ '' if obj.edited_at else 'hidden' }}" id="editedBadge">{{ ic('pen', 12) }} נערך</span>
+      </div>
+    </div>
+    <div class="tr-actions">
+      <button type="button" class="btn btn-secondary" id="editBtn" onclick="editStart()">{{ ic('edit', 16) }} עריכה</button>
+      <button type="button" class="btn btn-secondary" onclick="copyText(this)">{{ ic('copy', 16) }} העתקה</button>
+      <a class="btn" href="/institution/t/{{ kind }}/{{ obj.id }}/download">{{ ic('download', 16) }} הורדת Word</a>
+    </div>
+  </div>
+
+  <div class="card player" id="player">
+    <div class="pl-state" id="plState"><span class="spinner-ring"></span> טוענים את השמע...</div>
+    <div class="hidden" id="plUi">
+      <div class="pl-row">
+        <button type="button" class="pl-main" id="plPlay" aria-label="ניגון">{{ ic('play', 22, 1) }}</button>
+        <button type="button" class="pl-skip" id="plBack" title="10 שניות אחורה">{{ ic('back10', 22, 1.7) }}</button>
+        <div class="pl-track">
+          <div class="pl-bar" id="plBar"><div class="buf" id="plBuf"></div><div class="fill" id="plFill"></div><div class="knob" id="plKnob"></div></div>
+          <div class="pl-times"><span id="plCur">0:00</span><span id="plDur">0:00</span></div>
+        </div>
+        <button type="button" class="pl-skip hide-sm" id="plFwd" title="10 שניות קדימה">{{ ic('fwd10', 22, 1.7) }}</button>
+        <select class="pl-speed" id="plSpeed" title="מהירות">
+          <option value="0.75">0.75×</option><option value="1" selected>1×</option><option value="1.25">1.25×</option>
+          <option value="1.5">1.5×</option><option value="1.75">1.75×</option><option value="2">2×</option>
+        </select>
+      </div>
+      <div class="pl-opts">
+        <label><input type="checkbox" id="optFollow" checked> גלילה אוטומטית עם הטקסט</label>
+        <span class="sync-note">{{ ic('info', 13) }} הסנכרון משוער. אם ההדגשה לא מדויקת: בזמן ניגון, Shift + לחיצה על המשפט שנשמע עכשיו</span>
+      </div>
+    </div>
+    <audio id="audio" preload="metadata"></audio>
+  </div>
+
+  <div class="card">
+    <div class="tx-tools" id="txTools">
+      <div class="tx-search">{{ ic('search', 16) }}<input class="input" id="txFind" placeholder="חיפוש בתוך התמלול"></div>
+      <span class="tx-count" id="txCount"></span>
+      <button type="button" class="icon-btn hidden" id="findPrev" title="הקודם">{{ ic('chevron-right', 16) }}</button>
+      <button type="button" class="icon-btn hidden" id="findNext" title="הבא">{{ ic('chevron-left', 16) }}</button>
+      <button type="button" class="icon-btn" title="הדפסה" onclick="window.print()" style="margin-inline-start:auto;">{{ ic('printer', 16) }}</button>
+    </div>
+    <div class="tx" id="tx"></div>
+    <div class="hidden" id="editWrap">
+      <textarea class="tx-edit" id="editArea" spellcheck="true"></textarea>
+      <div class="edit-bar">
+        <button type="button" class="btn" id="saveBtn" onclick="editSave()">{{ ic('save', 16) }} שמירה</button>
+        <button type="button" class="btn btn-secondary" onclick="editCancel()">ביטול</button>
+        <button type="button" class="btn btn-danger {{ '' if can_revert else 'hidden' }}" id="revertBtn" onclick="editRevert()">{{ ic('undo', 16) }} חזרה לתמלול המקורי</button>
+        <span class="saved" id="savedNote">Ctrl+S לשמירה</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop hidden" id="revertModal">
+  <div class="modal-box">
+    <button class="modal-close" onclick="closeM('revertModal')">סגירה</button>
+    <h3>חזרה לתמלול המקורי?</h3>
+    <p class="card-sub">כל העריכות שנעשו יימחקו, והטקסט יחזור למה שהתקבל מהתמלול.</p>
+    <div class="modal-actions">
+      <button class="btn btn-danger" onclick="doRevert()">כן, לשחזר</button>
+      <button class="btn btn-secondary" onclick="closeM('revertModal')">ביטול</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  var KIND = '{{ kind }}', ID = {{ obj.id }}, BASE = '/institution/t/' + KIND + '/' + ID;
+  var TEXT = {{ obj.transcript|tojson }};
+  var DUR_HINT = {{ duration|int }};
+  var ICP = { play: '{{ ic("play", 22, 1)|replace("\n", "")|replace("'", "\\'") }}', pause: '{{ ic("pause", 22, 1)|replace("\n", "")|replace("'", "\\'") }}' };
+  var audio = document.getElementById('audio'), txEl = document.getElementById('tx');
+  var segs = [], starts = [], active = -1, anchors = {}, AKEY = 'instSync:' + KIND + ID;
+  try { anchors = JSON.parse(localStorage.getItem(AKEY) || '{}') || {}; } catch (e) { anchors = {}; }
+
+  function toast(html, bad) {
+    var box = document.getElementById('flashToasts');
+    if (!box) { box = document.createElement('div'); box.id = 'flashToasts'; document.body.appendChild(box); }
+    var t = document.createElement('div'); t.className = 'ftoast' + (bad ? ' bad' : '');
+    t.innerHTML = (bad ? IC.alert : IC.check) + '<span>' + html + '</span>';
+    box.appendChild(t);
+    setTimeout(function () { t.classList.add('out'); setTimeout(function () { t.remove(); }, 450); }, bad ? 6000 : 3000);
+  }
+  window.instToast = window.instToast || toast;
+
+  /* ---------- פירוק הטקסט למשפטים ---------- */
+  function split(text) {
+    var paras = text.split(/\n+/), out = [];
+    paras.forEach(function (p, pi) {
+      p = p.trim(); if (!p) return;
+      var parts = p.match(/[^.!?׃:;]+[.!?׃:;]*["'”׳״)]*\s*/g) || [p], buf = '';
+      parts.forEach(function (s, i) {
+        buf += s;
+        if (buf.length >= 45 || i === parts.length - 1) { out.push({ t: buf, p: pi }); buf = ''; }
+      });
+      if (buf) out.push({ t: buf, p: pi });
+    });
+    // משפטים ארוכים מאוד - מפצלים לפי פסיקים כדי שההדגשה תזוז
+    var res = [];
+    out.forEach(function (s) {
+      if (s.t.length <= 260) { res.push(s); return; }
+      var chunks = s.t.match(/[^,،]+[,،]?\s*/g) || [s.t], b = '';
+      chunks.forEach(function (c, i) { b += c; if (b.length >= 120 || i === chunks.length - 1) { res.push({ t: b, p: s.p }); b = ''; } });
+    });
+    return res;
+  }
+  function render() {
+    segs = split(TEXT);
+    var html = '', lastP = -1, n = 0;
+    segs.forEach(function (s, i) {
+      if (s.p !== lastP) { if (lastP >= 0) html += '</p>'; html += '<p>'; lastP = s.p; }
+      html += '<span class="seg" data-i="' + i + '">' + escHtml(s.t) + '</span>';
+    });
+    if (lastP >= 0) html += '</p>';
+    txEl.innerHTML = html || '<p style="color:var(--text2)">אין טקסט</p>';
+    computeStarts();
+    markAnchors();
+    if (findQ) doFind(findQ, true);
+  }
+  function duration() { return (isFinite(audio.duration) && audio.duration > 0) ? audio.duration : DUR_HINT; }
+  /* זמן התחלה משוער לכל משפט: לפי מיקום התווים, ובין נקודות "כיול" שהמשתמש סימן - לינארי */
+  function computeStarts() {
+    var w = segs.map(function (s) { return Math.max(1, s.t.replace(/\s+/g, '').length); });
+    var cum = [0]; for (var i = 0; i < w.length; i++) cum.push(cum[i] + w[i]);
+    var total = cum[cum.length - 1] || 1, D = duration() || 0;
+    var pts = [[0, 0]];
+    Object.keys(anchors).map(Number).filter(function (k) { return k > 0 && k < segs.length; }).sort(function (a, b) { return a - b; })
+      .forEach(function (k) { pts.push([cum[k], anchors[k]]); });
+    pts.push([total, D]);
+    // לוודא שהזמנים עולים
+    for (var j = 1; j < pts.length; j++) if (pts[j][1] < pts[j - 1][1]) pts[j][1] = pts[j - 1][1];
+    starts = cum.slice(0, segs.length).map(function (c) {
+      for (var j = 1; j < pts.length; j++) {
+        if (c <= pts[j][0]) {
+          var a = pts[j - 1], b = pts[j], span = (b[0] - a[0]) || 1;
+          return a[1] + (b[1] - a[1]) * (c - a[0]) / span;
+        }
+      }
+      return D;
+    });
+  }
+  function markAnchors() {
+    txEl.querySelectorAll('.seg.anchor').forEach(function (e) { e.classList.remove('anchor'); });
+    Object.keys(anchors).forEach(function (k) { var e = txEl.querySelector('.seg[data-i="' + k + '"]'); if (e) e.classList.add('anchor'); });
+  }
+  function segAt(t) {
+    var lo = 0, hi = starts.length - 1, ans = 0;
+    while (lo <= hi) { var mid = (lo + hi) >> 1; if (starts[mid] <= t + 0.05) { ans = mid; lo = mid + 1; } else hi = mid - 1; }
+    return ans;
+  }
+  function highlight(i, scroll) {
+    if (i === active) return;
+    var prev = txEl.querySelector('.seg.now'); if (prev) prev.classList.remove('now');
+    active = i;
+    var el = txEl.querySelector('.seg[data-i="' + i + '"]');
+    if (!el) return;
+    el.classList.add('now');
+    if (scroll && document.getElementById('optFollow').checked && !document.hidden) {
+      var r = el.getBoundingClientRect(), top = document.getElementById('player').getBoundingClientRect().bottom + 20;
+      if (r.top < top || r.bottom > window.innerHeight - 40) {
+        window.scrollTo({ top: window.scrollY + r.top - top - 60, behavior: 'smooth' });
+      }
+    }
+  }
+
+  txEl.addEventListener('click', function (e) {
+    var el = e.target.closest('.seg'); if (!el || !hasAudio) return;
+    var i = +el.dataset.i;
+    if (e.shiftKey && !audio.paused) {          // כיול: המשפט הזה מתחיל עכשיו
+      anchors[i] = audio.currentTime;
+      try { localStorage.setItem(AKEY, JSON.stringify(anchors)); } catch (x) {}
+      computeStarts(); markAnchors(); active = -1; highlight(i, false);
+      toast('הסנכרון עודכן מהמשפט הזה');
+      return;
+    }
+    if (window.getSelection && String(window.getSelection())) return;     // סימון טקסט להעתקה
+    audio.currentTime = starts[i] || 0; active = -1; highlight(i, false);
+    if (audio.paused) audio.play().catch(function () {});
+  });
+
+  /* ---------- נגן ---------- */
+  var hasAudio = false;
+  var plPlay = document.getElementById('plPlay'), bar = document.getElementById('plBar');
+  function fmt(s) { s = Math.max(0, Math.floor(s || 0)); var h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = s % 60;
+    return (h ? h + ':' + String(m).padStart(2, '0') : m) + ':' + String(x).padStart(2, '0'); }
+  function paint() {
+    var D = duration() || 1, p = Math.min(1, (audio.currentTime || 0) / D) * 100;
+    document.getElementById('plFill').style.width = p + '%';
+    document.getElementById('plKnob').style.left = p + '%';
+    document.getElementById('plCur').textContent = fmt(audio.currentTime);
+    try { if (audio.buffered.length) document.getElementById('plBuf').style.width = Math.min(100, audio.buffered.end(audio.buffered.length - 1) / D * 100) + '%'; } catch (e) {}
+  }
+  audio.addEventListener('loadedmetadata', function () { document.getElementById('plDur').textContent = fmt(duration()); computeStarts(); paint(); });
+  audio.addEventListener('timeupdate', function () { paint(); if (segs.length) highlight(segAt(audio.currentTime), true); });
+  audio.addEventListener('progress', paint);
+  audio.addEventListener('play', function () { plPlay.innerHTML = ICP.pause; plPlay.setAttribute('aria-label', 'השהיה'); });
+  audio.addEventListener('pause', function () { plPlay.innerHTML = ICP.play; plPlay.setAttribute('aria-label', 'ניגון'); savePos(); });
+  audio.addEventListener('error', function () { if (hasAudio) showState('{{ ic("alert", 16)|replace("\n", "")|replace("'", "\\'") }} לא הצלחנו לנגן את השמע כרגע. נסו לרענן בעוד רגע'); });
+  plPlay.onclick = function () { audio.paused ? audio.play().catch(function () {}) : audio.pause(); };
+  document.getElementById('plBack').onclick = function () { audio.currentTime = Math.max(0, audio.currentTime - 10); };
+  document.getElementById('plFwd').onclick = function () { audio.currentTime = Math.min(duration(), audio.currentTime + 10); };
+  document.getElementById('plSpeed').onchange = function () { audio.playbackRate = +this.value; try { localStorage.setItem('instSpeed', this.value); } catch (e) {} };
+  try { var sp = localStorage.getItem('instSpeed'); if (sp) { document.getElementById('plSpeed').value = sp; audio.playbackRate = +sp; } } catch (e) {}
+  function seekFrom(ev) {
+    var r = bar.getBoundingClientRect(), x = (ev.touches ? ev.touches[0].clientX : ev.clientX);
+    audio.currentTime = Math.max(0, Math.min(1, (x - r.left) / r.width)) * duration(); paint();
+  }
+  var dragging = false;
+  bar.addEventListener('pointerdown', function (e) { dragging = true; bar.setPointerCapture(e.pointerId); seekFrom(e); });
+  bar.addEventListener('pointermove', function (e) { if (dragging) seekFrom(e); });
+  bar.addEventListener('pointerup', function () { dragging = false; });
+  function savePos() { try { if (audio.currentTime > 5) localStorage.setItem('instPos:' + KIND + ID, String(audio.currentTime)); } catch (e) {} }
+  window.addEventListener('beforeunload', savePos);
+  function showState(html) { var s = document.getElementById('plState'); s.innerHTML = html; s.classList.remove('hidden'); document.getElementById('plUi').classList.add('hidden'); }
+
+  document.addEventListener('keydown', function (e) {
+    if (!hasAudio || /INPUT|TEXTAREA|SELECT/.test((e.target.tagName || '')) || e.target.isContentEditable) return;
+    if (e.code === 'Space') { e.preventDefault(); plPlay.click(); }
+    else if (e.key === 'ArrowLeft') { audio.currentTime = Math.min(duration(), audio.currentTime + 5); }
+    else if (e.key === 'ArrowRight') { audio.currentTime = Math.max(0, audio.currentTime - 5); }
+  });
+
+  var tries = 0;
+  function loadAudio() {
+    fetch(BASE + '/audio-state', { credentials: 'same-origin' }).then(function (r) { return r.json(); }).then(function (d) {
+      if (d.state === 'ready') {
+        hasAudio = true;
+        audio.src = d.src;
+        document.getElementById('plState').classList.add('hidden');
+        document.getElementById('plUi').classList.remove('hidden');
+        document.getElementById('plDur').textContent = fmt(DUR_HINT);
+        try { var pos = +localStorage.getItem('instPos:' + KIND + ID); if (pos > 5) audio.addEventListener('loadedmetadata', function once() { audio.currentTime = pos; audio.removeEventListener('loadedmetadata', once); }); } catch (e) {}
+      } else if (d.state === 'preparing' && tries++ < 40) {
+        showState('<span class="spinner-ring"></span> מכינים את השמע לניגון - עוד כמה שניות...');
+        setTimeout(loadAudio, 4000);
+      } else {
+        document.getElementById('player').classList.add('hidden');
+      }
+    }).catch(function () { showState('{{ ic("alert", 16)|replace("\n", "")|replace("'", "\\'") }} השמע לא נטען. נסו לרענן את הדף'); });
+  }
+  loadAudio();
+
+  /* ---------- חיפוש בתוך הטקסט ---------- */
+  var findQ = '', hits = [], hitI = -1;
+  function clearMarks() { txEl.querySelectorAll('mark.hit').forEach(function (m) { m.replaceWith(document.createTextNode(m.textContent)); }); txEl.normalize(); }
+  function doFind(q, keep) {
+    clearMarks(); hits = []; hitI = -1; findQ = q;
+    var cnt = document.getElementById('txCount');
+    if (!q || q.length < 2) { cnt.textContent = ''; toggleNav(false); return; }
+    var re = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+    txEl.querySelectorAll('.seg').forEach(function (el) {
+      var t = el.textContent; if (!re.test(t)) return; re.lastIndex = 0;
+      el.innerHTML = escHtml(t).replace(new RegExp(escHtml(q).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), function (m) { return '<mark class="hit">' + m + '</mark>'; });
+    });
+    hits = Array.prototype.slice.call(txEl.querySelectorAll('mark.hit'));
+    cnt.textContent = hits.length ? hits.length + ' תוצאות' : 'לא נמצא';
+    toggleNav(hits.length > 1);
+    if (hits.length && !keep) go(0);
+  }
+  function toggleNav(on) { ['findPrev', 'findNext'].forEach(function (id) { document.getElementById(id).classList.toggle('hidden', !on); }); }
+  function go(i) {
+    if (!hits.length) return;
+    if (hits[hitI]) hits[hitI].classList.remove('cur');
+    hitI = (i + hits.length) % hits.length; hits[hitI].classList.add('cur');
+    hits[hitI].scrollIntoView({ block: 'center', behavior: 'smooth' });
+    document.getElementById('txCount').textContent = (hitI + 1) + ' מתוך ' + hits.length;
+  }
+  var ft; document.getElementById('txFind').addEventListener('input', function () { var v = this.value.trim(); clearTimeout(ft); ft = setTimeout(function () { doFind(v); }, 220); });
+  document.getElementById('txFind').addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); go(hitI + (e.shiftKey ? -1 : 1)); } });
+  document.getElementById('findNext').onclick = function () { go(hitI + 1); };
+  document.getElementById('findPrev').onclick = function () { go(hitI - 1); };
+
+  /* ---------- עריכה ---------- */
+  var area = document.getElementById('editArea'), dirty = false;
+  function grow() { area.style.height = 'auto'; area.style.height = Math.max(420, area.scrollHeight + 4) + 'px'; }
+  window.editStart = function () {
+    area.value = TEXT; dirty = false;
+    txEl.classList.add('hidden'); document.getElementById('txTools').classList.add('hidden');
+    document.getElementById('editWrap').classList.remove('hidden');
+    document.getElementById('editBtn').classList.add('hidden');
+    document.getElementById('savedNote').textContent = 'Ctrl+S לשמירה';
+    grow(); area.focus();
+  };
+  area.addEventListener('input', function () { dirty = true; grow(); document.getElementById('savedNote').textContent = 'יש שינויים שלא נשמרו'; });
+  area.addEventListener('keydown', function (e) { if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'ד')) { e.preventDefault(); editSave(); } });
+  window.editCancel = function () { closeEdit(); };
+  function closeEdit() {
+    dirty = false;
+    document.getElementById('editWrap').classList.add('hidden');
+    txEl.classList.remove('hidden'); document.getElementById('txTools').classList.remove('hidden');
+    document.getElementById('editBtn').classList.remove('hidden');
+  }
+  window.editSave = async function () {
+    var btn = document.getElementById('saveBtn'); btn.disabled = true;
+    var old = btn.innerHTML; btn.innerHTML = '<span class="spinner-ring" style="border-color:rgba(255,255,255,.35);border-top-color:#fff"></span> שומרים...';
+    try {
+      var r = await fetch(BASE + '/save', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify({ text: area.value }) });
+      var d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'השמירה נכשלה');
+      TEXT = area.value.replace(/\r\n/g, '\n').trim();
+      if (!d.unchanged) {
+        document.getElementById('editedBadge').classList.remove('hidden');
+        document.getElementById('revertBtn').classList.remove('hidden');
+        // שינוי טקסט = הכיול הישן כבר לא מתאים
+        anchors = {}; try { localStorage.removeItem(AKEY); } catch (x) {}
+      }
+      render(); closeEdit();
+      toast(d.unchanged ? 'לא היו שינויים' : 'התמלול נשמר - גם קובץ ה-Word מעודכן');
+    } catch (e) { toast(escHtml(e.message), true); }
+    finally { btn.disabled = false; btn.innerHTML = old; }
+  };
+  window.editRevert = function () { document.getElementById('revertModal').classList.remove('hidden'); };
+  window.closeM = function (id) { document.getElementById(id).classList.add('hidden'); };
+  window.doRevert = async function () {
+    closeM('revertModal');
+    try {
+      var r = await fetch(BASE + '/revert', { method: 'POST', credentials: 'same-origin' });
+      var d = await r.json(); if (!r.ok) throw new Error(d.error || 'נכשל');
+      TEXT = d.text; anchors = {}; try { localStorage.removeItem(AKEY); } catch (x) {}
+      document.getElementById('editedBadge').classList.add('hidden');
+      document.getElementById('revertBtn').classList.add('hidden');
+      render(); closeEdit(); toast('התמלול חזר לגרסה המקורית');
+    } catch (e) { toast(escHtml(e.message), true); }
+  };
+  window.addEventListener('beforeunload', function (e) { if (dirty) { e.preventDefault(); e.returnValue = ''; } });
+
+  /* ---------- שם ---------- */
+  window.renameStart = function () {
+    var box = document.getElementById('titleBox'), cur = document.getElementById('titleText').textContent;
+    box.innerHTML = '<input id="titleInput" maxlength="200">';
+    var inp = document.getElementById('titleInput'); inp.value = cur; inp.focus(); inp.select();
+    var done = false;
+    async function finish(save) {
+      if (done) return; done = true;
+      var v = inp.value.trim(), name = cur;
+      if (save && v && v !== cur) {
+        try {
+          var r = await fetch(BASE + '/rename', { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify({ title: v }) });
+          var d = await r.json(); if (!r.ok) throw new Error(d.error || 'נכשל'); name = d.title; toast('השם עודכן');
+        } catch (e) { toast(escHtml(e.message), true); }
+      }
+      box.innerHTML = '<span class="name" id="titleText"></span><button type="button" class="icon-btn" title="שינוי שם" onclick="renameStart()">{{ ic("pen", 15)|replace("\n", "")|replace("'", "\\'") }}</button>';
+      document.getElementById('titleText').textContent = name;
+    }
+    inp.addEventListener('keydown', function (e) { if (e.key === 'Enter') finish(true); else if (e.key === 'Escape') finish(false); });
+    inp.addEventListener('blur', function () { finish(true); });
+  };
+
+  window.copyText = function (btn) {
+    var done = function () { toast('הטקסט הועתק'); };
+    if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(TEXT).then(done, fallback); else fallback();
+    function fallback() { var t = document.createElement('textarea'); t.value = TEXT; document.body.appendChild(t); t.select(); try { document.execCommand('copy'); done(); } catch (e) {} t.remove(); }
+  };
+
+  render();
+})();
+</script>
+{% endblock %}

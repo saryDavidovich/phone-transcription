@@ -1,0 +1,382 @@
+{% extends "institution/base.html" %}
+{% from "institution/_icons.html" import ic %}
+{% block title %}כל התמלולים{% endblock %}
+{% block head %}
+<style>
+.tabs { display:flex; gap:4px; background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:4px; margin-bottom:16px; width:max-content; max-width:100%; box-shadow:var(--shadow); }
+.tab { display:flex; align-items:center; gap:7px; padding:8px 16px; border-radius:9px; border:0; background:none; font-family:inherit; font-size:13.5px; font-weight:600; color:var(--text2); cursor:pointer; transition:.15s; white-space:nowrap; }
+.tab:hover { color:var(--text); }
+.tab.on { background:var(--accent); color:#fff; box-shadow:0 4px 12px -4px rgba(16,185,129,.5); }
+.tab .ico { width:16px; height:16px; }
+.filters { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:14px; }
+.filters .input { width:auto; min-width:0; padding:9px 11px; font-size:13.5px; }
+.filters .q { position:relative; flex:1 1 240px; }
+.filters .q input { width:100%; padding-right:34px; }
+.filters .q .ico { position:absolute; right:10px; top:50%; transform:translateY(-50%); color:var(--text3); }
+.custom-range { display:flex; gap:6px; align-items:center; }
+.custom-range .input { width:150px; }
+.pane { display:none; }
+.pane.on { display:block; animation:paneIn .2s ease-out; }
+@keyframes paneIn { from { opacity:0; transform:translateY(4px); } to { opacity:1; transform:none; } }
+.list-head { display:flex; align-items:center; gap:10px; margin-bottom:6px; font-size:13px; color:var(--text2); flex-wrap:wrap; }
+.list-head .sel-all { display:inline-flex; align-items:center; gap:6px; cursor:pointer; }
+.list-head input, .tr-row input[type=checkbox] { width:17px; height:17px; accent-color:var(--accent); cursor:pointer; }
+.tr-row { display:flex; align-items:center; gap:12px; padding:11px 6px; border-bottom:1px solid var(--border); border-radius:10px; transition:background .15s; }
+.tr-row:hover { background:var(--surface2); }
+.tr-row.sel { background:var(--accent-soft); }
+.tr-row .main { flex:1; min-width:0; }
+.tr-row .t { font-weight:700; font-size:14px; color:var(--text); text-decoration:none; display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+a.t:hover { color:var(--accent2); }
+.tr-row .m { font-size:12.5px; color:var(--text2); display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin-top:2px; }
+.chip { font-size:11.5px; padding:1px 8px; border-radius:10px; background:var(--surface3); color:var(--text2); font-weight:600; }
+.chip.pro { background:rgba(124,58,237,.12); color:#7c3aed; }
+.chip.ed { background:var(--blue-soft); color:var(--blue); }
+.snip { font-size:12.5px; color:var(--text2); margin-top:4px; line-height:1.6; }
+.snip mark { background:#fde68a; color:inherit; border-radius:3px; padding:0 1px; }
+.tr-row .act { display:flex; gap:6px; flex:none; align-items:center; }
+.state { font-size:12px; font-weight:600; }
+.state.processing { color:var(--blue); } .state.pending { color:var(--amber); } .state.error { color:var(--red); }
+.skel { height:54px; border-radius:10px; margin:6px 0; background:linear-gradient(90deg,var(--surface2) 25%,var(--surface3) 50%,var(--surface2) 75%); background-size:200% 100%; animation:sk 1.2s infinite; }
+@keyframes sk { to { background-position:-200% 0; } }
+.empty-state { text-align:center; padding:40px 10px; color:var(--text2); font-size:14px; }
+.empty-state .ico { margin:0 auto 10px; width:36px; height:36px; color:var(--text3); }
+.more { text-align:center; font-size:12.5px; color:var(--text2); padding:12px; }
+.selbar { position:fixed; bottom:22px; left:50%; transform:translateX(-50%) translateY(120px); z-index:300; background:var(--surface); border:1px solid var(--border); box-shadow:var(--shadow-lg); border-radius:14px; padding:10px 12px 10px 16px; display:flex; gap:10px; align-items:center; transition:transform .25s, opacity .25s; max-width:calc(100vw - 24px); flex-wrap:wrap; opacity:0; pointer-events:none; }
+.selbar.show { transform:translateX(-50%); opacity:1; pointer-events:auto; }
+.selbar b { font-size:14px; }
+@media (min-width:901px) { .selbar { margin-right:120px; } }
+
+/* לוח שנה */
+.cal-head { display:flex; align-items:center; gap:10px; margin-bottom:12px; }
+.cal-head h2 { flex:1; text-align:center; font-size:17px; }
+.cal-head h2 small { display:block; font-size:12.5px; color:var(--text2); font-weight:500; margin-top:2px; }
+.cal { display:grid; grid-template-columns:repeat(7,1fr); gap:6px; }
+.cal .dow { text-align:center; font-size:12px; font-weight:700; color:var(--text2); padding:4px 0; }
+.cal .d { min-height:82px; border:1px solid var(--border); border-radius:11px; padding:7px 8px; background:var(--surface); cursor:pointer; transition:.15s; display:flex; flex-direction:column; gap:3px; position:relative; }
+.cal .d:hover { border-color:var(--accent); }
+.cal .d.out { background:var(--surface2); opacity:.55; }
+.cal .d.today { border-color:var(--accent); box-shadow:0 0 0 2px var(--accent-soft); }
+.cal .d.pick { background:var(--accent-soft); border-color:var(--accent); }
+.cal .d.shabbat { background:#fbfaf5; }
+.cal .d .hd { font-weight:800; font-size:15px; }
+.cal .d .gd { font-size:11px; color:var(--text3); position:absolute; top:7px; left:8px; }
+.cal .d .rh { font-size:10.5px; color:var(--accent2); font-weight:700; }
+.cal .d .cnt { margin-top:auto; align-self:flex-start; font-size:11.5px; font-weight:700; padding:2px 8px; border-radius:10px; background:var(--accent); color:#fff; }
+.cal .d .cnt.l1 { background:#a7f3d0; color:#065f46; } .cal .d .cnt.l2 { background:#34d399; color:#064e3b; }
+.day-list { margin-top:16px; }
+.day-list h3 { margin-bottom:6px; }
+@media (max-width:640px) {
+  .cal { gap:3px; }
+  .cal .d { min-height:58px; padding:5px; border-radius:8px; }
+  .cal .d .hd { font-size:13px; }
+  .cal .d .gd { font-size:9.5px; top:5px; left:5px; }
+  .cal .d .rh { display:none; }
+  .cal .d .cnt { font-size:10px; padding:1px 6px; }
+  .tabs { width:100%; } .tab { flex:1; justify-content:center; padding:8px 6px; }
+  .tr-row { flex-wrap:wrap; }
+  .tr-row .act { width:100%; padding-inline-start:29px; }
+}
+
+/* הורדה מרוכזת */
+.fmt-cards { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin:6px 0 16px; }
+@media (max-width:560px) { .fmt-cards { grid-template-columns:1fr; } }
+.fmt { border:2px solid var(--border); border-radius:14px; padding:16px; cursor:pointer; display:flex; gap:12px; align-items:flex-start; transition:.15s; background:var(--surface); }
+.fmt:hover { border-color:#a7f3d0; }
+.fmt.on { border-color:var(--accent); background:var(--accent-soft); }
+.fmt input { display:none; }
+.fmt b { display:block; font-size:14.5px; margin-bottom:3px; }
+.fmt span { font-size:12.5px; color:var(--text2); line-height:1.6; }
+.exp-sum { display:flex; align-items:center; gap:10px; padding:12px 14px; border-radius:12px; background:var(--surface2); border:1px solid var(--border); margin-bottom:14px; font-size:14px; }
+.exp-sum b { font-size:20px; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="page">
+<h1>כל התמלולים</h1>
+
+<div class="tabs" role="tablist">
+  <button type="button" class="tab" data-tab="list">{{ ic('list', 16) }} רשימה</button>
+  <button type="button" class="tab" data-tab="cal">{{ ic('calendar', 16) }} לוח שנה</button>
+  <button type="button" class="tab" data-tab="export">{{ ic('archive', 16) }} הורדה מרוכזת</button>
+</div>
+
+<div class="card mb-18" style="padding:14px 16px;">
+  <div class="filters" style="margin:0;">
+    <div class="q">{{ ic('search', 16) }}<input class="input" id="fQ" placeholder="חיפוש לפי שם, תלמיד או מילה מתוך התמלול"></div>
+    <select class="input" id="fPeriod" aria-label="תקופה">
+      <option value="">כל הזמנים</option><option value="7">7 הימים האחרונים</option><option value="30">30 הימים האחרונים</option>
+      <option value="month">החודש</option><option value="prev">החודש הקודם</option><option value="90">3 חודשים</option><option value="custom">טווח תאריכים...</option>
+    </select>
+    <span class="custom-range hidden" id="fRange"><input type="date" class="input" id="fFrom" aria-label="מתאריך"> - <input type="date" class="input" id="fTo" aria-label="עד תאריך"></span>
+    <select class="input" id="fScope" aria-label="של מי"><option value="all">הכל</option><option value="students">של תלמידים</option><option value="inst">של המוסד</option></select>
+    {% if groups %}<select class="input" id="fGroup" aria-label="קבוצה"><option value="">כל הקבוצות</option>{% for g in groups %}<option value="{{ g.id }}">{{ g.name }}</option>{% endfor %}</select>{% endif %}
+    <select class="input" id="fStudent" aria-label="תלמיד"><option value="">כל התלמידים</option>{% for s in students %}<option value="{{ s.id }}">{{ s.name or ('#' ~ s.id) }}</option>{% endfor %}</select>
+  </div>
+</div>
+
+<div class="pane" data-pane="list">
+  <div class="card">
+    <div class="list-head">
+      <label class="sel-all"><input type="checkbox" id="selAll"> סימון הכל</label>
+      <span id="listCount"></span>
+    </div>
+    <div id="list"></div>
+  </div>
+</div>
+
+<div class="pane" data-pane="cal">
+  <div class="card">
+    <div class="cal-head">
+      <button type="button" class="icon-btn" id="calPrev" title="החודש הקודם">{{ ic('chevron-right', 18) }}</button>
+      <h2 id="calTitle"></h2>
+      <button type="button" class="icon-btn" id="calNext" title="החודש הבא">{{ ic('chevron-left', 18) }}</button>
+      <button type="button" class="btn btn-secondary btn-sm" id="calToday">היום</button>
+    </div>
+    <div class="cal" id="cal"></div>
+  </div>
+  <div class="card day-list hidden" id="dayCard"><h3 id="dayTitle"></h3><div id="dayList"></div></div>
+</div>
+
+<div class="pane" data-pane="export">
+  <div class="card page-narrow" style="max-width:720px; margin:0;">
+    <div class="card-head"><span class="ic">{{ ic('archive') }}</span><h2>הורדה מרוכזת</h2></div>
+    <div class="card-sub">כל התמלולים המוכנים לפי הסינון שלמעלה (תקופה, קבוצה, תלמיד או חיפוש) - בבת אחת, עם הלוגו והשם של המוסד.</div>
+    <div class="fmt-cards">
+      <label class="fmt on"><input type="radio" name="fmt" value="zip" checked><span class="ic-box">{{ ic('archive', 18) }}</span><div><b>קובץ ZIP</b><span>קובץ Word נפרד לכל תמלול, ארוזים יחד</span></div></label>
+      <label class="fmt"><input type="radio" name="fmt" value="merged"><span class="ic-box">{{ ic('file-text', 18) }}</span><div><b>קובץ Word אחד</b><span>כל התמלולים במסמך אחד, כל תמלול בעמוד חדש</span></div></label>
+    </div>
+    <div class="exp-sum" id="expSum"><span class="spinner-ring"></span> סופרים...</div>
+    <label class="switch-row hidden" id="onlySelRow"><input type="checkbox" id="onlySel" checked> <span>רק <b id="selN">0</b> התמלולים שסימנתי ברשימה</span></label>
+    <button type="button" class="btn btn-block" id="expBtn">{{ ic('download', 16) }} הורדה</button>
+    <div class="hint">עד 300 תמלולים בכל הורדה. לתקופה ארוכה יותר - מורידים בכמה חלקים.</div>
+  </div>
+</div>
+</div>
+
+<div class="selbar" id="selbar">
+  <b id="selbarN"></b>
+  <button type="button" class="btn btn-sm" onclick="exportSel('zip')">{{ ic('archive', 14) }} ZIP</button>
+  <button type="button" class="btn btn-sm btn-secondary" onclick="exportSel('merged')">{{ ic('file-text', 14) }} Word אחד</button>
+  <button type="button" class="icon-btn" title="ביטול הסימון" onclick="clearSel()">{{ ic('close', 14) }}</button>
+</div>
+
+<script>
+(function () {
+  var IK = {
+    head: '{{ ic("headphones", 15)|replace("\n", "")|replace("'", "\\'") }}', dl: '{{ ic("download", 15)|replace("\n", "")|replace("'", "\\'") }}',
+    empty: '{{ ic("file-text", 36, 1.5)|replace("\n", "")|replace("'", "\\'") }}', spin: '<span class="spinner-ring"></span>'
+  };
+  var $ = function (id) { return document.getElementById(id); };
+  var params = new URLSearchParams(location.search);
+  var tab = params.get('tab') || '{{ tab }}' || 'list';
+  var sel = {}, lastItems = [];
+
+  /* ---------- תאריך עברי ---------- */
+  function gem(n) {
+    var o = '', H = ['', 'ק', 'ר', 'ש', 'ת'], T = ['', 'י', 'כ', 'ל', 'מ', 'נ', 'ס', 'ע', 'פ', 'צ'], U = ['', 'א', 'ב', 'ג', 'ד', 'ה', 'ו', 'ז', 'ח', 'ט'];
+    n = n % 1000;
+    while (n >= 400) { o += 'ת'; n -= 400; }
+    if (n >= 100) { o += H[Math.floor(n / 100)]; n %= 100; }
+    if (n === 15) o += 'טו'; else if (n === 16) o += 'טז'; else { o += T[Math.floor(n / 10)] + U[n % 10]; }
+    return o.length > 1 ? o.slice(0, -1) + '״' + o.slice(-1) : o + '׳';
+  }
+  var HF = new Intl.DateTimeFormat('he-u-ca-hebrew', { day: 'numeric', month: 'long', year: 'numeric' });
+  function heb(d) {
+    var p = {}; HF.formatToParts(d).forEach(function (x) { p[x.type] = x.value; });
+    var day = parseInt(String(p.day).replace(/\D/g, ''), 10), yr = parseInt(String(p.year).replace(/\D/g, ''), 10);
+    return { day: day, dayH: isNaN(day) ? p.day : gem(day), month: p.month, year: isNaN(yr) ? p.year : gem(yr) };
+  }
+  function ymd(d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+
+  /* ---------- מסננים ---------- */
+  var f = { q: params.get('q') || '', period: params.get('period') || '', from: params.get('from') || '', to: params.get('to') || '',
+            scope: params.get('scope') || 'all', group: params.get('group') || '', student: params.get('student') || '' };
+  if ((f.from || f.to) && !f.period) f.period = 'custom';
+  $('fQ').value = f.q; $('fPeriod').value = f.period; $('fFrom').value = f.from; $('fTo').value = f.to; $('fScope').value = f.scope;
+  if ($('fGroup')) $('fGroup').value = f.group; $('fStudent').value = f.student;
+  $('fRange').classList.toggle('hidden', f.period !== 'custom');
+  function range() {
+    var now = new Date(), d0 = null, d1 = null;
+    if (f.period === 'custom') return [f.from, f.to];
+    if (/^\d+$/.test(f.period)) { d0 = new Date(now); d0.setDate(d0.getDate() - (+f.period - 1)); d1 = now; }
+    else if (f.period === 'month') { d0 = new Date(now.getFullYear(), now.getMonth(), 1); d1 = now; }
+    else if (f.period === 'prev') { d0 = new Date(now.getFullYear(), now.getMonth() - 1, 1); d1 = new Date(now.getFullYear(), now.getMonth(), 0); }
+    return [d0 ? ymd(d0) : '', d1 ? ymd(d1) : ''];
+  }
+  function query(extra) {
+    var r = range(), q = new URLSearchParams();
+    if (f.q) q.set('q', f.q); if (r[0]) q.set('from', r[0]); if (r[1]) q.set('to', r[1]);
+    if (f.scope !== 'all') q.set('scope', f.scope); if (f.group) q.set('group', f.group); if (f.student) q.set('student', f.student);
+    Object.keys(extra || {}).forEach(function (k) { q.set(k, extra[k]); });
+    return q;
+  }
+  function syncUrl() {
+    var q = new URLSearchParams();
+    ['q', 'period', 'scope', 'group', 'student'].forEach(function (k) { if (f[k] && !(k === 'scope' && f[k] === 'all')) q.set(k, f[k]); });
+    if (f.period === 'custom') { if (f.from) q.set('from', f.from); if (f.to) q.set('to', f.to); }
+    if (tab !== 'list') q.set('tab', tab);
+    history.replaceState(null, '', location.pathname + (q.toString() ? '?' + q : ''));
+  }
+  function changed() { syncUrl(); refresh(); }
+  var qt; $('fQ').addEventListener('input', function () { clearTimeout(qt); var v = this.value.trim(); qt = setTimeout(function () { f.q = v; changed(); }, 350); });
+  $('fPeriod').addEventListener('change', function () { f.period = this.value; $('fRange').classList.toggle('hidden', f.period !== 'custom'); if (f.period !== 'custom') changed(); });
+  ['fFrom', 'fTo'].forEach(function (id) { $(id).addEventListener('change', function () { f.from = $('fFrom').value; f.to = $('fTo').value; changed(); }); });
+  $('fScope').addEventListener('change', function () { f.scope = this.value; changed(); });
+  if ($('fGroup')) $('fGroup').addEventListener('change', function () { f.group = this.value; changed(); });
+  $('fStudent').addEventListener('change', function () { f.student = this.value; changed(); });
+
+  /* ---------- לשוניות ---------- */
+  function setTab(t) {
+    tab = t;
+    document.querySelectorAll('.tab').forEach(function (b) { b.classList.toggle('on', b.dataset.tab === t); });
+    document.querySelectorAll('.pane').forEach(function (p) { p.classList.toggle('on', p.dataset.pane === t); });
+    syncUrl(); refresh();
+  }
+  document.querySelectorAll('.tab').forEach(function (b) { b.addEventListener('click', function () { setTab(b.dataset.tab); }); });
+
+  /* ---------- רשימה ---------- */
+  function hl(text, q) {
+    var e = escHtml(text); if (!q) return e;
+    return e.replace(new RegExp(escHtml(q).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), function (m) { return '<mark>' + m + '</mark>'; });
+  }
+  function rowHtml(it, withCheck) {
+    var key = it.k + it.id, st = { processing: 'בתמלול...', pending: 'ממתין ליתרה', error: 'שגיאה' }[it.state];
+    var whoLink = it.sid ? '<a href="/institution/students/' + it.sid + '" style="color:inherit">' + escHtml(it.who) + '</a>' : escHtml(it.who);
+    return '<div class="tr-row' + (sel[key] ? ' sel' : '') + '" data-key="' + key + '">' +
+      (withCheck ? '<input type="checkbox" ' + (it.state === 'done' ? '' : 'disabled ') + (sel[key] ? 'checked ' : '') + 'aria-label="סימון">' : '') +
+      '<div class="main">' + (it.view ? '<a class="t" href="' + it.view + '">' + hl(it.title, f.q) + '</a>' : '<span class="t">' + hl(it.title, f.q) + '</span>') +
+      '<div class="m"><span>' + whoLink + '</span>' + (it.group ? '<span class="chip">' + escHtml(it.group) + '</span>' : '') +
+      '<span>' + it.date + ' ' + it.time + '</span>' + (it.min ? '<span>· ' + it.min + ' דק\'</span>' : '') +
+      (it.tier === 'premium' ? '<span class="chip pro">מקצועי</span>' : '') + (it.edited ? '<span class="chip ed">נערך</span>' : '') + '</div>' +
+      (it.snip ? '<div class="snip">' + hl(it.snip, f.q) + '</div>' : '') + '</div>' +
+      '<div class="act">' + (st ? '<span class="state ' + it.state + '">' + st + '</span>' :
+        '<a class="icon-btn" href="' + it.view + '" title="האזנה ועריכה">' + IK.head + '</a><a class="icon-btn" href="' + it.word + '" title="הורדת Word">' + IK.dl + '</a>') +
+      '</div></div>';
+  }
+  var req = 0;
+  async function loadList() {
+    var my = ++req;
+    $('list').innerHTML = '<div class="skel"></div><div class="skel"></div><div class="skel"></div>';
+    var d = await (await fetch('/institution/transcripts/data?' + query({ limit: 300 }), { credentials: 'same-origin' })).json();
+    if (my !== req) return;
+    lastItems = d.items;
+    $('listCount').textContent = d.total ? (d.total > d.items.length ? 'מוצגים ' + d.items.length + ' מתוך ' + d.total : d.total + ' תמלולים') : '';
+    if (!d.items.length) { $('list').innerHTML = '<div class="empty-state">' + IK.empty + (f.q || f.period || f.group || f.student ? 'לא נמצאו תמלולים לפי הסינון' : 'עדיין אין תמלולים') + '</div>'; return; }
+    shown = 0; $('list').innerHTML = ''; more(d);
+  }
+  var shown = 0, PAGE = 50;
+  function more(d) {
+    var old = $('list').querySelector('.more'); if (old) old.remove();
+    var chunk = lastItems.slice(shown, shown + PAGE); shown += chunk.length;
+    $('list').insertAdjacentHTML('beforeend', chunk.map(function (it) { return rowHtml(it, true); }).join(''));
+    if (shown < lastItems.length) {
+      $('list').insertAdjacentHTML('beforeend', '<div class="more"><button type="button" class="btn btn-secondary btn-sm" id="moreBtn">הצגת עוד ' + Math.min(PAGE, lastItems.length - shown) + '</button></div>');
+      $('moreBtn').onclick = function () { more(d); };
+    } else if (d.total > lastItems.length) {
+      $('list').insertAdjacentHTML('beforeend', '<div class="more">יש עוד ' + (d.total - lastItems.length) + ' - צמצמו את הסינון כדי לראות אותם</div>');
+    }
+    paintSel();
+  }
+  $('list').addEventListener('change', function (e) {
+    if (e.target.type !== 'checkbox') return;
+    var row = e.target.closest('.tr-row'), key = row.dataset.key;
+    if (e.target.checked) sel[key] = 1; else delete sel[key];
+    row.classList.toggle('sel', e.target.checked); paintSel();
+  });
+  $('selAll').addEventListener('change', function () {
+    var on = this.checked;
+    lastItems.forEach(function (it) { if (it.state === 'done') { if (on) sel[it.k + it.id] = 1; else delete sel[it.k + it.id]; } });
+    $('list').querySelectorAll('.tr-row').forEach(function (r) { var c = r.querySelector('input'); if (c && !c.disabled) { c.checked = on; r.classList.toggle('sel', on); } });
+    paintSel();
+  });
+  function selCount() { return Object.keys(sel).length; }
+  function paintSel() {
+    var n = selCount();
+    $('selbar').classList.toggle('show', n > 0 && tab === 'list');
+    $('selbarN').textContent = n + ' נבחרו';
+    $('selN').textContent = n; $('onlySelRow').classList.toggle('hidden', !n);
+  }
+  window.clearSel = function () { sel = {}; $('selAll').checked = false; $('list').querySelectorAll('.tr-row').forEach(function (r) { r.classList.remove('sel'); var c = r.querySelector('input'); if (c) c.checked = false; }); paintSel(); };
+
+  /* ---------- הורדה מרוכזת ---------- */
+  async function doExport(fmt, onlySel) {
+    var q = query({ format: fmt }), fd = new FormData();
+    q.forEach(function (v, k) { fd.append(k, v); });
+    if (onlySel && selCount()) fd.append('ids', Object.keys(sel).join(','));
+    return instDownload('/institution/transcripts/export', { method: 'POST', body: fd });
+  }
+  window.exportSel = function (fmt) { doExport(fmt, true); };
+  document.querySelectorAll('.fmt').forEach(function (l) { l.addEventListener('click', function () { document.querySelectorAll('.fmt').forEach(function (x) { x.classList.toggle('on', x === l); }); }); });
+  $('expBtn').addEventListener('click', async function () {
+    var btn = this; btn.disabled = true;
+    try { await doExport(document.querySelector('.fmt input:checked').value, $('onlySel').checked); } finally { btn.disabled = false; }
+  });
+  async function loadExportSum() {
+    var my = ++req;
+    $('expSum').innerHTML = IK.spin + ' סופרים...';
+    var d = await (await fetch('/institution/transcripts/data?' + query({ done: 1, limit: 1000 }), { credentials: 'same-origin' })).json();
+    if (my !== req) return;
+    var n = d.total, mins = d.items.reduce(function (a, it) { return a + (it.min || 0); }, 0);
+    $('expSum').innerHTML = n ? '<b>' + n + '</b> תמלולים מוכנים להורדה' + (mins ? ' · כ-' + mins + ' דקות' : '') + (n > 300 ? ' <span class="chip">יורדו 300 הראשונים</span>' : '')
+                              : 'אין תמלולים מוכנים לפי הסינון';
+    $('expBtn').disabled = !n;
+  }
+
+  /* ---------- לוח שנה ---------- */
+  var cm = (function () { var d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); })(), calData = {}, pickDay = null;
+  $('calPrev').onclick = function () { cm = new Date(cm.getFullYear(), cm.getMonth() - 1, 1); loadCal(); };
+  $('calNext').onclick = function () { cm = new Date(cm.getFullYear(), cm.getMonth() + 1, 1); loadCal(); };
+  $('calToday').onclick = function () { var d = new Date(); cm = new Date(d.getFullYear(), d.getMonth(), 1); pickDay = ymd(d); loadCal(); };
+  function paintCal() {
+    var first = new Date(cm.getFullYear(), cm.getMonth(), 1), last = new Date(cm.getFullYear(), cm.getMonth() + 1, 0);
+    var h0 = heb(first), h1 = heb(last);
+    $('calTitle').innerHTML = escHtml(first.toLocaleDateString('he-IL', { month: 'long', year: 'numeric' })) +
+      '<small>' + escHtml(h0.month === h1.month ? h0.month + ' ' + h0.year : h0.month + ' - ' + h1.month + ' ' + h1.year) + '</small>';
+    var html = ['א׳', 'ב׳', 'ג׳', 'ד׳', 'ה׳', 'ו׳', 'שבת'].map(function (x) { return '<div class="dow">' + x + '</div>'; }).join('');
+    var start = new Date(first); start.setDate(1 - first.getDay());
+    var today = ymd(new Date()), max = 1;
+    Object.keys(calData).forEach(function (k) { max = Math.max(max, calData[k].length); });
+    for (var i = 0; i < 42; i++) {
+      var d = new Date(start); d.setDate(start.getDate() + i);
+      if (i >= 35 && d.getMonth() !== cm.getMonth()) break;
+      var key = ymd(d), h = heb(d), n = (calData[key] || []).length, lvl = n / max < .34 ? 'l1' : (n / max < .67 ? 'l2' : '');
+      html += '<div class="d' + (d.getMonth() !== cm.getMonth() ? ' out' : '') + (key === today ? ' today' : '') + (d.getDay() === 6 ? ' shabbat' : '') + (key === pickDay ? ' pick' : '') + '" data-day="' + key + '">' +
+        '<span class="hd">' + h.dayH + '</span><span class="gd">' + d.getDate() + '</span>' + (h.day === 1 ? '<span class="rh">ר״ח ' + escHtml(h.month) + '</span>' : '') +
+        (n ? '<span class="cnt ' + lvl + '">' + n + '</span>' : '') + '</div>';
+    }
+    $('cal').innerHTML = html;
+    if (pickDay && calData[pickDay] !== undefined) showDay(pickDay); else if (pickDay && pickDay.slice(0, 7) === ymd(cm).slice(0, 7)) showDay(pickDay); else $('dayCard').classList.add('hidden');
+  }
+  function showDay(key) {
+    pickDay = key;
+    $('cal').querySelectorAll('.d').forEach(function (e) { e.classList.toggle('pick', e.dataset.day === key); });
+    var p = key.split('-'), d = new Date(+p[0], +p[1] - 1, +p[2]), h = heb(d), items = calData[key] || [];
+    $('dayTitle').textContent = d.toLocaleDateString('he-IL', { weekday: 'long', day: 'numeric', month: 'long' }) + ' · ' + h.dayH + ' ' + h.month + ' ' + h.year;
+    $('dayList').innerHTML = items.length ? items.map(function (it) { return rowHtml(it, false); }).join('') : '<div class="empty-state" style="padding:18px">אין תמלולים ביום הזה</div>';
+    $('dayCard').classList.remove('hidden');
+  }
+  $('cal').addEventListener('click', function (e) {
+    var c = e.target.closest('.d'); if (!c) return;
+    showDay(c.dataset.day);
+    if (window.innerWidth < 900) $('dayCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+  async function loadCal() {
+    var my = ++req;
+    var first = new Date(cm.getFullYear(), cm.getMonth(), 1), start = new Date(first); start.setDate(1 - first.getDay());
+    var end = new Date(start); end.setDate(start.getDate() + 41);
+    calData = {}; paintCal();
+    var q = query({ limit: 1000 }); q.set('from', ymd(start)); q.set('to', ymd(end));
+    var d = await (await fetch('/institution/transcripts/data?' + q, { credentials: 'same-origin' })).json();
+    if (my !== req) return;
+    d.items.forEach(function (it) { (calData[it.day] = calData[it.day] || []).push(it); });
+    paintCal();
+  }
+
+  function refresh() {
+    paintSel();
+    if (tab === 'list') loadList(); else if (tab === 'cal') loadCal(); else loadExportSum();
+  }
+  setTab(['list', 'cal', 'export'].indexOf(tab) >= 0 ? tab : 'list');
+})();
+</script>
+{% endblock %}

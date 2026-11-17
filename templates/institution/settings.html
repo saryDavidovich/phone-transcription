@@ -106,6 +106,75 @@
   </div>
 </form>
 
+<div class="card mb-18" id="branding">
+  <div class="card-head"><span class="ic">{{ ic("image") }}</span><h3>מיתוג קובצי ה-Word</h3></div>
+  <div class="card-sub">הלוגו והשם יופיעו בראש כל קובץ תמלול שיורד מאזור המוסד (גם בהורדה מרוכזת ובמייל).</div>
+  <div class="brand-grid">
+    <form id="brandForm" data-ajax="1">
+      <div class="field"><label>שם בכותרת</label><input class="input" name="brand_title" maxlength="200" value="{{ inst.brand_title or '' }}" placeholder="{{ inst.name }}"></div>
+      <div class="field"><label>שורה שנייה (לא חובה)</label><input class="input" name="brand_subtitle" maxlength="200" value="{{ inst.brand_subtitle or '' }}" placeholder="למשל: כתובת, טלפון או סיסמה של המוסד"></div>
+      <div class="field"><label>לוגו (PNG או JPG)</label>
+        <div class="logo-row">
+          <label class="btn btn-secondary btn-sm" style="cursor:pointer;">{{ ic("upload", 14) }} בחירת תמונה<input type="file" name="logo" accept="image/png,image/jpeg" hidden id="logoIn"></label>
+          <button type="button" class="btn btn-danger btn-sm {{ '' if logo_preview else 'hidden' }}" id="logoDel">{{ ic("trash", 14) }} הסרת הלוגו</button>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button type="submit" class="btn" id="brandSave">שמירה</button>
+        <a class="btn btn-secondary" href="{{ url_for('institution_portal.branding_sample') }}">{{ ic("download", 14) }} Word לדוגמה</a>
+      </div>
+    </form>
+    <div class="doc-prev" aria-label="תצוגה מקדימה">
+      <div class="dp-head">
+        <img id="logoPrev" src="{{ logo_preview or '' }}" alt="" class="{{ '' if logo_preview else 'hidden' }}">
+        <div><b id="pvTitle">{{ inst.brand_title or inst.name }}</b><small id="pvSub">{{ inst.brand_subtitle or '' }}</small></div>
+      </div>
+      <div class="dp-body"><b>תמלול: שיעור בגמרא</b><i></i><i></i><i style="width:70%"></i><i></i><i style="width:55%"></i></div>
+    </div>
+  </div>
+</div>
+<style>
+.brand-grid { display:grid; grid-template-columns:1fr 1fr; gap:22px; align-items:start; }
+@media (max-width:760px) { .brand-grid { grid-template-columns:1fr; } }
+.logo-row { display:flex; gap:8px; flex-wrap:wrap; }
+.field .logo-row label.btn { display:inline-flex; margin:0; color:var(--text); font-size:12.5px; font-weight:600; }
+@media (max-width:760px) { .doc-prev { aspect-ratio:auto; max-height:none; padding-bottom:12px; } }
+.doc-prev { background:#fff; border:1px solid var(--border); border-radius:10px; box-shadow:var(--shadow-lg); padding:18px 22px 26px; aspect-ratio:1/1.1; max-height:330px; overflow:hidden; }
+.dp-head { display:flex; align-items:center; gap:10px; padding-bottom:10px; border-bottom:1px solid #c9d3e3; margin-bottom:16px; min-height:44px; }
+.dp-head img { max-height:42px; max-width:110px; object-fit:contain; }
+.dp-head b { display:block; color:#0e7a55; font-size:15px; }
+.dp-head small { display:block; color:#64708a; font-size:11px; }
+.dp-body b { display:block; font-size:14px; margin-bottom:10px; }
+.dp-body i { display:block; height:7px; border-radius:4px; background:#e9edf4; margin-bottom:9px; }
+</style>
+<script>
+(function () {
+  var f = document.getElementById('brandForm'), logoIn = document.getElementById('logoIn'), prev = document.getElementById('logoPrev');
+  var defName = {{ inst.name|tojson }};
+  f.brand_title.addEventListener('input', function () { document.getElementById('pvTitle').textContent = this.value.trim() || defName; });
+  f.brand_subtitle.addEventListener('input', function () { document.getElementById('pvSub').textContent = this.value.trim(); });
+  logoIn.addEventListener('change', function () {
+    var file = logoIn.files[0]; if (!file) return;
+    var r = new FileReader(); r.onload = function () { prev.src = r.result; prev.classList.remove('hidden'); }; r.readAsDataURL(file);
+  });
+  async function send(fd) {
+    var res = await fetch('{{ url_for("institution_portal.branding") }}', { method: 'POST', body: fd, credentials: 'same-origin' });
+    var d = await res.json(); if (!res.ok) throw new Error(d.error || 'השמירה נכשלה'); return d;
+  }
+  f.addEventListener('submit', async function (e) {
+    e.preventDefault(); var b = document.getElementById('brandSave'); b.disabled = true;
+    try { var d = await send(new FormData(f)); logoIn.value = '';
+      if (d.logo) { prev.src = d.logo; prev.classList.remove('hidden'); document.getElementById('logoDel').classList.remove('hidden'); }
+      instToast('המיתוג נשמר - יופיע בכל קובצי ה-Word'); }
+    catch (x) { instToast(escHtml(x.message), true); } finally { b.disabled = false; }
+  });
+  document.getElementById('logoDel').addEventListener('click', async function () {
+    var fd = new FormData(); fd.append('remove_logo', '1');
+    try { await send(fd); prev.classList.add('hidden'); prev.removeAttribute('src'); this.classList.add('hidden'); instToast('הלוגו הוסר'); } catch (x) { instToast(escHtml(x.message), true); }
+  });
+})();
+</script>
+
 <div class="grid grid-2" style="align-items:stretch;">
   <div class="card card-flex">
     <div class="card-head"><span class="ic">{{ ic("user-plus") }}</span><h3>מורשי כניסה נוספים</h3></div>

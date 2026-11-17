@@ -14,3 +14,15 @@ self.addEventListener('fetch', (e) => {
     '<button onclick="location.reload()" style="background:#10b981;color:#fff;border:0;border-radius:10px;padding:10px 22px;font-size:14px;cursor:pointer">נסו שוב</button></div></body></html>',
     { headers: { 'Content-Type': 'text/html; charset=utf-8' } })));
 });
+
+/* לחיצה על התראה (תמלול מוכן / הודעה מהצוות) - פותחת את אזור המוסד בעמוד המתאים */
+self.addEventListener('notificationclick', (e) => {
+  e.notification.close();
+  const url = (e.notification.data && e.notification.data.url) || '/institution/dashboard';
+  e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((list) => {
+    for (const c of list) {
+      if (c.url.indexOf('/institution/') >= 0 && 'focus' in c) { c.focus(); if ('navigate' in c) c.navigate(url); return; }
+    }
+    return self.clients.openWindow(url);
+  }));
+});

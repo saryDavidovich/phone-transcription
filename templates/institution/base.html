@@ -65,6 +65,26 @@ a { color:inherit; }
 .sidebar-footer a { color:var(--text2); font-size:13px; text-decoration:none; }
 .sidebar-footer a:hover { color:var(--red); }
 
+.side-tools { display:flex; gap:4px; padding:8px 12px; border-top:1px solid var(--border); }
+.side-tool { flex:1; position:relative; background:none; border:0; border-radius:10px; padding:7px 2px; cursor:pointer; color:var(--text2); font-family:inherit; font-size:11.5px; display:flex; flex-direction:column; align-items:center; gap:3px; transition:.15s; }
+.side-tool:hover { background:var(--surface2); color:var(--text); }
+.side-tool.on { color:var(--accent2); }
+.side-tool .dot { position:absolute; top:5px; left:calc(50% - 14px); width:8px; height:8px; border-radius:50%; background:var(--red); box-shadow:0 0 0 2px var(--surface); }
+#navProgress { position:fixed; top:0; right:0; height:3px; width:0; background:linear-gradient(90deg,#34d399,var(--accent)); z-index:2000; opacity:0; transition:width .4s ease, opacity .3s; pointer-events:none; }
+#navProgress.go { opacity:1; width:70%; transition:width 6s cubic-bezier(.1,.7,.2,1), opacity .2s; }
+.guide-list { display:flex; flex-direction:column; gap:8px; }
+.guide { border:1px solid var(--border); border-radius:12px; background:var(--surface2); }
+.guide summary { list-style:none; cursor:pointer; padding:12px 14px; font-weight:700; font-size:14px; display:flex; align-items:center; gap:10px; }
+.guide summary::-webkit-details-marker { display:none; }
+.guide summary .ic-box { width:30px; height:30px; border-radius:9px; }
+.guide[open] summary { border-bottom:1px solid var(--border); }
+.guide ol { margin:0; padding:12px 34px 14px 16px; font-size:13.5px; line-height:1.75; color:var(--text); }
+.wn-item { display:flex; gap:12px; padding:10px 0; border-bottom:1px solid var(--border); }
+.wn-item:last-child { border-bottom:0; }
+.wn-item .ic-box { width:32px; height:32px; border-radius:9px; }
+.wn-item b { display:block; font-size:14px; margin-bottom:2px; }
+.wn-item span { font-size:13px; color:var(--text2); line-height:1.6; }
+.modal-box.wide { max-width:560px; }
 main { flex:1; margin-right:240px; padding:32px 40px; max-width:1180px; min-width:0; }
 .sidebar-install { margin:0 14px 10px; }
 .topbar { display:none; }
@@ -109,7 +129,7 @@ body.no-sidebar main .flash { max-width:380px; width:100%; }
 .stat-value { font-size:26px; font-weight:800; color:var(--text); }
 .stat-label { font-size:13px; color:var(--text2); margin-top:6px; }
 
-.btn { background:var(--accent); color:#fff; border:none; border-radius:10px; padding:10px 20px; font-family:inherit; font-size:14px; font-weight:600; cursor:pointer; transition:.15s; display:inline-flex; align-items:center; gap:8px; justify-content:center; }
+.btn { text-decoration:none; background:var(--accent); color:#fff; border:none; border-radius:10px; padding:10px 20px; font-family:inherit; font-size:14px; font-weight:600; cursor:pointer; transition:.15s; display:inline-flex; align-items:center; gap:8px; justify-content:center; }
 .btn:hover { background:var(--accent2); transform:translateY(-1px); }
 .btn:disabled { opacity:.5; cursor:not-allowed; transform:none; }
 .btn-secondary { background:var(--surface2); color:var(--text); border:1px solid var(--border); }
@@ -248,13 +268,20 @@ window.IC = {
   <nav class="sidebar-nav">
     <a href="{{ url_for('institution.dashboard') }}" class="{{ 'active' if ep == 'institution.dashboard' }}">{{ ic('dashboard') }}<span>דשבורד</span></a>
     <a href="{{ url_for('institution_students.students_tab') }}" class="{{ 'active' if ep.startswith('institution_students.') and not self_page }}">{{ ic('users') }}<span>ניהול תלמידים</span></a>
-    <a href="{{ url_for('institution.self_manuscripts') }}" class="{{ 'active' if self_page }}">{{ ic('keyboard') }}<span>קלדנות דיגיטלית</span></a>
     <a href="{{ url_for('institution_transcribe.transcribe_tab') }}" class="{{ 'active' if ep == 'institution_transcribe.transcribe_tab' }}">{{ ic('mic') }}<span>יצירת תמלול</span></a>
+    <a href="{{ url_for('institution_portal.transcripts') }}" class="{{ 'active' if ep in ('institution_portal.transcripts', 'institution_portal.transcript_page') }}">{{ ic('file-text') }}<span>כל התמלולים</span></a>
+    <a href="{{ url_for('institution_portal.reports') }}" class="{{ 'active' if ep == 'institution_portal.reports' }}">{{ ic('chart') }}<span>דוחות וגרפים</span></a>
+    <a href="{{ url_for('institution.self_manuscripts') }}" class="{{ 'active' if self_page }}">{{ ic('keyboard') }}<span>קלדנות דיגיטלית</span></a>
     <a href="{{ url_for('institution.settings') }}" class="{{ 'active' if ep == 'institution.settings' }}">{{ ic('settings') }}<span>הגדרות מוסד</span></a>
     <a href="{{ url_for('institution_billing.billing_tab') }}" class="{{ 'active' if ep == 'institution_billing.billing_tab' }}">{{ ic('card') }}<span>הגדרות חיוב</span></a>
-    <a href="{{ url_for('institution.contact') }}" class="{{ 'active' if ep == 'institution.contact' }}">{{ ic('mail') }}<span>צור קשר</span>{% if inst_chat_unread %}<b class="nav-badge">{{ inst_chat_unread }}</b>{% endif %}</a>
+    <a href="{{ url_for('institution.contact') }}" class="{{ 'active' if ep == 'institution.contact' }}">{{ ic('mail') }}<span>צור קשר</span>{% if inst_chat_unread %}<b class="nav-badge" id="chatBadge">{{ inst_chat_unread }}</b>{% else %}<b class="nav-badge hidden" id="chatBadge"></b>{% endif %}</a>
   </nav>
   <button type="button" id="pwaInstall" class="btn btn-secondary btn-sm sidebar-install" style="display:none" onclick="pwaInstall()">{{ ic('install', 16) }} התקנה כתוכנה במחשב</button>
+  <div class="side-tools">
+    <button type="button" class="side-tool" id="notifyBtn" onclick="instNotifyToggle()" title="התראות בשולחן העבודה">{{ ic('bell-off', 17) }}<span>התראות</span></button>
+    <button type="button" class="side-tool" onclick="instHelp()" title="מדריכים קצרים">{{ ic('help', 17) }}<span>עזרה</span></button>
+    <button type="button" class="side-tool" onclick="instWhatsNew(true)" title="מה חדש">{{ ic('sparkle', 17) }}<span>מה חדש</span><i class="dot hidden" id="newDot"></i></button>
+  </div>
   <div class="sidebar-footer">
     <a href="{{ url_for('institution.logout') }}">{{ ic('logout', 16) }}<span>התנתקות</span></a>
   </div>
@@ -340,6 +367,28 @@ window.IC = {
     }
     throw new Error('no-file');
   }
+  /* הורדה מכל מקום בעמוד (גם POST - למשל הורדה מרוכזת): window.instDownload(url, {method, body}) */
+  window.instDownload = async function (href, init) {
+    say('<span class="spinner-ring" style="border-color:#4b556b;border-top-color:#fff"></span> מכינים את הקובץ...');
+    try {
+      var r = await fetch(href, Object.assign({ credentials: 'same-origin' }, init || {}));
+      if (r.redirected && /\/login/.test(r.url)) { location.href = r.url; return false; }
+      if (!r.ok) throw new Error(await r.text());
+      var ct = r.headers.get('Content-Type') || '', res;
+      if (ct.indexOf('text/html') >= 0) res = await fromPage(await r.text());
+      else res = [await r.blob(), fname(r)];
+      save(res[0], res[1]);
+      say(IC.check + ' הקובץ ירד: ' + (res[1] || '').replace(/</g, '&lt;'), 3500);
+      return true;
+    } catch (err) {
+      var msg = String(err && err.message || '');
+      if (msg && msg.length < 200 && !/^\d+$/.test(msg) && msg !== 'no-file') { say(IC.alert + ' ' + msg.replace(/</g, '&lt;'), 6000); return false; }
+      toast.classList.add('hidden');
+      if (!init || !init.method || init.method === 'GET') location.href = href;     // גיבוי: ההתנהגות הקודמת
+      else say(IC.alert + ' ההורדה נכשלה - נסו שוב', 6000);
+      return false;
+    }
+  };
   document.addEventListener('click', async function (e) {
     var a = e.target.closest && e.target.closest('a[href]');
     if (!a || e.defaultPrevented || e.ctrlKey || e.metaKey || e.shiftKey || e.button !== 0) return;
@@ -348,23 +397,161 @@ window.IC = {
     e.preventDefault();
     if (a.dataset.busy) return;
     a.dataset.busy = '1';
-    say('<span class="spinner-ring" style="border-color:#4b556b;border-top-color:#fff"></span> מכינים את הקובץ...');
-    try {
-      var r = await fetch(url.href, { credentials: 'same-origin' });
-      if (r.redirected && /\/login/.test(r.url)) { location.href = r.url; return; }
-      if (!r.ok) throw new Error(await r.text());
-      var ct = r.headers.get('Content-Type') || '', res;
-      if (ct.indexOf('text/html') >= 0) res = await fromPage(await r.text());
-      else res = [await r.blob(), fname(r)];
-      save(res[0], res[1]);
-      say(IC.check + ' הקובץ ירד: ' + (res[1] || '').replace(/</g, '&lt;'), 3500);
-    } catch (err) {
-      var msg = String(err && err.message || '');
-      if (msg && msg.length < 200 && !/^\d+$/.test(msg) && msg !== 'no-file') say(IC.alert + ' ' + msg.replace(/</g, '&lt;'), 6000);
-      else { toast.classList.add('hidden'); location.href = url.href; }     // גיבוי: ההתנהגות הקודמת
-    } finally { delete a.dataset.busy; }
+    try { await window.instDownload(url.href); } finally { delete a.dataset.busy; }
   });
 })();
 </script>
+{% if inst_logged_in %}
+<div id="navProgress"></div>
+<div class="modal-backdrop hidden" id="helpModal" onclick="if(event.target===this)this.classList.add('hidden')">
+  <div class="modal-box wide">
+    <button class="modal-close" onclick="document.getElementById('helpModal').classList.add('hidden')">סגירה</button>
+    <h3 style="display:flex;align-items:center;gap:8px;">{{ ic('help', 20) }} מדריכים קצרים</h3>
+    <div class="guide-list">
+      <details class="guide"><summary><span class="ic-box">{{ ic('mic', 16) }}</span>איך יוצרים תמלול</summary><ol>
+        <li>בלשונית "יצירת תמלול" בוחרים אחת משלוש דרכים: <b>קובץ</b> מהמחשב, <b>הקלטה</b> ישירות מהמיקרופון, או <b>קישור</b> מ-Google Drive / ג'מבו מייל.</li>
+        <li>בוחרים שפה וסוג תמלול (רגיל או מקצועי) ולוחצים "לתמלול".</li>
+        <li>אפשר להמשיך לגלוש - התמלול ממשיך ברקע, ומופיע ברשימה כשהוא מוכן.</li>
+        <li>להקלטה של תלמיד מסוים - אותו דבר מתוך כרטיס התלמיד.</li></ol></details>
+      <details class="guide"><summary><span class="ic-box">{{ ic('headphones', 16) }}</span>האזנה לתמלול ותיקון הטקסט</summary><ol>
+        <li>לוחצים על שם התמלול - נפתח דף עם נגן והטקסט המלא.</li>
+        <li>בזמן הניגון המשפט שמושמע מודגש. לחיצה על משפט קופצת אליו.</li>
+        <li>אם ההדגשה מקדימה או מאחרת: בזמן ניגון לוחצים Shift + לחיצה על המשפט שנשמע עכשיו, והסנכרון מתוקן ממנו והלאה.</li>
+        <li>"עריכת הטקסט" - מתקנים ושומרים (Ctrl+S). קובץ ה-Word שיורד אחר כך כולל את התיקונים. אפשר תמיד לחזור לתמלול המקורי.</li></ol></details>
+      <details class="guide"><summary><span class="ic-box">{{ ic('archive', 16) }}</span>הורדה מרוכזת</summary><ol>
+        <li>ב"כל התמלולים" בוחרים טווח תאריכים, קבוצה או תלמיד.</li>
+        <li>אפשר לסמן תמלולים מסוימים, או להוריד את כל מה שמופיע ברשימה.</li>
+        <li>בוחרים: קובץ ZIP עם Word לכל תמלול, או קובץ Word אחד שמאחד הכל (כל תמלול בעמוד חדש).</li></ol></details>
+      <details class="guide"><summary><span class="ic-box">{{ ic('calendar', 16) }}</span>לוח שנה</summary><ol>
+        <li>ב"כל התמלולים" ← "לוח שנה" רואים לכל יום (בתאריך עברי ולועזי) כמה תמלולים היו.</li>
+        <li>לחיצה על יום מציגה את התמלולים שלו.</li></ol></details>
+      <details class="guide"><summary><span class="ic-box">{{ ic('plus-minus', 16) }}</span>זיכוי תלמידים</summary><ol>
+        <li>ב"ניהול תלמידים" לוחצים על כפתור הזיכוי בשורת התלמיד, או מסמנים כמה תלמידים ובוחרים "זיכוי לנבחרים".</li>
+        <li>בהגדרות המוסד אפשר להפעיל זיכוי חודשי אוטומטי והתראת יתרה נמוכה.</li></ol></details>
+      <details class="guide"><summary><span class="ic-box">{{ ic('bell', 16) }}</span>התראות בשולחן העבודה</summary><ol>
+        <li>לוחצים על "התראות" בתחתית התפריט ומאשרים בחלון של הדפדפן.</li>
+        <li>תקבלו הודעה כשתמלול מוכן, כשמגיעה הודעה מהצוות וכשהיתרה נמוכה - כל עוד אזור המוסד פתוח (גם בלשונית ברקע).</li></ol></details>
+      <details class="guide"><summary><span class="ic-box">{{ ic('install', 16) }}</span>התקנה כתוכנה</summary><ol>
+        <li>בכרום או באדג': כפתור "התקנה כתוכנה במחשב" בתפריט (או סמל ההתקנה בשורת הכתובת).</li>
+        <li>אזור המוסד נפתח אז בחלון משלו, עם סמל בשולחן העבודה.</li></ol></details>
+    </div>
+  </div>
+</div>
+<div class="modal-backdrop hidden" id="wnModal" onclick="if(event.target===this)instWhatsNewClose()">
+  <div class="modal-box wide">
+    <button class="modal-close" onclick="instWhatsNewClose()">סגירה</button>
+    <h3 style="display:flex;align-items:center;gap:8px;">{{ ic('sparkle', 20) }} מה חדש באזור המוסד</h3>
+    <div>
+      <div class="wn-item"><span class="ic-box">{{ ic('headphones', 16) }}</span><div><b>נגן עם טקסט מסונכרן</b><span>פותחים תמלול ושומעים את ההקלטה - המשפט שמושמע מודגש, ולחיצה על משפט קופצת אליו.</span></div></div>
+      <div class="wn-item"><span class="ic-box">{{ ic('edit', 16) }}</span><div><b>עריכת תמלול בדפדפן</b><span>מתקנים את הטקסט ושומרים, וה-Word יורד מעודכן. אפשר לחזור למקור בכל רגע.</span></div></div>
+      <div class="wn-item"><span class="ic-box">{{ ic('mic', 16) }}</span><div><b>הקלטה ישירה וקישורים</b><span>מקליטים ישירות מהמחשב או מהטלפון, או מדביקים קישור מ-Drive או מג'מבו מייל - בלי להוריד את הקובץ.</span></div></div>
+      <div class="wn-item"><span class="ic-box">{{ ic('file-text', 16) }}</span><div><b>כל התמלולים במקום אחד</b><span>חיפוש גם בתוך הטקסט, לוח שנה עם תאריך עברי, והורדה מרוכזת (ZIP או קובץ Word אחד).</span></div></div>
+      <div class="wn-item"><span class="ic-box">{{ ic('chart', 16) }}</span><div><b>דוחות וגרפים</b><span>שימוש לפי שבוע, לפי קבוצה, התלמידים הפעילים ושעות השימוש.</span></div></div>
+      <div class="wn-item"><span class="ic-box">{{ ic('image', 16) }}</span><div><b>לוגו המוסד ב-Word</b><span>בהגדרות המוסד מעלים לוגו ושם, והם יופיעו בראש כל קובץ תמלול.</span></div></div>
+      <div class="wn-item"><span class="ic-box">{{ ic('bell', 16) }}</span><div><b>עכשיו במוסד והתראות</b><span>בדשבורד רואים מה קורה ברגע זה, ואפשר לקבל התראה בשולחן העבודה כשתמלול מוכן.</span></div></div>
+    </div>
+    <div class="modal-actions" style="margin-top:14px;"><button class="btn" onclick="instWhatsNewClose()">הבנתי, תודה</button></div>
+  </div>
+</div>
+<script>
+(function () {
+  var WN = '2026-11-18';
+  function ls(k, v) { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) { return null; } }
+  window.instHelp = function () { document.body.classList.remove('nav-open'); document.getElementById('helpModal').classList.remove('hidden'); };
+  window.instWhatsNew = function () { document.body.classList.remove('nav-open'); document.getElementById('wnModal').classList.remove('hidden'); };
+  window.instWhatsNewClose = function () { document.getElementById('wnModal').classList.add('hidden'); ls('instWN', WN); document.getElementById('newDot').classList.add('hidden'); };
+  if (ls('instWN') !== WN) {
+    document.getElementById('newDot').classList.remove('hidden');
+    if (!ls('instWNauto' + WN)) { ls('instWNauto' + WN, '1'); setTimeout(window.instWhatsNew, 700); }   // פעם אחת לכל עדכון
+  }
+
+  /* פס התקדמות דק במעבר בין עמודים */
+  var np = document.getElementById('navProgress');
+  document.addEventListener('click', function (e) {
+    var a = e.target.closest && e.target.closest('a[href]');
+    if (!a || e.defaultPrevented || a.target || a.hasAttribute('download') || e.ctrlKey || e.metaKey || e.shiftKey || e.button !== 0) return;
+    var u = new URL(a.getAttribute('href'), location.href);
+    if (u.origin !== location.origin || u.href === location.href || u.hash && u.pathname === location.pathname) return;
+    setTimeout(function () { if (!e.defaultPrevented) np.classList.add('go'); }, 0);
+  });
+  document.addEventListener('submit', function (e) { if (!e.defaultPrevented && !e.target.dataset.ajax) setTimeout(function () { if (!e.defaultPrevented) np.classList.add('go'); }, 0); });
+  window.addEventListener('pageshow', function () { np.classList.remove('go'); });
+
+  /* ---- עדכונים חיים: אירועים אחרונים (לדשבורד), תג הודעות, התראות בשולחן העבודה ---- */
+  var P = window.InstPulse = { listeners: [], last: null, since: null, fast: false };
+  var seen = {}; try { (JSON.parse(ls('instSeen') || '[]') || []).forEach(function (id) { seen[id] = 1; }); } catch (e) {}
+  function remember(id) { seen[id] = 1; var ids = Object.keys(seen); if (ids.length > 300) ids = ids.slice(-300); ls('instSeen', JSON.stringify(ids)); }
+  function notifyOn() { return ls('instNotify') === '1' && 'Notification' in window && Notification.permission === 'granted'; }
+  function paintBell() {
+    var b = document.getElementById('notifyBtn'); if (!b) return;
+    var on = notifyOn();
+    b.classList.toggle('on', on);
+    b.querySelector('svg').outerHTML = on ? '{{ ic("bell", 17)|replace("\n", "")|replace("'", "\\'") }}' : '{{ ic("bell-off", 17)|replace("\n", "")|replace("'", "\\'") }}';
+    b.title = on ? 'התראות פעילות - לחיצה לכיבוי' : 'הפעלת התראות בשולחן העבודה';
+  }
+  function show(title, body, url, tag) {
+    var opts = { body: body || '', tag: tag, dir: 'rtl', lang: 'he', icon: 'https://raw.githubusercontent.com/saryDavidovich/phone-transcription/main/static/pwa/inst-icon-192.png', data: { url: url || '/institution/dashboard' } };
+    if (navigator.serviceWorker && navigator.serviceWorker.getRegistration) {
+      navigator.serviceWorker.getRegistration('/institution/').then(function (reg) {
+        if (reg && reg.showNotification) reg.showNotification(title, opts); else fallback();
+      }).catch(fallback);
+    } else fallback();
+    function fallback() { try { var n = new Notification(title, opts); n.onclick = function () { window.focus(); if (url) location.href = url; n.close(); }; } catch (e) {} }
+  }
+  window.instNotifyToggle = function () {
+    if (!('Notification' in window)) { instToast('הדפדפן הזה לא תומך בהתראות', true); return; }
+    if (notifyOn()) { ls('instNotify', '0'); paintBell(); instToast('ההתראות כובו'); return; }
+    if (Notification.permission === 'denied') { instToast('ההתראות חסומות בדפדפן. לחצו על סמל המנעול שליד כתובת האתר ← התראות ← אפשר', true); return; }
+    Notification.requestPermission().then(function (p) {
+      if (p === 'granted') { ls('instNotify', '1'); paintBell(); instToast('ההתראות הופעלו'); show('ההתראות פועלות', 'נודיע כאן כשתמלול מוכן או כשמגיעה הודעה מהצוות', null, 'inst-test'); schedule(); }
+      else instToast('לא אושרו התראות', true);
+    });
+  };
+  window.instToast = window.instToast || function (html, bad) {
+    var box = document.getElementById('flashToasts');
+    if (!box) { box = document.createElement('div'); box.id = 'flashToasts'; document.body.appendChild(box); }
+    var t = document.createElement('div'); t.className = 'ftoast' + (bad ? ' bad' : '');
+    t.innerHTML = (bad ? IC.alert : IC.check) + '<span>' + html + '</span>';
+    box.appendChild(t);
+    setTimeout(function () { t.classList.add('out'); setTimeout(function () { t.remove(); }, 450); }, bad ? 7000 : 3200);
+  };
+  P.on = function (fn) { P.listeners.push(fn); if (P.last) fn(P.last, true); };
+  var timer = null, busy = false;
+  function tick() {
+    if (busy) return; busy = true;
+    var url = '/institution/pulse' + (P.since ? '?after=' + (P.since - 3) : '');
+    fetch(url, { credentials: 'same-origin', headers: { 'X-Requested-With': 'fetch' } })
+      .then(function (r) { if (!r.ok || r.redirected) throw 0; return r.json(); })
+      .then(function (d) {
+        var first = !P.since;
+        P.since = d.now; P.last = d;
+        var badge = document.getElementById('chatBadge');
+        if (badge) { badge.textContent = d.chat || ''; badge.classList.toggle('hidden', !d.chat); }
+        var fresh = [];
+        d.events.forEach(function (ev) { if (!seen[ev.id]) { if (!first) fresh.push(ev); remember(ev.id); } });
+        if (notifyOn()) {
+          fresh.filter(function (e) { return /ready|chat|error|pending/.test(e.type); }).slice(0, 3).forEach(function (e) { show(e.title, e.sub, e.url, e.id); });
+          var day = new Date().toISOString().slice(0, 10);
+          if (d.low && ls('instLowDay') !== day) { ls('instLowDay', day); show('יתרת המוסד נמוכה', 'היתרה כעת ₪' + d.balance.toFixed(2) + ' - לטעינה בלשונית הגדרות חיוב', '/institution/billing', 'inst-low'); }
+        }
+        P.listeners.forEach(function (fn) { try { fn(d, first, fresh); } catch (e) {} });
+        P.busyCount = d.busy;
+      })
+      .catch(function () {})
+      .then(function () { busy = false; schedule(); });
+  }
+  function schedule() {
+    clearTimeout(timer);
+    var ms = P.fast || P.busyCount ? 15000 : (notifyOn() ? 45000 : 90000);
+    if (document.hidden && !notifyOn()) ms = Math.max(ms, 180000);
+    timer = setTimeout(tick, ms);
+  }
+  P.refresh = function () { clearTimeout(timer); tick(); };
+  document.addEventListener('visibilitychange', function () { if (!document.hidden && P.since && Date.now() / 1000 - P.since > 20) P.refresh(); });
+  paintBell();
+  setTimeout(tick, 1200);
+})();
+</script>
+{% endif %}
 </body>
 </html>

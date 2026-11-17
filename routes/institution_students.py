@@ -9,6 +9,7 @@ import random
 import string
 import threading
 import logging
+import uuid
 from datetime import datetime
 from flask import Blueprint, render_template, request, jsonify, send_file, flash, redirect, url_for
 from flask_login import current_user
@@ -559,6 +560,28 @@ def student_detail(student_id):
                             proofing_price_per_minute=_manuscript_proofing_price())
 
 
+def recording_title(rec, student):
+    """כותרת לתמלול של תלמיד (בדף התמלול, ב-Word ובהורדה המרוכזת)."""
+    if rec.source_filename:
+        return rec.source_filename
+    return f"{student.name or 'תלמיד'} - הקלטה מהטלפון"
+
+
+def recording_meta(rec, student=None):
+    parts = []
+    if student is not None and student.name:
+        parts.append(student.name)
+    if rec.created_at:
+        from services.institution_students_ops import IL
+        from datetime import timezone
+        parts.append(rec.created_at.replace(tzinfo=timezone.utc).astimezone(IL).strftime('%d/%m/%Y %H:%M'))
+    if rec.duration_seconds:
+        from services.portal_docx import minutes_label
+        parts.append(minutes_label(rec.duration_seconds))
+    parts.append('תמלול מקצועי' if rec.transcription_tier == 'premium' else 'תמלול רגיל')
+    return ' · '.join(parts)
+
+
 @institution_students_bp.route('/institution/students/<int:student_id>/recording/<int:recording_id>/download')
 @institution_login_required
 def download_student_recording(student_id, recording_id):
@@ -569,22 +592,12 @@ def download_student_recording(student_id, recording_id):
     if not recording.transcript:
         return 'אין עדיין תמלול להקלטה הזו', 404
 
-    from docx import Document
-    from docx.enum.text import WD_ALIGN_PARAGRAPH
-    doc = Document()
-    title = doc.add_heading(f'תמלול: {student.name or ""}', level=1)
-    title.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-    for line in recording.transcript.split('\n'):
-        p = doc.add_paragraph(line)
-        p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-
-    output = io.BytesIO()
-    doc.save(output)
-    output.seek(0)
+    from services import portal_docx as PD
+    data = PD.single(current_user, recording_title(recording, student), recording.transcript, recording_meta(recording))
     from routes.download_utils import render_data_uri_download_page
     hebrew_name = f"תמלול - {student.name or 'תלמיד'} - {recording.created_at.strftime('%d-%m-%Y') if recording.created_at else recording.id}.docx"
     return render_data_uri_download_page(
-        output.getvalue(), hebrew_name,
+        data, hebrew_name,
         mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     )
 
@@ -703,9 +716,13 @@ def upload_for_student(student_id):
     'יצירת תמלול' הכללית, רק שהתוצאה משויכת לתלמיד (Recording אמיתי,
     כולל חיוב יתרה) ולא רק קובץ Word חד-פעמי למוסד."""
     student = Customer.query.filter_by(id=student_id, institution_id=current_user.id).first_or_404()
+    from services import portal_media as PM
     file = request.files.get('audio_file')
-    if not file or not file.filename:
-        return jsonify({'error': 'יש לבחור קובץ'}), 400
+    link = (request.form.get('link') or '').strip()
+    if (not file or not file.filename) and not link:
+        return jsonify({'error': 'יש לבחור קובץ, להקליט או להדביק קישור'}), 400
+    if link and not PM.link_kind(link):
+        return jsonify({'error': PM.LINK_HELP}), 400
 
     from routes.institution import student_usage_limit_error
     limit_error = student_usage_limit_error(student)
@@ -715,38 +732,57 @@ def upload_for_student(student_id):
     import uuid
     static_dir = os.path.join(os.path.dirname(__file__), '..', 'static', 'fax_tmp')
     os.makedirs(static_dir, exist_ok=True)
-    from services.security import safe_audio_ext
-    ext = safe_audio_ext(file.filename)
-    filename = f"student_{uuid.uuid4().hex}{ext}"
-    file.save(os.path.join(static_dir, filename))
-
-    base_url = os.environ.get('APP_BASE_URL', os.environ.get('APP_URL', '')).rstrip('/')
-    rec_url = f"{base_url}/static/fax_tmp/{filename}"
+    local_path, name = None, None
+    if file and file.filename:
+        from services.security import safe_audio_ext
+        local_path = os.path.join(static_dir, f"student_{uuid.uuid4().hex}{safe_audio_ext(file.filename)}")
+        file.save(local_path)
+        name = file.filename
+    else:
+        name = 'קישור Drive' if PM.link_kind(link) == 'drive' else "קישור ג'מבו מייל"
+    name = (request.form.get('title') or '').strip()[:200] or name
 
     tier = 'premium' if request.form.get('tier') == 'premium' else 'gemini'
     language = request.form.get('language') if request.form.get('language') in ('he', 'yi', 'en') else 'he'
     output_language = 'original' if request.form.get('output_language') == 'original' else 'he'
     recording = Recording(
         customer_id=student.id, call_id=f"inst_{uuid.uuid4().hex[:12]}",
-        status='processing', source_filename=file.filename, rec_url=rec_url,
+        status='processing', source_filename=name, rec_url=None,
         transcription_tier=tier, language=language, output_language=output_language,
     )
     db.session.add(recording)
     db.session.commit()
 
     from app import app as flask_app
-    t = threading.Thread(target=_process_student_upload, args=(flask_app, recording.id, rec_url), daemon=True)
-    t.start()
+    threading.Thread(target=_process_student_upload, args=(flask_app, recording.id, local_path, link or None),
+                     daemon=True).start()
+    return jsonify({'recordingId': recording.id, 'name': name})
 
-    return jsonify({'recordingId': recording.id})
 
-
-def _process_student_upload(flask_app, recording_id, rec_url):
+def _process_student_upload(flask_app, recording_id, local_path, link=None):
     from services.job_tracker import tracked
+    from services import portal_media as PM
     with flask_app.app_context(), tracked('institution_student', label=f'הקלטה {recording_id}'):
         recording = Recording.query.get(recording_id)
         student = Customer.query.get(recording.customer_id)
         try:
+            static_dir = os.path.join(os.path.dirname(__file__), '..', 'static', 'fax_tmp')
+            if link:                      # קישור Drive / ג'מבו - מורידים קודם
+                try:
+                    local_path, real_name = PM.fetch_link(link, static_dir)
+                except ValueError as ve:
+                    recording.status = 'error'
+                    db.session.commit()
+                    log.warning(f'Student upload {recording_id}: {ve}')
+                    return
+                if recording.source_filename in ('קישור Drive', "קישור ג'מבו מייל") and real_name:
+                    recording.source_filename = real_name[:200]
+            if PM.needs_conversion(local_path):       # הקלטה מהדפדפן (webm) -> mp3
+                local_path = PM.convert_in_place(local_path)
+            base_url = os.environ.get('APP_BASE_URL', os.environ.get('APP_URL', '')).rstrip('/')
+            rec_url = f"{base_url}/static/fax_tmp/{os.path.basename(local_path)}"
+            recording.rec_url = rec_url
+            db.session.commit()
             from services.transcribe import _gemini_from_url, _send_email, _send_fax, alefbot_transcribe_wait
             tier = recording.transcription_tier or 'gemini'
             is_video = False
@@ -760,6 +796,15 @@ def _process_student_upload(flask_app, recording_id, rec_url):
                 recording.status = 'error'
                 db.session.commit()
                 return
+
+            # השמע לנגן באזור המוסד - בימות (נטפרי חוסמת שמע מהאתר שלנו); העותק אצלנו נמחק
+            play = PM.push_to_yemot(local_path, f'r{recording_id}_{uuid.uuid4().hex[:8]}')
+            if play:
+                recording.play_url = play
+                # כמו הקלטה מהטלפון: rec_url בימות (המנהל מאזין משם; שליחה חוזרת לתמלול מורידה משם)
+                recording.rec_url = f"{PM.YEMOT_API}/DownloadFile?token={PM.upload_token()}&path={play}"
+                PM.remove_quietly(local_path)
+                db.session.commit()
 
             # מחיר כמו ללקוח רגיל: סוג השירות (רגיל / מקצועי / וידאו) ויחידות של 20 או 5 דקות -
             # לפי המחירון האישי של התלמיד, ואם אין לו - לפי המוסד (services/pricing.unit_minutes)
@@ -810,4 +855,6 @@ def recording_status(recording_id):
     student = Customer.query.get(recording.customer_id)
     if not student or student.institution_id != current_user.id:
         return jsonify({'error': 'אין הרשאה'}), 403
-    return jsonify({'status': recording.status})
+    done = recording.status == 'completed'
+    return jsonify({'status': recording.status, 'name': recording.source_filename,
+                    'viewUrl': f'/institution/t/r/{recording.id}' if done else None})

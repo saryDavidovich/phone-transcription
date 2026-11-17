@@ -107,6 +107,11 @@ class Institution(db.Model, UserMixin):
     # התראת יתרה נמוכה: סימון ברשימה + מייל שבועי למוסד
     low_balance_threshold = db.Column(db.Float, nullable=True)        # ריק = 5 ₪
     low_balance_email = db.Column(db.Boolean, nullable=True, default=False)
+    # מיתוג: לוגו ושם לכותרת קובצי ה-Word (הלוגו נטען רק כשצריך - deferred)
+    logo_data = db.deferred(db.Column(db.LargeBinary, nullable=True))
+    logo_mime = db.Column(db.String(40), nullable=True)
+    brand_title = db.Column(db.String(200), nullable=True)   # שם לכותרת ה-Word (ריק = שם המוסד)
+    brand_subtitle = db.Column(db.String(200), nullable=True)  # שורה שנייה (כתובת/טלפון) - אופציונלי
     low_balance_last_sent = db.Column(db.DateTime, nullable=True)
 
     @property
@@ -161,6 +166,11 @@ class InstitutionUpload(db.Model):
     cost = db.Column(db.Float, nullable=True)  # מנוכה מיתרת המוסד (Institution.balance)
     send_to = db.Column(db.String(200), nullable=True)   # מייל לשליחת התמלול (אם סומן) - גם אחרי שחרור מהמתנה לתשלום
     charged = db.Column(db.Boolean, nullable=True)       # True = העלות כבר ירדה מיתרת המוסד
+    play_url = db.Column(db.Text, nullable=True)          # השמע בימות (DownloadFile) - לנגן באזור המוסד
+    transcript_original = db.Column(db.Text, nullable=True)  # התמלול לפני עריכה ידנית (לשחזור)
+    edited_at = db.Column(db.DateTime, nullable=True)
+    source = db.Column(db.String(10), nullable=True)      # file / record / link
+    status_at = db.Column(db.DateTime, nullable=True)     # מתי הסטטוס השתנה (לפיד "עכשיו במוסד" ולהתראות)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     institution = db.relationship('Institution', backref='uploads')
@@ -205,6 +215,9 @@ class Recording(db.Model):
     __tablename__ = 'recordings'
     id = db.Column(db.Integer, primary_key=True)
     promo_free_seconds = db.Column(db.Integer, nullable=True)   # כמה מהאורך היה חינם במבצע דקות החינם
+    play_url = db.Column(db.Text, nullable=True)             # השמע בימות לנגן באזור המוסד (כשהמקור לא מימות)
+    transcript_original = db.Column(db.Text, nullable=True)  # התמלול לפני עריכה ידנית באזור המוסד (לשחזור)
+    edited_at = db.Column(db.DateTime, nullable=True)
     customer_id = db.Column(db.Integer, db.ForeignKey('customers.id'), nullable=False, index=True)
     call_id = db.Column(db.String(100), unique=True)
     duration_seconds = db.Column(db.Integer, default=0)
@@ -718,6 +731,12 @@ from sqlalchemy.orm import Session as _SASession
 def _recording_status_at(target, value, oldvalue, initiator):
     """כל שינוי סטטוס של הקלטה - נרשם מתי (services/stuck_watch מודד "תקועה" מהרגע הזה,
     לא מרגע ההקלטה: הקלטה שחיכתה שעות לתשלום ושוחררה עכשיו - לא תקועה)."""
+    if value != oldvalue:
+        target.status_at = datetime.utcnow()
+
+
+@_sa_event.listens_for(InstitutionUpload.status, 'set')
+def _upload_status_at(target, value, oldvalue, initiator):
     if value != oldvalue:
         target.status_at = datetime.utcnow()
 

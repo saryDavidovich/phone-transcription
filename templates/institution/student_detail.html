@@ -40,7 +40,12 @@
 .rec-main { display:flex; align-items:center; gap:12px; }
 .rec-ic { width:36px; height:36px; border-radius:10px; background:var(--surface2); color:var(--text2); display:flex; align-items:center; justify-content:center; flex:none; }
 .rec-info { flex:1; min-width:0; }
-.rec-title { font-weight:600; font-size:14px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.rec-title { font-weight:600; font-size:14px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; display:block; color:var(--text); text-decoration:none; }
+a.rec-title:hover { color:var(--accent2); }
+.rec { transition:background .4s; }
+.rec-new { animation:feIn .45s ease-out; }
+.rec-flash { background:var(--accent-soft); }
+@keyframes feIn { from { opacity:0; transform:translateY(-6px); } to { opacity:1; transform:none; } }
 .rec-meta { font-size:12px; color:var(--text3); margin-top:2px; }
 .rec-side { display:flex; align-items:center; gap:6px; flex:none; }
 .icon-btn.on { background:var(--accent-soft); color:var(--accent2); border-color:rgba(16,185,129,.3); }
@@ -126,16 +131,11 @@
 
 {# העלאת אודיו לתמלול - רק בתיק תלמיד אמיתי (למסמכים הכלליים יש את לשונית "יצירת תמלול") #}
 <div class="card mb-18">
-  <div class="card-head"><span class="ic">{{ ic('upload') }}</span><h3>העלאת קבצים לתמלול</h3></div>
+  <div class="card-head"><span class="ic">{{ ic('upload') }}</span><h3>תמלול חדש לתלמיד</h3></div>
   <div class="card-sub">התמלול נשמר בתיק התלמיד ונשלח {{ 'למייל שלו' if student.email else 'למייל המוסד' }}. העלות יורדת מיתרת התלמיד.</div>
   <form id="studentUploadForm">
-    <div class="dropzone" id="studentDz">
-      <div class="dz-icon">{{ ic('headphones', 34, 1.6) }}</div>
-      <div class="dz-title">גררו קבצי אודיו/וידאו לכאן או לחצו לבחירה</div>
-      <div class="dz-sub">אפשר לבחור כמה קבצים יחד - כל קובץ יתומלל בנפרד</div>
-      <div class="dz-filename" id="studentDzFilename"></div>
-      <input type="file" name="audio_file" id="studentAudioFile" accept="audio/*,video/*" multiple required>
-    </div>
+    {% set sp_id = 'studentPick' %}{% set sp_file_sub = 'אפשר לבחור כמה קבצים יחד - כל קובץ יתומלל בנפרד' %}
+    {% include "institution/_source_picker.html" %}
     <div class="row-3" style="margin-top:14px;">
       <div class="field"><label>סוג תמלול</label>
         <select class="input" name="tier"><option value="gemini">תמלול רגיל</option><option value="premium">תמלול מקצועי</option></select></div>
@@ -144,21 +144,21 @@
       <div class="field"><label>שפת התמלול</label>
         <select class="input" name="output_language"><option value="he">עברית</option><option value="original">כמו שפת ההקלטה</option></select></div>
     </div>
-    <button type="submit" class="btn btn-block" id="studentUploadBtn">{{ ic('upload', 16) }} העלאה ותמלול</button>
-    <div id="studentUploadMsg" style="font-size:13px; margin-top:10px;"></div>
+    <button type="submit" class="btn btn-block" id="studentUploadBtn">{{ ic('upload', 16) }} לתמלול</button>
   </form>
 </div>
 
 <div class="card mb-18">
-  <div class="card-head" style="margin-bottom:12px;"><span class="ic">{{ ic('file-text') }}</span><h3>הקלטות ותמלולים ({{ recordings|length }})</h3></div>
-  {% if recordings %}
-  <div class="rec-list">
+  <div class="card-head" style="margin-bottom:12px;"><span class="ic">{{ ic('file-text') }}</span><h3>הקלטות ותמלולים ({{ recordings|length }})</h3>
+    {% if recordings %}<a class="btn btn-secondary btn-sm" style="margin-inline-start:auto;" href="{{ url_for('institution_portal.transcripts') }}?student={{ student.id }}&tab=export">{{ ic('archive', 14) }} הורדה מרוכזת</a>{% endif %}</div>
+  <div class="rec-list" id="recList">
     {% for r in recordings %}
-    <div class="rec">
+    <div class="rec" data-id="{{ r.id }}" {{ 'data-busy' if r.status in ('processing', 'queued', 'transcribing') }}>
       <div class="rec-main">
         <span class="rec-ic">{{ ic('headphones', 17) }}</span>
         <div class="rec-info">
-          <div class="rec-title">{{ r.source_filename or ('שיחה מהטלפון' if not (r.call_id or '').startswith('inst_') else 'הקלטה') }}</div>
+          {% set rt = r.source_filename or ('שיחה מהטלפון' if not (r.call_id or '').startswith('inst_') else 'הקלטה') %}
+          {% if r.transcript and r.status != 'pending_payment' %}<a class="rec-title" href="/institution/t/r/{{ r.id }}">{{ rt }}</a>{% else %}<div class="rec-title">{{ rt }}</div>{% endif %}
           <div class="rec-meta">
             {{ r.created_at|il_time if r.created_at else '' }}
             {% if r.duration_seconds %} · {{ '%d:%02d'|format((r.duration_seconds // 60), (r.duration_seconds % 60)) }} דק'{% endif %}
@@ -173,7 +173,8 @@
           {% elif r.status in ('delivered', 'transcribed', 'completed') %}<span class="badge badge-green">הושלם</span>
           {% else %}<span class="badge badge-gray">{{ r.status }}</span>{% endif %}
           {% if r.transcript and r.status != 'pending_payment' %}
-          <button type="button" class="icon-btn" title="צפייה בתמלול" onclick="toggleTr({{ r.id }}, this)">{{ ic('file-text', 16) }}</button>
+          <a class="icon-btn" title="האזנה ועריכה" href="/institution/t/r/{{ r.id }}">{{ ic('headphones', 16) }}</a>
+          <button type="button" class="icon-btn" title="הצצה בטקסט" onclick="toggleTr({{ r.id }}, this)">{{ ic('file-text', 16) }}</button>
           <a class="icon-btn" title="הורדת Word" href="{{ url_for('institution_students.download_student_recording', student_id=student.id, recording_id=r.id) }}">{{ ic('download', 16) }}</a>
           {% endif %}
         </div>
@@ -182,11 +183,10 @@
       <div class="rec-tr hidden" id="tr{{ r.id }}">{{ r.transcript }}</div>
       {% endif %}
     </div>
+    {% else %}
+    <p class="sub rec-empty" style="font-size:13px;">אין עדיין הקלטות. הקלטות מהטלפון ומהעלאה כאן יופיעו ברשימה הזו.</p>
     {% endfor %}
   </div>
-  {% else %}
-  <p class="sub" style="font-size:13px;">אין עדיין הקלטות. הקלטות מהטלפון ומהעלאה כאן יופיעו ברשימה הזו.</p>
-  {% endif %}
 </div>
 
 <div id="creditModal" class="modal-backdrop hidden">
@@ -341,81 +341,60 @@ document.addEventListener('keydown', function (e) {
   if (e.key === 'Escape') document.querySelectorAll('.modal-backdrop:not(.hidden)').forEach(function (m) { closeModal(m.id); });
 });
 var STUDENT_ID = {{ student.id }};
-if (document.getElementById('studentDz')) {
-var studentDz = document.getElementById('studentDz');
-var studentFileInput = document.getElementById('studentAudioFile');
-var studentDzFilename = document.getElementById('studentDzFilename');
-
-function showStudentFilename() {
-  var n = studentFileInput.files.length;
-  studentDzFilename.innerHTML = !n ? '' : IC.file + ' ' + escHtml(n === 1 ? studentFileInput.files[0].name : n + ' קבצים נבחרו');
-}
-studentFileInput.addEventListener('change', showStudentFilename);
-
-['dragover', 'dragenter'].forEach(function (ev) {
-  studentDz.addEventListener(ev, function (e) { e.preventDefault(); studentDz.classList.add('dragover'); });
-});
-['dragleave', 'dragend'].forEach(function (ev) {
-  studentDz.addEventListener(ev, function () { studentDz.classList.remove('dragover'); });
-});
-studentDz.addEventListener('drop', function (e) {
-  e.preventDefault();
-  studentDz.classList.remove('dragover');
-  if (e.dataTransfer.files.length) {
-    studentFileInput.files = e.dataTransfer.files;
-    showStudentFilename();
+if (document.getElementById('studentPick')) {
+  var picker = SrcPicker(document.getElementById('studentPick'));
+  var recList = document.getElementById('recList');
+  var RIC = { head: '{{ ic("headphones", 17)|replace("\n", "")|replace("'", "\\'") }}', head16: '{{ ic("headphones", 16)|replace("\n", "")|replace("'", "\\'") }}' };
+  function addRec(id, name) {
+    var e = recList.querySelector('.rec-empty'); if (e) e.remove();
+    var el = document.createElement('div'); el.className = 'rec rec-new'; el.dataset.id = id;
+    el.innerHTML = '<div class="rec-main"><span class="rec-ic">' + RIC.head + '</span><div class="rec-info"><div class="rec-title"></div><div class="rec-meta">עכשיו</div></div>' +
+      '<div class="rec-side"><span class="badge badge-amber"><span class="spinner-ring"></span> בתמלול</span></div></div>';
+    el.querySelector('.rec-title').textContent = name;
+    recList.prepend(el); return el;
   }
-});
-
-document.getElementById('studentUploadForm').addEventListener('submit', async function (e) {
-  e.preventDefault();
-  var msgEl = document.getElementById('studentUploadMsg');
-  var btn = document.getElementById('studentUploadBtn');
-  var files = Array.prototype.slice.call(studentFileInput.files);
-  if (!files.length) return;
-  btn.disabled = true;
-  msgEl.style.color = 'var(--text2)';
-  msgEl.textContent = '';
-  var base = new FormData(this);
-  base.delete('audio_file');
-  var ids = [], errors = [];
-  for (var k = 0; k < files.length; k++) {
-    btn.innerHTML = '<span class="spinner-ring"></span> מעלה ' + (files.length > 1 ? (k + 1) + ' מתוך ' + files.length : '') + '...';
-    var fd = new FormData();
-    base.forEach(function (v, key) { fd.append(key, v); });
-    fd.append('audio_file', files[k]);
-    try {
-      var res = await fetch('{{ url_for("institution_students.upload_for_student", student_id=student.id) }}', { method: 'POST', body: fd });
-      var data = await res.json();
-      if (res.ok) ids.push(data.recordingId); else errors.push(files[k].name + ': ' + (data.error || 'שגיאה'));
-    } catch (err) {
-      errors.push(files[k].name + ': שגיאת תקשורת');
-    }
+  function pollRec(id, el) {
+    var n = 0;
+    (function again() {
+      setTimeout(async function () {
+        var d; try { d = await (await fetch('/institution/students/recording-status/' + id, { credentials: 'same-origin' })).json(); } catch (x) { return again(); }
+        var side = el.querySelector('.rec-side');
+        if (d.name) el.querySelector('.rec-title').textContent = d.name;
+        if (['completed', 'delivered', 'transcribed'].indexOf(d.status) >= 0) {
+          var t = el.querySelector('.rec-title'), a = document.createElement('a'); a.className = 'rec-title'; a.href = d.viewUrl; a.textContent = t.textContent; t.replaceWith(a);
+          side.innerHTML = '<span class="badge badge-green">הושלם</span><a class="icon-btn" title="האזנה ועריכה" href="' + d.viewUrl + '">' + RIC.head16 + '</a>' +
+            '<a class="icon-btn" title="הורדת Word" href="/institution/students/' + STUDENT_ID + '/recording/' + id + '/download">' + IC.download + '</a>';
+          el.classList.add('rec-flash'); setTimeout(function () { el.classList.remove('rec-flash'); }, 1800);
+        } else if (d.status === 'pending_payment') {
+          side.innerHTML = '<span class="badge badge-amber" title="לתלמיד אין מספיק יתרה - יישלח אוטומטית אחרי זיכוי">ממתין לזיכוי</span>';
+        } else if (d.status === 'error') {
+          side.innerHTML = '<span class="badge badge-red">שגיאה</span>';
+        } else again();
+      }, n++ < 10 ? 3000 : 6000);
+    })();
   }
-  if (!ids.length) {
-    btn.disabled = false;
-    btn.innerHTML = 'העלאה ותמלול';
-    msgEl.style.color = 'var(--red)';
-    msgEl.textContent = errors.join(' · ') || 'שגיאה';
-    return;
-  }
-  btn.innerHTML = '<span class="spinner-ring"></span> מתמלל...';
-  msgEl.style.color = errors.length ? 'var(--red)' : 'var(--accent)';
-  msgEl.textContent = (ids.length === 1 ? 'הקובץ עלה ומתמלל...' : ids.length + ' קבצים עלו ומתמללים...') +
-                      (errors.length ? ' לא עלו: ' + errors.join(' · ') : '');
-  var left = ids.slice();
-  var interval = setInterval(async function () {
-    for (var q = left.length - 1; q >= 0; q--) {
+  recList.querySelectorAll('.rec[data-busy]').forEach(function (el) { pollRec(el.dataset.id, el); });
+  document.getElementById('studentUploadForm').addEventListener('submit', async function (e) {
+    e.preventDefault();
+    var err = picker.error(); if (err) { instToast(err, true); return; }
+    var items = picker.items(), btn = document.getElementById('studentUploadBtn'), old = btn.innerHTML;
+    btn.disabled = true;
+    var base = new FormData(this); base.delete('audio_file');
+    var ok = 0, errors = [];
+    for (var k = 0; k < items.length; k++) {
+      btn.innerHTML = '<span class="spinner-ring" style="border-color:rgba(255,255,255,.35);border-top-color:#fff"></span> שולחים' + (items.length > 1 ? ' ' + (k + 1) + ' מתוך ' + items.length : '') + '...';
+      var fd = new FormData(); base.forEach(function (v, key) { fd.append(key, v); }); items[k].fill(fd);
       try {
-        var r = await fetch('{{ url_for("institution_students.recording_status", recording_id=0) }}'.replace(/0$/, left[q]));
-        var d = await r.json();
-        if (['completed', 'error', 'pending_payment', 'delivered', 'transcribed'].indexOf(d.status) >= 0) left.splice(q, 1);
-      } catch (err) {}
+        var res = await fetch('{{ url_for("institution_students.upload_for_student", student_id=student.id) }}', { method: 'POST', body: fd, credentials: 'same-origin' });
+        var data = await res.json();
+        if (res.ok) { ok++; pollRec(data.recordingId, addRec(data.recordingId, data.name || items[k].label)); }
+        else errors.push(items[k].label + ': ' + (data.error || 'שגיאה'));
+      } catch (x) { errors.push(items[k].label + ': שגיאת תקשורת'); }
     }
-    if (!left.length) { clearInterval(interval); window.location.reload(); }
-  }, 3000);
-});
-
+    btn.disabled = false; btn.innerHTML = old;
+    if (ok) { picker.reset(); instToast((ok === 1 ? 'נשלח לתמלול' : ok + ' נשלחו לתמלול') + ' - הרשימה תתעדכן לבד'); recList.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+    if (errors.length) instToast(escHtml(errors.join(' · ')), true);
+  });
 }
 
 // --- העלאת כתב יד חדש לקלדנות דיגיטלית ---

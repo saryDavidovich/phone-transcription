@@ -91,6 +91,8 @@ def create_app():
     app.register_blueprint(institution_billing_bp)
     app.register_blueprint(institution_transcribe_bp)
     app.register_blueprint(institution_students_bp)
+    from routes.institution_portal import institution_portal_bp
+    app.register_blueprint(institution_portal_bp)
     app.register_blueprint(download_bp)
     app.register_blueprint(dictate_bp, url_prefix='/admin/dictate')
 
@@ -609,6 +611,20 @@ def _migrate_db():
         # מבצע דקות תמלול חינם
         "ALTER TABLE customers ADD COLUMN IF NOT EXISTS promo_free BOOLEAN DEFAULT FALSE",
         "ALTER TABLE recordings ADD COLUMN IF NOT EXISTS promo_free_seconds INTEGER",
+        # אזור המוסד: נגן עם טקסט, עריכת תמלול, מיתוג ה-Word
+        "ALTER TABLE recordings ADD COLUMN IF NOT EXISTS play_url TEXT",
+        "ALTER TABLE recordings ADD COLUMN IF NOT EXISTS transcript_original TEXT",
+        "ALTER TABLE recordings ADD COLUMN IF NOT EXISTS edited_at TIMESTAMP",
+        "ALTER TABLE institution_uploads ADD COLUMN IF NOT EXISTS play_url TEXT",
+        "ALTER TABLE institution_uploads ADD COLUMN IF NOT EXISTS transcript_original TEXT",
+        "ALTER TABLE institution_uploads ADD COLUMN IF NOT EXISTS edited_at TIMESTAMP",
+        "ALTER TABLE institution_uploads ADD COLUMN IF NOT EXISTS source VARCHAR(10)",
+        "ALTER TABLE institution_uploads ADD COLUMN IF NOT EXISTS status_at TIMESTAMP",
+        "ALTER TABLE institutions ADD COLUMN IF NOT EXISTS logo_data BYTEA",
+        "ALTER TABLE institutions ADD COLUMN IF NOT EXISTS logo_mime VARCHAR(40)",
+        "ALTER TABLE institutions ADD COLUMN IF NOT EXISTS brand_title VARCHAR(200)",
+        "ALTER TABLE institutions ADD COLUMN IF NOT EXISTS brand_subtitle VARCHAR(200)",
+        "CREATE INDEX IF NOT EXISTS ix_institution_uploads_inst_created ON institution_uploads (institution_id, created_at DESC)",
         # אינדקסים למהירות (create_all לא מוסיף אינדקסים לטבלאות קיימות - לכן במפורש; IF NOT EXISTS = בטוח)
         "CREATE INDEX IF NOT EXISTS ix_transactions_recording_id ON transactions (recording_id)",
         "CREATE INDEX IF NOT EXISTS ix_recordings_customer_created ON recordings (customer_id, created_at DESC)",

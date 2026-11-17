@@ -15,6 +15,31 @@
 .info-row { display:flex; justify-content:space-between; gap:10px; padding:9px 0; border-bottom:1px solid var(--border); font-size:13.5px; }
 .info-row:last-child { border-bottom:0; }
 .info-row span:first-child { color:var(--text2); }
+.live-dot { width:8px; height:8px; border-radius:50%; background:var(--accent); box-shadow:0 0 0 0 rgba(16,185,129,.6); animation:live 2s infinite; flex:none; }
+@keyframes live { 0% { box-shadow:0 0 0 0 rgba(16,185,129,.55); } 70% { box-shadow:0 0 0 8px rgba(16,185,129,0); } 100% { box-shadow:0 0 0 0 rgba(16,185,129,0); } }
+.live-lbl { margin-inline-start:auto; display:flex; align-items:center; gap:7px; font-size:12px; color:var(--text2); }
+.busy-chip { font-size:12px; font-weight:600; background:var(--blue-soft); color:var(--blue); padding:3px 9px; border-radius:20px; display:inline-flex; align-items:center; gap:6px; }
+.busy-chip .spinner-ring { width:11px; height:11px; border-width:2px; border-top-color:var(--blue); }
+.feed { display:flex; flex-direction:column; max-height:390px; overflow:auto; margin:0 -6px; padding:0 6px; }
+.fe { display:flex; gap:11px; align-items:flex-start; padding:10px 6px; border-bottom:1px solid var(--border); text-decoration:none; color:var(--text); border-radius:10px; transition:background .15s; }
+.fe:last-child { border-bottom:0; }
+a.fe:hover { background:var(--surface2); }
+.fe .fi { width:32px; height:32px; border-radius:10px; display:flex; align-items:center; justify-content:center; flex:none; }
+.fe.ready .fi { background:var(--accent-soft); color:var(--accent2); }
+.fe.new .fi { background:var(--blue-soft); color:var(--blue); }
+.fe.pending .fi { background:var(--amber-soft); color:var(--amber); }
+.fe.error .fi { background:var(--red-soft); color:var(--red); }
+.fe.chat .fi { background:#f3edfe; color:#7c3aed; }
+.fe .ft { flex:1; min-width:0; }
+.fe .ft b { display:block; font-size:13.5px; font-weight:700; }
+.fe .ft span { display:block; font-size:12.5px; color:var(--text2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.fe time { font-size:11.5px; color:var(--text3); white-space:nowrap; margin-top:2px; }
+.fe.enter { animation:feIn .5s ease-out; background:var(--accent-soft); }
+@keyframes feIn { from { opacity:0; transform:translateY(-8px); } to { opacity:1; transform:none; } }
+.feed-empty { text-align:center; color:var(--text2); font-size:13px; padding:26px 10px; }
+.feed-empty .ico { margin:0 auto 8px; color:var(--text3); width:30px; height:30px; }
+.info-strip { display:flex; flex-wrap:wrap; gap:8px 28px; font-size:13.5px; }
+.info-strip div span { color:var(--text2); margin-inline-end:6px; }
 </style>
 {% endblock %}
 {% block content %}
@@ -59,26 +84,90 @@
 </div>
 {% endif %}
 
-<div class="grid grid-2" style="align-items:stretch;">
+<div class="grid grid-2 mb-18" style="align-items:stretch;">
+  <div class="card">
+    <div class="card-head" style="margin-bottom:10px;"><span class="ic">{{ ic('activity') }}</span><h2>עכשיו במוסד</h2>
+      <span class="busy-chip hidden" id="busyChip"><span class="spinner-ring"></span><span id="busyN"></span></span>
+      <span class="live-lbl"><i class="live-dot"></i>מתעדכן חי</span></div>
+    <div class="feed" id="feed"><div class="feed-empty"><span class="spinner-ring"></span></div></div>
+  </div>
   <div class="card">
     <div class="card-head" style="margin-bottom:12px;"><span class="ic">{{ ic('dashboard') }}</span><h2>פעולות מהירות</h2></div>
     <div class="grid" style="gap:10px;">
       <a class="card quick" style="padding:14px; box-shadow:none;" href="{{ url_for('institution_transcribe.transcribe_tab') }}">
-        <span class="ic-box">{{ ic('mic') }}</span><div><div class="t">יצירת תמלול</div><div class="d">העלאת קבצי שמע או וידאו</div></div></a>
+        <span class="ic-box">{{ ic('mic') }}</span><div><div class="t">יצירת תמלול</div><div class="d">קובץ, הקלטה ישירה או קישור מ-Drive / ג'מבו</div></div></a>
+      <a class="card quick" style="padding:14px; box-shadow:none;" href="{{ url_for('institution_portal.transcripts') }}">
+        <span class="ic-box">{{ ic('file-text') }}</span><div><div class="t">כל התמלולים</div><div class="d">חיפוש, לוח שנה והורדה מרוכזת</div></div></a>
       <a class="card quick" style="padding:14px; box-shadow:none;" href="{{ url_for('institution_students.students_tab') }}">
         <span class="ic-box">{{ ic('users') }}</span><div><div class="t">ניהול תלמידים</div><div class="d">הוספה, זיכוי, קבוצות וחיפוש</div></div></a>
       <a class="card quick" style="padding:14px; box-shadow:none;" href="{{ url_for('institution_billing.billing_tab') }}">
         <span class="ic-box">{{ ic('card') }}</span><div><div class="t">טעינת יתרה ודוחות</div><div class="d">כרטיס אשראי ודוח עלויות באקסל</div></div></a>
     </div>
   </div>
-  <div class="card">
-    <div class="card-head" style="margin-bottom:8px;"><span class="ic">{{ ic('info') }}</span><h2>פרטי המוסד</h2></div>
-    <div class="info-row"><span>שם</span><b>{{ inst.name }}</b></div>
-    <div class="info-row"><span>מייל</span><b>{{ inst.email or '—' }}</b></div>
-    <div class="info-row"><span>טלפון</span><b>{{ inst.phone or '—' }}</b></div>
-    <div class="info-row"><span>הקלטות שבוצעו</span><b>{{ total_recordings }}</b></div>
-    <div class="info-row"><span>זיכוי חודשי אוטומטי</span><b>{% if inst.monthly_credit_amount %}{{ '%.2f'|format(inst.monthly_credit_amount) }} ₪ לתלמיד{% else %}כבוי{% endif %}</b></div>
+</div>
+
+<div class="card">
+  <div class="info-strip">
+    <div><span>מייל</span><b>{{ inst.email or '—' }}</b></div>
+    <div><span>טלפון</span><b>{{ inst.phone or '—' }}</b></div>
+    <div><span>הקלטות שבוצעו</span><b>{{ total_recordings }}</b></div>
+    <div><span>זיכוי חודשי אוטומטי</span><b>{% if inst.monthly_credit_amount %}{{ '%.2f'|format(inst.monthly_credit_amount) }} ₪ לתלמיד{% else %}כבוי{% endif %}</b></div>
   </div>
 </div>
 </div>
+<script>
+(function () {
+  var ICONS = {
+    ready: '{{ ic("check", 16, 2.2)|replace("\n", "")|replace("'", "\\'") }}',
+    new: '{{ ic("clock", 16)|replace("\n", "")|replace("'", "\\'") }}',
+    pending: '{{ ic("hourglass", 16)|replace("\n", "")|replace("'", "\\'") }}',
+    error: '{{ ic("alert", 16)|replace("\n", "")|replace("'", "\\'") }}',
+    chat: '{{ ic("mail", 16)|replace("\n", "")|replace("'", "\\'") }}'
+  };
+  var feed = document.getElementById('feed'), items = [];
+  function ago(ts) {
+    var s = Math.max(0, Date.now() / 1000 - ts);
+    if (s < 60) return 'עכשיו';
+    if (s < 3600) return 'לפני ' + Math.round(s / 60) + ' דק\'';
+    if (s < 86400) return 'לפני ' + Math.round(s / 3600) + ' שע\'';
+    var d = new Date(ts * 1000); return d.getDate() + '/' + (d.getMonth() + 1);
+  }
+  function row(ev, isNew) {
+    var tag = ev.url ? 'a' : 'div', el = document.createElement(tag);
+    el.className = 'fe ' + ev.type + (isNew ? ' enter' : ''); el.dataset.id = ev.id;
+    if (ev.url) el.href = ev.url;
+    el.innerHTML = '<span class="fi">' + (ICONS[ev.type] || ICONS.new) + '</span><div class="ft"><b>' + escHtml(ev.title) + '</b><span>' +
+      escHtml(ev.sub || '') + (ev.min ? ' · ' + ev.min + ' דק\'' : '') + '</span></div><time data-ts="' + ev.ts + '">' + ago(ev.ts) + '</time>';
+    if (isNew) setTimeout(function () { el.classList.remove('enter'); }, 2500);
+    return el;
+  }
+  function paint(d, first) {
+    var chip = document.getElementById('busyChip');
+    chip.classList.toggle('hidden', !d.busy);
+    document.getElementById('busyN').textContent = d.busy + ' בתמלול כעת';
+    var byId = {};
+    items.forEach(function (e) { byId[e.id.split(':')[0]] = e; });
+    var changed = false;
+    d.events.slice().reverse().forEach(function (ev) {
+      var key = ev.id.split(':')[0], old = byId[key];
+      if (old && old.id === ev.id) return;
+      if (old) { items.splice(items.indexOf(old), 1); var oe = feed.querySelector('[data-id="' + old.id + '"]'); if (oe) oe.remove(); }
+      items.unshift(ev); byId[key] = ev; changed = true;
+      var empty = feed.querySelector('.feed-empty'); if (empty) empty.remove();
+      feed.prepend(row(ev, !first));
+    });
+    if (first && !d.events.length) {
+      feed.innerHTML = '<div class="feed-empty">{{ ic("activity", 30)|replace("\n", "")|replace("'", "\\'") }}אין פעילות בימים האחרונים. כשתלמיד יקליט או כשתמלול יהיה מוכן - זה יופיע כאן מיד.</div>';
+    }
+    while (items.length > 25) { var x = items.pop(), xe = feed.querySelector('[data-id="' + x.id + '"]'); if (xe) xe.remove(); }
+  }
+  setInterval(function () { feed.querySelectorAll('time[data-ts]').forEach(function (t) { t.textContent = ago(+t.dataset.ts); }); }, 30000);
+  document.addEventListener('DOMContentLoaded', function () {
+    if (!window.InstPulse) return;
+    InstPulse.fast = true;
+    InstPulse.on(paint);
+    InstPulse.refresh();
+  });
+})();
+</script>
 {% endblock %}

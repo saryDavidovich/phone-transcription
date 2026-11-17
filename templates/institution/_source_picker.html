@@ -1,0 +1,198 @@
+{# בחירת מקור לתמלול: קובץ / הקלטה ישירה מהמיקרופון / קישור Drive או ג'מבו מייל.
+   שימוש: {% set sp_id = 'sp' %}{% include "institution/_source_picker.html" %}
+   ובסקריפט: var picker = SrcPicker(document.getElementById('sp')); picker.items() -> [{label, fill(fd)}] #}
+{% from "institution/_icons.html" import ic %}
+<style>
+.src-tabs { display:flex; gap:4px; background:var(--surface2); border:1px solid var(--border); border-radius:12px; padding:4px; margin-bottom:14px; }
+.src-tab { flex:1; display:flex; align-items:center; justify-content:center; gap:7px; padding:9px 8px; border-radius:9px; border:0; background:none; font-family:inherit; font-size:13.5px; font-weight:600; color:var(--text2); cursor:pointer; transition:.15s; }
+.src-tab:hover { color:var(--text); }
+.src-tab.on { background:var(--surface); color:var(--accent2); box-shadow:0 1px 3px rgba(20,25,40,.1); }
+.src-tab .ico { width:17px; height:17px; }
+.src-pane { display:none; animation:paneIn .2s ease-out; }
+.src-pane.on { display:block; }
+@keyframes paneIn { from { opacity:0; transform:translateY(4px); } to { opacity:1; transform:none; } }
+.rec-box { border:2px dashed var(--border); border-radius:var(--radius); background:var(--surface2); padding:22px 18px; text-align:center; }
+.rec-box.live { border-color:rgba(220,38,38,.35); background:#fff7f7; }
+.rec-btn { width:72px; height:72px; border-radius:50%; border:0; cursor:pointer; background:var(--red); color:#fff; display:inline-flex; align-items:center; justify-content:center; box-shadow:0 8px 22px -8px rgba(220,38,38,.7); transition:.15s; }
+.rec-btn:hover { transform:scale(1.05); }
+.rec-btn .ico { width:30px; height:30px; }
+.rec-btn.stop { background:#1c2333; box-shadow:0 8px 22px -8px rgba(20,25,40,.6); }
+.rec-time { font-size:28px; font-weight:800; font-variant-numeric:tabular-nums; margin:12px 0 4px; direction:ltr; }
+.rec-sub { font-size:12.5px; color:var(--text2); }
+.rec-level { display:flex; gap:3px; align-items:flex-end; justify-content:center; height:34px; margin:10px auto 0; max-width:220px; }
+.rec-level i { flex:1; background:var(--red); border-radius:2px; height:3px; opacity:.75; transition:height .08s; }
+.rec-ctrl { display:flex; gap:8px; justify-content:center; margin-top:14px; flex-wrap:wrap; }
+.rec-done audio { width:100%; max-width:420px; margin-top:12px; }
+.rec-done .rec-ok { display:inline-flex; align-items:center; gap:8px; font-weight:700; color:var(--accent2); }
+.link-box textarea { min-height:86px; direction:ltr; text-align:left; font-size:13.5px; resize:vertical; }
+.link-chips { display:flex; flex-direction:column; gap:6px; margin-top:8px; }
+.link-chip { display:flex; align-items:center; gap:8px; font-size:12.5px; padding:6px 10px; border-radius:9px; background:var(--surface2); border:1px solid var(--border); }
+.link-chip.ok { color:var(--accent2); border-color:rgba(16,185,129,.25); background:var(--accent-soft); }
+.link-chip.bad { color:var(--red); border-color:rgba(220,38,38,.2); background:var(--red-soft); }
+.link-chip span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; direction:ltr; }
+.src-title { margin-top:12px; }
+</style>
+<div class="src-picker" id="{{ sp_id }}">
+  <div class="src-tabs" role="tablist">
+    <button type="button" class="src-tab on" data-mode="file">{{ ic('upload', 17) }}<span>קובץ</span></button>
+    <button type="button" class="src-tab" data-mode="record">{{ ic('mic', 17) }}<span>הקלטה</span></button>
+    <button type="button" class="src-tab" data-mode="link">{{ ic('link', 17) }}<span>קישור</span></button>
+  </div>
+
+  <div class="src-pane on" data-pane="file">
+    <div class="dropzone">
+      <div class="dz-icon">{{ ic('headphones', 34, 1.6) }}</div>
+      <div class="dz-title">גררו קבצי אודיו/וידאו לכאן או לחצו לבחירה</div>
+      <div class="dz-sub">{{ sp_file_sub or 'אפשר לבחור כמה קבצים יחד - כל קובץ יתומלל בנפרד' }}</div>
+      <div class="dz-filename"></div>
+      <input type="file" name="audio_file" {{ 'multiple' if sp_multiple is not defined or sp_multiple }} accept="audio/*,video/*">
+    </div>
+  </div>
+
+  <div class="src-pane" data-pane="record">
+    <div class="rec-box">
+      <div class="rec-idle">
+        <button type="button" class="rec-btn" data-act="start" aria-label="התחלת הקלטה">{{ ic('mic', 30, 1.8) }}</button>
+        <div class="rec-time">0:00</div>
+        <div class="rec-sub">לוחצים כדי להתחיל להקליט מהמיקרופון של המחשב או הטלפון</div>
+      </div>
+      <div class="rec-live hidden">
+        <button type="button" class="rec-btn stop" data-act="stop" aria-label="סיום הקלטה">{{ ic('stop', 28, 1.8) }}</button>
+        <div class="rec-time" data-time>0:00</div>
+        <div class="rec-sub" data-livesub>מקליטים...</div>
+        <div class="rec-level">{% for i in range(18) %}<i></i>{% endfor %}</div>
+        <div class="rec-ctrl"><button type="button" class="btn btn-secondary btn-sm" data-act="pause">{{ ic('pause', 14, 1) }} השהיה</button></div>
+      </div>
+      <div class="rec-done hidden">
+        <div class="rec-ok">{{ ic('check', 18, 2.4) }} ההקלטה מוכנה (<span data-len></span>)</div>
+        <div><audio controls preload="metadata"></audio></div>
+        <div class="rec-ctrl"><button type="button" class="btn btn-secondary btn-sm" data-act="again">{{ ic('refresh', 14) }} הקלטה מחדש</button></div>
+      </div>
+    </div>
+    <div class="field src-title"><input class="input" data-title placeholder="שם להקלטה (לא חובה) - למשל: שיעור בגמרא"></div>
+  </div>
+
+  <div class="src-pane" data-pane="link">
+    <div class="field link-box" style="margin-bottom:6px;">
+      <textarea class="input" data-links placeholder="https://drive.google.com/file/d/...&#10;https://jmb.co/..."></textarea>
+      <div class="hint">מדביקים קישור שיתוף של Google Drive או של ג'מבו מייל (כמה קישורים - כל אחד בשורה). הקובץ יורד ישירות אצלנו, בלי להוריד אותו למחשב. ב-Drive: לוודא שהשיתוף הוא "כל מי שיש לו את הקישור".</div>
+      <div class="link-chips" data-chips></div>
+    </div>
+  </div>
+</div>
+<script>
+window.SrcPicker = window.SrcPicker || function (root) {
+  var mode = 'file', tabs = root.querySelectorAll('.src-tab'), panes = root.querySelectorAll('.src-pane');
+  var fileIn = root.querySelector('input[type=file]'), dz = root.querySelector('.dropzone'), dzName = root.querySelector('.dz-filename');
+  function setMode(m) {
+    if (mode === 'record' && m !== 'record' && rec && rec.state !== 'inactive') return;      // באמצע הקלטה
+    mode = m;
+    tabs.forEach(function (t) { t.classList.toggle('on', t.dataset.mode === m); });
+    panes.forEach(function (p) { p.classList.toggle('on', p.dataset.pane === m); });
+    if (root.onchange) root.onchange();
+  }
+  tabs.forEach(function (t) { t.addEventListener('click', function () { setMode(t.dataset.mode); }); });
+
+  /* --- קובץ --- */
+  function showName() { var n = fileIn.files.length; dzName.innerHTML = !n ? '' : IC.file + ' ' + escHtml(n === 1 ? fileIn.files[0].name : n + ' קבצים נבחרו'); if (root.onchange) root.onchange(); }
+  fileIn.addEventListener('change', showName);
+  ['dragover', 'dragenter'].forEach(function (ev) { dz.addEventListener(ev, function (e) { e.preventDefault(); dz.classList.add('dragover'); }); });
+  ['dragleave', 'dragend'].forEach(function (ev) { dz.addEventListener(ev, function () { dz.classList.remove('dragover'); }); });
+  dz.addEventListener('drop', function (e) { e.preventDefault(); dz.classList.remove('dragover'); if (e.dataTransfer.files.length) { fileIn.files = e.dataTransfer.files; showName(); } });
+
+  /* --- הקלטה --- */
+  var rec = null, chunks = [], blob = null, ext = 'webm', stream = null, t0 = 0, acc = 0, tick = null, ac = null, an = null, raf = null;
+  var box = root.querySelector('.rec-box'), vIdle = root.querySelector('.rec-idle'), vLive = root.querySelector('.rec-live'), vDone = root.querySelector('.rec-done');
+  var bars = root.querySelectorAll('.rec-level i'), tEl = root.querySelector('[data-time]'), pauseBtn = root.querySelector('[data-act=pause]');
+  function fmt(s) { s = Math.floor(s); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); }
+  function elapsed() { return acc + (rec && rec.state === 'recording' ? (Date.now() - t0) / 1000 : 0); }
+  function view(v) { vIdle.classList.toggle('hidden', v !== 'idle'); vLive.classList.toggle('hidden', v !== 'live'); vDone.classList.toggle('hidden', v !== 'done'); box.classList.toggle('live', v === 'live'); }
+  function level() {
+    if (!an) return;
+    var d = new Uint8Array(an.frequencyBinCount); an.getByteFrequencyData(d);
+    var step = Math.floor(d.length / bars.length / 2) || 1;
+    bars.forEach(function (b, i) { var v = d[i * step] / 255; b.style.height = Math.max(3, Math.round(v * 34)) + 'px'; });
+    raf = requestAnimationFrame(level);
+  }
+  async function start() {
+    if (!navigator.mediaDevices || !window.MediaRecorder) { instToast('הדפדפן הזה לא תומך בהקלטה. נסו בכרום או באדג\' מעודכנים', true); return; }
+    try { stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } }); }
+    catch (e) { instToast('אין גישה למיקרופון. אשרו גישה בחלון של הדפדפן (או בסמל המנעול שליד הכתובת)', true); return; }
+    var types = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus'], type = '';
+    for (var i = 0; i < types.length; i++) if (MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(types[i])) { type = types[i]; break; }
+    rec = new MediaRecorder(stream, type ? { mimeType: type, audioBitsPerSecond: 64000 } : undefined);
+    ext = /mp4/.test(rec.mimeType || type) ? 'm4a' : (/ogg/.test(rec.mimeType || type) ? 'ogg' : 'webm');
+    chunks = []; blob = null; acc = 0; t0 = Date.now();
+    rec.ondataavailable = function (e) { if (e.data && e.data.size) chunks.push(e.data); };
+    rec.onstop = function () {
+      blob = new Blob(chunks, { type: rec.mimeType || 'audio/webm' });
+      stream.getTracks().forEach(function (t) { t.stop(); });
+      if (ac) { ac.close().catch(function () {}); ac = an = null; } cancelAnimationFrame(raf);
+      clearInterval(tick);
+      root.querySelector('[data-len]').textContent = fmt(acc);
+      var au = vDone.querySelector('audio'); au.src = URL.createObjectURL(blob);
+      view('done'); if (root.onchange) root.onchange();
+    };
+    rec.start(1000);
+    try { ac = new (window.AudioContext || window.webkitAudioContext)(); an = ac.createAnalyser(); an.fftSize = 128; ac.createMediaStreamSource(stream).connect(an); level(); } catch (e) {}
+    tick = setInterval(function () { tEl.textContent = fmt(elapsed()); }, 250);
+    pauseBtn.innerHTML = '{{ ic("pause", 14, 1)|replace("\n", "")|replace("'", "\\'") }} השהיה';
+    root.querySelector('[data-livesub]').textContent = 'מקליטים... לחצו על הריבוע כדי לסיים';
+    view('live');
+  }
+  function stop() { if (rec && rec.state !== 'inactive') { acc = elapsed(); rec.stop(); } }
+  function pause() {
+    if (!rec) return;
+    if (rec.state === 'recording') { acc = elapsed(); rec.pause(); pauseBtn.innerHTML = '{{ ic("mic", 14)|replace("\n", "")|replace("'", "\\'") }} המשך הקלטה'; root.querySelector('[data-livesub]').textContent = 'ההקלטה מושהית'; }
+    else if (rec.state === 'paused') { t0 = Date.now(); rec.resume(); pauseBtn.innerHTML = '{{ ic("pause", 14, 1)|replace("\n", "")|replace("'", "\\'") }} השהיה'; root.querySelector('[data-livesub]').textContent = 'מקליטים... לחצו על הריבוע כדי לסיים'; }
+  }
+  root.querySelector('[data-act=start]').onclick = start;
+  root.querySelector('[data-act=stop]').onclick = stop;
+  pauseBtn.onclick = pause;
+  root.querySelector('[data-act=again]').onclick = function () { blob = null; view('idle'); start(); };
+  window.addEventListener('beforeunload', function (e) { if (rec && rec.state !== 'inactive' || blob) { e.preventDefault(); e.returnValue = ''; } });
+
+  /* --- קישורים --- */
+  var linksIn = root.querySelector('[data-links]'), chipsEl = root.querySelector('[data-chips]');
+  function parseLinks() {
+    return linksIn.value.split(/\s+/).map(function (s) { return s.trim(); }).filter(Boolean).map(function (u) {
+      var kind = /drive\.google\.com|docs\.google\.com/.test(u) ? 'drive' : (/jumbomail|jmb\.|jumbo/i.test(u) ? 'jumbo' : null);
+      return { url: u, kind: /^https?:\/\//i.test(u) ? kind : null };
+    });
+  }
+  function paintLinks() {
+    var ls = parseLinks();
+    chipsEl.innerHTML = ls.map(function (l) {
+      return '<div class="link-chip ' + (l.kind ? 'ok' : 'bad') + '">' + (l.kind ? IC.check : IC.alert) + '<b>' +
+        (l.kind === 'drive' ? 'Google Drive' : l.kind === 'jumbo' ? 'ג\'מבו מייל' : 'קישור לא נתמך') + '</b><span>' + escHtml(l.url) + '</span></div>';
+    }).join('');
+    if (root.onchange) root.onchange();
+  }
+  linksIn.addEventListener('input', paintLinks);
+
+  var api = {
+    mode: function () { return mode; },
+    error: function () {
+      if (mode === 'file' && !fileIn.files.length) return 'יש לבחור קובץ';
+      if (mode === 'record') { if (rec && rec.state !== 'inactive') return 'יש לסיים את ההקלטה (הריבוע השחור)'; if (!blob) return 'עדיין לא הוקלט כלום'; }
+      if (mode === 'link') { var l = parseLinks(); if (!l.length) return 'יש להדביק קישור'; if (l.some(function (x) { return !x.kind; })) return 'יש קישור שאינו מ-Drive או מג\'מבו מייל'; }
+      return '';
+    },
+    items: function () {
+      if (mode === 'file') return Array.prototype.map.call(fileIn.files, function (f) { return { label: f.name, fill: function (fd) { fd.append('audio_file', f); } }; });
+      if (mode === 'record') {
+        var title = root.querySelector('[data-title]').value.trim(), d = new Date();
+        var name = (title || ('הקלטה ' + d.getDate() + '.' + (d.getMonth() + 1) + ' ' + d.getHours() + ':' + String(d.getMinutes()).padStart(2, '0'))) + '.' + ext;
+        return [{ label: title || 'הקלטה ישירה', fill: function (fd) { fd.append('audio_file', blob, name); fd.append('source', 'record'); if (title) fd.append('title', title); } }];
+      }
+      return parseLinks().map(function (l) { return { label: l.kind === 'drive' ? 'קישור Drive' : 'קישור ג\'מבו מייל', fill: function (fd) { fd.append('link', l.url); } }; });
+    },
+    reset: function () {
+      fileIn.value = ''; dzName.innerHTML = '';
+      blob = null; chunks = []; if (vDone) view('idle'); tEl.textContent = '0:00'; root.querySelector('[data-title]').value = '';
+      linksIn.value = ''; chipsEl.innerHTML = '';
+    }
+  };
+  return api;
+};
+</script>

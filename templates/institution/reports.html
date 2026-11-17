@@ -1,0 +1,213 @@
+{% extends "institution/base.html" %}
+{% from "institution/_icons.html" import ic %}
+{% block title %}דוחות וגרפים{% endblock %}
+{% block head %}
+<style>
+:root { --s1:#0ea371; --s2:#3b6ef6; }
+.r-filters { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:16px; }
+.r-filters .input { width:auto; padding:9px 11px; font-size:13.5px; }
+.seg-btns { display:flex; gap:3px; background:var(--surface); border:1px solid var(--border); border-radius:11px; padding:3px; }
+.seg-btns button { border:0; background:none; padding:7px 13px; border-radius:8px; font-family:inherit; font-size:13px; font-weight:600; color:var(--text2); cursor:pointer; }
+.seg-btns button.on { background:var(--accent); color:#fff; }
+.kpi .stat-value { font-variant-numeric:tabular-nums; }
+.chart-card { position:relative; }
+.chart-card h2 { margin-bottom:2px; }
+.legend { display:flex; gap:14px; font-size:12.5px; color:var(--text2); margin:6px 0 10px; flex-wrap:wrap; }
+.legend i { display:inline-block; width:10px; height:10px; border-radius:3px; margin-inline-end:5px; vertical-align:-1px; }
+.vchart { width:100%; height:240px; display:block; overflow:visible; }
+.vchart text { font-family:'Heebo',sans-serif; font-size:11px; fill:var(--text2); }
+.vchart .grid line { stroke:var(--border); }
+.vchart .hit { fill:transparent; cursor:pointer; }
+.vchart .bar-g.dim rect.bar { opacity:.45; }
+.hbars { display:flex; flex-direction:column; gap:10px; }
+.hb { display:grid; grid-template-columns:minmax(80px,150px) 1fr auto; gap:10px; align-items:center; font-size:13px; text-decoration:none; color:var(--text); border-radius:8px; }
+a.hb:hover .hb-name { color:var(--accent2); }
+.hb-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:600; }
+.hb-track { height:14px; background:var(--surface2); border-radius:4px; overflow:hidden; }
+.hb-fill { display:block; height:100%; background:var(--s1); border-radius:4px 0 0 4px; width:0; transition:width .6s cubic-bezier(.2,.8,.2,1); }
+.hb-val { font-size:12.5px; color:var(--text2); font-variant-numeric:tabular-nums; white-space:nowrap; }
+.tip { position:absolute; pointer-events:none; background:#1c2333; color:#fff; font-size:12.5px; padding:8px 11px; border-radius:9px; box-shadow:var(--shadow-lg); z-index:5; white-space:nowrap; transform:translate(-50%,-100%); margin-top:-8px; line-height:1.6; opacity:0; transition:opacity .12s; }
+.tip.on { opacity:1; }
+.tip i { display:inline-block; width:8px; height:8px; border-radius:2px; margin-inline-end:5px; }
+.mini-bars { display:flex; align-items:flex-end; gap:4px; height:110px; padding-top:6px; }
+.mini-bars .mb { flex:1; display:flex; flex-direction:column; align-items:center; gap:4px; height:100%; justify-content:flex-end; position:relative; }
+.mini-bars .mb span.b { width:100%; max-width:34px; background:var(--s1); border-radius:4px 4px 0 0; min-height:2px; transition:height .5s; }
+.mini-bars .mb small { font-size:10.5px; color:var(--text2); }
+.mini-bars .mb:hover span.b { background:var(--accent2); }
+.mini-bars.hours .mb small { visibility:hidden; }
+.mini-bars.hours .mb:nth-child(3n+1) small { visibility:visible; }
+.tier-bar { display:flex; height:16px; border-radius:5px; overflow:hidden; gap:2px; margin:10px 0 8px; background:var(--surface); }
+.tier-bar span { display:block; height:100%; transition:width .5s; }
+.tier-legend { display:flex; justify-content:space-between; font-size:13px; flex-wrap:wrap; gap:6px; }
+.tier-legend i { display:inline-block; width:10px; height:10px; border-radius:3px; margin-inline-end:5px; }
+.empty { color:var(--text2); font-size:13px; padding:20px 0; text-align:center; }
+.tbl-toggle { font-size:12.5px; margin-top:8px; }
+.tbl-toggle summary { cursor:pointer; color:var(--text2); }
+.tbl-toggle table { margin-top:8px; font-size:12.5px; }
+.loading-ov { opacity:.5; transition:opacity .2s; pointer-events:none; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="page">
+<h1>דוחות וגרפים</h1>
+
+<div class="r-filters">
+  <div class="seg-btns" id="days">
+    <button type="button" data-d="30">30 יום</button><button type="button" data-d="90" class="on">3 חודשים</button>
+    <button type="button" data-d="180">חצי שנה</button><button type="button" data-d="365">שנה</button>
+  </div>
+  {% if groups %}<select class="input" id="grp" aria-label="קבוצה"><option value="">כל הקבוצות</option>{% for g in groups %}<option value="{{ g.id }}">{{ g.name }}</option>{% endfor %}</select>{% endif %}
+</div>
+
+<div id="wrap">
+<div class="grid grid-4 stats mb-18">
+  <div class="card stat-card kpi"><span class="ic" style="background:var(--accent-soft); color:var(--accent2);">{{ ic('clock', 22) }}</span><div><div class="stat-value" id="kMin">—</div><div class="stat-label">דקות תמלול</div></div></div>
+  <div class="card stat-card kpi"><span class="ic" style="background:var(--blue-soft); color:var(--blue);">{{ ic('file-text', 22) }}</span><div><div class="stat-value" id="kCount">—</div><div class="stat-label">תמלולים</div></div></div>
+  <div class="card stat-card kpi"><span class="ic" style="background:#f3edfe; color:#7c3aed;">{{ ic('users', 22) }}</span><div><div class="stat-value" id="kActive">—</div><div class="stat-label">תלמידים פעילים</div></div></div>
+  <div class="card stat-card kpi"><span class="ic" style="background:var(--surface3); color:var(--text2);">{{ ic('shekel', 22) }}</span><div><div class="stat-value" id="kCost">—</div><div class="stat-label">עלות התמלולים</div></div></div>
+</div>
+
+<div class="card chart-card mb-18">
+  <div class="card-head"><span class="ic">{{ ic('chart') }}</span><h2 id="trendTitle">דקות תמלול לפי שבוע</h2></div>
+  <div class="legend"><span><i style="background:var(--s1)"></i>תלמידים</span><span><i style="background:var(--s2)"></i>המוסד</span></div>
+  <svg class="vchart" id="trend" role="img" aria-label="גרף דקות תמלול לאורך זמן"></svg>
+  <div class="tip" id="tip"></div>
+  <details class="tbl-toggle"><summary>הצגה כטבלה</summary><div class="table-wrap"><table id="trendTbl"></table></div></details>
+</div>
+
+<div class="grid grid-2 mb-18" style="align-items:stretch;">
+  <div class="card">
+    <div class="card-head" style="margin-bottom:14px;"><span class="ic">{{ ic('folder') }}</span><h2>לפי קבוצה</h2></div>
+    <div class="hbars" id="groups"></div>
+  </div>
+  <div class="card">
+    <div class="card-head" style="margin-bottom:14px;"><span class="ic">{{ ic('user') }}</span><h2>התלמידים הפעילים ביותר</h2></div>
+    <div class="hbars" id="top"></div>
+  </div>
+</div>
+
+<div class="grid grid-3" style="align-items:stretch;">
+  <div class="card">
+    <div class="card-head"><span class="ic">{{ ic('calendar') }}</span><h2>לפי יום בשבוע</h2></div>
+    <div class="mini-bars" id="wd"></div>
+  </div>
+  <div class="card">
+    <div class="card-head"><span class="ic">{{ ic('clock') }}</span><h2>לפי שעה ביום</h2></div>
+    <div class="mini-bars hours" id="hr"></div>
+  </div>
+  <div class="card">
+    <div class="card-head"><span class="ic">{{ ic('sparkle') }}</span><h2>רגיל מול מקצועי</h2></div>
+    <div class="tier-bar" id="tierBar"></div>
+    <div class="tier-legend" id="tierLeg"></div>
+  </div>
+</div>
+</div>
+</div>
+
+<script>
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  var st = { days: 90, group: '' };
+  try { var sv = JSON.parse(localStorage.getItem('instReports') || '{}'); if (sv.days) st.days = sv.days; } catch (e) {}
+  var nf = new Intl.NumberFormat('he-IL');
+  function fmtMin(m) { return m >= 120 ? nf.format(Math.round(m / 6) / 10) + ' שע\'' : nf.format(Math.round(m)) + ' דק\''; }
+  function countUp(el, to, fmt) {
+    var from = 0, t0 = performance.now();
+    (function step(t) { var k = Math.min(1, (t - t0) / 500), v = from + (to - from) * (1 - Math.pow(1 - k, 3)); el.textContent = fmt(v); if (k < 1) requestAnimationFrame(step); })(t0);
+  }
+  var NS = 'http://www.w3.org/2000/svg';
+  function el(n, a) { var e = document.createElementNS(NS, n); for (var k in a) e.setAttribute(k, a[k]); return e; }
+
+  function trend(series, monthly) {
+    var svg = $('trend'), W = svg.clientWidth || 800, H = 240, padL = 8, padR = 40, padT = 10, padB = 26;
+    svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H); svg.innerHTML = '';
+    var max = Math.max(1, Math.max.apply(null, series.map(function (s) { return s.students + s.inst; })));
+    var step = Math.pow(10, Math.floor(Math.log10(max))), nice = Math.ceil(max / step) * step; if (nice / step <= 2) step /= 2; nice = Math.ceil(max / step) * step;
+    var g = el('g', { class: 'grid' }); svg.appendChild(g);
+    for (var v = 0; v <= nice + 1e-9; v += step) {
+      var y = padT + (H - padT - padB) * (1 - v / nice);
+      g.appendChild(el('line', { x1: padL, x2: W - padR, y1: y, y2: y, 'stroke-width': v === 0 ? 1 : .6, 'stroke-dasharray': v === 0 ? '' : '3 4' }));
+      var t = el('text', { x: W - padR + 6, y: y + 4, 'text-anchor': 'start' }); t.textContent = nf.format(Math.round(v)); svg.appendChild(t);
+    }
+    var n = series.length, bw = (W - padL - padR) / n, w = Math.max(4, Math.min(40, bw * .62)), ch = H - padT - padB;
+    var lblEvery = Math.ceil(n / Math.max(1, Math.floor((W - padL - padR) / 46)));
+    series.forEach(function (s, i) {
+      var x = W - padR - bw * (i + .5);                    // מימין לשמאל: הישן מימין
+      var bg = el('g', { class: 'bar-g' });
+      var hS = ch * s.students / nice, hI = ch * s.inst / nice, base = padT + ch;
+      function bar(h, y, color, top) {
+        if (h <= 0) return;
+        var r = Math.min(4, w / 2, h);
+        var d = top ? 'M' + (x - w / 2) + ',' + (y + h) + 'V' + (y + r) + 'Q' + (x - w / 2) + ',' + y + ' ' + (x - w / 2 + r) + ',' + y + 'H' + (x + w / 2 - r) + 'Q' + (x + w / 2) + ',' + y + ' ' + (x + w / 2) + ',' + (y + r) + 'V' + (y + h) + 'Z'
+                    : 'M' + (x - w / 2) + ',' + y + 'h' + w + 'v' + h + 'h' + (-w) + 'Z';
+        bg.appendChild(el('path', { d: d, fill: color, class: 'bar' }));
+      }
+      var gap = hS > 0 && hI > 0 ? 2 : 0;
+      bar(hS, base - hS, 'var(--s1)', hI <= 0);
+      bar(Math.max(0, hI - gap), base - hS - hI, 'var(--s2)', true);
+      var hit = el('rect', { x: x - bw / 2, y: padT, width: bw, height: ch, class: 'hit' });
+      hit.addEventListener('mouseenter', function () { showTip(s, x, base - hS - hI, monthly); bg.classList.add('on'); svg.querySelectorAll('.bar-g').forEach(function (o) { if (o !== bg) o.classList.add('dim'); }); });
+      hit.addEventListener('mouseleave', hideTip);
+      hit.addEventListener('touchstart', function () { showTip(s, x, base - hS - hI, monthly); }, { passive: true });
+      bg.appendChild(hit); svg.appendChild(bg);
+      if (i % lblEvery === 0 || i === n - 1) { var t = el('text', { x: x, y: H - 8, 'text-anchor': 'middle' }); t.textContent = s.label; svg.appendChild(t); }
+    });
+    $('trendTitle').textContent = monthly ? 'דקות תמלול לפי חודש' : 'דקות תמלול לפי שבוע';
+    $('trendTbl').innerHTML = '<tr><th>' + (monthly ? 'חודש' : 'שבוע מ-') + '</th><th>תלמידים (דק\')</th><th>המוסד (דק\')</th><th>תמלולים</th></tr>' +
+      series.map(function (s) { return '<tr><td>' + s.label + '</td><td>' + nf.format(s.students) + '</td><td>' + nf.format(s.inst) + '</td><td>' + s.count + '</td></tr>'; }).join('');
+  }
+  function showTip(s, x, y, monthly) {
+    var tip = $('tip'), svg = $('trend'), r = svg.getBoundingClientRect(), pr = svg.parentNode.getBoundingClientRect();
+    tip.innerHTML = '<b>' + (monthly ? 'חודש ' : 'שבוע מ-') + s.label + '</b><br><i style="background:var(--s1)"></i>תלמידים: ' + fmtMin(s.students) +
+      '<br><i style="background:var(--s2)"></i>המוסד: ' + fmtMin(s.inst) + '<br>' + s.count + ' תמלולים';
+    var sx = r.width / (svg.viewBox.baseVal.width || r.width);
+    tip.style.left = (r.left - pr.left + x * sx) + 'px'; tip.style.top = (r.top - pr.top + y * sx) + 'px'; tip.classList.add('on');
+  }
+  function hideTip() { $('tip').classList.remove('on'); $('trend').querySelectorAll('.bar-g').forEach(function (o) { o.classList.remove('dim'); }); }
+
+  function hbars(box, rows, link, valFmt) {
+    if (!rows.length) { box.innerHTML = '<div class="empty">אין נתונים בתקופה הזו</div>'; return; }
+    var max = Math.max.apply(null, rows.map(function (r) { return r.min; })) || 1;
+    box.innerHTML = rows.map(function (r) {
+      var tag = link ? 'a' : 'div';
+      return '<' + tag + ' class="hb"' + (link ? ' href="' + link(r) + '"' : '') + ' title="' + escHtml(r.name) + '"><span class="hb-name">' + escHtml(r.name) + '</span>' +
+        '<span class="hb-track"><span class="hb-fill" data-w="' + (r.min / max * 100).toFixed(1) + '"></span></span><span class="hb-val">' + valFmt(r) + '</span></' + tag + '>';
+    }).join('');
+    requestAnimationFrame(function () { box.querySelectorAll('.hb-fill').forEach(function (f) { f.style.width = f.dataset.w + '%'; }); });
+  }
+  function mini(box, vals, labels, tipf) {
+    var max = Math.max.apply(null, vals) || 1;
+    box.innerHTML = vals.map(function (v, i) { return '<div class="mb" title="' + tipf(i, v) + '"><span class="b" style="height:0"></span><small>' + labels[i] + '</small></div>'; }).join('');
+    requestAnimationFrame(function () { box.querySelectorAll('.mb span.b').forEach(function (b, i) { b.style.height = Math.max(2, vals[i] / max * 86) + 'px'; }); });
+  }
+
+  var last = null;
+  async function load() {
+    $('wrap').classList.add('loading-ov');
+    document.querySelectorAll('#days button').forEach(function (b) { b.classList.toggle('on', +b.dataset.d === st.days); });
+    try { localStorage.setItem('instReports', JSON.stringify({ days: st.days })); } catch (e) {}
+    var d = await (await fetch('/institution/reports/data?days=' + st.days + (st.group ? '&group=' + st.group : ''), { credentials: 'same-origin' })).json();
+    last = d;
+    $('wrap').classList.remove('loading-ov');
+    countUp($('kMin'), d.totals.minutes, function (v) { return nf.format(Math.round(v)); });
+    countUp($('kCount'), d.totals.count, function (v) { return nf.format(Math.round(v)); });
+    countUp($('kActive'), d.totals.active, function (v) { return nf.format(Math.round(v)); });
+    countUp($('kCost'), d.totals.cost, function (v) { return '₪' + nf.format(Math.round(v)); });
+    trend(d.series, d.monthly);
+    hbars($('groups'), d.groups, null, function (r) { return fmtMin(r.min) + ' · ' + r.students + ' תלמידים'; });
+    hbars($('top'), d.top, function (r) { return '/institution/students/' + r.id; }, function (r) { return fmtMin(r.min) + ' · ' + r.count + ' תמלולים'; });
+    var wdN = ['א׳', 'ב׳', 'ג׳', 'ד׳', 'ה׳', 'ו׳', 'ש׳'];
+    mini($('wd'), d.weekdays, wdN, function (i, v) { return 'יום ' + wdN[i] + ': ' + v + ' תמלולים'; });
+    var hl = d.hours.map(function (_, i) { return String(i); });
+    mini($('hr'), d.hours, hl, function (i, v) { return i + ':00-' + (i + 1) + ':00: ' + v + ' תמלולים'; });
+    var tb = d.tiers.basic, tp = d.tiers.premium, tt = tb + tp || 1;
+    $('tierBar').innerHTML = '<span style="width:' + (tb / tt * 100) + '%;background:var(--s1)"></span><span style="width:' + (tp / tt * 100) + '%;background:var(--s2)"></span>';
+    $('tierLeg').innerHTML = '<span><i style="background:var(--s1)"></i>רגיל: ' + fmtMin(tb) + ' (' + Math.round(tb / tt * 100) + '%)</span><span><i style="background:var(--s2)"></i>מקצועי: ' + fmtMin(tp) + ' (' + Math.round(tp / tt * 100) + '%)</span>';
+  }
+  document.querySelectorAll('#days button').forEach(function (b) { b.addEventListener('click', function () { st.days = +b.dataset.d; load(); }); });
+  if ($('grp')) $('grp').addEventListener('change', function () { st.group = this.value; load(); });
+  var rt; window.addEventListener('resize', function () { clearTimeout(rt); rt = setTimeout(function () { if (last) trend(last.series, last.monthly); }, 150); });
+  load();
+})();
+</script>
+{% endblock %}

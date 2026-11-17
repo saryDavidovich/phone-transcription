@@ -505,8 +505,12 @@ def settings():
     from services.institution_students_ops import DEFAULT_LOW, active_students
     groups = StudentGroup.query.filter_by(institution_id=inst.id).order_by(StudentGroup.name).all()
     monthly_count = len(active_students(inst, inst.monthly_credit_group_id)) if inst.monthly_credit_amount else 0
+    logo_preview = None
+    if inst.logo_mime and inst.logo_data:
+        import base64
+        logo_preview = f'data:{inst.logo_mime};base64,' + base64.b64encode(inst.logo_data).decode()
     return render_template('institution/settings.html', inst=inst, topup_global_on=global_self_topup_enabled(),
-                           groups=groups, default_low=DEFAULT_LOW, monthly_count=monthly_count)
+                           groups=groups, default_low=DEFAULT_LOW, monthly_count=monthly_count, logo_preview=logo_preview)
 
 
 @institution_bp.route('/settings/add-authorized', methods=['POST'])
