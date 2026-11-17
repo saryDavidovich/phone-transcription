@@ -68,7 +68,18 @@ def get_customer(phone):
         'unit_prices': {k: __import__('services.pricing', fromlist=['x']).unit_price(customer, k)
                         for k in ('basic', 'premium', 'video', 'excel')},
         'new_email_replies': _new_reply_count(customer),
+        # מבצע דקות חינם: כמה שניות תמלול רגיל חינם נשארו היום (0 = אין מבצע עבורו)
+        'promo_free_left': _promo_left(customer),
     })
+
+
+def _promo_left(customer):
+    try:
+        from services import pricing as P
+        return int(P.promo_seconds_left(customer))
+    except Exception:
+        db.session.rollback()
+        return 0
 
 
 def _new_reply_count(customer):

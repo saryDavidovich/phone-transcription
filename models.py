@@ -47,6 +47,7 @@ class Customer(db.Model):
     institution_id = db.Column(db.Integer, db.ForeignKey('institutions.id'), nullable=True, index=True)
     student_number = db.Column(db.String(10), unique=True, nullable=True, index=True)  # 6 ספרות, לזיהוי בשלוחה 7
     student_display_name = db.Column(db.String(100), nullable=True)  # שם שהמוסד נתן לתלמיד (עשוי להיות שונה מ-name)
+    promo_free = db.Column(db.Boolean, nullable=True, default=False)   # מסומן למבצע דקות החינם (כשהמבצע "ללקוחות מסומנים")
     student_group_id = db.Column(db.Integer, db.ForeignKey('student_groups.id', ondelete='SET NULL'), nullable=True, index=True)  # קבוצה/שיעור במוסד
     # "לקוח-דמה" אחד לכל מוסד (נוצר עצלנית - ראה routes/institution.py
     # ensure_institution_self_customer) המייצג את המוסד עצמו ולא תלמיד
@@ -203,6 +204,7 @@ class InstitutionLoginLog(db.Model):
 class Recording(db.Model):
     __tablename__ = 'recordings'
     id = db.Column(db.Integer, primary_key=True)
+    promo_free_seconds = db.Column(db.Integer, nullable=True)   # כמה מהאורך היה חינם במבצע דקות החינם
     customer_id = db.Column(db.Integer, db.ForeignKey('customers.id'), nullable=False, index=True)
     call_id = db.Column(db.String(100), unique=True)
     duration_seconds = db.Column(db.Integer, default=0)

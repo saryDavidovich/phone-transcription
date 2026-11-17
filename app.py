@@ -606,6 +606,9 @@ def _migrate_db():
         # תמלול של מוסד בלי יתרה מספיקה - ממתין לתשלום (כמו לקוח), נשלח במייל אחרי טעינה
         "ALTER TABLE institution_uploads ADD COLUMN IF NOT EXISTS send_to VARCHAR(200)",
         "ALTER TABLE institution_uploads ADD COLUMN IF NOT EXISTS charged BOOLEAN",
+        # מבצע דקות תמלול חינם
+        "ALTER TABLE customers ADD COLUMN IF NOT EXISTS promo_free BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE recordings ADD COLUMN IF NOT EXISTS promo_free_seconds INTEGER",
         # אינדקסים למהירות (create_all לא מוסיף אינדקסים לטבלאות קיימות - לכן במפורש; IF NOT EXISTS = בטוח)
         "CREATE INDEX IF NOT EXISTS ix_transactions_recording_id ON transactions (recording_id)",
         "CREATE INDEX IF NOT EXISTS ix_recordings_customer_created ON recordings (customer_id, created_at DESC)",

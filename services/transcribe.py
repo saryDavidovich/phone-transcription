@@ -303,7 +303,10 @@ def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, durat
                     from services import pricing as P
                     customer_pre = Customer.query.get(customer_id)
                     price_per_20min_pre = P.unit_price(customer_pre, 'basic')   # מחיר ליחידה (20 או 5 דק')
-                    cost_pre = P.cost_for(customer_pre, duration_seconds, 'basic')
+                    _rec_pre = Recording.query.filter_by(call_id=call_id).first()
+                    # מבצע דקות חינם: חלק מהאורך (או כולו) לא מחויב
+                    cost_pre = P.basic_cost_with_promo(customer_pre, duration_seconds,
+                                                       _rec_pre.id if _rec_pre else None)[0]
                     if customer_pre and customer_pre.balance < cost_pre:
                         log.info(f"Insufficient balance for {call_id}: need {cost_pre}, have {customer_pre.balance}")
                         db.session.remove()
@@ -365,8 +368,13 @@ def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, durat
             customer = Customer.query.get(customer_id)
             kind = 'video' if price_key == 'price_per_20min_video' else 'basic'
             price_per_20min = P.unit_price(customer, kind)          # מחיר ליחידה (20 או 5 דק')
-            cost = P.cost_for(customer, duration_seconds, kind)
-            fax_extra = P.fax_surcharge(customer, duration_seconds, delivery_method)
+            promo_free = 0
+            if kind == 'basic':          # מבצע: דקות תמלול רגיל חינם בכל יום (services/pricing.py)
+                cost, promo_free = P.basic_cost_with_promo(customer, duration_seconds, rec.id if rec else None)
+            else:
+                cost = P.cost_for(customer, duration_seconds, kind)
+            promo_fax = P.promo_fax_fee(customer, duration_seconds, delivery_method, promo_free)
+            fax_extra = P.fax_surcharge(customer, duration_seconds, delivery_method) + promo_fax
 
             # בדיקה סופית שהיתרה מספיקה (לאחר שיודעים את האורך המדויק)
             if customer and customer.balance < cost + fax_extra:
@@ -393,18 +401,28 @@ def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, durat
                 rec.status = 'transcribed'
                 rec.cost = cost
                 rec.duration_seconds = duration_seconds
+                rec.promo_free_seconds = promo_free or None
                 db.session.commit()
 
             if customer:
                 customer.balance -= cost
+                promo_note = ''
+                if promo_free:
+                    promo_note = (' - חינם במבצע' if not cost else
+                                  f' - {max(1, round(promo_free / 60))} דק׳ חינם במבצע')
                 txn = Transaction(
                     customer_id=customer_id,
                     amount=-cost,
                     type='debit',
-                    description=f'תמלול {duration_seconds//60} דקות ({description_tier}{", לפי 5 דק׳" if P.unit_minutes(customer) == 5 else ""})',
+                    description=f'תמלול {duration_seconds//60} דקות ({description_tier}{", לפי 5 דק׳" if P.unit_minutes(customer) == 5 else ""}){promo_note}',
                     recording_id=rec.id if rec else None
                 )
                 db.session.add(txn)
+                if promo_fax:
+                    customer.balance -= promo_fax
+                    db.session.add(Transaction(customer_id=customer_id, amount=-promo_fax, type='debit',
+                                               recording_id=rec.id if rec else None,
+                                               description='שליחת פקס (תמלול חינם במבצע)'))
                 db.session.commit()
                 P.charge_fax_surcharge(customer, rec.id if rec else None, duration_seconds, delivery_method)
 
@@ -508,8 +526,13 @@ def process_pending_recordings(customer_id):
             from services import pricing as P
             db.session.refresh(customer)
             kind = P.kind_for_tier(rec.transcription_tier)
-            cost = P.cost_for(customer, rec.duration_seconds or 0, kind)
-            fax_extra = P.fax_surcharge(customer, rec.duration_seconds or 0, rec.delivery_method)
+            promo_free = 0
+            if kind == 'basic' and rec.transcript:
+                cost, promo_free = P.basic_cost_with_promo(customer, rec.duration_seconds or 0, rec.id)
+            else:
+                cost = P.cost_for(customer, rec.duration_seconds or 0, kind)
+            promo_fax = P.promo_fax_fee(customer, rec.duration_seconds or 0, rec.delivery_method, promo_free)
+            fax_extra = P.fax_surcharge(customer, rec.duration_seconds or 0, rec.delivery_method) + promo_fax
             if customer.balance < cost + fax_extra:
                 log.info(f"process_pending_recordings: not enough balance for rec {rec.id} (need {cost}, have {customer.balance})")
                 continue
@@ -545,12 +568,17 @@ def process_pending_recordings(customer_id):
                     customer_id=customer_id,
                     amount=-cost,
                     type='debit',
-                    description=f'תמלול {(rec.duration_seconds or 0)//60} דקות',
+                    description=f'תמלול {(rec.duration_seconds or 0)//60} דקות' + (' (חלקית/כולה חינם במבצע)' if promo_free else ''),
                     recording_id=rec.id
                 )
                 db.session.add(txn)
+                if promo_fax:
+                    customer.balance -= promo_fax
+                    db.session.add(Transaction(customer_id=customer_id, amount=-promo_fax, type='debit', recording_id=rec.id,
+                                               description='שליחת פקס (תמלול חינם במבצע)'))
                 rec.status = 'transcribed'
                 rec.cost = cost
+                rec.promo_free_seconds = promo_free or None
                 db.session.commit()
                 P.charge_fax_surcharge(customer, rec.id, rec.duration_seconds or 0, rec.delivery_method)
 

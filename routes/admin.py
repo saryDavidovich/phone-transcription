@@ -980,7 +980,7 @@ def customer_detail(id):
     return render_template('admin/customer_detail.html',
         customer=customer, recordings=recordings, transactions=transactions,
         ocr_results=ocr_results, manuscript_pages=manuscript_pages, proofing_rounds=proofing_rounds,
-        threads=threads, timedelta=timedelta, lite=lite,
+        threads=threads, timedelta=timedelta, lite=lite, promo_line=_promo_line(customer),
         excel_templates=_excel_templates_for(customer),
         cust_defaults=_customer_defaults(customer),
         billing=_billing_info(customer),
@@ -989,6 +989,21 @@ def customer_detail(id):
         msg_attachments={} if lite else _attachments_for('customer_message_id', [m.id for t in threads for m in t.messages]),
         all_institutions=Institution.query.order_by(Institution.name).all(),
         **_mail_and_tasks_for(customer))
+
+
+def _promo_line(customer):
+    from services import pricing as P
+    st = P.promo_settings()
+    if not st['on']:
+        return '(המבצע כבוי כרגע - מפעילים בהגדרות)'
+    if not P.promo_active(customer):
+        if customer.institution_id:
+            return '(תלמיד מוסד - המבצע לא חל)'
+        if st['until'] and P._il_now().strftime('%Y-%m-%d') > st['until']:
+            return '(המבצע הסתיים)'
+        return '(המבצע כרגע רק ללקוחות מסומנים)'
+    left = P.promo_seconds_left(customer)
+    return f'פעיל ללקוח: נותרו היום {left // 60} מתוך {st["minutes"]} דקות' + (' (המבצע לכל הלקוחות)' if st['scope'] == 'all' else '')
 
 
 def _mail_and_tasks_for(customer):
@@ -1924,6 +1939,33 @@ def change_password():
     return redirect(url_for('admin.settings'))
 
 
+@admin_bp.route('/settings/promo', methods=['POST'])
+@login_required
+def promo_settings_save():
+    """מבצע דקות תמלול רגיל חינם בכל יום - הפעלה, למי, עד מתי, כמה דקות."""
+    set_setting('promo_free_on', '1' if request.form.get('promo_free_on') == '1' else '0')
+    set_setting('promo_free_scope', 'all' if request.form.get('promo_free_scope') == 'all' else 'marked')
+    until = (request.form.get('promo_free_until') or '').strip()
+    set_setting('promo_free_until', until if re.fullmatch(r'\d{4}-\d{2}-\d{2}', until) else '')
+    try:
+        mins = max(1, min(600, int(float(request.form.get('promo_free_minutes') or 20))))
+    except ValueError:
+        mins = 20
+    set_setting('promo_free_minutes', str(mins))
+    flash('✔ הגדרות המבצע נשמרו')
+    return redirect(url_for('admin.settings') + '#promo')
+
+
+@admin_bp.route('/customers/<int:id>/promo', methods=['POST'])
+@login_required
+def customer_promo_toggle(id):
+    customer = Customer.query.get_or_404(id)
+    customer.promo_free = request.form.get('promo_free') == '1'
+    db.session.commit()
+    flash('✔ הלקוח סומן למבצע' if customer.promo_free else '✔ הסימון למבצע הוסר')
+    return redirect(url_for('admin.customer_detail', id=id) + '#billing')
+
+
 @admin_bp.route('/settings/slow-pages/clear', methods=['POST'])
 @login_required
 def clear_slow_pages():
@@ -2032,7 +2074,22 @@ def settings():
         slow_pages = _json.loads(get_setting('slow_pages', '') or '[]')
     except Exception:
         slow_pages = []
-    return render_template('admin/settings.html', settings=current_settings, slow_pages=slow_pages)
+    from services import pricing as _P
+    from sqlalchemy import func as _f
+    promo = _P.promo_settings()
+    _start = _P._il_now().replace(hour=0, minute=0, second=0, microsecond=0)
+    from zoneinfo import ZoneInfo as _Z
+    _start = _start.astimezone(_Z('UTC')).replace(tzinfo=None)
+    promo_stats = {
+        'marked': Customer.query.filter(Customer.promo_free.is_(True)).count(),
+        'today_customers': db.session.query(_f.count(_f.distinct(Recording.customer_id))).filter(
+            Recording.promo_free_seconds > 0, Recording.created_at >= _start).scalar() or 0,
+        'today_minutes': round((db.session.query(_f.coalesce(_f.sum(Recording.promo_free_seconds), 0)).filter(
+            Recording.created_at >= _start).scalar() or 0) / 60),
+        'expired': bool(promo['until'] and _P._il_now().strftime('%Y-%m-%d') > promo['until']),
+    }
+    return render_template('admin/settings.html', settings=current_settings, slow_pages=slow_pages,
+                           promo=promo, promo_stats=promo_stats)
 
 
 @admin_bp.route('/maintenance')

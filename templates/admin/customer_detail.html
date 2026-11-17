@@ -242,6 +242,11 @@
     בחיוב לפי 5 דקות: תמלול שנשלח <b>בפקס</b> והקלטה קצרה מ-20 דקות (פחות מ-4 חיובים) - תוספת פקס של ₪{{ '%.2f'|format(billing.fax) }} בתנועה נפרדת.
     המחירים נקבעים בהגדרות.
   </div>
+  <form method="POST" action="{{ url_for('admin.customer_promo_toggle', id=customer.id) }}" style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border);display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+    <label style="cursor:pointer;display:flex;gap:8px;align-items:center"><input type="checkbox" name="promo_free" value="1" {{ 'checked' if customer.promo_free }} onchange="this.form.requestSubmit()">
+      🎁 מסומן למבצע דקות החינם</label>
+    <span style="font-size:12px;color:var(--text2)">{{ promo_line }}</span>
+  </form>
 </div>
 </details>
 
