@@ -122,9 +122,26 @@ def create_app():
     _install_gzip(app)
 
     with app.app_context():
-        db.create_all()
-        _migrate_db()
-        _create_default_admin()
+        # כמה תהליכי שרת עולים יחד ומריצים את זה במקביל - נעילה במסד הנתונים כדי שרק אחד ייצור
+        # טבלאות/יריץ מיגרציות בכל רגע (אחרת יצירה כפולה של טבלה חדשה מפילה תהליך בעלייה)
+        lock = None
+        try:
+            if db.engine.dialect.name == 'postgresql':
+                lock = db.engine.connect()
+                lock.execute(db.text('SELECT pg_advisory_lock(7134491)'))
+        except Exception:
+            lock = None
+        try:
+            db.create_all()
+            _migrate_db()
+            _create_default_admin()
+        finally:
+            if lock is not None:
+                try:
+                    lock.execute(db.text('SELECT pg_advisory_unlock(7134491)'))
+                    lock.close()
+                except Exception:
+                    pass
 
     # משיכת "הודעות לגבאי" מנדרים פלוס ברקע, בערך כל 10 דקות (services/nedarim_messages.py)
     try:
