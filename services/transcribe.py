@@ -848,6 +848,35 @@ def _alefbot_submit_once(rec_url, call_id, model_tier='standard', translate_to_h
         audio_prep.cleanup(prepared, src)
 
 
+def alefbot_transcribe_wait(rec_url, ref, translate_to_hebrew=True, max_minutes=45):
+    """תמלול מקצועי (אלף בוט) לעבודות שאינן הקלטת לקוח (למשל העלאה של מוסד): שולח, ממתין לסיום
+    בבדיקה כל 20 שניות, ומחזיר (טקסט, משך בשניות). כשל - (None, 0).
+    (ה-webhook של אלף בוט לא ימצא הקלטה עם המזהה הזה - הוא פשוט יתעלם; התוצאה נאספת כאן.)"""
+    job_id, duration = _alefbot_submit(rec_url, ref, model_tier='standard', translate_to_hebrew=translate_to_hebrew)
+    if not job_id:
+        return None, 0
+    api_key = os.environ.get('ALEFBOT_API_KEY')
+    base = 'https://alef-bot.top/api/v1'
+    for attempt in range(max_minutes * 3):
+        time.sleep(20)
+        try:
+            st = requests.get(f'{base}/transcriptions/{job_id}', headers={'Authorization': f'Bearer {api_key}'},
+                              timeout=15).json().get('status', '')
+            if st == 'completed':
+                art = requests.get(f'{base}/transcriptions/{job_id}/artifact?format=txt',
+                                   headers={'Authorization': f'Bearer {api_key}'}, timeout=30)
+                art.raise_for_status()
+                log.info(f"AlefBot ({ref}): הושלם, {len(art.text)} תווים")
+                return art.text.strip(), duration
+            if st in ('failed', 'cancelled'):
+                log.error(f"AlefBot ({ref}): job {job_id} {st}")
+                return None, 0
+        except Exception as e:
+            log.warning(f"AlefBot ({ref}) poll {attempt + 1}: {e}")
+    log.error(f"AlefBot ({ref}): לא הסתיים תוך {max_minutes} דקות")
+    return None, 0
+
+
 def finalize_alefbot_recording(call_id, transcript_text):
     """נקרא מה-webhook כשאלף בוט מסיים (או מהבדיקה התקופתית)"""
     try:

@@ -30,7 +30,10 @@ def transcribe_tab():
     uploads = InstitutionUpload.query.filter_by(institution_id=current_user.id).order_by(
         InstitutionUpload.created_at.desc()
     ).limit(30).all()
-    return render_template('institution/transcribe.html', uploads=uploads)
+    from routes.admin import get_setting
+    return render_template('institution/transcribe.html', uploads=uploads,
+                           price_basic=get_setting('price_per_20min_basic', '0.90'),
+                           price_premium=get_setting('price_per_20min_premium', '1.90'))
 
 
 @institution_transcribe_bp.route('/institution/transcribe/upload', methods=['POST'])
@@ -43,7 +46,11 @@ def upload():
     if (current_user.balance or 0) <= 0:
         return jsonify({'error': 'אין למוסד יתרה מספיקה לביצוע תמלול. נא לטעון יתרה בלשונית "הגדרות חיוב".'}), 402
 
-    tier = request.form.get('tier', 'gemini')
+    tier = 'premium' if request.form.get('tier') == 'premium' else 'gemini'
+    if tier == 'premium':
+        from routes.admin import get_setting
+        if (current_user.balance or 0) < float(get_setting('price_per_20min_premium', '1.90')):
+            return jsonify({'error': 'אין למוסד יתרה מספיקה לתמלול מקצועי. נא לטעון יתרה בלשונית "הגדרות חיוב".'}), 402
     language = request.form.get('language', 'he')
     output_language = request.form.get('output_language', 'he')
 
@@ -82,8 +89,13 @@ def _process_upload(flask_app, upload_id, rec_url, tier, language, output_langua
     with flask_app.app_context(), tracked('institution_upload', label=f'העלאה {upload_id}'):
         record = InstitutionUpload.query.get(upload_id)
         try:
-            from services.transcribe import _gemini_from_url
-            transcript, duration, _ = _gemini_from_url(rec_url, language, output_language)
+            if tier == 'premium':      # תמלול מקצועי - אלף בוט, כמו בתמלול מקצועי של לקוח
+                from services.transcribe import alefbot_transcribe_wait
+                transcript, duration = alefbot_transcribe_wait(rec_url, f'inst-{upload_id}',
+                                                               translate_to_hebrew=(output_language == 'he'))
+            else:
+                from services.transcribe import _gemini_from_url
+                transcript, duration, _ = _gemini_from_url(rec_url, language, output_language)
             if not transcript:
                 record.status = 'error'
                 record.error_message = 'התמלול נכשל - לא התקבל טקסט'
@@ -97,7 +109,8 @@ def _process_upload(flask_app, upload_id, rec_url, tier, language, output_langua
             import math
             from routes.admin import get_setting
             from models import Institution
-            price_per_20min = float(get_setting('price_per_20min_basic', '0.90'))
+            price_per_20min = float(get_setting('price_per_20min_premium', '1.90') if tier == 'premium'
+                                    else get_setting('price_per_20min_basic', '0.90'))
             units = math.ceil((duration or 0) / 1200) or 1
             cost = round(units * price_per_20min, 2)
 

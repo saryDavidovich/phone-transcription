@@ -22,6 +22,15 @@
       </select>
     </div>
 
+    <div class="field">
+      <label>סוג תמלול</label>
+      <select class="input" name="tier">
+        <option value="gemini">תמלול רגיל - {{ price_basic }} ₪ ל-20 דקות</option>
+        <option value="premium">תמלול מקצועי - {{ price_premium }} ₪ ל-20 דקות</option>
+      </select>
+      <div style="font-size:12px; color:var(--text2); margin-top:4px;">תמלול מקצועי מדויק יותר (מינוח תורני, שמות, ארמית), ולוקח מעט יותר זמן.</div>
+    </div>
+
     <button type="submit" class="btn btn-block" id="uploadBtn">העלאה ותמלול</button>
   </form>
   <div id="uploadMsg" style="font-size:13px; margin-top:10px;"></div>
@@ -32,7 +41,7 @@
   <div id="uploadsList">
     {% for u in uploads %}
     <div class="upload-row" data-id="{{ u.id }}" style="display:flex; justify-content:space-between; align-items:center; padding:10px 0; border-bottom:1px solid var(--border);">
-      <span>{{ u.original_filename }}</span>
+      <span>{{ u.original_filename }}{% if u.tier == 'premium' %} <span style="font-size:11px; padding:1px 7px; border-radius:8px; background:rgba(124,58,237,.12); color:#7c3aed;">מקצועי</span>{% endif %}</span>
       <span class="row-status" style="font-size:13px; color:var(--text2);">
         {% if u.status == 'processing' %}
           <span class="spinner-ring"></span> מתמלל...
