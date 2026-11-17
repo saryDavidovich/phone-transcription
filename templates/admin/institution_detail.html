@@ -24,6 +24,21 @@
 
 <div style="display:flex; gap:16px; flex-wrap:wrap; margin-bottom:20px;">
   <div class="table-card" style="padding:16px; flex:1; min-width:260px;">
+    <div class="table-title" style="margin-bottom:10px;">דוח עלויות (Excel)</div>
+    <div style="display:flex; gap:8px; align-items:flex-end; flex-wrap:wrap;">
+      <input class="form-input" type="date" id="icrFrom" style="width:auto">
+      <input class="form-input" type="date" id="icrTo" style="width:auto">
+      <a class="btn btn-primary" href="{{ url_for('admin.institution_cost_report', inst_id=inst.id) }}" data-turbo="false"
+         onclick="this.href='{{ url_for('admin.institution_cost_report', inst_id=inst.id) }}?from='+document.getElementById('icrFrom').value+'&to='+document.getElementById('icrTo').value">⬇ הורדה</a>
+    </div>
+    {% if inst.locked_until and inst.locked_until > now_utc %}
+    <form method="post" action="{{ url_for('admin.institution_unlock', inst_id=inst.id) }}" style="margin-top:12px;">
+      <span style="color:#f59e0b; font-size:13px;">🔒 הכניסה נעולה זמנית (ניסיונות שגויים)</span>
+      <button type="submit" class="btn btn-sm">שחרור נעילה</button>
+    </form>
+    {% endif %}
+  </div>
+  <div class="table-card" style="padding:16px; flex:1; min-width:260px;">
     <div class="table-title" style="margin-bottom:10px;">עדכון יתרת מוסד</div>
     <form method="post" action="{{ url_for('admin.adjust_institution_balance', inst_id=inst.id) }}" style="display:flex; gap:8px;">
       <input class="form-input" name="amount" type="number" step="0.01" placeholder="+/- ₪">

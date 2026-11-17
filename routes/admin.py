@@ -3499,11 +3499,12 @@ def create_institution():
 
     inst = Institution(
         name=name, email=email, phone=phone,
-        login_code=__import__('services.security', fromlist=['new_login_code']).new_login_code(),
     )
+    from services.security import issue_login_code
+    code = issue_login_code(inst)     # נשמר רק כגיבוב - הקוד מוצג כאן פעם אחת בלבד
     db.session.add(inst)
     db.session.commit()
-    flash(f'המוסד "{name}" נוצר - קוד כניסה ראשוני: {inst.login_code}')
+    flash(f'המוסד "{name}" נוצר - קוד כניסה ראשוני: {code} (מוצג פעם אחת בלבד - שמרו אותו)')
     return redirect(url_for('admin.institutions'))
 
 
@@ -3514,7 +3515,8 @@ def institution_detail(inst_id):
     inst = Institution.query.get_or_404(inst_id)
     students = Customer.query.filter_by(institution_id=inst.id).all()
     charges = InstitutionChargeLog.query.filter_by(institution_id=inst.id).order_by(InstitutionChargeLog.created_at.desc()).limit(20).all()
-    return render_template('admin/institution_detail.html', inst=inst, students=students, charges=charges)
+    return render_template('admin/institution_detail.html', inst=inst, students=students, charges=charges,
+                           now_utc=__import__('datetime').datetime.utcnow())
 
 
 @admin_bp.route('/institutions/<int:inst_id>/billing-unit', methods=['POST'])
@@ -3541,11 +3543,20 @@ def adjust_institution_balance(inst_id):
         flash('סכום לא תקין')
         return redirect(url_for('admin.institution_detail', inst_id=inst.id))
     inst.balance = (inst.balance or 0) + amount
+    # נרשם ביומן החיובים של המוסד (מופיע בהיסטוריה ובדוח העלויות)
+    from models import InstitutionChargeLog
+    db.session.add(InstitutionChargeLog(institution_id=inst.id, amount=amount, status='manual',
+                                        provider_ref='עדכון ידני ע"י המנהל'))
     db.session.commit()
     if amount > 0:
         try:
             from routes.dictate import trigger_pending_manuscripts
             trigger_pending_manuscripts(institution_id=inst.id)
+        except Exception:
+            pass
+        try:
+            from routes.institution_transcribe import release_pending_async
+            release_pending_async(inst.id)
         except Exception:
             pass
     flash('היתרה עודכנה')
@@ -3583,6 +3594,8 @@ def delete_institution(inst_id):
         st.self_funded = 0.0
         st.is_institution_self = False
     InstitutionChargeLog.query.filter_by(institution_id=inst.id).delete()
+    from models import InstitutionLoginLog
+    InstitutionLoginLog.query.filter_by(institution_id=inst.id).delete()
     InstitutionUpload.query.filter_by(institution_id=inst.id).delete()
     StudentLinkRequest.query.filter_by(institution_id=inst.id).delete()
     db.session.delete(inst)
@@ -3595,16 +3608,43 @@ def delete_institution(inst_id):
     return redirect(url_for('admin.institutions'))
 
 
+@admin_bp.route('/institutions/<int:inst_id>/cost-report')
+@login_required
+def institution_cost_report(inst_id):
+    from models import Institution
+    from services import institution_cost_report as R
+    inst = Institution.query.get_or_404(inst_id)
+    data = R.build_xlsx(inst, request.args.get('from') or None, request.args.get('to') or None)
+    from flask import send_file
+    import io as _io
+    return send_file(_io.BytesIO(data), as_attachment=True, download_name=R.filename(inst),
+                     mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+
+
+@admin_bp.route('/institutions/<int:inst_id>/unlock', methods=['POST'])
+@login_required
+def institution_unlock(inst_id):
+    from models import Institution
+    from services.security import inst_clear_fails
+    inst = Institution.query.get_or_404(inst_id)
+    inst_clear_fails(inst)
+    db.session.commit()
+    flash('נעילת הכניסה של המוסד שוחררה')
+    return redirect(url_for('admin.institution_detail', inst_id=inst.id))
+
+
 @admin_bp.route('/institutions/<int:inst_id>/regenerate-code', methods=['POST'])
 @login_required
 def regenerate_institution_code(inst_id):
     import random, string
     from models import Institution
     inst = Institution.query.get_or_404(inst_id)
-    inst.login_code = __import__('services.security', fromlist=['new_login_code']).new_login_code()
-    inst.password_hash = None  # חוזר למצב "כניסה ראשונה" עם הקוד החדש
+    from services import security as sec
+    code = sec.issue_login_code(inst)
+    inst.password_hash = None  # חוזר למצב "כניסה ראשונה" עם הקוד החדש (וכל המחוברים מתנתקים)
+    sec.inst_clear_fails(inst)
     db.session.commit()
-    flash(f'קוד כניסה חדש למוסד: {inst.login_code}')
+    flash(f'קוד כניסה חדש למוסד: {code} (מוצג פעם אחת בלבד)')
     return redirect(url_for('admin.institution_detail', inst_id=inst.id))
 
 

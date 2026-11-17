@@ -45,10 +45,10 @@
   <form id="studentUploadForm">
     <div class="dropzone" id="studentDz">
       <div class="dz-icon">🎧</div>
-      <div class="dz-title">גררו קובץ אודיו/וידאו לכאן או לחצו לבחירה</div>
-      <div class="dz-sub">כל סוגי קבצי השמע והווידאו הנפוצים</div>
+      <div class="dz-title">גררו קבצי אודיו/וידאו לכאן או לחצו לבחירה</div>
+      <div class="dz-sub">אפשר לבחור כמה קבצים יחד - כל קובץ יתומלל בנפרד</div>
       <div class="dz-filename" id="studentDzFilename"></div>
-      <input type="file" name="audio_file" id="studentAudioFile" accept="audio/*,video/*" required>
+      <input type="file" name="audio_file" id="studentAudioFile" accept="audio/*,video/*" multiple required>
     </div>
     <div style="display:flex; gap:12px; flex-wrap:wrap; margin-top:14px;">
       <div class="field" style="flex:1; min-width:160px;"><label>סוג תמלול</label>
@@ -78,6 +78,9 @@
       <td>
         {% if r.status == 'completed' %}<span class="badge badge-green">הושלם</span>
         {% elif r.status == 'processing' %}<span class="badge badge-amber"><span class="spinner-ring"></span> מעבד</span>
+        {% elif r.status == 'pending_payment' %}<span class="badge badge-amber" title="לתלמיד אין מספיק יתרה - יישלח אוטומטית אחרי זיכוי">ממתין לזיכוי יתרה</span>
+        {% elif r.status in ('delivered', 'transcribed') %}<span class="badge badge-green">הושלם ונשלח</span>
+        {% elif r.status == 'error' %}<span class="badge badge-gray">שגיאה</span>
         {% else %}<span class="badge badge-gray">{{ r.status }}</span>{% endif %}
       </td>
       <td>
@@ -218,7 +221,8 @@ var studentFileInput = document.getElementById('studentAudioFile');
 var studentDzFilename = document.getElementById('studentDzFilename');
 
 function showStudentFilename() {
-  studentDzFilename.textContent = studentFileInput.files.length ? '📄 ' + studentFileInput.files[0].name : '';
+  var n = studentFileInput.files.length;
+  studentDzFilename.textContent = !n ? '' : (n === 1 ? '📄 ' + studentFileInput.files[0].name : '📄 ' + n + ' קבצים נבחרו');
 }
 studentFileInput.addEventListener('change', showStudentFilename);
 
@@ -241,40 +245,48 @@ document.getElementById('studentUploadForm').addEventListener('submit', async fu
   e.preventDefault();
   var msgEl = document.getElementById('studentUploadMsg');
   var btn = document.getElementById('studentUploadBtn');
+  var files = Array.prototype.slice.call(studentFileInput.files);
+  if (!files.length) return;
   btn.disabled = true;
-  btn.innerHTML = '<span class="spinner-ring"></span> מעלה...';
   msgEl.style.color = 'var(--text2)';
   msgEl.textContent = '';
-  var fd = new FormData(this);
-  var res, data;
-  try {
-    res = await fetch('{{ url_for("institution_students.upload_for_student", student_id=student.id) }}', { method: 'POST', body: fd });
-    data = await res.json();
-  } catch (err) {
-    btn.disabled = false;
-    btn.textContent = 'העלאה';
-    msgEl.style.color = 'var(--red)';
-    msgEl.textContent = 'שגיאת תקשורת, נסה שוב';
-    return;
+  var base = new FormData(this);
+  base.delete('audio_file');
+  var ids = [], errors = [];
+  for (var k = 0; k < files.length; k++) {
+    btn.innerHTML = '<span class="spinner-ring"></span> מעלה ' + (files.length > 1 ? (k + 1) + ' מתוך ' + files.length : '') + '...';
+    var fd = new FormData();
+    base.forEach(function (v, key) { fd.append(key, v); });
+    fd.append('audio_file', files[k]);
+    try {
+      var res = await fetch('{{ url_for("institution_students.upload_for_student", student_id=student.id) }}', { method: 'POST', body: fd });
+      var data = await res.json();
+      if (res.ok) ids.push(data.recordingId); else errors.push(files[k].name + ': ' + (data.error || 'שגיאה'));
+    } catch (err) {
+      errors.push(files[k].name + ': שגיאת תקשורת');
+    }
   }
-  if (!res.ok) {
+  if (!ids.length) {
     btn.disabled = false;
     btn.textContent = 'העלאה';
     msgEl.style.color = 'var(--red)';
-    msgEl.textContent = data.error || 'שגיאה';
+    msgEl.textContent = errors.join(' · ') || 'שגיאה';
     return;
   }
   btn.innerHTML = '<span class="spinner-ring"></span> מתמלל...';
-  msgEl.style.color = 'var(--accent)';
-  msgEl.textContent = 'הקובץ עולה ומתמלל...';
-  var recId = data.recordingId;
+  msgEl.style.color = errors.length ? 'var(--red)' : 'var(--accent)';
+  msgEl.textContent = (ids.length === 1 ? 'הקובץ עלה ומתמלל...' : ids.length + ' קבצים עלו ומתמללים...') +
+                      (errors.length ? ' לא עלו: ' + errors.join(' · ') : '');
+  var left = ids.slice();
   var interval = setInterval(async function () {
-    var r = await fetch('{{ url_for("institution_students.recording_status", recording_id=0) }}'.replace('0', recId));
-    var d = await r.json();
-    if (d.status === 'completed' || d.status === 'error') {
-      clearInterval(interval);
-      window.location.reload();
+    for (var q = left.length - 1; q >= 0; q--) {
+      try {
+        var r = await fetch('{{ url_for("institution_students.recording_status", recording_id=0) }}'.replace(/0$/, left[q]));
+        var d = await r.json();
+        if (['completed', 'error', 'pending_payment', 'delivered', 'transcribed'].indexOf(d.status) >= 0) left.splice(q, 1);
+      } catch (err) {}
     }
+    if (!left.length) { clearInterval(interval); window.location.reload(); }
   }, 3000);
 });
 

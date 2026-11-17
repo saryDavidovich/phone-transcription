@@ -105,6 +105,17 @@
 </script>
 
 <div class="card" style="max-width:480px; margin-top:20px;">
+  <h2 style="font-size:16px; margin-bottom:6px;">דוח עלויות (Excel)</h2>
+  <p style="font-size:12.5px; color:var(--text2); margin-bottom:10px;">טעינות, תמלולים של המוסד, זיכויים לתלמידים ושימוש מפורט לפי תלמיד. בלי תאריכים = כל התקופה.</p>
+  <div style="display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap;">
+    <div class="field" style="margin:0;"><label>מתאריך</label><input class="input" type="date" id="crFrom"></div>
+    <div class="field" style="margin:0;"><label>עד תאריך</label><input class="input" type="date" id="crTo"></div>
+    <a class="btn" href="{{ url_for('institution_billing.cost_report') }}" style="text-decoration:none;"
+       onclick="this.href='{{ url_for('institution_billing.cost_report') }}?from='+document.getElementById('crFrom').value+'&to='+document.getElementById('crTo').value">הורדת הדוח</a>
+  </div>
+</div>
+
+<div class="card" style="max-width:480px; margin-top:20px;">
   <h2 style="font-size:16px; margin-bottom:10px;">היסטוריית חיובים</h2>
   {% if charges %}
     <table style="width:100%; font-size:13px; color:var(--text2);">
@@ -113,7 +124,7 @@
       <tr style="border-bottom:1px solid var(--border);">
         <td style="padding:6px 0;">{{ c.created_at.strftime('%d/%m/%Y %H:%M') }}</td>
         <td>{{ "%.2f"|format(c.amount) }} ₪</td>
-        <td>{{ 'הצליח' if c.status == 'success' else ('נכשל' if c.status == 'failed' else 'ממתין') }}</td>
+        <td>{{ 'הצליח' if c.status == 'success' else ('נכשל' if c.status == 'failed' else ('עדכון ידני' if c.status == 'manual' else 'ממתין')) }}</td>
       </tr>
       {% endfor %}
     </table>

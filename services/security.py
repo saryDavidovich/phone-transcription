@@ -161,6 +161,86 @@ def new_login_code():
     return ''.join(secrets.choice('0123456789') for _ in range(6))
 
 
+# --- קוד כניסה של מוסד: נשמר רק כגיבוב חד-כיווני (scrypt), לא כטקסט ---
+def issue_login_code(inst):
+    """מייצר קוד חדש, שומר במוסד רק את הגיבוב שלו, ומחזיר את הקוד הגלוי (להצגה/שליחה פעם אחת)."""
+    from werkzeug.security import generate_password_hash
+    code = new_login_code()
+    inst.login_code = generate_password_hash(code)
+    return code
+
+
+def login_code_ok(inst, code):
+    from werkzeug.security import check_password_hash
+    stored = inst.login_code or ''
+    if not code or not stored:
+        return False
+    if ':' in stored and '$' in stored:          # גיבוב
+        try:
+            return check_password_hash(stored, code)
+        except Exception:
+            return False
+    return hmac.compare_digest(code.encode(), stored.encode())   # קוד ישן שנשמר לפני המעבר
+
+
+# --- נעילת חשבון מוסד אחרי ניסיונות שגויים (בבסיס הנתונים - משותף לכל התהליכים ושורד דפלוי) ---
+INST_MAX_FAILS = 10
+INST_LOCK_MINUTES = 15
+
+
+def inst_locked(inst):
+    from datetime import datetime
+    return bool(inst and inst.locked_until and inst.locked_until > datetime.utcnow())
+
+
+def inst_register_fail(inst):
+    from datetime import datetime, timedelta
+    inst.failed_logins = (inst.failed_logins or 0) + 1
+    if inst.failed_logins >= INST_MAX_FAILS:
+        inst.locked_until = datetime.utcnow() + timedelta(minutes=INST_LOCK_MINUTES)
+        inst.failed_logins = 0
+        log.warning(f'institution {inst.id} locked for {INST_LOCK_MINUTES} min after {INST_MAX_FAILS} failed logins')
+
+
+def inst_clear_fails(inst):
+    inst.failed_logins = 0
+    inst.locked_until = None
+
+
+# --- חתימת סשן של מוסד: נגזרת מהסיסמה. החלפת/איפוס סיסמה מנתקת את כל שאר המחוברים ---
+def inst_session_fp(inst):
+    key = (current_app.secret_key or '').encode()
+    return hmac.new(key, f'inst-session|{inst.id}|{inst.password_hash or "-"}'.encode(),
+                    hashlib.sha256).hexdigest()[:40]
+
+
+def inst_mark_session(inst):
+    session['inst_fp'] = inst_session_fp(inst)
+    session.permanent = True
+
+
+def inst_session_valid(inst):
+    return hmac.compare_digest(str(session.get('inst_fp', '')), inst_session_fp(inst))
+
+
+def log_inst_login(inst, method, ok):
+    """יומן כניסות למוסד (מוצג למוסד בהגדרות). לא שומרים סיסמאות/קודים - רק זמן, שיטה ו-IP."""
+    try:
+        from app import db
+        from models import InstitutionLoginLog
+        db.session.add(InstitutionLoginLog(
+            institution_id=inst.id, method=method, success=bool(ok), ip=real_client_ip()[:64],
+            user_agent=(request.headers.get('User-Agent') or '')[:200]))
+        db.session.commit()
+    except Exception:
+        log.exception('log_inst_login failed')
+        try:
+            from app import db
+            db.session.rollback()
+        except Exception:
+            pass
+
+
 def nedarim_request_ok(allowed_ips, ip=None):
     """אימות עדכון שמגיע מנדרים פלוס, לפי התיעוד שלהם:
     1. אם הוגדר NEDARIM_WEBHOOK_SECRET (אפשר כמה מפתחות מופרדים בפסיק, להחלפת מפתח) - חובה חתימת
@@ -246,6 +326,9 @@ def init_security(app):
         SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SAMESITE='Lax',
         SESSION_COOKIE_SECURE=secure,
+        REMEMBER_COOKIE_HTTPONLY=True,
+        REMEMBER_COOKIE_SECURE=secure,
+        REMEMBER_COOKIE_SAMESITE='Lax',
         PERMANENT_SESSION_LIFETIME=12 * 3600,   # כניסה תקפה עד 12 שעות
     )
 

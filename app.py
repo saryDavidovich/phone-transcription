@@ -554,6 +554,14 @@ def _migrate_db():
         "ALTER TABLE settings ALTER COLUMN value TYPE TEXT",
         "ALTER TABLE recordings ADD COLUMN IF NOT EXISTS status_at TIMESTAMP",
         "ALTER TABLE institutions ADD COLUMN IF NOT EXISTS billing_unit INTEGER",
+        # אבטחת כניסת מוסדות: קוד כניסה נשמר כגיבוב (ארוך), נעילה אחרי ניסיונות שגויים, יומן כניסות
+        "ALTER TABLE institutions ALTER COLUMN login_code TYPE VARCHAR(255)",
+        "ALTER TABLE institutions ADD COLUMN IF NOT EXISTS failed_logins INTEGER DEFAULT 0",
+        "ALTER TABLE institutions ADD COLUMN IF NOT EXISTS locked_until TIMESTAMP",
+        "ALTER TABLE institutions ALTER COLUMN nedarim_token TYPE VARCHAR(500)",
+        # תמלול של מוסד בלי יתרה מספיקה - ממתין לתשלום (כמו לקוח), נשלח במייל אחרי טעינה
+        "ALTER TABLE institution_uploads ADD COLUMN IF NOT EXISTS send_to VARCHAR(200)",
+        "ALTER TABLE institution_uploads ADD COLUMN IF NOT EXISTS charged BOOLEAN",
         # תיקון חד-פעמי: הקלטות שחיכו לתשלום ונשלחו אחרי טעינה, אבל נשארו "שולחת ללקוח" (באג שתוקן) -
         # רק כאלה שחויבו בפועל וקיבלו התראת "תקועה". ההתראות עצמן נסגרות לבד ב-stuck_watch.
         "UPDATE recordings r SET status = 'delivered' WHERE r.status = 'transcribed' AND r.cost > 0 "
@@ -587,6 +595,27 @@ def _migrate_db():
             failed += 1
             logger.warning(f"Migration statement skipped ({stmt[:60]}...): {e}")
     logger.info(f"Migration: {ok} statements applied, {failed} skipped")
+    _hash_plain_institution_codes(logger)
+
+
+def _hash_plain_institution_codes(logger):
+    """חד-פעמי (ובטוח להרצה חוזרת): קודי כניסה של מוסדות שנשמרו פעם כטקסט גלוי -
+    מוחלפים בגיבוב שלהם. הקוד עצמו ממשיך לעבוד, רק שכבר לא ניתן לקרוא אותו מבסיס הנתונים."""
+    try:
+        from werkzeug.security import generate_password_hash
+        from models import Institution
+        n = 0
+        for inst in Institution.query.filter(Institution.login_code.isnot(None)).all():
+            code = inst.login_code or ''
+            if code and not (':' in code and '$' in code):
+                inst.login_code = generate_password_hash(code)
+                n += 1
+        if n:
+            db.session.commit()
+            logger.info(f'Migration: {n} institution login codes hashed')
+    except Exception as e:
+        db.session.rollback()
+        logger.warning(f'Migration: hashing institution login codes skipped: {e}')
 
 
 def _create_default_admin():

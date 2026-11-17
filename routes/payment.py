@@ -210,6 +210,11 @@ def nedarim_webhook():
             trigger_pending_manuscripts(institution_id=institution.id)
         except Exception as e:
             log.error(f'Nedarim webhook: pending manuscripts trigger failed: {e}')
+        try:
+            from routes.institution_transcribe import release_pending_async
+            release_pending_async(institution.id)     # תמלולים של המוסד שחיכו לתשלום
+        except Exception as e:
+            log.error(f'institution pending uploads release failed: {e}')
         return jsonify({'ok': True})
 
     # 2. ניסיון התאמה ללקוח בודד - לפי טלפון. אם אין עדיין לקוח עם הטלפון

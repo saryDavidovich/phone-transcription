@@ -67,6 +67,19 @@ def billing_tab():
     )
 
 
+@institution_billing_bp.route('/institution/billing/cost-report')
+@institution_login_required
+def cost_report():
+    """דוח עלויות למוסד (Excel) לתקופה - טעינות, תמלולי המוסד, זיכויים לתלמידים ושימוש לפי תלמיד."""
+    from flask_login import current_user
+    from services import institution_cost_report as R
+    from routes.download_utils import render_data_uri_download_page
+    data = R.build_xlsx(current_user, request.args.get('from') or None, request.args.get('to') or None)
+    return render_data_uri_download_page(
+        data, R.filename(current_user),
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', page_title='דוח העלויות מוכן')
+
+
 @institution_billing_bp.route('/institution/billing/topup', methods=['POST'])
 @institution_login_required
 def topup():
@@ -210,6 +223,11 @@ def nedarim_callback(charge_id):
             trigger_pending_manuscripts(institution_id=institution.id)
         except Exception as e:
             log.error(f'pending manuscripts trigger failed: {e}')
+        try:
+            from routes.institution_transcribe import release_pending_async
+            release_pending_async(institution.id)     # תמלולים של המוסד שחיכו לתשלום
+        except Exception as e:
+            log.error(f'institution pending uploads release failed: {e}')
     else:
         charge.status = 'failed'
         db.session.commit()

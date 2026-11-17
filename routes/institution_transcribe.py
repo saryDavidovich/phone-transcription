@@ -43,14 +43,9 @@ def upload():
     if not file or not file.filename:
         return jsonify({'error': 'יש לבחור קובץ'}), 400
 
-    if (current_user.balance or 0) <= 0:
-        return jsonify({'error': 'אין למוסד יתרה מספיקה לביצוע תמלול. נא לטעון יתרה בלשונית "הגדרות חיוב".'}), 402
-
+    # אין בדיקת יתרה לפני ההעלאה (כמו לקוח רגיל): אם בסוף התמלול היתרה לא מספיקה - התמלול נשמר
+    # "ממתין לתשלום", ומשתחרר אוטומטית (כולל מייל) אחרי טעינת יתרה. היתרה לא יורדת למינוס.
     tier = 'premium' if request.form.get('tier') == 'premium' else 'gemini'
-    if tier == 'premium':
-        from services import pricing as P
-        if (current_user.balance or 0) < P.unit_price(current_user, 'premium'):
-            return jsonify({'error': 'אין למוסד יתרה מספיקה לתמלול מקצועי. נא לטעון יתרה בלשונית "הגדרות חיוב".'}), 402
     language = request.form.get('language', 'he')
     output_language = 'original' if request.form.get('output_language') == 'original' else 'he'
 
@@ -66,6 +61,7 @@ def upload():
         original_filename=file.filename,
         tier=tier,
         status='processing',
+        send_to=(current_user.notify_email or current_user.email) if request.form.get('send_email') else None,
     )
     db.session.add(record)
     db.session.commit()
@@ -76,8 +72,7 @@ def upload():
     from app import app as flask_app
     t = threading.Thread(
         target=_process_upload,
-        args=(flask_app, record.id, rec_url, tier, language, output_language,
-              (current_user.notify_email or current_user.email) if request.form.get('send_email') else None),
+        args=(flask_app, record.id, rec_url, tier, language, output_language, record.send_to),
         daemon=True,
     )
     t.start()
@@ -105,22 +100,32 @@ def _process_upload(flask_app, upload_id, rec_url, tier, language, output_langua
                 return
 
             # חיוב יתרת המוסד לפי המחירון - כמו לקוח רגיל: סוג השירות (רגיל / מקצועי / וידאו) ויחידות
-            # של 20 או 5 דקות (לפי הגדרת המוסד). בכוונה לא חוסמים כאן אם התוצאה חורגת מעט מהיתרה
-            # (העבודה כבר בוצעה) - החסימה היא לפני ההעלאה.
+            # של 20 או 5 דקות (לפי הגדרת המוסד). אין מספיק יתרה = ממתין לתשלום (לא יורדים למינוס,
+            # ולא "מוחקים" את ההפרש כמו פעם) - משתחרר אחרי טעינה (release_pending).
             from services import pricing as P
             from models import Institution
-            institution = Institution.query.get(record.institution_id)
+            institution = Institution.query.filter_by(id=record.institution_id).populate_existing().with_for_update().first()
             cost = P.cost_for(institution, duration or 0, P.kind_for_tier(tier, is_video))
-            if institution:
-                institution.balance = max(0, (institution.balance or 0) - cost)
 
             docx_filename = _make_docx(transcript, record.original_filename)
             record.transcript = transcript
             record.duration_seconds = duration
             record.cost = cost
             record.docx_filename = docx_filename
-            record.status = 'done'
+            if institution and (institution.balance or 0) + 1e-9 >= cost:
+                institution.balance = round((institution.balance or 0) - cost, 2)
+                record.charged = True
+                record.status = 'done'
+            else:
+                record.status = 'pending_payment'
             db.session.commit()
+            if record.status == 'pending_payment':
+                log.info(f'Institution upload {upload_id}: ממתין לתשלום (עלות {cost}, יתרה {institution.balance if institution else 0})')
+                try:
+                    _email_pending(institution, record)
+                except Exception:
+                    log.exception(f'Institution upload {upload_id}: מייל "ממתין לתשלום" נכשל')
+                return
             if send_to:
                 try:
                     _email_docx(send_to, institution, record, docx_filename)
@@ -131,6 +136,73 @@ def _process_upload(flask_app, upload_id, rec_url, tier, language, output_langua
             record.status = 'error'
             record.error_message = str(e)[:500]
             db.session.commit()
+
+
+def release_pending(institution_id):
+    """אחרי טעינת יתרה למוסד: משחרר תמלולים שחיכו לתשלום (מהישן לחדש) כל עוד היתרה מספיקה -
+    מחייב, מסמן 'מוכן', ושולח במייל אם ביקשו. בטוח לקריאה כפולה (נעילת שורה על המוסד)."""
+    from models import Institution
+    released = 0
+    pending = InstitutionUpload.query.filter_by(institution_id=institution_id, status='pending_payment').order_by(
+        InstitutionUpload.created_at.asc()).all()
+    for rec in pending:
+        inst = Institution.query.filter_by(id=institution_id).populate_existing().with_for_update().first()
+        db.session.refresh(rec)
+        if rec.status != 'pending_payment' or not inst:
+            db.session.rollback()
+            continue
+        cost = rec.cost or 0
+        if (inst.balance or 0) + 1e-9 < cost:
+            db.session.rollback()
+            break                      # לפי הסדר - לא מדלגים לקובץ זול יותר
+        inst.balance = round((inst.balance or 0) - cost, 2)
+        rec.charged = True
+        rec.status = 'done'
+        db.session.commit()
+        released += 1
+        if rec.send_to and rec.docx_filename:
+            try:
+                _email_docx(rec.send_to, inst, rec, rec.docx_filename)
+            except Exception:
+                log.exception(f'release_pending: מייל לתמלול {rec.id} נכשל')
+    if released:
+        log.info(f'institution {institution_id}: {released} תמלולים שוחררו אחרי טעינת יתרה')
+    return released
+
+
+def release_pending_async(institution_id):
+    from app import app as flask_app
+
+    def _run():
+        with flask_app.app_context():
+            try:
+                release_pending(institution_id)
+            except Exception:
+                log.exception('release_pending failed')
+    threading.Thread(target=_run, daemon=True).start()
+
+
+def _email_pending(institution, record):
+    """מייל למוסד: התמלול מוכן אבל ממתין לטעינת יתרה (פעם אחת לכל קובץ)."""
+    to = institution and (institution.notify_email or institution.email)
+    if not to:
+        return
+    import sendgrid
+    from sendgrid.helpers.mail import Mail, Email
+    from services import email_layout as L
+    name = record.original_filename or 'הקלטה'
+    base = os.environ.get('APP_URL', os.environ.get('APP_BASE_URL', '')).rstrip('/')
+    card = (L.title('התמלול מוכן - ממתין לטעינת יתרה')
+            + L.text_block(f'הקובץ "{name}" תומלל ({max(1, round((record.duration_seconds or 0) / 60))} דקות, '
+                           f'עלות ₪{(record.cost or 0):.2f}), אבל יתרת המוסד (₪{(institution.balance or 0):.2f}) לא מספיקה.\n\n'
+                           'מיד אחרי טעינת יתרה בלשונית "הגדרות חיוב" התמלול ישוחרר אוטומטית'
+                           + (' וגם יישלח למייל' if record.send_to else '') + '.')
+            + (L.button(f'{base}/institution/billing', 'לטעינת יתרה') if base else '')
+            + L.signature(can_reply=True))
+    msg = Mail(from_email=Email(os.environ.get('SENDGRID_FROM_EMAIL', os.environ.get('GMAIL_USER', '')), 'תמלול פון'),
+               to_emails=to, subject=f'התמלול ממתין לטעינת יתרה: {record.original_filename or "הקלטה"}',
+               html_content=L.wrap(card, show_circles=False))
+    sendgrid.SendGridAPIClient(api_key=os.environ.get('SENDGRID_API_KEY')).send(msg)
 
 
 def _email_docx(to, institution, record, docx_filename):
@@ -196,6 +268,8 @@ def download(upload_id):
     record = InstitutionUpload.query.filter_by(id=upload_id, institution_id=current_user.id).first()
     if not record or not record.docx_filename:
         return 'לא נמצא', 404
+    if record.status != 'done':
+        return 'התמלול ממתין לטעינת יתרה - אחרי הטעינה הוא ישוחרר אוטומטית', 402
     path = os.path.join(STATIC_TMP_DIR, record.docx_filename)
     if not os.path.exists(path):
         return 'הקובץ אינו זמין', 404

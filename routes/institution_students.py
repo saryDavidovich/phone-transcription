@@ -145,6 +145,11 @@ def credit_student(student_id):
             trigger_pending_manuscripts(customer_id=student.id)
         except Exception:
             pass
+        try:   # הקלטות של התלמיד שחיכו לתשלום - נשלחות עכשיו (כמו אחרי טעינת ארנק של לקוח)
+            from services.transcribe import process_pending_recordings
+            threading.Thread(target=process_pending_recordings, args=(student.id,), daemon=True).start()
+        except Exception:
+            pass
     flash('היתרה עודכנה')
     return redirect(url_for('institution_students.students_tab'))
 
@@ -577,20 +582,32 @@ def _process_student_upload(flask_app, recording_id, rec_url):
             # מחיר כמו ללקוח רגיל: סוג השירות (רגיל / מקצועי / וידאו) ויחידות של 20 או 5 דקות -
             # לפי המחירון האישי של התלמיד, ואם אין לו - לפי המוסד (services/pricing.unit_minutes)
             from services import pricing as P
-            cost = P.cost_for(student, duration or 0, P.kind_for_tier(tier, is_video))
+            kind = P.kind_for_tier(tier, is_video)
+            cost = P.cost_for(student, duration or 0, kind)
+
+            institution = student.institution
+            target_email = student.email or (institution.notify_email if institution else None)
+            target_fax = student.fax or (institution.notify_fax if institution else None)
+
+            if (student.balance or 0) + 1e-9 < cost:
+                # אין לתלמיד מספיק יתרה - כמו לקוח רגיל: ממתין לתשלום (לא יורד למינוס), נשמר עם
+                # התמלול, ונשלח אוטומטית אחרי זיכוי/טעינה (process_pending_recordings)
+                from services.transcribe import _save_pending_payment
+                _save_pending_payment(recording, student, int(duration or 0), P.unit_price(student, kind),
+                                      'email' if target_email else ('fax' if target_fax else 'email'),
+                                      target_email or target_fax, tier, recording.language or 'he',
+                                      recording.output_language or 'he', transcript=transcript)
+                return
 
             recording.transcript = transcript
             recording.duration_seconds = duration
             recording.cost = cost
             recording.status = 'completed'
-            student.balance = (student.balance or 0) - cost
-            db.session.add(Transaction(customer_id=student.id, amount=-cost, type='charge',
+            student.balance = round((student.balance or 0) - cost, 2)
+            db.session.add(Transaction(customer_id=student.id, amount=-cost, type='debit',
                                         description='תמלול הקלטה', recording_id=recording.id))
             db.session.commit()
 
-            institution = student.institution
-            target_email = student.email or (institution.notify_email if institution else None)
-            target_fax = student.fax or (institution.notify_fax if institution else None)
             try:
                 if target_email:
                     _send_email(target_email, transcript, student, rec_url, duration, is_premium=(tier == 'premium'))

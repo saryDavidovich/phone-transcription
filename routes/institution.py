@@ -56,6 +56,13 @@ def institution_login_required(view):
     def wrapped(*args, **kwargs):
         if not current_user.is_authenticated or not isinstance(current_user, Institution):
             return redirect(url_for('institution.login'))
+        from services import security as sec
+        if current_user.is_blocked or not sec.inst_session_valid(current_user):
+            # הסיסמה הוחלפה/אופסה (או המוסד נחסם) אחרי שהסשן הזה נפתח - מנתקים
+            logout_user()
+            session.pop('inst_fp', None)
+            flash('יש להתחבר מחדש')
+            return redirect(url_for('institution.login'))
         return view(*args, **kwargs)
     return wrapped
 
@@ -96,12 +103,17 @@ def login():
             flash('פרטי התחברות שגויים')
             return render_template('institution/login.html')
 
-        import hmac
+        if sec.inst_locked(inst):
+            # נעילה בבסיס הנתונים (משותפת לכל השרתים ושורדת עדכון גרסה) - 10 ניסיונות שגויים = 15 דקות
+            sec.hits_add(ip_key)
+            flash('החשבון ננעל זמנית בגלל ניסיונות כניסה שגויים רבים. נסו שוב בעוד כרבע שעה, או השתמשו ב"שכחתי סיסמה".')
+            return render_template('institution/login.html')
+
         ok = False
         via_code = False
         if inst.password_hash and check_password_hash(inst.password_hash, code):
             ok = True    # הסיסמה הקבועה
-        elif bool(code) and inst.login_code and hmac.compare_digest(code.encode(), inst.login_code.encode()):
+        elif sec.login_code_ok(inst, code):
             if not inst.password_hash:
                 ok, via_code = True, True    # כניסה ראשונה עם הקוד שנתן מנהל-העל
             elif inst.reset_requested_at and (datetime.utcnow() - inst.reset_requested_at).total_seconds() < 30 * 60:
@@ -111,15 +123,22 @@ def login():
             sec.hits_add(ip_key)
             if acct_key:
                 sec.hits_add(acct_key)
+            sec.inst_register_fail(inst)
+            db.session.commit()
+            sec.log_inst_login(inst, 'code' if not inst.password_hash else 'password', False)
             flash('פרטי התחברות שגויים')
             return render_template('institution/login.html')
 
         if acct_key:
             sec.hits_clear(acct_key)
+        sec.inst_clear_fails(inst)
         if not via_code and inst.reset_requested_at:
             inst.reset_requested_at = None   # נכנס עם הסיסמה הרגילה - בקשת האיפוס מתבטלת
-            db.session.commit()
+        db.session.commit()
+        session.clear()                      # סשן חדש בכל כניסה (מונע קיבוע סשן)
         login_user(inst)
+        sec.inst_mark_session(inst)
+        sec.log_inst_login(inst, 'code' if via_code else 'password', True)
         if via_code or not inst.password_hash:
             session['must_set_password'] = True
             return redirect(url_for('institution.set_password'))
@@ -152,18 +171,18 @@ def forgot_password():
     if inst and not inst.is_blocked:
         # הסיסמה הקיימת *לא* נמחקת - אחרת כל אדם זר יכול היה לנעול מוסד מחוץ לחשבון שלו
         # רק בהקלדת המייל שלו. הקוד החדש תקף 30 דקות ומאפשר להגדיר סיסמה חדשה.
-        inst.login_code = sec.new_login_code()
+        code = sec.issue_login_code(inst)
         inst.reset_requested_at = datetime.utcnow()
         db.session.commit()
         try:
-            _send_login_code_email(inst)
+            _send_login_code_email(inst, code)
         except Exception:
             log.exception('forgot_password: failed to send email')
 
     return jsonify({'ok': True, 'message': generic_msg})
 
 
-def _send_login_code_email(inst):
+def _send_login_code_email(inst, code):
     import sendgrid
     from services.email_layout import wrap_existing
     from sendgrid.helpers.mail import Mail, Email
@@ -172,7 +191,7 @@ def _send_login_code_email(inst):
 <h2 style="color:#10b981">קוד כניסה זמני חדש</h2>
 <p style="line-height:1.8">שלום {inst.name},</p>
 <p style="line-height:1.8">התקבלה בקשה לאיפוס הגישה לחשבון המוסד שלכם במערכת התמלול. הקוד הזמני החדש שלכם הוא:</p>
-<div style="background:#f4f6fb;border-radius:10px;padding:16px;text-align:center;font-size:26px;font-weight:700;letter-spacing:2px;margin:16px 0">{inst.login_code}</div>
+<div style="background:#f4f6fb;border-radius:10px;padding:16px;text-align:center;font-size:26px;font-weight:700;letter-spacing:2px;margin:16px 0">{code}</div>
 <p style="line-height:1.8">היכנסו עם המייל/טלפון שלכם והקוד הזה, ותתבקשו להגדיר סיסמה קבועה חדשה.</p>
 <p style="color:#6b7280;font-size:13px;line-height:1.6">אם לא ביקשתם זאת, ניתן להתעלם מהודעה זו.</p>
 </div>'''
@@ -272,7 +291,11 @@ def google_auth_callback():
         flash('לא נמצא מוסד עם חשבון הגוגל הזה. יש להתחבר קודם עם מייל/סיסמה כדי לקשר את החשבון.')
         return redirect(url_for('institution.login'))
 
+    from services import security as sec
+    session.clear()
     login_user(inst)
+    sec.inst_mark_session(inst)
+    sec.log_inst_login(inst, 'google', True)
     return redirect(url_for('institution.dashboard'))
 
 
@@ -284,17 +307,21 @@ def set_password():
     if request.method == 'POST':
         pw1 = request.form.get('password') or ''
         pw2 = request.form.get('password2') or ''
-        if len(pw1) < 6:
-            flash('הסיסמה חייבת להיות באורך 6 תווים לפחות')
+        import re as _re
+        if len(pw1) < 8 or not _re.search(r'\d', pw1) or not _re.search(r'[^\d]', pw1):
+            flash('הסיסמה חייבת להיות באורך 8 תווים לפחות, ולכלול גם ספרות וגם אותיות')
+        elif pw1.isdigit() or len(set(pw1)) < 4:
+            flash('הסיסמה פשוטה מדי - בחרו סיסמה מגוונת יותר')
         elif pw1 != pw2:
             flash('הסיסמאות אינן תואמות')
         else:
             current_user.password_hash = generate_password_hash(pw1)
             current_user.reset_requested_at = None
-            from services.security import new_login_code
-            current_user.login_code = new_login_code()   # הקוד הישן כבר לא תקף
+            from services import security as sec
+            sec.issue_login_code(current_user)   # הקוד הישן כבר לא תקף (את החדש לא מציגים לאף אחד)
             session.pop('must_set_password', None)
             db.session.commit()
+            sec.inst_mark_session(current_user)  # הסשן הנוכחי נשאר מחובר; כל שאר המחוברים מתנתקים
             flash('הסיסמה הוגדרה בהצלחה')
             return redirect(url_for('institution.dashboard'))
     return render_template('institution/set_password.html')
@@ -386,7 +413,14 @@ def settings():
         flash('ההגדרות נשמרו')
         return redirect(url_for('institution.settings'))
     from services.student_links import global_self_topup_enabled
-    return render_template('institution/settings.html', inst=inst, topup_global_on=global_self_topup_enabled())
+    from models import InstitutionLoginLog
+    logins = InstitutionLoginLog.query.filter_by(institution_id=inst.id).order_by(
+        InstitutionLoginLog.created_at.desc()).limit(15).all()
+    from zoneinfo import ZoneInfo
+    for l in logins:
+        l.local_time = l.created_at.replace(tzinfo=ZoneInfo('UTC')).astimezone(ZoneInfo('Asia/Jerusalem')).strftime('%d/%m/%Y %H:%M') if l.created_at else ''
+    return render_template('institution/settings.html', inst=inst, topup_global_on=global_self_topup_enabled(),
+                           logins=logins)
 
 
 @institution_bp.route('/settings/add-authorized', methods=['POST'])
@@ -431,10 +465,14 @@ def regenerate_code():
     כי הכניסה תמיד מעדיפה סיסמה קבועה קיימת אם יש כזו."""
     import random, string
     inst = current_user
-    inst.login_code = __import__('services.security', fromlist=['new_login_code']).new_login_code()
+    from services import security as sec
+    code = sec.issue_login_code(inst)
     inst.password_hash = None
+    sec.inst_clear_fails(inst)
     db.session.commit()
-    flash(f'קוד כניסה חדש: {inst.login_code} (הסיסמה הקבועה הקודמת אופסה - הכניסה הבאה תבקש להגדיר סיסמה חדשה)')
+    sec.inst_mark_session(inst)
+    session['must_set_password'] = True
+    flash(f'קוד כניסה חדש: {code} (הסיסמה הקבועה הקודמת אופסה - הכניסה הבאה תבקש להגדיר סיסמה חדשה)')
     return redirect(url_for('institution.settings'))
 
 

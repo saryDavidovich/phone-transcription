@@ -7,10 +7,10 @@
   <form id="uploadForm">
     <div class="dropzone" id="transcribeDz">
       <div class="dz-icon">🎧</div>
-      <div class="dz-title">גררו קובץ אודיו/וידאו לכאן או לחצו לבחירה</div>
-      <div class="dz-sub">כל סוגי קבצי השמע והווידאו הנפוצים</div>
+      <div class="dz-title">גררו קבצי אודיו/וידאו לכאן או לחצו לבחירה</div>
+      <div class="dz-sub">אפשר לבחור כמה קבצים יחד - כל קובץ יתומלל בנפרד ויקבל קובץ Word משלו</div>
       <div class="dz-filename" id="transcribeDzFilename"></div>
-      <input type="file" name="audio_file" id="audioFile" required accept="audio/*,video/*">
+      <input type="file" name="audio_file" id="audioFile" required multiple accept="audio/*,video/*">
     </div>
 
     <div class="field" style="margin-top:16px;">
@@ -44,6 +44,7 @@
       לשלוח את התמלול גם במייל{% if current_user.notify_email or current_user.email %} ({{ current_user.notify_email or current_user.email }}){% endif %}
     </label>
 
+    <div style="font-size:12px; color:var(--text2); margin-bottom:10px;">יתרת המוסד: {{ '%.2f'|format(current_user.balance or 0) }} ₪. אם היתרה לא תספיק - התמלול יישמר כ"ממתין לטעינת יתרה" וישוחרר אוטומטית מיד אחרי הטעינה.</div>
     <button type="submit" class="btn btn-block" id="uploadBtn">העלאה ותמלול</button>
   </form>
   <div id="uploadMsg" style="font-size:13px; margin-top:10px;"></div>
@@ -58,6 +59,8 @@
       <span class="row-status" style="font-size:13px; color:var(--text2);">
         {% if u.status == 'processing' %}
           <span class="spinner-ring"></span> מתמלל...
+        {% elif u.status == 'pending_payment' %}
+          <a href="/institution/billing" style="color:#b45309; font-weight:600;" title="עלות {{ '%.2f'|format(u.cost or 0) }} ₪ - ישוחרר אוטומטית אחרי טעינה">ממתין לטעינת יתרה ({{ '%.2f'|format(u.cost or 0) }} ₪)</a>
         {% elif u.status == 'done' %}
           <a href="/institution/transcribe/download/{{ u.id }}" class="word-btn">
             <svg width="20" height="20" viewBox="0 0 48 48"><rect x="6" y="4" width="30" height="40" rx="3" fill="#2b579a"/><path d="M26 4l10 10H26z" fill="#1a3f6e"/><text x="21" y="30" font-size="14" fill="#fff" text-anchor="middle" font-family="Arial" font-weight="bold">W</text></svg>
@@ -89,7 +92,8 @@ var audioFileInput = document.getElementById('audioFile');
 var transcribeDzFilename = document.getElementById('transcribeDzFilename');
 
 function showTranscribeFilename() {
-  transcribeDzFilename.textContent = audioFileInput.files.length ? '📄 ' + audioFileInput.files[0].name : '';
+  var n = audioFileInput.files.length;
+  transcribeDzFilename.textContent = !n ? '' : (n === 1 ? '📄 ' + audioFileInput.files[0].name : '📄 ' + n + ' קבצים נבחרו');
 }
 audioFileInput.addEventListener('change', showTranscribeFilename);
 
@@ -108,69 +112,93 @@ transcribeDz.addEventListener('drop', function (e) {
   }
 });
 
+var WORD_ICON = '<svg width="20" height="20" viewBox="0 0 48 48"><rect x="6" y="4" width="30" height="40" rx="3" fill="#2b579a"/><path d="M26 4l10 10H26z" fill="#1a3f6e"/><text x="21" y="30" font-size="14" fill="#fff" text-anchor="middle" font-family="Arial" font-weight="bold">W</text></svg>';
+
+function addRow(id, name) {
+  var list = document.getElementById('uploadsList');
+  var empty = list.querySelector('p');
+  if (empty) empty.remove();
+  var row = document.createElement('div');
+  row.className = 'upload-row';
+  row.dataset.id = id;
+  row.style = 'display:flex; justify-content:space-between; align-items:center; padding:10px 0; border-bottom:1px solid var(--border);';
+  var label = document.createElement('span');
+  label.textContent = name;
+  row.appendChild(label);
+  var st = document.createElement('span');
+  st.className = 'row-status';
+  st.style = 'font-size:13px; color:var(--text2);';
+  st.innerHTML = '<span class="spinner-ring"></span> מתמלל...';
+  row.appendChild(st);
+  list.prepend(row);
+  return row;
+}
+
 document.getElementById('uploadForm').addEventListener('submit', async function (e) {
   e.preventDefault();
-  var fileInput = document.getElementById('audioFile');
-  if (!fileInput.files.length) return;
+  var files = Array.prototype.slice.call(audioFileInput.files);
+  if (!files.length) return;
 
   var msgEl = document.getElementById('uploadMsg');
   var btn = document.getElementById('uploadBtn');
   btn.disabled = true;
-  btn.innerHTML = '<span class="spinner-ring"></span> מעלה...';
   msgEl.style.color = 'var(--text2)';
   msgEl.textContent = '';
 
-  var fd = new FormData(this);
-  var res, data;
-  try {
-    res = await fetch('/institution/transcribe/upload', { method: 'POST', body: fd });
-    data = await res.json();
-  } catch (err) {
-    btn.disabled = false;
-    btn.textContent = 'העלאה ותמלול';
-    msgEl.style.color = 'var(--red)';
-    msgEl.textContent = 'שגיאת תקשורת, נסה שוב';
-    return;
-  }
-  if (!res.ok) {
-    btn.disabled = false;
-    btn.textContent = 'העלאה ותמלול';
-    msgEl.style.color = 'var(--red)';
-    msgEl.textContent = data.error || 'שגיאה בהעלאה';
-    return;
+  var base = new FormData(this);
+  base.delete('audio_file');
+  var ok = 0, errors = [];
+  for (var k = 0; k < files.length; k++) {
+    btn.innerHTML = '<span class="spinner-ring"></span> מעלה ' + (files.length > 1 ? (k + 1) + ' מתוך ' + files.length : '') + '...';
+    var fd = new FormData();
+    base.forEach(function (v, key) { fd.append(key, v); });
+    fd.append('audio_file', files[k]);
+    try {
+      var res = await fetch('/institution/transcribe/upload', { method: 'POST', body: fd });
+      var data = await res.json();
+      if (res.ok) {
+        ok++;
+        pollStatus(data.uploadId, addRow(data.uploadId, files[k].name));
+      } else {
+        errors.push(files[k].name + ': ' + (data.error || 'שגיאה בהעלאה'));
+      }
+    } catch (err) {
+      errors.push(files[k].name + ': שגיאת תקשורת');
+    }
   }
 
   btn.disabled = false;
   btn.textContent = 'העלאה ותמלול';
-  msgEl.style.color = 'var(--accent)';
-  msgEl.textContent = 'הקובץ עלה בהצלחה - מתמלל ברקע, אפשר להמשיך לגלוש באתר.';
-  fileInput.value = '';
+  audioFileInput.value = '';
   transcribeDzFilename.textContent = '';
-
-  var list = document.getElementById('uploadsList');
-  var row = document.createElement('div');
-  row.className = 'upload-row';
-  row.dataset.id = data.uploadId;
-  row.style = 'display:flex; justify-content:space-between; align-items:center; padding:10px 0; border-bottom:1px solid var(--border);';
-  row.innerHTML = '<span>' + fd.get('audio_file').name + '</span><span class="row-status" style="font-size:13px; color:var(--text2);"><span class="spinner-ring"></span> מתמלל...</span>';
-  list.prepend(row);
-
-  pollStatus(data.uploadId, row);
+  if (ok) {
+    msgEl.style.color = errors.length ? 'var(--red)' : 'var(--accent)';
+    msgEl.textContent = (ok === 1 ? 'הקובץ עלה בהצלחה' : ok + ' קבצים עלו בהצלחה') +
+      ' - מתמלל ברקע, אפשר להמשיך לגלוש באתר.' + (errors.length ? ' לא עלו: ' + errors.join(' · ') : '');
+  } else {
+    msgEl.style.color = 'var(--red)';
+    msgEl.textContent = errors.join(' · ');
+  }
 });
 
 function pollStatus(id, row) {
   var interval = setInterval(async function () {
-    var res = await fetch('/institution/transcribe/status/' + id);
-    var data = await res.json();
+    var data;
+    try {
+      var res = await fetch('/institution/transcribe/status/' + id);
+      data = await res.json();
+    } catch (err) { return; }
+    var st = row.querySelector('.row-status');
     if (data.status === 'done') {
       clearInterval(interval);
-      row.querySelector('.row-status').innerHTML =
-        '<a href="' + data.downloadUrl + '" class="word-btn">' +
-        '<svg width="20" height="20" viewBox="0 0 48 48"><rect x="6" y="4" width="30" height="40" rx="3" fill="#2b579a"/><path d="M26 4l10 10H26z" fill="#1a3f6e"/><text x="21" y="30" font-size="14" fill="#fff" text-anchor="middle" font-family="Arial" font-weight="bold">W</text></svg>' +
-        'הורדת Word</a>';
+      st.innerHTML = '<a href="' + data.downloadUrl + '" class="word-btn">' + WORD_ICON + 'הורדת Word</a>';
+    } else if (data.status === 'pending_payment') {
+      clearInterval(interval);
+      st.innerHTML = '<a href="/institution/billing" style="color:#b45309; font-weight:600;">ממתין לטעינת יתרה (' +
+                     (data.cost || 0).toFixed(2) + ' ₪)</a>';
     } else if (data.status === 'error') {
       clearInterval(interval);
-      row.querySelector('.row-status').innerHTML = '<span style="color:var(--red);">שגיאה</span>';
+      st.innerHTML = '<span style="color:var(--red);">שגיאה</span>';
     }
   }, 3000);
 }

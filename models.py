@@ -71,7 +71,7 @@ class Institution(db.Model, UserMixin):
     name = db.Column(db.String(200), nullable=False)
     email = db.Column(db.String(200), nullable=True)   # התחברות אפשרית לפי מייל
     phone = db.Column(db.String(20), nullable=True)    # התחברות אפשרית לפי טלפון
-    login_code = db.Column(db.String(20), nullable=True)      # קוד שנוצר ע"י מנהל-העל, בשימוש עד שהמוסד מגדיר סיסמה
+    login_code = db.Column(db.String(255), nullable=True)     # גיבוב (scrypt) של הקוד הזמני - הקוד עצמו לא נשמר
     password_hash = db.Column(db.String(256), nullable=True)  # מוגדר בכניסה ראשונה, מחליף את login_code
     reset_requested_at = db.Column(db.DateTime, nullable=True)  # "שכחתי סיסמה": הקוד שנשלח תקף 30 דקות, בלי למחוק את הסיסמה הקיימת
     google_id = db.Column(db.String(100), nullable=True, unique=True)  # אימות גוגל אופציונלי, ללא קוד
@@ -94,8 +94,20 @@ class Institution(db.Model, UserMixin):
 
     # --- הגדרות חיוב (נדרים פלוס - ראו routes/institution_billing.py) ---
     card_last4 = db.Column(db.String(4), nullable=True)
-    nedarim_token = db.Column(db.String(200), nullable=True)  # טוקן חיוב קבוע, אם נדרים פלוס מספקים כזה
+    nedarim_token = db.Column(db.String(500), nullable=True)  # טוקן חיוב קבוע - נשמר מוצפן (AES-256-GCM), גישה רק דרך secret_token
     billing_unit = db.Column(db.Integer, nullable=True)   # 5 = חיוב לפי 5 דקות (המוסד וברירת מחדל לתלמידים); ריק/20 = לפי 20
+    failed_logins = db.Column(db.Integer, nullable=True, default=0)   # ניסיונות שגויים רצופים
+    locked_until = db.Column(db.DateTime, nullable=True)              # נעילה זמנית אחרי 10 ניסיונות שגויים
+
+    @property
+    def secret_token(self):
+        from services.crypto import decrypt
+        return decrypt(self.nedarim_token)
+
+    @secret_token.setter
+    def secret_token(self, value):
+        from services.crypto import encrypt
+        self.nedarim_token = encrypt(value) if value else None
 
     students = db.relationship('Customer', backref='institution', lazy=True,
                                 foreign_keys='Customer.institution_id')
@@ -137,9 +149,23 @@ class InstitutionUpload(db.Model):
     error_message = db.Column(db.Text)
     duration_seconds = db.Column(db.Integer, nullable=True)
     cost = db.Column(db.Float, nullable=True)  # מנוכה מיתרת המוסד (Institution.balance)
+    send_to = db.Column(db.String(200), nullable=True)   # מייל לשליחת התמלול (אם סומן) - גם אחרי שחרור מהמתנה לתשלום
+    charged = db.Column(db.Boolean, nullable=True)       # True = העלות כבר ירדה מיתרת המוסד
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     institution = db.relationship('Institution', backref='uploads')
+
+
+class InstitutionLoginLog(db.Model):
+    """יומן כניסות לאזור המוסד - זמן, שיטה (סיסמה/קוד/גוגל), הצלחה, IP. בלי סיסמאות או קודים."""
+    __tablename__ = 'institution_login_logs'
+    id = db.Column(db.Integer, primary_key=True)
+    institution_id = db.Column(db.Integer, db.ForeignKey('institutions.id', ondelete='CASCADE'), nullable=False, index=True)
+    method = db.Column(db.String(20))
+    success = db.Column(db.Boolean, default=False)
+    ip = db.Column(db.String(64))
+    user_agent = db.Column(db.String(200))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
 
 class Recording(db.Model):
     __tablename__ = 'recordings'
