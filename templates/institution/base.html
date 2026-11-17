@@ -214,5 +214,86 @@ table tr { border-bottom:1px solid var(--border); }
   {% endwith %}
   {% block content %}{% endblock %}
 </main>
+<div id="dlToast" class="hidden" style="position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:#1c2333;color:#fff;padding:10px 18px;border-radius:12px;font-size:13.5px;z-index:999;box-shadow:var(--shadow-lg);display:flex;align-items:center;gap:10px;"></div>
+<script>
+/* הורדות (Word / אקסל / שמע / דוחות) - בלי לעבור לדף אחר: הקובץ נמשך ברקע ונשמר מהדף הנוכחי.
+   השרת מחזיר "דף הורדה" (בגלל נטפרי - ראו routes/download_utils.py); כאן קוראים ממנו את הקובץ
+   ושומרים אותו ישירות. אם משהו לא מצליח - חוזרים להתנהגות הרגילה (מעבר לדף ההורדה). */
+(function () {
+  var DL = /\/(download|excel-template|export-excel|cost-report)(\/|\?|$)/;
+  var toast = document.getElementById('dlToast'), tmr;
+  function say(html, ms) {
+    toast.innerHTML = html; toast.classList.remove('hidden');
+    clearTimeout(tmr); if (ms) tmr = setTimeout(function () { toast.classList.add('hidden'); }, ms);
+  }
+  function save(blob, name) {
+    var url = URL.createObjectURL(blob), a = document.createElement('a');
+    a.href = url; a.download = name || 'file'; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
+  }
+  function b64blob(b64, type) {
+    var bin = atob(b64), bytes = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return new Blob([bytes], { type: type || 'application/octet-stream' });
+  }
+  function fname(r) {
+    var cd = r.headers.get('Content-Disposition') || '', m = cd.match(/filename\*=UTF-8''([^;]+)/i);
+    if (m) return decodeURIComponent(m[1]);
+    m = cd.match(/filename="?([^";]+)"?/i); return m ? m[1] : 'file';
+  }
+  async function fromPage(html) {
+    var doc = new DOMParser().parseFromString(html, 'text/html');
+    var a = doc.getElementById('dl');
+    if (a && /^data:/.test(a.getAttribute('href') || '')) {          // הקובץ מוטמע בדף
+      var href = a.getAttribute('href'), comma = href.indexOf(',');
+      var type = href.slice(5, href.indexOf(';'));
+      return [b64blob(href.slice(comma + 1), type), a.getAttribute('download')];
+    }
+    var m = html.match(/fetch\('([^']+)'\)/);                       // הקובץ נמשך בבקשה נוספת
+    if (m && html.indexOf('b64_chunk') < 0) {
+      var r = await fetch(m[1].replace(/&amp;/g, '&'), { credentials: 'same-origin' });
+      if (!r.ok) throw new Error(r.status);
+      var d = await r.json();
+      return [b64blob(d.b64, d.mimetype), d.filename];
+    }
+    var cm = html.match(/var\s+base\s*=\s*'([^']+)'/) || html.match(/fetch\(\s*'([^']+)'\s*\+/);
+    if (cm) {                                                         // בחתיכות
+      var base = cm[1].replace(/&amp;/g, '&').replace(/\/$/, ''), parts = [], i = 0, meta;
+      while (true) {
+        var rr = await fetch(base + '/' + i, { credentials: 'same-origin' });
+        if (!rr.ok) throw new Error(rr.status);
+        meta = await rr.json(); parts.push(meta.b64_chunk);
+        if (meta.is_last || i + 1 >= (meta.total_chunks || 0)) break; i++;
+      }
+      return [b64blob(parts.join(''), meta.mimetype), meta.filename];
+    }
+    throw new Error('no-file');
+  }
+  document.addEventListener('click', async function (e) {
+    var a = e.target.closest && e.target.closest('a[href]');
+    if (!a || e.defaultPrevented || e.ctrlKey || e.metaKey || e.shiftKey || e.button !== 0) return;
+    var url = new URL(a.getAttribute('href'), location.href);
+    if (url.origin !== location.origin || !DL.test(url.pathname)) return;
+    e.preventDefault();
+    if (a.dataset.busy) return;
+    a.dataset.busy = '1';
+    say('<span class="spinner-ring" style="border-color:#4b556b;border-top-color:#fff"></span> מכינים את הקובץ...');
+    try {
+      var r = await fetch(url.href, { credentials: 'same-origin' });
+      if (r.redirected && /\/login/.test(r.url)) { location.href = r.url; return; }
+      if (!r.ok) throw new Error(await r.text());
+      var ct = r.headers.get('Content-Type') || '', res;
+      if (ct.indexOf('text/html') >= 0) res = await fromPage(await r.text());
+      else res = [await r.blob(), fname(r)];
+      save(res[0], res[1]);
+      say('✓ הקובץ ירד: ' + (res[1] || ''), 3500);
+    } catch (err) {
+      var msg = String(err && err.message || '');
+      if (msg && msg.length < 200 && !/^\d+$/.test(msg) && msg !== 'no-file') say('⚠ ' + msg.replace(/</g, '&lt;'), 6000);
+      else { toast.classList.add('hidden'); location.href = url.href; }     // גיבוי: ההתנהגות הקודמת
+    } finally { delete a.dataset.busy; }
+  });
+})();
+</script>
 </body>
 </html>

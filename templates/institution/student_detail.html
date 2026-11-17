@@ -147,7 +147,7 @@
         {% else %}<span class="badge badge-gray">{{ page.status }}</span>{% endif %}
         {% if page.status == 'done' %}
         <a href="{{ url_for('institution_students.download_student_manuscript', student_id=student.id, page_id=page.id) }}"
-           class="btn btn-sm btn-secondary" style="text-decoration:none;display:inline-flex;align-items:center;gap:6px;" target="_blank">
+           class="btn btn-sm btn-secondary" style="text-decoration:none;display:inline-flex;align-items:center;gap:6px;">
           🖨 הדפסה/הורדה
         </a>
         {% endif %}
@@ -164,7 +164,7 @@
           <span class="badge badge-green">הושלם</span>
           <span style="color:var(--text2); font-size:12px;">{{ "%.2f"|format(r.cost or 0) }} ₪</span>
           <a href="{{ url_for('institution_students.download_student_proof', student_id=student.id, page_id=page.id, round_id=r.id) }}"
-             class="btn btn-sm btn-secondary" style="text-decoration:none;" target="_blank">⬇ הורדת הגהה סופית</a>
+             class="btn btn-sm btn-secondary" style="text-decoration:none;">⬇ הורדת הגהה סופית</a>
         {% else %}
           <span class="badge badge-amber" title="בדרך כלל מוכן תוך 24 שעות, ייתכנו עיכובים בזמני עומס">⏳ ממתין לטיפול</span>
         {% endif %}

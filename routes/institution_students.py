@@ -178,6 +178,38 @@ def remove_student(student_id):
     return redirect(url_for('institution_students.students_tab'))
 
 
+def _style_sheet(ws, widths, text_cols=(), money_cols=()):
+    """גיליון בעברית: מימין לשמאל, כותרת מודגשת וצבועה, רוחב עמודות, טלפונים כטקסט (שלא יאבד ה-0)."""
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
+    ws.sheet_view.rightToLeft = True
+    thin = Side(style='thin', color='D5DCE8')
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    for c in ws[1]:
+        c.font = Font(bold=True, color='FFFFFF')
+        c.fill = PatternFill('solid', fgColor='10B981')
+        c.alignment = Alignment(horizontal='center', vertical='center')
+        c.border = border
+    ws.row_dimensions[1].height = 22
+    ws.freeze_panes = 'A2'
+    for i, w in enumerate(widths, start=1):
+        ws.column_dimensions[get_column_letter(i)].width = w
+    for row in ws.iter_rows(min_row=2):
+        for c in row:
+            c.border = border
+            c.alignment = Alignment(horizontal='right')
+            if c.column in text_cols:
+                c.number_format = '@'
+                if c.value not in (None, ''):
+                    c.value = str(c.value)
+            if c.column in money_cols:
+                c.number_format = '#,##0.00'
+    # גם שורות ריקות שימולאו בהמשך: טלפון כטקסט
+    for col in text_cols:
+        for r in range(ws.max_row + 1, ws.max_row + 300):
+            ws.cell(row=r, column=col).number_format = '@'
+
+
 @institution_students_bp.route('/institution/students/excel-template')
 @institution_login_required
 def download_excel_template():
@@ -187,13 +219,11 @@ def download_excel_template():
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = 'תלמידים'
-    ws.append(['name', 'phone', 'email', 'balance'])
+    # בעברית ומימין לשמאל. הייבוא מזהה גם כותרות בעברית וגם באנגלית (קבצים ישנים)
+    ws.append(['שם', 'טלפון', 'מייל', 'יתרה'])
     ws.append(['ישראל ישראלי', '0501234567', 'israel@example.com', 20])
     ws.append(['דוגמה בלי טלפון', '', '', 0])
-    ws.column_dimensions['A'].width = 22
-    ws.column_dimensions['B'].width = 16
-    ws.column_dimensions['C'].width = 26
-    ws.column_dimensions['D'].width = 10
+    _style_sheet(ws, [24, 16, 28, 10], text_cols=(2,))
     buf = io.BytesIO()
     wb.save(buf)
     buf.seek(0)
@@ -223,9 +253,9 @@ def upload_excel():
                 return headers.index(n)
         return None
 
-    idx_name = col('name', 'שם')
-    idx_phone = col('phone', 'טלפון')
-    idx_email = col('email', 'מייל', 'אימייל')
+    idx_name = col('name', 'שם', 'שם מלא', 'שם התלמיד')
+    idx_phone = col('phone', 'טלפון', 'פלאפון', 'נייד')
+    idx_email = col('email', 'מייל', 'אימייל', 'דוא"ל', 'דואל')
     idx_balance = col('balance', 'יתרה')
 
     inst = current_user
@@ -239,6 +269,13 @@ def upload_excel():
             continue
         name = str(row[idx_name]).strip() if idx_name is not None and row[idx_name] else ''
         phone = str(row[idx_phone]).strip() if idx_phone is not None and row[idx_phone] else None
+        if phone:
+            # אקסל שומר טלפון כמספר ומוחק את ה-0 בהתחלה (501234567 / 501234567.0) - מחזירים אותו
+            phone = phone.replace('-', '').replace(' ', '')
+            if phone.endswith('.0'):
+                phone = phone[:-2]
+            if phone.isdigit() and len(phone) in (8, 9) and not phone.startswith('0'):
+                phone = '0' + phone
         email = str(row[idx_email]).strip() if idx_email is not None and row[idx_email] else None
         requested_balance = float(row[idx_balance]) if idx_balance is not None and row[idx_balance] else 0.0
 
@@ -319,11 +356,13 @@ def export_excel():
 
     wb = openpyxl.Workbook()
     ws = wb.active
+    ws.title = 'תלמידים'
     ws.append(['מספר תלמיד', 'שם', 'טלפון', 'מייל', 'יתרה', 'סה"כ הקלטות', 'חסום'])
     for s in students:
         recording_count = counts_by_customer.get(s.id, 0)
-        ws.append([s.student_number or '', s.name or '', s.phone or '', s.email or '',
-                   s.balance or 0, recording_count, 'כן' if s.is_blocked else 'לא'])
+        ws.append([s.student_number or '', s.student_display_name or s.name or '', s.phone or '', s.email or '',
+                   round(s.balance or 0, 2), recording_count, 'כן' if s.is_blocked else 'לא'])
+    _style_sheet(ws, [12, 24, 16, 28, 11, 12, 8], text_cols=(1, 3), money_cols=(5,))
 
     buf = io.BytesIO()
     wb.save(buf)
