@@ -29,6 +29,10 @@
 .st-hero .hero-actions { display:flex; gap:8px; flex-wrap:wrap; }
 .chip { display:inline-flex; align-items:center; gap:4px; font-size:11px; font-weight:600; padding:2px 8px; border-radius:20px; background:var(--blue-soft); color:var(--blue); }
 .row-3 { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
+.details-form { display:grid; grid-template-columns:repeat(3,1fr); gap:0 12px; }
+.details-form .field { margin-bottom:12px; }
+@media (max-width:900px) { .details-form { grid-template-columns:1fr 1fr; } }
+@media (max-width:560px) { .details-form { grid-template-columns:1fr; } .details-form .save label { display:none; } }
 .sub { color:var(--text2); }
 .rec-list { display:flex; flex-direction:column; }
 .rec { border-bottom:1px solid var(--border); padding:10px 0; }
@@ -106,51 +110,43 @@
   </div>
 </div>
 
-<div class="grid grid-2 mb-18" style="align-items:stretch;">
-  <div class="card card-flex">
-    <div class="card-head"><span class="ic">{{ ic('edit') }}</span><h3>פרטי התלמיד</h3></div>
-    <div class="card-sub">עדכון הפרטים שמופיעים ברשימת התלמידים ושאליהם נשלחים התמלולים.</div>
-    <form method="post" action="{{ url_for('institution_students.edit_student', student_id=student.id) }}">
-      <input type="hidden" name="back" value="{{ request.path }}">
-      <div class="field"><label>שם</label><input class="input" name="name" required value="{{ student.student_display_name or student.name or '' }}"></div>
-      <div class="row-2">
-        <div class="field"><label>טלפון</label><input class="input" name="phone" inputmode="tel" value="{{ student.phone or '' }}"></div>
-        <div class="field"><label>קבוצה</label><select class="input" name="group_id"><option value="">בלי קבוצה</option>{% for g in groups %}<option value="{{ g.id }}" {{ 'selected' if student.student_group_id == g.id }}>{{ g.name }}</option>{% endfor %}</select></div>
-      </div>
-      <div class="row-2">
-        <div class="field"><label>מייל (לקבלת התמלולים)</label><input class="input" name="email" type="email" value="{{ student.email or '' }}"></div>
-        <div class="field"><label>פקס</label><input class="input" name="fax" inputmode="tel" value="{{ student.fax or '' }}"></div>
-      </div>
-      <div class="card-actions"><button type="submit" class="btn btn-block">שמירת פרטים</button></div>
-    </form>
-  </div>
+<div class="card mb-18">
+  <div class="card-head"><span class="ic">{{ ic('edit') }}</span><h3>פרטי התלמיד</h3></div>
+  <div class="card-sub">עדכון הפרטים שמופיעים ברשימת התלמידים ושאליהם נשלחים התמלולים.</div>
+  <form method="post" action="{{ url_for('institution_students.edit_student', student_id=student.id) }}" class="details-form">
+    <input type="hidden" name="back" value="{{ request.path }}">
+    <div class="field"><label>שם</label><input class="input" name="name" required value="{{ student.student_display_name or student.name or '' }}"></div>
+    <div class="field"><label>טלפון</label><input class="input" name="phone" inputmode="tel" value="{{ student.phone or '' }}"></div>
+    <div class="field"><label>מייל (לקבלת התמלולים)</label><input class="input" name="email" type="email" value="{{ student.email or '' }}"></div>
+    <div class="field"><label>פקס</label><input class="input" name="fax" inputmode="tel" value="{{ student.fax or '' }}"></div>
+    <div class="field"><label>קבוצה</label><select class="input" name="group_id"><option value="">בלי קבוצה</option>{% for g in groups %}<option value="{{ g.id }}" {{ 'selected' if student.student_group_id == g.id }}>{{ g.name }}</option>{% endfor %}</select></div>
+    <div class="field save"><label>&nbsp;</label><button type="submit" class="btn btn-block">{{ ic('check', 16, 2.2) }} שמירת פרטים</button></div>
+  </form>
+</div>
 
-  {# העלאת אודיו לתמלול - רק בתיק תלמיד אמיתי (למסמכים הכלליים יש את לשונית "יצירת תמלול") #}
-  <div class="card card-flex">
-    <div class="card-head"><span class="ic">{{ ic('upload') }}</span><h3>העלאת קבצים לתמלול</h3></div>
-    <div class="card-sub">התמלול נשמר בתיק התלמיד ונשלח {{ 'למייל שלו' if student.email else 'למייל המוסד' }}. העלות יורדת מיתרת התלמיד.</div>
-    <form id="studentUploadForm" class="card-body">
-      <div class="dropzone" id="studentDz" style="padding:20px 16px;">
-        <div class="dz-icon">{{ ic('headphones', 30, 1.6) }}</div>
-        <div class="dz-title">גררו קבצי אודיו/וידאו או לחצו לבחירה</div>
-        <div class="dz-sub">אפשר כמה קבצים יחד</div>
-        <div class="dz-filename" id="studentDzFilename"></div>
-        <input type="file" name="audio_file" id="studentAudioFile" accept="audio/*,video/*" multiple required>
-      </div>
-      <div class="row-3" style="margin-top:12px;">
-        <div class="field"><label>סוג תמלול</label>
-          <select class="input" name="tier"><option value="gemini">רגיל</option><option value="premium">מקצועי</option></select></div>
-        <div class="field"><label>שפת ההקלטה</label>
-          <select class="input" name="language"><option value="he">עברית</option><option value="yi">יידיש</option><option value="en">אנגלית</option></select></div>
-        <div class="field"><label>שפת התמלול</label>
-          <select class="input" name="output_language"><option value="he">עברית</option><option value="original">כמו ההקלטה</option></select></div>
-      </div>
-      <div class="card-actions">
-        <button type="submit" class="btn btn-block" id="studentUploadBtn">{{ ic('upload', 16) }} העלאה ותמלול</button>
-        <div id="studentUploadMsg" style="font-size:13px; margin-top:8px;"></div>
-      </div>
-    </form>
-  </div>
+{# העלאת אודיו לתמלול - רק בתיק תלמיד אמיתי (למסמכים הכלליים יש את לשונית "יצירת תמלול") #}
+<div class="card mb-18">
+  <div class="card-head"><span class="ic">{{ ic('upload') }}</span><h3>העלאת קבצים לתמלול</h3></div>
+  <div class="card-sub">התמלול נשמר בתיק התלמיד ונשלח {{ 'למייל שלו' if student.email else 'למייל המוסד' }}. העלות יורדת מיתרת התלמיד.</div>
+  <form id="studentUploadForm">
+    <div class="dropzone" id="studentDz">
+      <div class="dz-icon">{{ ic('headphones', 34, 1.6) }}</div>
+      <div class="dz-title">גררו קבצי אודיו/וידאו לכאן או לחצו לבחירה</div>
+      <div class="dz-sub">אפשר לבחור כמה קבצים יחד - כל קובץ יתומלל בנפרד</div>
+      <div class="dz-filename" id="studentDzFilename"></div>
+      <input type="file" name="audio_file" id="studentAudioFile" accept="audio/*,video/*" multiple required>
+    </div>
+    <div class="row-3" style="margin-top:14px;">
+      <div class="field"><label>סוג תמלול</label>
+        <select class="input" name="tier"><option value="gemini">תמלול רגיל</option><option value="premium">תמלול מקצועי</option></select></div>
+      <div class="field"><label>שפת ההקלטה</label>
+        <select class="input" name="language"><option value="he">עברית</option><option value="yi">יידיש</option><option value="en">אנגלית</option></select></div>
+      <div class="field"><label>שפת התמלול</label>
+        <select class="input" name="output_language"><option value="he">עברית</option><option value="original">כמו שפת ההקלטה</option></select></div>
+    </div>
+    <button type="submit" class="btn btn-block" id="studentUploadBtn">{{ ic('upload', 16) }} העלאה ותמלול</button>
+    <div id="studentUploadMsg" style="font-size:13px; margin-top:10px;"></div>
+  </form>
 </div>
 
 <div class="card mb-18">
@@ -462,14 +458,14 @@ document.getElementById('manuscriptUploadForm').addEventListener('submit', async
     data = await res.json();
   } catch (err) {
     btn.disabled = false;
-    btn.innerHTML = 'העלאה ותמלול';
+    btn.textContent = 'העלאה';
     msgEl.style.color = 'var(--red)';
     msgEl.textContent = 'שגיאת תקשורת, נסה שוב';
     return;
   }
   if (!res.ok) {
     btn.disabled = false;
-    btn.innerHTML = 'העלאה ותמלול';
+    btn.textContent = 'העלאה';
     msgEl.style.color = 'var(--red)';
     msgEl.textContent = data.error || 'שגיאה';
     return;

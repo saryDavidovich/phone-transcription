@@ -169,6 +169,15 @@ table tr { border-bottom:1px solid var(--border); }
   -webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round'%3E%3Cpath d='M18 6L6 18M6 6l12 12'/%3E%3C/svg%3E") center/contain no-repeat;
           mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round'%3E%3Cpath d='M18 6L6 18M6 6l12 12'/%3E%3C/svg%3E") center/contain no-repeat; }
 
+#flashToasts { position:fixed; bottom:22px; left:50%; transform:translateX(-50%); z-index:1000; display:flex; flex-direction:column; gap:8px;
+  align-items:center; pointer-events:none; width:max-content; max-width:calc(100vw - 32px); }
+.ftoast { pointer-events:auto; display:flex; gap:10px; align-items:center; padding:11px 14px 11px 16px; border-radius:12px; font-size:14px; font-weight:600;
+  color:#fff; background:#0ea371; box-shadow:0 10px 30px rgba(20,25,40,.28); animation:toastIn .25s ease-out; transition:opacity .4s, transform .4s; line-height:1.5; }
+.ftoast.bad { background:#dc2626; }
+.ftoast.out { opacity:0; transform:translateY(12px); }
+.ftoast .x { background:none; border:0; color:inherit; opacity:.75; cursor:pointer; padding:2px; display:flex; }
+.ftoast .x:hover { opacity:1; }
+@keyframes toastIn { from { opacity:0; transform:translateY(14px); } to { opacity:1; transform:none; } }
 .modal-actions { display:flex; gap:10px; margin-top:6px; }
 .switch-row { display:flex; gap:10px; align-items:flex-start; cursor:pointer; font-size:13.5px; color:var(--text); margin-bottom:14px; line-height:1.5; }
 .switch-row input[type=checkbox] { width:18px; height:18px; margin-top:1px; accent-color:var(--accent); flex:none; cursor:pointer; }
@@ -248,13 +257,31 @@ window.IC = {
 </aside>
 {% endif %}
 <main>
-  {% with messages = get_flashed_messages() %}
-    {% if messages %}{% for m in messages %}<div class="flash">{{ m }}</div>{% endfor %}{% endif %}
-  {% endwith %}
+  {# הודעות אחרי פעולה: בועה קטנה למטה שנעלמת לבד אחרי כמה שניות (כמו בממשק הניהול) #}
+  {% with messages = get_flashed_messages() %}{% if messages %}
+  <div id="flashToasts">
+  {% for msg in messages %}
+    {% set m = msg|string %}
+    {% set bad = m.startswith('לא ') or m.startswith('אין ') or m.startswith('אי אפשר') or m.startswith('יש להזין') or m.startswith('יותר מדי')
+                 or 'שגוי' in m or 'נכשל' in m or 'שגיאה' in m or 'לא תקין' in m or 'לא נמצא' in m or 'כבר רשום' in m
+                 or 'חייבת' in m or 'פשוטה מדי' in m or 'אינן תואמות' in m or 'ננעל' in m or 'כבר יש' in m or 'זהה לנוכחית' in m %}
+    <div class="ftoast {{ 'bad' if bad }}" role="status">
+      {{ ic('alert' if bad else 'check', 17, 2.2) }}<span>{{ msg }}</span>
+      <button type="button" class="x" aria-label="סגירה" onclick="this.parentNode.remove()">{{ ic('close', 14, 2.4) }}</button>
+    </div>
+  {% endfor %}
+  </div>
+  <script>
+  document.querySelectorAll('#flashToasts .ftoast').forEach(function (t, i) {
+    var ms = (t.classList.contains('bad') ? 7000 : 3800) + i * 600;
+    setTimeout(function () { t.classList.add('out'); setTimeout(function () { t.remove(); }, 450); }, ms);
+  });
+  </script>
+  {% endif %}{% endwith %}
   {% block content %}{% endblock %}
 </main>
 
-<div id="dlToast" class="hidden" style="position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:#1c2333;color:#fff;padding:10px 18px;border-radius:12px;font-size:13.5px;z-index:999;box-shadow:var(--shadow-lg);display:flex;align-items:center;gap:10px;"></div>
+<div id="dlToast" class="hidden" style="position:fixed;bottom:22px;left:50%;transform:translateX(-50%);background:#1c2333;color:#fff;padding:10px 18px;border-radius:12px;font-size:13.5px;z-index:999;box-shadow:var(--shadow-lg);display:flex;align-items:center;gap:10px;"></div>
 <script>
 /* הורדות (Word / אקסל / שמע / דוחות) - בלי לעבור לדף אחר: הקובץ נמשך ברקע ונשמר מהדף הנוכחי.
    השרת מחזיר "דף הורדה" (בגלל נטפרי - ראו routes/download_utils.py); כאן קוראים ממנו את הקובץ
