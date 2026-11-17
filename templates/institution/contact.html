@@ -40,7 +40,7 @@
 <div class="card chat">
   <div class="chat-head">
     <span class="ava">{{ ic('logo', 20, 2) }}</span>
-    <div><div class="t">הנהלת תמלול פון</div><div class="s">כל תשובה מגיעה גם למייל {{ current_user.notify_email or current_user.email or 'של המוסד' }}</div></div>
+    <div><div class="t">צוות תמלול פון</div><div class="s">כל תשובה מגיעה גם למייל {{ current_user.notify_email or current_user.email or 'של המוסד' }}</div></div>
   </div>
   <div class="chat-body" id="chatBody">
     <div class="empty-chat" id="emptyChat" {% if messages %}style="display:none"{% endif %}>
@@ -69,7 +69,7 @@
     }
     var el = document.createElement('div');
     el.className = 'msg ' + (m.dir === 'in' ? 'me' : 'them'); el.dataset.id = m.id;
-    el.innerHTML = (m.dir === 'out' ? '<div class="by">הנהלת תמלול פון</div>' : '') +
+    el.innerHTML = (m.dir === 'out' ? '<div class="by">צוות תמלול פון</div>' : '') +
       '<div class="tx"></div><div class="meta">' + (m.via === 'email' ? 'במייל · ' : '') + escHtml(m.time) +
       (m.dir === 'in' ? '<span class="tick">' + (m.read ? CHECK2 : CHECK1) + '</span>' : '') + '</div>';
     el.querySelector('.tx').textContent = m.body;

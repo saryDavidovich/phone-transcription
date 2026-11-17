@@ -636,7 +636,7 @@ function confirmOcrDelete() {
         <span style="color:var(--text2);font-size:12px">· מס׳ {{ th.ref }} · {{ th['items']|length }} הודעות · {{ th.last | il_time('%d/%m %H:%M') }}</span>
         {% if th.new %}<span class="badge badge-amber">{{ th.new }} תגובות שלא נשמעו</span>{% endif %}
       </summary>
-      <div style="padding:14px;display:flex;flex-direction:column;gap:8px;max-height:420px;overflow-y:auto;background:var(--surface,transparent)">
+      <div data-chat-scroll style="padding:14px;display:flex;flex-direction:column;gap:8px;max-height:420px;overflow-y:auto;background:var(--surface,transparent)">
       {% for it in th['items'] %}
         <div style="display:flex;justify-content:{{ 'flex-start' if it.dir == 'out' else 'flex-end' }}">
           <div style="max-width:75%;width:fit-content;padding:8px 12px;border-radius:12px;font-size:13px;line-height:1.55;
@@ -724,15 +724,13 @@ function confirmOcrDelete() {
       <button class="btn btn-sm btn-outline-danger" type="submit">🗑 מחק שיחה</button>
     </form>
   </div>
-  <div style="padding:16px;display:flex;flex-direction:column;gap:10px;max-height:360px;overflow-y:auto">
+  <div data-chat-scroll style="padding:16px;display:flex;flex-direction:column;gap:10px;max-height:360px;overflow-y:auto">
     {% for m in t.messages %}
     <div style="display:flex;{% if m.direction == 'out' %}justify-content:flex-start{% else %}justify-content:flex-end{% endif %}">
-      <div style="max-width:70%;width:fit-content;padding:8px 12px;border-radius:10px;white-space:pre-wrap;font-size:13px;line-height:1.5;
+      <div style="max-width:70%;width:fit-content;padding:7px 11px;border-radius:10px;font-size:13px;line-height:1.5;
                   {% if m.direction == 'out' %}background:#1e3a8a;color:#fff{% else %}background:var(--surface2);color:var(--text);border:1px solid var(--border){% endif %}">
-        <div style="font-size:11px;opacity:0.7;margin-bottom:3px">
-          {% if m.direction == 'out' %}מנהל{% else %}לקוח{% endif %} · {{ m.created_at | il_time }}
-        </div>
-        {{ m.body }}
+        <div style="font-size:11px;opacity:0.7;margin-bottom:2px">{% if m.direction == 'out' %}מנהל{% else %}לקוח{% endif %} · {{ m.created_at | il_time }}</div>
+        <div style="white-space:pre-wrap">{{ m.body }}</div>
         {% if m.handled_note %}<div style="margin-top:6px;padding-top:5px;border-top:1px solid rgba(255,255,255,.15);font-size:12px;color:#86efac;white-space:pre-wrap">✔ טופל{% if m.handled_at %} ({{ m.handled_at | il_time('%d/%m %H:%M') }}){% endif %}: {{ m.handled_note }}</div>{% endif %}
         {% set atts = msg_attachments.get(m.id, []) %}
         {% if atts %}

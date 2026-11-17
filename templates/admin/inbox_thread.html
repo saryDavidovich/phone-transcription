@@ -29,15 +29,13 @@
   <div class="table-header">
     <span class="table-title">💬 {{ thread.subject or '(ללא נושא)' }}</span>
   </div>
-  <div style="padding:16px;display:flex;flex-direction:column;gap:10px;max-height:480px;overflow-y:auto">
+  <div data-chat-scroll style="padding:16px;display:flex;flex-direction:column;gap:10px;max-height:480px;overflow-y:auto">
     {% for m in thread.messages %}
     <div style="display:flex;{% if m.direction == 'out' %}justify-content:flex-start{% else %}justify-content:flex-end{% endif %}">
-      <div style="max-width:70%;width:fit-content;padding:8px 12px;border-radius:10px;white-space:pre-wrap;font-size:13px;line-height:1.5;
+      <div style="max-width:70%;width:fit-content;padding:7px 11px;border-radius:10px;font-size:13px;line-height:1.5;
                   {% if m.direction == 'out' %}background:#1e3a8a;color:#fff{% else %}background:var(--surface2);color:var(--text);border:1px solid var(--border){% endif %}">
-        <div style="font-size:11px;opacity:0.7;margin-bottom:3px">
-          {% if m.direction == 'out' %}מנהל{% else %}{{ thread.from_email }}{% endif %} · {{ m.created_at | il_time }}
-        </div>
-        {{ m.body }}
+        <div style="font-size:11px;opacity:0.7;margin-bottom:2px">{% if m.direction == 'out' %}מנהל{% else %}{{ thread.from_email }}{% endif %} · {{ m.created_at | il_time }}</div>
+        <div style="white-space:pre-wrap">{{ m.body }}</div>
         {% set atts = attachments.get(m.id, []) %}
         {% if atts %}
         <div style="margin-top:8px;padding-top:6px;border-top:1px solid rgba(255,255,255,.15);white-space:normal">

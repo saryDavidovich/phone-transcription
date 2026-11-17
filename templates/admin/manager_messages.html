@@ -140,6 +140,13 @@
     </tbody>
   </table>
   </div>
+  {% if pages > 1 %}
+  <div style="display:flex;justify-content:center;align-items:center;gap:10px;margin:14px 0;font-size:13px">
+    {% if page > 1 %}<a class="btn btn-sm btn-outline-primary" href="{{ url_for('admin.manager_messages', status=status_filter or None, page=page-1) }}">&rarr; הקודמות</a>{% endif %}
+    <span style="color:var(--text2)">עמוד {{ page }} מתוך {{ pages }} · {{ total }} הודעות</span>
+    {% if page < pages %}<a class="btn btn-sm btn-outline-primary" href="{{ url_for('admin.manager_messages', status=status_filter or None, page=page+1) }}">הבאות &larr;</a>{% endif %}
+  </div>
+  {% endif %}
   {% endif %}
   {% elif tab == 'inbox' %}{% include 'admin/_mm_inbox.html' %}
   {% elif tab == 'customers' %}{% include 'admin/_mm_customers.html' %}

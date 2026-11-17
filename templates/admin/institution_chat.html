@@ -8,7 +8,8 @@
 .ichat-body { height:calc(100vh - 330px); min-height:340px; overflow-y:auto; padding:16px; display:flex; flex-direction:column; gap:4px;
   background:rgba(127,127,127,.06); }
 .ichat-day { align-self:center; font-size:11.5px; color:var(--text2); background:rgba(127,127,127,.14); padding:3px 12px; border-radius:8px; margin:10px 0 6px; }
-.ichat-msg { max-width:76%; padding:7px 11px 5px; border-radius:10px; font-size:14px; line-height:1.6; white-space:pre-wrap; word-wrap:break-word; }
+.ichat-msg { max-width:72%; width:fit-content; padding:6px 10px 4px; border-radius:10px; font-size:14px; line-height:1.55; word-wrap:break-word; }
+.ichat-msg .tx { white-space:pre-wrap; }
 .ichat-msg .meta { font-size:10.5px; opacity:.7; text-align:left; margin-top:2px; }
 .ichat-msg .by { font-size:11.5px; font-weight:700; color:#10b981; margin-bottom:1px; }
 .ichat-msg.them { align-self:flex-start; background:var(--surface2); color:var(--text); border:1px solid var(--border); border-top-right-radius:3px; }
@@ -16,7 +17,7 @@
 .ichat-form { display:flex; gap:8px; align-items:flex-end; padding:10px 12px; border-top:1px solid var(--border); }
 .ichat-form textarea { flex:1; resize:vertical; min-height:46px; max-height:220px; }
 </style>
-<div class="ichat">
+<div class="ichat" data-chat-page>
   <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px">
     <a href="{{ url_for('admin.manager_messages', tab='institutions') }}" class="btn btn-ghost" style="font-size:13px">&rarr; חזרה להתכתבויות</a>
     <a href="{{ url_for('admin.institution_detail', inst_id=inst.id) }}" class="btn btn-ghost" style="font-size:13px">כרטיס המוסד</a>
@@ -27,12 +28,12 @@
     {% endif %}
   </div>
   <div class="ichat-box">
-    <div class="ichat-body" id="ichatBody">
+    <div class="ichat-body" id="ichatBody" data-chat-scroll>
       {% set ns = namespace(d='') %}
       {% for m in msgs %}
         {% if m.date != ns.d %}<div class="ichat-day">{{ m.date }}</div>{% set ns.d = m.date %}{% endif %}
         <div class="ichat-msg {{ 'me' if m.dir == 'out' else 'them' }}">
-          {% if m.dir == 'in' %}<div class="by">{{ inst.name }}{% if m.sender %} · {{ m.sender }}{% endif %}</div>{% endif %}{{ m.body }}
+          {% if m.dir == 'in' %}<div class="by">{{ inst.name }}{% if m.sender %} · {{ m.sender }}{% endif %}</div>{% endif %}<div class="tx">{{ m.body }}</div>
           <div class="meta">{{ 'במייל · ' if m.via == 'email' }}{{ m.time }}{% if m.dir == 'out' %} · {{ 'נקרא' if m.read else 'נשלח' }}{% endif %}</div>
         </div>
       {% else %}
@@ -47,7 +48,7 @@
   </div>
 </div>
 <script>
-(function(){ var b=document.getElementById('ichatBody'); if(b) b.scrollTop=b.scrollHeight;
+(function(){
   var t=document.querySelector('.ichat-form textarea');
   t.addEventListener('keydown',function(e){ if(e.key==='Enter'&&(e.ctrlKey||e.metaKey)){ e.preventDefault(); t.form.submit(); }});
 })();

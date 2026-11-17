@@ -317,22 +317,42 @@ def pwa_service_worker():
     return resp
 
 
+_LIVE = {'at': 0.0, 'data': None, 'err': None}
+_LIVE_LOCK = __import__('threading').Lock()
+
+
+def _ivr_live_calls():
+    """השיחות שעל הקו משרת ה-IVR - עם מטמון קצר (2.5 שניות) משותף לכל הבקשות בשרת.
+    הדשבורד והעיגול בתפריט שואלים כל כמה שניות מכל לשונית פתוחה; בלי המטמון כל שאלה כזו
+    תפסה תהליך שרת עד שה-IVR ענה, וזה האט את כל הממשק."""
+    import time
+    import requests
+    ivr_url = os.environ.get('NODE_IVR_URL', '').rstrip('/')
+    secret = os.environ.get('INTERNAL_PROXY_SECRET', '')
+    if not (ivr_url and secret):
+        return None, 'NODE_IVR_URL / INTERNAL_PROXY_SECRET לא מוגדרים'
+    with _LIVE_LOCK:
+        if time.time() - _LIVE['at'] < 2.5:
+            return _LIVE['data'], _LIVE['err']
+        try:
+            r = requests.get(f'{ivr_url}/internal/live-calls', headers={'X-Internal-Secret': secret}, timeout=3)
+            r.raise_for_status()
+            _LIVE.update(data=r.json().get('calls', []), err=None)
+        except Exception as e:
+            _LIVE.update(data=None, err=f'שרת ה-IVR לא ענה ({type(e).__name__})')
+        _LIVE['at'] = time.time()
+        return _LIVE['data'], _LIVE['err']
+
+
 @admin_bp.route('/live-calls')
 @login_required
 def live_calls():
     """לוח חי בדשבורד: השיחות שעל הקו עכשיו, משרת ה-IVR (/internal/live-calls).
     נקרא מהדפדפן כל כמה שניות - רק כשהדשבורד פתוח וגלוי."""
-    import requests
-    ivr_url = os.environ.get('NODE_IVR_URL', '').rstrip('/')
-    secret = os.environ.get('INTERNAL_PROXY_SECRET', '')
-    if not (ivr_url and secret):
-        return jsonify({'ok': False, 'error': 'NODE_IVR_URL / INTERNAL_PROXY_SECRET לא מוגדרים'})
-    try:
-        r = requests.get(f'{ivr_url}/internal/live-calls', headers={'X-Internal-Secret': secret}, timeout=5)
-        r.raise_for_status()
-        calls = r.json().get('calls', [])
-    except Exception as e:
-        return jsonify({'ok': False, 'error': f'שרת ה-IVR לא ענה ({type(e).__name__})'})
+    raw, err = _ivr_live_calls()
+    if raw is None:
+        return jsonify({'ok': False, 'error': err})
+    calls = [dict(c) for c in raw]
     # זיהוי כמו בכניסה לשיחה (find_customer_and_row) - גם מספר נוסף של לקוח ולא רק המספר הראשי
     from services.customer_phones import find_customer_and_row
     by_phone = {}
@@ -352,14 +372,10 @@ def live_calls():
 @login_required
 def live_count():
     """מספר השיחות החיות בלבד - לעיגול ליד "דשבורד" בתפריט הצד (כל 10 שניות)."""
-    import requests
-    ivr_url = os.environ.get('NODE_IVR_URL', '').rstrip('/')
-    secret = os.environ.get('INTERNAL_PROXY_SECRET', '')
-    if not (ivr_url and secret):
+    calls, _err = _ivr_live_calls()
+    if calls is None:
         return jsonify({'ok': False})
     try:
-        r = requests.get(f'{ivr_url}/internal/live-calls', headers={'X-Internal-Secret': secret}, timeout=4)
-        calls = r.json().get('calls', [])
         # גם מי בשיחה - בשביל כרטיס הלקוח ("בשיחה עכשיו"), מאותה בדיקה בלי פנייה נוספת
         return jsonify({'ok': True, 'count': len(calls),
                         'calls': [{'phone': c.get('phone', ''), 'stage': c.get('stage', ''),
@@ -419,60 +435,40 @@ def dashboard():
         ).scalar() or 0,
         'total_balance': db.session.query(func.sum(Customer.balance)).scalar() or 0,
         # לקוחות לא פעילים
-        'inactive_month': Customer.query.filter(
-            ~Customer.id.in_(
-                db.session.query(Recording.customer_id).filter(
-                    Recording.created_at >= one_month_ago
-                )
-            )
-        ).count(),
-        'inactive_year': Customer.query.filter(
-            ~Customer.id.in_(
-                db.session.query(Recording.customer_id).filter(
-                    Recording.created_at >= one_year_ago
-                )
-            )
-        ).count(),
     }
+    # לקוחות לא פעילים = כל הלקוחות פחות מי שהקליט בתקופה (NOT IN על תת-שאילתה היה איטי מאוד)
+    _active_since = lambda since: db.session.query(func.count(func.distinct(Recording.customer_id))).filter(
+        Recording.created_at >= since, Recording.customer_id.isnot(None)).scalar() or 0
+    stats['inactive_month'] = max(0, stats['total_customers'] - _active_since(one_month_ago))
+    stats['inactive_year'] = max(0, stats['total_customers'] - _active_since(one_year_ago))
 
-    # חיובי ארנקות היום — לפי סוג, ערוץ, ושיטת שליחה
-    today_debits = Recording.query.options(*_light(Recording)).filter(
-        Recording.created_at >= today_start,
-        Recording.status == 'delivered',
-        Recording.cost > 0
-    ).all()
+    # חיובי ארנקות היום — לפי סוג, ערוץ ושיטת שליחה: חישוב במסד הנתונים (קודם נטענו כל הקלטות היום לזיכרון)
+    from sqlalchemy import case
+    tier = func.coalesce(Recording.transcription_tier, 'gemini')
+    is_email = func.coalesce(Recording.call_id, '').like('email-%')
+    basic = ~tier.in_(('premium', 'video'))
+    def _sum_if(cond):
+        return func.coalesce(func.sum(case((cond, Recording.cost), else_=0)), 0)
+    def _cnt_if(cond):
+        return func.coalesce(func.sum(case((cond, 1), else_=0)), 0)
+    row = db.session.query(
+        func.count(Recording.id), func.coalesce(func.sum(Recording.cost), 0),
+        _sum_if(basic), _sum_if(tier == 'premium'), _sum_if(tier == 'video'),
+        _cnt_if(basic), _cnt_if(tier == 'premium'), _cnt_if(tier == 'video'),
+        _sum_if(~is_email), _sum_if(is_email), _cnt_if(~is_email), _cnt_if(is_email),
+        _cnt_if(Recording.delivery_method == 'email'), _cnt_if(Recording.delivery_method == 'fax'),
+    ).filter(Recording.created_at >= today_start, Recording.status == 'delivered', Recording.cost > 0).one()
 
     # סטטיסטיקות OCR היום
     from models import OcrResult
-    today_ocr = OcrResult.query.options(*_light(OcrResult)).filter(
-        OcrResult.created_at >= today_start,
-        OcrResult.status == 'completed'
-    ).all()
-    ocr_stats = {
-        'count': len(today_ocr),
-        'total_cost': sum(r.cost or 0 for r in today_ocr),
-        'total_chars': sum(r.char_count or 0 for r in today_ocr),
-    }
+    ocr_row = db.session.query(func.count(OcrResult.id), func.coalesce(func.sum(OcrResult.cost), 0),
+                               func.coalesce(func.sum(OcrResult.char_count), 0)).filter(
+        OcrResult.created_at >= today_start, OcrResult.status == 'completed').one()
+    ocr_stats = {'count': ocr_row[0], 'total_cost': float(ocr_row[1] or 0), 'total_chars': int(ocr_row[2] or 0)}
 
-    billing_stats = {
-        'total_cost': sum(r.cost or 0 for r in today_debits),
-        'count': len(today_debits),
-        # לפי סוג תמלול
-        'basic_cost': sum(r.cost or 0 for r in today_debits if (r.transcription_tier or 'gemini') not in ('premium', 'video')),
-        'premium_cost': sum(r.cost or 0 for r in today_debits if r.transcription_tier == 'premium'),
-        'video_cost': sum(r.cost or 0 for r in today_debits if r.transcription_tier == 'video'),
-        'basic_count': sum(1 for r in today_debits if (r.transcription_tier or 'gemini') not in ('premium', 'video')),
-        'premium_count': sum(1 for r in today_debits if r.transcription_tier == 'premium'),
-        'video_count': sum(1 for r in today_debits if r.transcription_tier == 'video'),
-        # לפי ערוץ
-        'phone_cost': sum(r.cost or 0 for r in today_debits if not (r.call_id or '').startswith('email-')),
-        'email_cost': sum(r.cost or 0 for r in today_debits if (r.call_id or '').startswith('email-')),
-        'phone_count': sum(1 for r in today_debits if not (r.call_id or '').startswith('email-')),
-        'email_count': sum(1 for r in today_debits if (r.call_id or '').startswith('email-')),
-        # לפי שיטת שליחה
-        'sent_email_count': sum(1 for r in today_debits if r.delivery_method == 'email'),
-        'sent_fax_count': sum(1 for r in today_debits if r.delivery_method == 'fax'),
-    }
+    keys = ['count', 'total_cost', 'basic_cost', 'premium_cost', 'video_cost', 'basic_count', 'premium_count',
+            'video_count', 'phone_cost', 'email_cost', 'phone_count', 'email_count', 'sent_email_count', 'sent_fax_count']
+    billing_stats = {k: (float(v or 0) if k.endswith('_cost') else int(v or 0)) for k, v in zip(keys, row)}
 
     from sqlalchemy.orm import joinedload
     recent_recordings = Recording.query.options(*_light(Recording), joinedload(Recording.customer)) \
@@ -2114,7 +2110,15 @@ def manager_messages():
     ))
     if status_filter:
         query = query.filter_by(status=status_filter)
-    messages = query.order_by(ManagerMessage.created_at.desc()).all()
+    tab = request.args.get('tab', 'phone')
+    # רק בלשונית הטלפון, ו-100 בכל עמוד (קודם נטענו כל ההודעות אי פעם, גם בלשוניות האחרות)
+    PER = 100
+    page = max(1, request.args.get('page', 1, type=int))
+    total = query.count() if tab == 'phone' else 0
+    pages = max(1, (total + PER - 1) // PER)
+    page = min(page, pages)
+    messages = (query.order_by(ManagerMessage.created_at.desc()).offset((page - 1) * PER).limit(PER).all()
+                if tab == 'phone' else [])
     # טלפון -> מספר לקוח (גם טלפון נוסף של לקוח), כדי שהטלפון יהיה קישור לכרטיס הלקוח
     from models import CustomerPhone
     phones = {m.phone for m in messages if m.phone}
@@ -2125,10 +2129,9 @@ def manager_messages():
             customer_ids[row[0]] = row[1]
         for row in Customer.query.filter(Customer.phone.in_(phones)).with_entities(Customer.phone, Customer.id):
             customer_ids[row[0]] = row[1]
-    tab = request.args.get('tab', 'phone')
     if tab not in ('phone', 'inbox', 'customers', 'nedarim', 'institutions'):
         tab = 'phone'
-    ctx = dict(messages=messages, status_filter=status_filter, timedelta=timedelta,
+    ctx = dict(messages=messages, status_filter=status_filter, timedelta=timedelta, page=page, pages=pages, total=total,
                customer_ids=customer_ids, tab=tab, counts=_message_tab_counts())
     if tab == 'inbox':
         from models import GeneralInboxMessage
@@ -2249,7 +2252,7 @@ def institution_chat(inst_id):
         elif body:
             ICH.add_from_admin(inst, body)
             flash('✔ התשובה נשלחה' + (' - וגם למייל של המוסד' if (inst.notify_email or inst.email) else ''))
-        return redirect(url_for('admin.institution_chat', inst_id=inst.id) + '#end')
+        return redirect(url_for('admin.institution_chat', inst_id=inst.id))
     msgs = (InstitutionChatMessage.query.filter_by(institution_id=inst.id)
             .order_by(InstitutionChatMessage.created_at.asc()).all())
     return render_template('admin/institution_chat.html', inst=inst, msgs=[ICH.serialize(m) | {'sender': m.sender} for m in msgs],

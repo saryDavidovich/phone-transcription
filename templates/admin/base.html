@@ -96,6 +96,25 @@
   document.addEventListener('turbo:load', restore);
 })();
 </script>
+<script>
+/* צ'אטים (שיחות עם לקוחות, מיילים, מוסדות): כל טעינה/רענון נפתחים בסוף השיחה - ההודעה האחרונה גלויה */
+(function () {
+  if (window.__chatScroll) return;
+  window.__chatScroll = true;
+  function bottom(root) {
+    (root || document).querySelectorAll('[data-chat-scroll]').forEach(function (el) { el.scrollTop = el.scrollHeight; });
+  }
+  function run() {
+    bottom(); requestAnimationFrame(function () { bottom(); }); setTimeout(bottom, 120); setTimeout(bottom, 400);
+    if (document.querySelector('[data-chat-page]')) {
+      var go = function () { window.scrollTo(0, document.documentElement.scrollHeight); };
+      setTimeout(go, 300);
+    }
+  }
+  document.addEventListener('turbo:load', run);
+  document.addEventListener('toggle', function (e) { if (e.target.open) bottom(e.target); }, true);
+})();
+</script>
 <meta name="dial-tpl" content="{{ dial_tpl|default('tel:{phone}') }}">
 <style>
   .pc-tools{display:inline-flex;gap:2px;vertical-align:middle;margin-inline-start:4px;white-space:nowrap}

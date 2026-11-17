@@ -19,7 +19,7 @@ SUBJECT_RE = re.compile(r'מוסד\s*#\s*(\d+)')
 
 
 def subject_for(inst):
-    return f'הודעה מהנהלת תמלול פון - מוסד #{inst.id}'
+    return f'הודעה מצוות תמלול פון - מוסד #{inst.id}'
 
 
 def institution_emails(inst):
@@ -77,11 +77,11 @@ def _send_email(flask_app, to, inst_id, inst_name, body, message_id, in_reply_to
         from services import email_layout as L
         from routes.email_inbound import TRANSCRIBE_INBOUND_EMAIL
         base = os.environ.get('APP_BASE_URL', os.environ.get('APP_URL', '')).rstrip('/')
-        card = (L.title('הודעה מהנהלת תמלול פון') + L.meta(inst_name or '') + L.text_block(body)
+        card = (L.title('הודעה מצוות תמלול פון') + L.meta(inst_name or '') + L.text_block(body)
                 + (L.button(f'{base}/institution/contact', 'להתכתבות באזור המוסד') if base else '')
                 + L.signature(can_reply=True))
         msg = Mail(from_email=Email(os.environ.get('SENDGRID_FROM_EMAIL', os.environ.get('GMAIL_USER', '')), 'תמלול פון'),
-                   to_emails=to, subject=f'הודעה מהנהלת תמלול פון - מוסד #{inst_id}',
+                   to_emails=to, subject=f'הודעה מצוות תמלול פון - מוסד #{inst_id}',
                    html_content=L.wrap(card, show_circles=False))
         msg.reply_to = ReplyTo(TRANSCRIBE_INBOUND_EMAIL, 'תמלול פון')
         msg.header = Header('Message-ID', message_id)
