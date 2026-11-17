@@ -90,6 +90,7 @@
     var d = null;
     try { d = JSON.parse(sessionStorage.getItem('keepScroll') || 'null'); sessionStorage.removeItem('keepScroll'); } catch (e) {}
     if (!d || d.p !== location.pathname || d.pg !== pageOf(location.href) || location.hash || Date.now() - d.t > 30000) return;
+    window.__restoreY = { y: d.y, t: Date.now() };   // לטעינה מדורגת: לחזור לאותו מקום אחרי שהתוכן הושלם
     var go = function () { window.scrollTo(0, d.y); };
     go(); requestAnimationFrame(go); setTimeout(go, 80); setTimeout(go, 250);
   }

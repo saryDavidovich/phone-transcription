@@ -236,6 +236,24 @@
   <div style="font-size:13px;color:#4a5568">שם המשתמש והסיסמה של המנהל מוגדרים רק במשתני הסביבה בשרת (Railway): <b>ADMIN_USERNAME</b> ו-<b>ADMIN_PASSWORD</b>. לשינוי - משנים אותם שם ומפעילים מחדש.</div>
 </div>
 
+<div class="card" style="margin-top:24px" id="slow-pages">
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px">
+    <div style="font-size:16px;font-weight:700">🐢 עמודים איטיים אחרונים</div>
+    {% if slow_pages %}<form method="post" action="{{ url_for('admin.clear_slow_pages') }}"><button class="btn btn-sm" type="submit">ניקוי הרשימה</button></form>{% endif %}
+  </div>
+  <div style="font-size:13px;color:var(--text2);margin-bottom:10px">כל עמוד בממשק הניהול שלקח יותר מ-0.4 שניות נרשם כאן (30 האחרונים) - כדי לדעת בדיוק מה לזרז.</div>
+  {% if slow_pages %}
+  <div class="table-responsive"><table style="width:100%;font-size:12.5px">
+    <thead><tr><th style="text-align:right">מתי</th><th style="text-align:right">זמן</th><th style="text-align:right">שאילתות</th><th style="text-align:right">עמוד</th></tr></thead>
+    <tbody>{% for r in slow_pages %}
+      <tr><td style="white-space:nowrap">{{ r.at[5:16] }}</td>
+        <td style="white-space:nowrap;font-weight:700;color:{{ 'var(--red)' if r.ms > 2000 else ('var(--amber)' if r.ms > 1000 else 'var(--text)') }}">{{ '%.1f'|format(r.ms / 1000) }} שנ׳</td>
+        <td>{{ r.q }}</td><td dir="ltr" style="text-align:right;word-break:break-all">{{ r.m }} {{ r.p }}</td></tr>
+    {% endfor %}</tbody>
+  </table></div>
+  {% else %}<div style="font-size:13px;color:var(--text2)">אין עמודים איטיים.</div>{% endif %}
+</div>
+
 <div class="card" style="margin-top:24px">
   <div style="font-size:16px;font-weight:700;margin-bottom:20px">🧪 בדיקת תמלול — העלאת קובץ</div>
   <a href="{{ url_for('admin.test_transcribe') }}" class="btn btn-primary">פתח עמוד בדיקת תמלול</a>

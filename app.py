@@ -246,9 +246,36 @@ def _install_request_timing(app):
             resp.headers['Server-Timing'] = f'app;dur={ms:.0f};desc="{q} queries"'
             if request.path.startswith('/admin') and ms > 400:
                 logging.getLogger('timing').warning(f'SLOW {ms / 1000:.2f}s {q} queries {request.method} {request.path}')
+                _record_slow(ms, q, request.method, request.full_path.rstrip('?'))
         except Exception:
             pass
         return resp
+
+
+def _record_slow(ms, queries, method, path):
+    """30 העמודים האיטיים האחרונים בממשק הניהול - נשמרים בהגדרות (slow_pages) ומוצגים בעמוד ההגדרות.
+    נכתב ברקע, בחיבור נפרד - לא מאט את הבקשה עצמה."""
+    import json
+    import threading
+    from datetime import datetime as _dt
+    engine = db.engine          # בתוך הבקשה (בתהליכון אין הקשר אפליקציה)
+
+    def _w():
+        try:
+            with engine.begin() as conn:
+                row = conn.execute(db.text("SELECT value FROM settings WHERE key='slow_pages' FOR UPDATE")).fetchone()
+                items = json.loads(row[0]) if row and row[0] else []
+                from zoneinfo import ZoneInfo
+                items.insert(0, {'at': _dt.now(ZoneInfo('Asia/Jerusalem')).strftime('%Y-%m-%d %H:%M:%S'), 'ms': int(ms), 'q': int(queries),
+                                 'm': method, 'p': path[:200]})
+                val = json.dumps(items[:30], ensure_ascii=False)
+                if row:
+                    conn.execute(db.text("UPDATE settings SET value=:v WHERE key='slow_pages'"), {'v': val})
+                else:
+                    conn.execute(db.text("INSERT INTO settings (key, value) VALUES ('slow_pages', :v)"), {'v': val})
+        except Exception:
+            pass
+    threading.Thread(target=_w, daemon=True).start()
 
 
 def _install_gzip(app):
@@ -579,6 +606,19 @@ def _migrate_db():
         # תמלול של מוסד בלי יתרה מספיקה - ממתין לתשלום (כמו לקוח), נשלח במייל אחרי טעינה
         "ALTER TABLE institution_uploads ADD COLUMN IF NOT EXISTS send_to VARCHAR(200)",
         "ALTER TABLE institution_uploads ADD COLUMN IF NOT EXISTS charged BOOLEAN",
+        # אינדקסים למהירות (create_all לא מוסיף אינדקסים לטבלאות קיימות - לכן במפורש; IF NOT EXISTS = בטוח)
+        "CREATE INDEX IF NOT EXISTS ix_transactions_recording_id ON transactions (recording_id)",
+        "CREATE INDEX IF NOT EXISTS ix_recordings_customer_created ON recordings (customer_id, created_at DESC)",
+        "CREATE INDEX IF NOT EXISTS ix_recordings_created_at ON recordings (created_at)",
+        "CREATE INDEX IF NOT EXISTS ix_recordings_status ON recordings (status)",
+        "CREATE INDEX IF NOT EXISTS ix_transactions_customer_created ON transactions (customer_id, created_at DESC)",
+        "CREATE INDEX IF NOT EXISTS ix_transactions_created_at ON transactions (created_at)",
+        "CREATE INDEX IF NOT EXISTS ix_manager_messages_status_created ON manager_messages (status, created_at DESC)",
+        "CREATE INDEX IF NOT EXISTS ix_manager_messages_created_at ON manager_messages (created_at DESC)",
+        "CREATE INDEX IF NOT EXISTS ix_customer_messages_unread ON customer_messages (direction, is_read)",
+        "CREATE INDEX IF NOT EXISTS ix_general_inbox_read_updated ON general_inbox_messages (is_read, updated_at DESC)",
+        "CREATE INDEX IF NOT EXISTS ix_email_replies_customer_heard ON email_replies (customer_id, heard_at)",
+        "CREATE INDEX IF NOT EXISTS ix_inst_chat_inst_dir_read ON institution_chat_messages (institution_id, direction, is_read)",
         # ניהול תלמידים: קבוצות, זיכוי חודשי אוטומטי, התראת יתרה נמוכה
         "ALTER TABLE customers ADD COLUMN IF NOT EXISTS student_group_id INTEGER REFERENCES student_groups(id) ON DELETE SET NULL",
         "CREATE INDEX IF NOT EXISTS ix_customers_student_group_id ON customers (student_group_id)",

@@ -290,6 +290,7 @@
 </details>
 
 <details class="cd-sec" data-sec="recordings"><summary>🎧 הקלטות ({{ recordings_total }})</summary>
+{% if lite %}<div class="lazy-ph" data-lazy="recordings"><span class="lz-spin"></span> טוען...</div>{% else %}
 <div id="recNewBanner" onclick="location.reload()" style="margin-top:20px"></div>
 <div style="margin-top:20px" class="table-card">
   <div class="table-header"><span class="table-title">🎧 הקלטות</span>
@@ -353,9 +354,11 @@ function confirmRecDelete() {
   return confirm('למחוק ' + checked + ' הקלטות נבחרות? פעולה זו אינה הפיכה!');
 }
 </script>
+{% endif %}
 </details>
 
 <details class="cd-sec" data-sec="ocr"><summary>📄 זיהוי כתב יד (OCR)</summary>
+{% if lite %}<div class="lazy-ph" data-lazy="ocr"><span class="lz-spin"></span> טוען...</div>{% else %}
 <div style="margin-top:20px" class="table-card">
   <div class="table-header"><span class="table-title">📄 זיהוי כתב יד (OCR)</span></div>
   <table>
@@ -419,6 +422,7 @@ function confirmOcrDelete() {
    לפני כל תיקון). עלות ה"הגהה" (התיקונים) מוצגת בנפרד בטבלה למטה, עם סימון
    ברור לאיזו הקראה כל תיקון שייך - כי אפשר כמה סבבי הגהה נפרדים על אותה
    הקראה (ראה models.ProofingRound). #}
+{% endif %}
 </details>
 
 {% if excel_templates %}
@@ -445,6 +449,7 @@ function confirmOcrDelete() {
 {% endif %}
 
 <details class="cd-sec" data-sec="dictation"><summary>🗣️ הקראה ראשונית (כתבי יד)</summary>
+{% if lite %}<div class="lazy-ph" data-lazy="dictation"><span class="lz-spin"></span> טוען...</div>{% else %}
 <div style="margin-top:20px" class="table-card">
   <div class="table-header"><span class="table-title">🗣️ הקראה ראשונית (כתבי יד)</span></div>
   <form method="POST" action="/admin/customers/{{ customer.id }}/manuscript-upload" enctype="multipart/form-data"
@@ -494,11 +499,13 @@ function confirmOcrDelete() {
     </tbody>
   </table>
 </div>
+{% endif %}
 </details>
 
 {# "✏️ הגהות" - כל סבב תיקונים בנפרד, עם עמודת "שייך להקראה" שמראה בבירור
    לאיזו הקראה מקורית (מהטבלה למעלה) כל סבב שייך - ראה models.ProofingRound. #}
 <details class="cd-sec" data-sec="proofing"><summary>✏️ הגהות (תיקונים)</summary>
+{% if lite %}<div class="lazy-ph" data-lazy="proofing"><span class="lz-spin"></span> טוען...</div>{% else %}
 <div style="margin-top:20px" class="table-card">
   <div class="table-header"><span class="table-title">✏️ הגהות (תיקונים)</span></div>
   <table>
@@ -524,6 +531,7 @@ function confirmOcrDelete() {
     </tbody>
   </table>
 </div>
+{% endif %}
 </details>
 
 <details class="cd-sec" data-sec="manual"><summary>🔁 תמלול חוזר / הוספת הקלטה ידנית</summary>
@@ -564,6 +572,7 @@ function confirmOcrDelete() {
 </details>
 
 <details class="cd-sec" data-sec="money"><summary>💳 עסקאות ודוח עלויות</summary>
+{% if lite %}<div class="lazy-ph" data-lazy="money"><span class="lz-spin"></span> טוען...</div>{% else %}
 <div style="margin-top:20px" class="table-card">
   <div id="cost-report" style="padding:12px 16px;border-bottom:1px solid #2d3561;display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
     <div style="font-weight:700;flex-basis:100%">📑 דוח עלויות ללקוח (Excel)</div>
@@ -603,6 +612,7 @@ function confirmOcrDelete() {
     </tbody>
   </table>
 </div>
+{% endif %}
 </details>
 
 <details class="cd-sec" data-sec="mail"><summary>📧 מיילים לאחרים ואנשי קשר ({{ contacts|length }} אנשי קשר{% if new_replies_count %}, {{ new_replies_count }} תגובות שלא נשמעו{% endif %})</summary>
@@ -680,6 +690,7 @@ function confirmOcrDelete() {
 </details>
 
 <details class="cd-sec" data-sec="threads"><summary>💬 שיחות עם הלקוח ({{ threads|length }})</summary>
+{% if lite %}<div class="lazy-ph" data-lazy="threads"><span class="lz-spin"></span> טוען...</div>{% else %}
 <div style="margin-top:20px" class="table-card">
   <div class="table-header"><span class="table-title">💬 שיחה חדשה עם הלקוח</span></div>
   <form method="POST" action="/admin/customers/{{ customer.id }}/send-message"
@@ -757,6 +768,7 @@ function confirmOcrDelete() {
   </form>
 </div>
 {% endfor %}
+{% endif %}
 </details>
 {% include 'admin/_handled_dialog.html' %}
 
@@ -769,7 +781,60 @@ function confirmOcrDelete() {
   .cd-sec[open]>summary{border-bottom:1px solid var(--border,#2d3561)}
   .cd-sec>*:not(summary){margin:12px !important}
   .cd-tools{display:flex;gap:8px;justify-content:flex-start;margin-top:18px}
+  .lazy-ph{display:flex;align-items:center;gap:10px;color:var(--text2);font-size:13px;padding:14px 4px}
+  .lz-spin{width:16px;height:16px;border:2.5px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:lzs .7s linear infinite;display:inline-block}
+  @keyframes lzs{to{transform:rotate(360deg)}}
 </style>
+<script>
+/* טעינה מדורגת: העמוד עולה מיד עם הפרטים והכותרות; החלקים הכבדים (הקלטות, OCR, הקראה, הגהות, עסקאות,
+   שיחות) נטענים ברקע מיד אחרי זה - או מיד כשפותחים אחד מהם - ומוחלפים במקום "טוען..." */
+(function () {
+  if (!document.querySelector('.lazy-ph')) return;
+  var started = null;
+  function runScripts(el) {
+    el.querySelectorAll('script').forEach(function (old) {
+      var s = document.createElement('script');
+      for (var i = 0; i < old.attributes.length; i++) s.setAttribute(old.attributes[i].name, old.attributes[i].value);
+      s.textContent = old.textContent; old.replaceWith(s);
+    });
+  }
+  function load() {
+    if (started) return started;
+    var u = new URL(location.href); u.searchParams.set('full', '1'); u.hash = '';
+    started = fetch(u.toString(), { credentials: 'same-origin', headers: { 'X-Lazy': '1' } })
+      .then(function (r) { if (!r.ok) throw new Error(r.status); return r.text(); })
+      .then(function (html) {
+        var doc = new DOMParser().parseFromString(html, 'text/html');
+        document.querySelectorAll('.lazy-ph').forEach(function (ph) {
+          var det = ph.closest('details.cd-sec');
+          var src = doc.querySelector('details.cd-sec[data-sec="' + det.dataset.sec + '"]');
+          if (!src) return;
+          Array.prototype.slice.call(det.children).forEach(function (c) { if (c.tagName !== 'SUMMARY') c.remove(); });
+          var sum = src.querySelector('summary'); if (sum) det.querySelector('summary').innerHTML = sum.innerHTML;
+          Array.prototype.slice.call(src.children).forEach(function (c) {
+            if (c.tagName !== 'SUMMARY') det.appendChild(document.importNode(c, true));
+          });
+          runScripts(det);
+        });
+        document.dispatchEvent(new Event('turbo:load'));   // כפתורי חיוג/העתקה, צ'אטים בסוף וכו' גם בתוכן החדש
+        var ry = window.__restoreY;
+        if (ry && Date.now() - ry.t < 8000) window.scrollTo(0, ry.y);
+        if (location.hash) { var t = document.getElementById(location.hash.slice(1)); if (t) t.scrollIntoView(); }
+      })
+      .catch(function () {
+        document.querySelectorAll('.lazy-ph').forEach(function (ph) {
+          ph.innerHTML = 'הטעינה נכשלה - <a href="?full=1" style="color:var(--accent)">טעינת העמוד המלא</a>';
+        });
+      });
+    return started;
+  }
+  document.addEventListener('toggle', function (e) {
+    if (e.target.open && e.target.querySelector && e.target.querySelector('.lazy-ph')) load();
+  }, true);
+  if (document.querySelector('details.cd-sec[open] .lazy-ph')) load();
+  else setTimeout(load, 600);
+})();
+</script>
 <script>
 (function () {   // כותרות מתקפלות: כניסה חדשה לכרטיס - הכל סגור. רענון / חזרה לאותו כרטיס (למשל אחרי שמירת טופס) - נשאר מה שהיה פתוח
   var secs = document.querySelectorAll('details.cd-sec');

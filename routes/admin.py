@@ -951,20 +951,28 @@ def customer_detail(id):
     # בלי עמודות כבדות (קבצים/תמלולים/JSON) - העמוד מציג רק נתוני רשימה
     # לקוח עם אלפי הקלטות/עסקאות - מציגים את האחרונות בלבד (מהירות), עם "הצג הכל"
     show_all = request.args.get('all') == '1'
+    # טעינה מדורגת: בכניסה רגילה העמוד עולה בלי החלקים הכבדים (רק כותרות ומספרים), והדפדפן מביא
+    # אותם מיד אחר כך ברקע (?full=1) ומשלים אותם במקום (ראו lazy-ph בתבנית)
+    lite = request.args.get('full') != '1' and not show_all
     LIST_LIMIT = None if show_all else 150
     rec_q = Recording.query.options(*_light(Recording)).filter_by(customer_id=id).order_by(Recording.created_at.desc())
     txn_q = Transaction.query.filter_by(customer_id=id).order_by(Transaction.created_at.desc())
-    recordings = rec_q.limit(LIST_LIMIT).all() if LIST_LIMIT else rec_q.all()
-    transactions = txn_q.limit(LIST_LIMIT).all() if LIST_LIMIT else txn_q.all()
-    recordings_total = Recording.query.filter_by(customer_id=id).count() if LIST_LIMIT and len(recordings) >= LIST_LIMIT else len(recordings)
-    transactions_total = Transaction.query.filter_by(customer_id=id).count() if LIST_LIMIT and len(transactions) >= LIST_LIMIT else len(transactions)
-    ocr_results = OcrResult.query.options(*_light(OcrResult)).filter_by(customer_id=id).order_by(OcrResult.created_at.desc()).all()
-    manuscript_pages = ManuscriptPage.query.options(*_light(ManuscriptPage)).filter_by(customer_id=id).order_by(ManuscriptPage.created_at.desc()).all()
+    if lite:
+        recordings, transactions = [], []
+        recordings_total = Recording.query.filter_by(customer_id=id).count()
+        transactions_total = Transaction.query.filter_by(customer_id=id).count()
+    else:
+        recordings = rec_q.limit(LIST_LIMIT).all() if LIST_LIMIT else rec_q.all()
+        transactions = txn_q.limit(LIST_LIMIT).all() if LIST_LIMIT else txn_q.all()
+        recordings_total = Recording.query.filter_by(customer_id=id).count() if LIST_LIMIT and len(recordings) >= LIST_LIMIT else len(recordings)
+        transactions_total = Transaction.query.filter_by(customer_id=id).count() if LIST_LIMIT and len(transactions) >= LIST_LIMIT else len(transactions)
+    ocr_results = [] if lite else OcrResult.query.options(*_light(OcrResult)).filter_by(customer_id=id).order_by(OcrResult.created_at.desc()).all()
+    manuscript_pages = [] if lite else ManuscriptPage.query.options(*_light(ManuscriptPage)).filter_by(customer_id=id).order_by(ManuscriptPage.created_at.desc()).all()
     # כל סבבי ההגהה ששייכים לכל כתבי-היד של הלקוח הזה (יכול להיות כמה סבבים
     # על אותו כתב-יד - ראה models.ProofingRound) - כל שורה מסמנת בבירור
     # לאיזה הקראה מקורית היא שייכת (r.manuscript_page), כדי להבדיל בפרופיל
     # הלקוח בין עלות ההקראה הראשונית לבין עלות ההגהה.
-    proofing_rounds = (ProofingRound.query.options(*_light(ProofingRound)).join(ManuscriptPage)
+    proofing_rounds = [] if lite else (ProofingRound.query.options(*_light(ProofingRound)).join(ManuscriptPage)
                         .filter(ManuscriptPage.customer_id == id)
                         .order_by(ProofingRound.requested_at.desc()).all())
     threads = ConversationThread.query.filter_by(customer_id=id).order_by(ConversationThread.created_at.desc()).all()
@@ -972,13 +980,13 @@ def customer_detail(id):
     return render_template('admin/customer_detail.html',
         customer=customer, recordings=recordings, transactions=transactions,
         ocr_results=ocr_results, manuscript_pages=manuscript_pages, proofing_rounds=proofing_rounds,
-        threads=threads, timedelta=timedelta,
+        threads=threads, timedelta=timedelta, lite=lite,
         excel_templates=_excel_templates_for(customer),
         cust_defaults=_customer_defaults(customer),
         billing=_billing_info(customer),
         voice_messages=_voice_messages_for(customer.id),
         recordings_total=recordings_total, transactions_total=transactions_total,
-        msg_attachments=_attachments_for('customer_message_id', [m.id for t in threads for m in t.messages]),
+        msg_attachments={} if lite else _attachments_for('customer_message_id', [m.id for t in threads for m in t.messages]),
         all_institutions=Institution.query.order_by(Institution.name).all(),
         **_mail_and_tasks_for(customer))
 
@@ -1916,6 +1924,17 @@ def change_password():
     return redirect(url_for('admin.settings'))
 
 
+@admin_bp.route('/settings/slow-pages/clear', methods=['POST'])
+@login_required
+def clear_slow_pages():
+    s = Settings.query.filter_by(key='slow_pages').first()
+    if s:
+        s.value = '[]'
+        db.session.commit()
+    flash('✔ הרשימה נוקתה')
+    return redirect(url_for('admin.settings') + '#slow-pages')
+
+
 @admin_bp.route('/settings', methods=['GET', 'POST'])
 @login_required
 def settings():
@@ -2008,7 +2027,12 @@ def settings():
         'welcome_returning': get_setting('welcome_returning', 'שלום וברוכים השבים.'),
         'system_explanation': get_setting('system_explanation', 'מערכת התמלול מאפשרת לך להקליט הודעות שיתומללו ויישלחו אליך למייל או לפקס.'),
     }
-    return render_template('admin/settings.html', settings=current_settings)
+    import json as _json
+    try:
+        slow_pages = _json.loads(get_setting('slow_pages', '') or '[]')
+    except Exception:
+        slow_pages = []
+    return render_template('admin/settings.html', settings=current_settings, slow_pages=slow_pages)
 
 
 @admin_bp.route('/maintenance')
@@ -2135,8 +2159,11 @@ def manager_messages():
                customer_ids=customer_ids, tab=tab, counts=_message_tab_counts())
     if tab == 'inbox':
         from models import GeneralInboxMessage
-        ctx['threads'] = GeneralInboxMessage.query.order_by(
-            GeneralInboxMessage.is_read.asc(), GeneralInboxMessage.updated_at.desc()).all()
+        q = GeneralInboxMessage.query.order_by(GeneralInboxMessage.is_read.asc(), GeneralInboxMessage.updated_at.desc())
+        total = q.count()
+        pages = max(1, (total + PER - 1) // PER)
+        page = min(max(1, request.args.get('page', 1, type=int)), pages)
+        ctx.update(threads=q.offset((page - 1) * PER).limit(PER).all(), page=page, pages=pages, total=total)
     elif tab == 'customers':
         ctx.update(_customer_threads_overview())
     elif tab == 'institutions':
@@ -2275,17 +2302,23 @@ def _customer_threads_overview():
                             'last': last, 'count': len(ins)})
         pending.sort(key=lambda p: p['last'].created_at, reverse=True)
     # כל הלקוחות שהייתה איתם התכתבות
+    # 100 לקוחות בכל עמוד (האחרונים קודם)
+    PER = 100
+    total = db.session.query(_f.count(_f.distinct(CustomerMessage.customer_id))).scalar() or 0
+    pages = max(1, (total + PER - 1) // PER)
+    page = min(max(1, request.args.get('page', 1, type=int)), pages)
     rows = (db.session.query(CustomerMessage.customer_id,
                              _f.count(CustomerMessage.id),
                              _f.max(CustomerMessage.created_at),
                              _f.count(_f.distinct(CustomerMessage.thread_id)))
             .group_by(CustomerMessage.customer_id)
-            .order_by(_f.max(CustomerMessage.created_at).desc()).all())
+            .order_by(_f.max(CustomerMessage.created_at).desc()).offset((page - 1) * PER).limit(PER).all())
     custs = {c.id: c for c in Customer.query.filter(Customer.id.in_([r[0] for r in rows])).all()} if rows else {}
     last_notes = {}
     for cid, note, at in (db.session.query(CustomerMessage.customer_id, CustomerMessage.handled_note,
                                            CustomerMessage.handled_at)
-                          .filter(CustomerMessage.handled_note.isnot(None))
+                          .filter(CustomerMessage.handled_note.isnot(None),
+                                  CustomerMessage.customer_id.in_([r[0] for r in rows] or [0]))
                           .order_by(CustomerMessage.handled_at.asc()).all()):
         last_notes[cid] = (note, at)
     pending_by_cust = {}
@@ -2294,7 +2327,7 @@ def _customer_threads_overview():
     corr = [{'customer': custs.get(r[0]), 'messages': r[1], 'last_at': r[2], 'threads': r[3],
              'note': last_notes.get(r[0]), 'pending': pending_by_cust.get(r[0], 0)}
             for r in rows if custs.get(r[0])]
-    return {'pending_threads': pending, 'correspondents': corr}
+    return {'pending_threads': pending, 'correspondents': corr, 'page': page, 'pages': pages, 'total': total}
 
 
 # --- קריין והודעות מערכת (services/narrator.py) ---

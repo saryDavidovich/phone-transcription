@@ -58,3 +58,11 @@
   </table>
   {% endif %}
 </div>
+
+{% if pages > 1 %}
+<div style="display:flex;justify-content:center;align-items:center;gap:10px;margin:14px 0;font-size:13px">
+  {% if page > 1 %}<a class="btn btn-sm btn-outline-primary" href="{{ url_for('admin.manager_messages', tab=tab, page=page-1) }}">&rarr; הקודמים</a>{% endif %}
+  <span style="color:var(--text2)">עמוד {{ page }} מתוך {{ pages }} · {{ total }}</span>
+  {% if page < pages %}<a class="btn btn-sm btn-outline-primary" href="{{ url_for('admin.manager_messages', tab=tab, page=page+1) }}">הבאים &larr;</a>{% endif %}
+</div>
+{% endif %}
