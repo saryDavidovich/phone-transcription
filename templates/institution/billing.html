@@ -1,16 +1,22 @@
 {% extends "institution/base.html" %}
 {% block title %}הגדרות חיוב{% endblock %}
 {% block content %}
+<div class="page">
 <h1>הגדרות חיוב</h1>
 
-<div class="grid grid-2" style="margin-bottom:24px;">
-  <div class="card">
-    <div class="stat-value">{{ success_count }}</div>
-    <div class="stat-label">חיובים שבוצעו בפועל</div>
+<div class="grid grid-3 mb-18">
+  <div class="card stat-card">
+    <span class="ic" style="background:var(--accent-soft); color:var(--accent2);">₪</span>
+    <div><div class="stat-value">{{ "%.2f"|format(inst.balance or 0) }} ₪</div><div class="stat-label">יתרת המוסד</div></div>
   </div>
-  <div class="card">
-    <div class="stat-value">{{ "%.2f"|format(inst.balance or 0) }} ₪</div>
-    <div class="stat-label">יתרת מוסד נוכחית</div>
+  <div class="card stat-card">
+    <span class="ic" style="background:{{ 'var(--amber-soft)' if pending_count else 'var(--surface3)' }}; color:{{ 'var(--amber)' if pending_count else 'var(--text2)' }};">⏳</span>
+    <div><div class="stat-value">{{ pending_count }}{% if pending_count %} <span style="font-size:14px; font-weight:600; color:var(--text2);">({{ "%.2f"|format(pending_sum) }} ₪)</span>{% endif %}</div>
+      <div class="stat-label">תמלולים ממתינים לטעינה</div></div>
+  </div>
+  <div class="card stat-card">
+    <span class="ic" style="background:var(--blue-soft); color:var(--blue);">✓</span>
+    <div><div class="stat-value">{{ success_count }}</div><div class="stat-label">טעינות שבוצעו</div></div>
   </div>
 </div>
 
@@ -18,16 +24,37 @@
   <div class="flash">חיבור נדרים פלוס לא הוגדר עדיין בצד השרת - נא להגדיר NEDARIM_MOSAD ו-NEDARIM_API_VALID.</div>
 {% endif %}
 
-<div class="card" style="max-width:480px;">
-  <h2 style="font-size:16px; margin-bottom:14px;">טעינת יתרה בכרטיס אשראי</h2>
+<div class="grid grid-2 mb-18" style="align-items:stretch;">
+  <div class="card card-flex">
+    <div class="card-head"><span class="ic">💳</span><h2>טעינת יתרה בכרטיס אשראי</h2></div>
+    <div class="card-sub">פרטי הכרטיס מוזנים בחלון המאובטח של נדרים פלוס ולא מגיעים אלינו.</div>
+    <div class="card-body">
+      <div class="field">
+        <label for="topupAmount">סכום לטעינה (₪)</label>
+        <input class="input" id="topupAmount" type="number" min="1" value="1000">
+      </div>
+      <iframe id="NedarimFrame" scrolling="no" style="width:100%;border:none;height:0"></iframe>
+      <div class="card-actions">
+        <button id="payBtn" class="btn btn-block" {{ 'disabled' if not nedarim_configured }}>תשלום</button>
+        <div id="payMsg" style="font-size:13px; margin-top:10px;"></div>
+      </div>
+    </div>
+  </div>
 
-  <label style="font-size:13px; color:var(--text2);">סכום לטעינה (₪)</label>
-  <input id="topupAmount" type="number" min="1" value="1000" style="width:100%; margin:6px 0 14px; padding:10px; border-radius:8px; border:1px solid var(--border); background:var(--surface2); color:var(--text);">
-
-  <iframe id="NedarimFrame" scrolling="no" style="width:100%;border:none;height:0"></iframe>
-
-  <button id="payBtn" class="btn" style="width:100%; margin-top:10px;" {{ 'disabled' if not nedarim_configured }}>תשלום</button>
-  <div id="payMsg" style="font-size:13px; margin-top:10px;"></div>
+  <div class="card card-flex">
+    <div class="card-head"><span class="ic">📑</span><h2>דוח עלויות (Excel)</h2></div>
+    <div class="card-sub">טעינות, תמלולים של המוסד, זיכויים לתלמידים ושימוש מפורט לפי תלמיד. בלי תאריכים = כל התקופה.</div>
+    <div class="card-body">
+      <div class="row-2">
+        <div class="field"><label for="crFrom">מתאריך</label><input class="input" type="date" id="crFrom"></div>
+        <div class="field"><label for="crTo">עד תאריך</label><input class="input" type="date" id="crTo"></div>
+      </div>
+      <div class="card-actions">
+        <a class="btn btn-block" href="{{ url_for('institution_billing.cost_report') }}" style="text-decoration:none;"
+           onclick="this.href='{{ url_for('institution_billing.cost_report') }}?from='+document.getElementById('crFrom').value+'&to='+document.getElementById('crTo').value">הורדת הדוח</a>
+      </div>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -104,32 +131,29 @@
 })();
 </script>
 
-<div class="card" style="max-width:480px; margin-top:20px;">
-  <h2 style="font-size:16px; margin-bottom:6px;">דוח עלויות (Excel)</h2>
-  <p style="font-size:12.5px; color:var(--text2); margin-bottom:10px;">טעינות, תמלולים של המוסד, זיכויים לתלמידים ושימוש מפורט לפי תלמיד. בלי תאריכים = כל התקופה.</p>
-  <div style="display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap;">
-    <div class="field" style="margin:0;"><label>מתאריך</label><input class="input" type="date" id="crFrom"></div>
-    <div class="field" style="margin:0;"><label>עד תאריך</label><input class="input" type="date" id="crTo"></div>
-    <a class="btn" href="{{ url_for('institution_billing.cost_report') }}" style="text-decoration:none;"
-       onclick="this.href='{{ url_for('institution_billing.cost_report') }}?from='+document.getElementById('crFrom').value+'&to='+document.getElementById('crTo').value">הורדת הדוח</a>
-  </div>
-</div>
-
-<div class="card" style="max-width:480px; margin-top:20px;">
-  <h2 style="font-size:16px; margin-bottom:10px;">היסטוריית חיובים</h2>
+<div class="card">
+  <div class="card-head" style="margin-bottom:12px;"><span class="ic">🧾</span><h2>היסטוריית חיובים</h2></div>
   {% if charges %}
-    <table style="width:100%; font-size:13px; color:var(--text2);">
-      <tr style="text-align:right; border-bottom:1px solid var(--border);"><th>תאריך</th><th>סכום</th><th>סטטוס</th></tr>
+  <div class="table-wrap">
+    <table style="font-size:13.5px;">
+      <tr><th>תאריך</th><th>סכום</th><th>סטטוס</th></tr>
       {% for c in charges %}
-      <tr style="border-bottom:1px solid var(--border);">
-        <td style="padding:6px 0;">{{ c.created_at.strftime('%d/%m/%Y %H:%M') }}</td>
-        <td>{{ "%.2f"|format(c.amount) }} ₪</td>
-        <td>{{ 'הצליח' if c.status == 'success' else ('נכשל' if c.status == 'failed' else ('עדכון ידני' if c.status == 'manual' else 'ממתין')) }}</td>
+      <tr>
+        <td>{{ c.created_at | il_time }}</td>
+        <td style="font-weight:600;">{{ "%.2f"|format(c.amount) }} ₪</td>
+        <td>
+          {% if c.status == 'success' %}<span class="badge badge-green">הצליח</span>
+          {% elif c.status == 'failed' %}<span class="badge badge-red">נכשל</span>
+          {% elif c.status == 'manual' %}<span class="badge badge-gray">עדכון ידני</span>
+          {% else %}<span class="badge badge-amber">ממתין</span>{% endif %}
+        </td>
       </tr>
       {% endfor %}
     </table>
+  </div>
   {% else %}
     <p style="color:var(--text2); font-size:13px;">אין עדיין חיובים.</p>
   {% endif %}
+</div>
 </div>
 {% endblock %}

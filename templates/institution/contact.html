@@ -1,12 +1,18 @@
 {% extends "institution/base.html" %}
 {% block title %}צור קשר{% endblock %}
 {% block content %}
+<div class="page-narrow">
 <h1>צור קשר</h1>
-<div class="card" style="max-width:480px;">
-  <p style="font-size:13px; color:var(--text2); margin-bottom:14px;">ההודעה תישלח ישירות להנהלת המערכת.</p>
+<div class="card">
+  <div class="card-head"><span class="ic">✉️</span><h2>הודעה להנהלת המערכת</h2></div>
+  <div class="card-sub">שאלה, בקשה או תקלה - ההודעה מגיעה ישירות אלינו, ונחזור אליכם בהקדם.</div>
   <form method="post">
-    <textarea name="message" required rows="5" placeholder="כתוב את ההודעה שלך כאן..." style="width:100%; padding:10px; border-radius:8px; border:1px solid var(--border); background:var(--surface2); color:var(--text); resize:vertical;"></textarea>
-    <button type="submit" class="btn" style="width:100%; margin-top:12px;">שליחה</button>
+    <div class="field">
+      <label for="contactMsg">ההודעה</label>
+      <textarea class="input" id="contactMsg" name="message" required rows="7" placeholder="כתבו כאן את ההודעה..." style="resize:vertical; min-height:140px;"></textarea>
+    </div>
+    <button type="submit" class="btn btn-block">שליחה</button>
   </form>
+</div>
 </div>
 {% endblock %}

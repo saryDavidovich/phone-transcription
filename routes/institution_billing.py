@@ -60,9 +60,12 @@ def billing_tab():
     ).limit(50).all()
     success_count = InstitutionChargeLog.query.filter_by(institution_id=inst.id, status='success').count()
     mosad = os.environ.get('NEDARIM_MOSAD', '')
+    from models import InstitutionUpload
+    pending = InstitutionUpload.query.filter_by(institution_id=inst.id, status='pending_payment').all()
     return render_template(
         'institution/billing.html',
         inst=inst, charges=charges, success_count=success_count,
+        pending_count=len(pending), pending_sum=round(sum(u.cost or 0 for u in pending), 2),
         nedarim_configured=bool(mosad),
     )
 

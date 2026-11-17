@@ -1,96 +1,106 @@
 {% extends "institution/base.html" %}
 {% block title %}הגדרות מוסד{% endblock %}
 {% block content %}
+<div class="page">
 <h1>הגדרות מוסד</h1>
 
-<div class="grid grid-2" style="align-items:start;">
-<div class="card" style="margin-bottom:20px;">
-  <h3 style="font-size:15px; margin-bottom:12px;">מגבלות ותפוצה</h3>
-  <form method="post">
-    <div class="field">
-      <label>מגבלת שימוש לתלמיד (בזמן)</label>
-      <div style="display:flex; gap:8px;">
-        <input class="input" name="max_minutes_per_period" type="number" min="1" step="1"
-               value="{{ inst.max_minutes_per_period|int if inst.max_minutes_per_period else '' }}"
-               placeholder="דקות" style="flex:1;">
-        <select class="input" name="limit_period" style="flex:1;">
-          <option value="day" {{ 'selected' if inst.limit_period == 'day' }}>ליום</option>
-          <option value="week" {{ 'selected' if inst.limit_period == 'week' }}>לשבוע</option>
-        </select>
+{# שני הכרטיסים העליונים הם טופס אחד (שמירה אחת לשניהם) #}
+<form method="post" class="grid grid-2 mb-18" style="align-items:stretch;">
+  <div class="card card-flex">
+    <div class="card-head"><span class="ic">⏱</span><h3>מגבלות שימוש לתלמידים</h3></div>
+    <div class="card-sub">כמה ומתי התלמידים יכולים להשתמש בשירות.</div>
+    <div class="card-body">
+      <div class="field">
+        <label>מגבלת דקות תמלול לתלמיד</label>
+        <div class="row-2">
+          <input class="input" name="max_minutes_per_period" type="number" min="1" step="1"
+                 value="{{ inst.max_minutes_per_period|int if inst.max_minutes_per_period else '' }}" placeholder="דקות (ריק = ללא הגבלה)">
+          <select class="input" name="limit_period">
+            <option value="day" {{ 'selected' if inst.limit_period == 'day' }}>ליום</option>
+            <option value="week" {{ 'selected' if inst.limit_period == 'week' }}>לשבוע</option>
+          </select>
+        </div>
+        <div class="hint">לדוגמה: 60 דקות ליום - כל תלמיד יוכל לתמלל עד שעה ביום.</div>
       </div>
-      <div style="font-size:12px; color:var(--text3); margin-top:6px;">
-        לדוגמה: 60 דקות ליום - כל תלמיד יוכל ליצור עד שעה של תמלולים ביום. השאירו ריק לביטול הגבלה.
+      <div class="field">
+        <label>שעות שימוש מותרות</label>
+        <div class="row-2">
+          <input class="input" name="allowed_hours_start" type="time" value="{{ inst.allowed_hours_start or '' }}" aria-label="משעה">
+          <input class="input" name="allowed_hours_end" type="time" value="{{ inst.allowed_hours_end or '' }}" aria-label="עד שעה">
+        </div>
+        <div class="hint">ריק = בכל שעות היממה.</div>
       </div>
+      <div class="card-actions"><button type="submit" class="btn btn-block">שמירת הגדרות</button></div>
     </div>
+  </div>
 
-    <div class="field">
-      <label>שעות שימוש מותרות לתלמידים</label>
-      <div style="display:flex; gap:8px;">
-        <input class="input" name="allowed_hours_start" type="time" value="{{ inst.allowed_hours_start or '' }}" style="flex:1;">
-        <input class="input" name="allowed_hours_end" type="time" value="{{ inst.allowed_hours_end or '' }}" style="flex:1;">
+  <div class="card card-flex">
+    <div class="card-head"><span class="ic">📨</span><h3>קבלת תמלולים</h3></div>
+    <div class="card-sub">לאן נשלחים תמלולים של תלמידים שאין להם מייל אישי.</div>
+    <div class="card-body">
+      <div class="field">
+        <label>מייל לקבלת התמלולים</label>
+        <input class="input" name="notify_email" type="email" value="{{ inst.notify_email or '' }}" placeholder="office@example.com">
       </div>
-    </div>
-
-    <div class="field">
-      <label>מייל לקבלת כל התמלולים (ברירת מחדל לתלמיד ללא מייל אישי)</label>
-      <input class="input" name="notify_email" value="{{ inst.notify_email or '' }}">
-    </div>
-
-    <div class="field">
-      <label>מספר פקס לקבלת כל התמלולים</label>
-      <input class="input" name="notify_fax" value="{{ inst.notify_fax or '' }}">
-    </div>
-
-    {% if topup_global_on %}
-    <div class="field">
-      <label style="display:flex;gap:8px;align-items:center;cursor:pointer;">
-        <input type="checkbox" name="allow_student_topup" value="1" {{ 'checked' if inst.allow_student_topup is not false }}>
-        לאפשר לתלמידים לטעון יתרה בעצמם
-      </label>
-      <div style="font-size:12px; color:var(--text3); margin-top:6px;">
-        הכסף שהתלמיד טוען נכנס ליתרה שלו ונשאר שלו - אי אפשר להורידו מהמוסד. הטעינות העצמיות מופיעות ברשימת התלמידים ובתנועות של כל תלמיד.
+      <div class="field">
+        <label>מספר פקס לקבלת התמלולים</label>
+        <input class="input" name="notify_fax" value="{{ inst.notify_fax or '' }}" placeholder="ריק = בלי פקס">
       </div>
+      {% if topup_global_on %}
+      <div class="field">
+        <label style="display:flex;gap:8px;align-items:center;cursor:pointer;color:var(--text);">
+          <input type="checkbox" name="allow_student_topup" value="1" style="width:auto" {{ 'checked' if inst.allow_student_topup is not false }}>
+          לאפשר לתלמידים לטעון יתרה בעצמם
+        </label>
+        <div class="hint">הכסף שהתלמיד טוען נשאר שלו - אי אפשר להורידו מהמוסד.</div>
+      </div>
+      {% endif %}
+      <div class="card-actions"><button type="submit" class="btn btn-block">שמירת הגדרות</button></div>
+    </div>
+  </div>
+</form>
+
+<div class="grid grid-2" style="align-items:stretch;">
+  <div class="card card-flex">
+    <div class="card-head"><span class="ic">👤</span><h3>מורשי כניסה נוספים</h3></div>
+    <div class="card-sub">אנשים נוספים שנכנסים לאותו חשבון, עם מייל או טלפון משלהם ואותה סיסמה.</div>
+    {% if inst.authorized_logins %}
+    <div style="margin-bottom:12px;">
+      {% for a in inst.authorized_logins %}
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; padding:8px 0; border-bottom:1px solid var(--border); font-size:13px;">
+        <span style="min-width:0; overflow:hidden; text-overflow:ellipsis;">{{ a.name }} · {{ a.email or a.phone }}</span>
+        <form method="post" action="{{ url_for('institution.remove_authorized') }}">
+          <input type="hidden" name="email" value="{{ a.email or '' }}">
+          <input type="hidden" name="phone" value="{{ a.phone or '' }}">
+          <button type="submit" class="btn btn-danger btn-sm">הסרה</button>
+        </form>
+      </div>
+      {% endfor %}
     </div>
     {% endif %}
-
-    <button type="submit" class="btn btn-block">שמירת הגדרות</button>
-  </form>
-</div>
-
-<div>
-<div class="card" style="margin-bottom:20px;">
-  <h3 style="font-size:15px; margin-bottom:8px;">מורשי כניסה נוספים</h3>
-  <p style="font-size:12px; color:var(--text3); margin-bottom:10px;">אנשים נוספים שיכולים להתחבר לאותו חשבון מוסד, עם מייל או טלפון משלהם ואותה סיסמה.</p>
-  {% for a in (inst.authorized_logins or []) %}
-  <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid var(--border); font-size:13px;">
-    <span>{{ a.name }} · {{ a.email or a.phone }}</span>
-    <form method="post" action="{{ url_for('institution.remove_authorized') }}">
-      <input type="hidden" name="email" value="{{ a.email or '' }}">
-      <input type="hidden" name="phone" value="{{ a.phone or '' }}">
-      <button type="submit" class="btn-sm btn-danger" style="border-radius:8px; border:none; cursor:pointer;">הסרה</button>
+    <form method="post" action="{{ url_for('institution.add_authorized') }}">
+      <div class="field"><label>שם</label><input class="input" name="auth_name" placeholder="שם מלא"></div>
+      <div class="row-2">
+        <div class="field"><label>מייל</label><input class="input" name="email" type="email" placeholder="מייל"></div>
+        <div class="field"><label>טלפון</label><input class="input" name="auth_phone" placeholder="טלפון"></div>
+      </div>
+      <div class="hint" style="margin:-6px 0 12px;">מספיק מייל או טלפון.</div>
+      <div class="card-actions"><button type="submit" class="btn btn-block">הוספה</button></div>
     </form>
   </div>
-  {% endfor %}
-  <form method="post" action="{{ url_for('institution.add_authorized') }}" style="margin-top:14px;">
-    <div class="field"><label>שם</label><input class="input" name="auth_name" placeholder="שם"></div>
-    <div class="field"><label>מייל</label><input class="input" name="email" placeholder="מייל (אפשר להשאיר ריק אם ממלאים טלפון)"></div>
-    <div class="field"><label>טלפון</label><input class="input" name="auth_phone" placeholder="טלפון (אפשר להשאיר ריק אם ממלאים מייל)"></div>
-    <button type="submit" class="btn btn-block">הוספה</button>
-  </form>
-</div>
 
-<div class="card">
-  <h3 style="font-size:15px; margin-bottom:12px;">{{ 'החלפת סיסמה' if inst.password_hash else 'הגדרת סיסמה' }}</h3>
-  <form method="post" action="{{ url_for('institution.change_password') }}" autocomplete="off">
-    {% if inst.password_hash %}
-    <div class="field"><label>הסיסמה הנוכחית</label><input class="input" type="password" name="current_password" required autocomplete="current-password"></div>
-    {% endif %}
-    <div class="field"><label>סיסמה חדשה</label><input class="input" type="password" name="password" required minlength="8" autocomplete="new-password"></div>
-    <div class="field"><label>אימות הסיסמה החדשה</label><input class="input" type="password" name="password2" required minlength="8" autocomplete="new-password"></div>
-    <div style="font-size:12px; color:var(--text3); margin-bottom:10px;">לפחות 8 תווים, עם אותיות וגם ספרות.</div>
-    <button type="submit" class="btn btn-block">שמירת הסיסמה</button>
-  </form>
-</div>
+  <div class="card card-flex">
+    <div class="card-head"><span class="ic">🔒</span><h3>{{ 'החלפת סיסמה' if inst.password_hash else 'הגדרת סיסמה' }}</h3></div>
+    <div class="card-sub">לפחות 8 תווים, עם אותיות וגם ספרות. אחרי ההחלפה שאר המכשירים המחוברים יתנתקו.</div>
+    <form method="post" action="{{ url_for('institution.change_password') }}" autocomplete="off">
+      {% if inst.password_hash %}
+      <div class="field"><label>הסיסמה הנוכחית</label><input class="input" type="password" name="current_password" required autocomplete="current-password"></div>
+      {% endif %}
+      <div class="field"><label>סיסמה חדשה</label><input class="input" type="password" name="password" required minlength="8" autocomplete="new-password"></div>
+      <div class="field"><label>אימות הסיסמה החדשה</label><input class="input" type="password" name="password2" required minlength="8" autocomplete="new-password"></div>
+      <div class="card-actions"><button type="submit" class="btn btn-block">שמירת הסיסמה</button></div>
+    </form>
+  </div>
 </div>
 </div>
 {% endblock %}

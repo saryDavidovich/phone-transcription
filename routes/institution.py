@@ -67,6 +67,48 @@ def institution_login_required(view):
     return wrapped
 
 
+_GH_ICONS = 'https://raw.githubusercontent.com/saryDavidovich/phone-transcription/main/static/pwa/'
+
+
+@institution_bp.route('/manifest.webmanifest')
+def pwa_manifest():
+    """התקנת אזור המוסד כתוכנה במחשב/בטלפון - סמל משלו (מסמך עם גלי קול, בצבעי אזור המוסד).
+    הסמלים נטענים מגיטהאב (נטפרי מאשרים תמונות לפי כתובת), והציור הווקטורי - גיבוי."""
+    import json
+    from urllib.parse import quote
+    from flask import make_response
+    path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'static', 'pwa', 'inst-icon.svg')
+    with open(path, encoding='utf-8') as f:
+        svg = 'data:image/svg+xml,' + quote(f.read(), safe='')
+    data = {
+        'name': 'תמלול - אזור מוסד', 'short_name': 'תמלול מוסד',
+        'description': 'ניהול תלמידים, תמלולים וחיובים של המוסד',
+        'lang': 'he', 'dir': 'rtl',
+        'id': '/institution/', 'start_url': '/institution/', 'scope': '/institution/',
+        'display': 'standalone', 'background_color': '#f3f5fa', 'theme_color': '#10b981',
+        'icons': [
+            {'src': _GH_ICONS + 'inst-icon-192.png', 'sizes': '192x192', 'type': 'image/png', 'purpose': 'any'},
+            {'src': _GH_ICONS + 'inst-icon-512.png', 'sizes': '512x512', 'type': 'image/png', 'purpose': 'any'},
+            {'src': _GH_ICONS + 'inst-icon-maskable-512.png', 'sizes': '512x512', 'type': 'image/png', 'purpose': 'maskable'},
+            {'src': svg, 'sizes': 'any', 'type': 'image/svg+xml', 'purpose': 'any'},
+        ],
+    }
+    resp = make_response(json.dumps(data, ensure_ascii=False).replace('"data:', '"data\\u003a'))
+    resp.mimetype = 'application/json'
+    resp.headers['Cache-Control'] = 'no-cache'
+    return resp
+
+
+@institution_bp.route('/sw.js')
+def pwa_service_worker():
+    from flask import send_from_directory
+    resp = send_from_directory(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'static', 'pwa'),
+                               'inst-sw.js', mimetype='application/javascript', max_age=0)
+    resp.headers['Cache-Control'] = 'no-cache'
+    resp.headers['Service-Worker-Allowed'] = '/institution/'
+    return resp
+
+
 @institution_bp.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
