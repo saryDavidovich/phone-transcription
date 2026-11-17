@@ -80,8 +80,11 @@ def pwa_manifest():
     path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'static', 'pwa', 'inst-icon.svg')
     with open(path, encoding='utf-8') as f:
         svg = 'data:image/svg+xml,' + quote(f.read(), safe='')
+    # השם מתחיל כמו כותרת העמוד ("מוסד - שם המוסד - ...") - כך החלון של התוכנה המותקנת מציג רק את
+    # הכותרת, בלי להוסיף את שם התוכנה לפניה פעם נוספת
+    inst_name = current_user.name if (current_user.is_authenticated and isinstance(current_user, Institution)) else ''
     data = {
-        'name': 'תמלול - אזור מוסד', 'short_name': 'תמלול מוסד',
+        'name': f'מוסד - {inst_name}' if inst_name else 'מוסד', 'short_name': (inst_name or 'מוסד')[:24],
         'description': 'ניהול תלמידים, תמלולים וחיובים של המוסד',
         'lang': 'he', 'dir': 'rtl',
         'id': '/institution/', 'start_url': '/institution/', 'scope': '/institution/',

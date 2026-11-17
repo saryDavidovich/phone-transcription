@@ -35,13 +35,22 @@
 .money.low { color:var(--red); }
 .sub { font-size:11.5px; color:var(--text3); }
 .row-actions { display:flex; gap:6px; justify-content:flex-end; }
-.bulkbar { position:sticky; bottom:14px; z-index:60; display:flex; align-items:center; gap:8px; flex-wrap:wrap;
-  background:#1c2333; color:#fff; padding:10px 14px; border-radius:14px; box-shadow:var(--shadow-lg); margin-top:14px; }
-.bulkbar .lbl { font-weight:700; font-size:13.5px; margin-left:6px; }
-.bulkbar .btn { background:rgba(255,255,255,.1); border:1px solid rgba(255,255,255,.14); color:#fff; padding:7px 12px; font-size:12.5px; }
-.bulkbar .btn:hover { background:rgba(255,255,255,.18); }
-.bulkbar .btn.danger:hover { background:#dc2626; }
+.bulkbar { position:fixed; bottom:18px; right:264px; left:24px; max-width:1040px; margin:0 auto; z-index:80;
+  display:flex; align-items:center; gap:8px; flex-wrap:wrap; background:var(--surface); color:var(--text);
+  border:1px solid rgba(16,185,129,.35); padding:10px 12px; border-radius:14px;
+  box-shadow:0 14px 38px -10px rgba(20,25,40,.28), 0 0 0 4px rgba(16,185,129,.08); animation:barIn .2s ease-out; }
+@keyframes barIn { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:none; } }
+.bulkbar .lbl { display:inline-flex; align-items:center; gap:6px; font-weight:700; font-size:13.5px; color:var(--accent2);
+  background:var(--accent-soft); padding:6px 12px; border-radius:10px; margin-left:4px; }
+.bulkbar .btn { background:var(--surface2); border:1px solid var(--border); color:var(--text); padding:7px 12px; font-size:12.5px; }
+.bulkbar .btn:hover { background:var(--surface3); transform:none; }
+.bulkbar .btn.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+.bulkbar .btn.primary:hover { background:var(--accent2); }
+.bulkbar .btn.danger { color:var(--red); }
+.bulkbar .btn.danger:hover { background:var(--red-soft); border-color:rgba(220,38,38,.25); }
 .bulkbar .spacer { flex:1; }
+body.has-bulk main { padding-bottom:110px; }
+@media (max-width:900px) { .bulkbar { right:14px; left:14px; } }
 .group-row { display:flex; align-items:center; gap:8px; padding:8px 0; border-bottom:1px solid var(--border); }
 .group-row form { display:flex; gap:6px; align-items:center; }
 .group-row input { flex:1; }
@@ -67,8 +76,9 @@
   .st-table tr.st td.c-actions .row-actions { justify-content:flex-start; }
   .toolbar select { flex:1 1 45%; min-width:0; }
   .toolbar .count { width:100%; margin:0; }
-  .bulkbar { bottom:8px; }
+  .bulkbar { bottom:10px; right:12px; left:12px; }
   .bulkbar .spacer { display:none; }
+  body.has-bulk main { padding-bottom:170px; }
 }
 </style>
 {% endblock %}
@@ -189,8 +199,8 @@
 </div>
 
 <div class="bulkbar hidden" id="bulkbar">
-  <span class="lbl" id="bulkLbl"></span>
-  <button type="button" class="btn" onclick="openModal('bulkCreditModal')">{{ ic('wallet', 15) }} זיכוי / הורדה</button>
+  <span class="lbl">{{ ic('check', 15, 2.4) }}<span id="bulkLbl"></span></span>
+  <button type="button" class="btn primary" onclick="openModal('bulkCreditModal')">{{ ic('wallet', 15) }} זיכוי / הורדה</button>
   {% if groups %}<button type="button" class="btn" onclick="openModal('bulkGroupModal')">{{ ic('tag', 15) }} שיוך לקבוצה</button>{% endif %}
   <button type="button" class="btn" onclick="bulkSubmit('block')">{{ ic('ban', 15) }} חסימה</button>
   <button type="button" class="btn" onclick="bulkSubmit('unblock')">{{ ic('unlock', 15) }} שחרור</button>
@@ -427,6 +437,7 @@
   function updateBulk() {
     var n = selected().length, bar = document.getElementById('bulkbar');
     bar.classList.toggle('hidden', !n);
+    document.body.classList.toggle('has-bulk', !!n);
     document.getElementById('bulkLbl').textContent = n + ' נבחרו';
     var vis = rows.filter(function (r) { return r.style.display !== 'none'; });
     var all = document.getElementById('chkAll');
