@@ -544,7 +544,16 @@ def student_detail(student_id):
     # יופיע מחיר שונה ממה שבאמת יחויב.
     from routes.dictate import _manuscript_pricing, _manuscript_proofing_price
     char_unit_size, char_unit_price = _manuscript_pricing()
+    from models import StudentGroup
+    from services import institution_students_ops as ISO
+    groups = StudentGroup.query.filter_by(institution_id=current_user.id).order_by(StudentGroup.name).all()
+    usage = ISO.month_usage([student.id]).get(student.id, {'cost': 0, 'minutes': 0})
+    total_spent = round(-sum((t.amount or 0) for t in Transaction.query.filter(
+        Transaction.customer_id == student.id, Transaction.amount < 0,
+        ~Transaction.description.like('הורדת יתרה ע"י המוסד%')).all()), 2)
     return render_template('institution/student_detail.html', student=student, recordings=recordings,
+                            groups=groups, group_name=next((g.name for g in groups if g.id == student.student_group_id), None),
+                            usage=usage, total_spent=total_spent, low_threshold=ISO.low_threshold(current_user),
                             transactions=transactions, manuscript_pages=manuscript_pages,
                             char_unit_size=char_unit_size, char_unit_price=char_unit_price,
                             proofing_price_per_minute=_manuscript_proofing_price())

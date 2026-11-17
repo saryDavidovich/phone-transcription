@@ -19,9 +19,42 @@
 }
 .dropzone-compact .dz-filename { margin-top:8px; }
 .dropzone-compact .dz-filename:empty { display:none; }
+/* כרטיס תלמיד */
+.st-hero { display:flex; align-items:center; gap:16px; flex-wrap:wrap; margin-top:10px; }
+.st-hero .avatar { width:56px; height:56px; border-radius:16px; background:var(--accent-soft); color:var(--accent2); display:flex; align-items:center; justify-content:center; flex:none; }
+.st-hero .who { flex:1; min-width:200px; }
+.st-hero h1 { margin:0 0 6px; }
+.st-hero .meta { display:flex; flex-wrap:wrap; align-items:center; gap:8px 14px; font-size:13px; color:var(--text2); }
+.st-hero .meta span { display:inline-flex; align-items:center; gap:5px; }
+.st-hero .hero-actions { display:flex; gap:8px; flex-wrap:wrap; }
+.chip { display:inline-flex; align-items:center; gap:4px; font-size:11px; font-weight:600; padding:2px 8px; border-radius:20px; background:var(--blue-soft); color:var(--blue); }
+.row-3 { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
+.sub { color:var(--text2); }
+.rec-list { display:flex; flex-direction:column; }
+.rec { border-bottom:1px solid var(--border); padding:10px 0; }
+.rec:last-child { border-bottom:0; }
+.rec-main { display:flex; align-items:center; gap:12px; }
+.rec-ic { width:36px; height:36px; border-radius:10px; background:var(--surface2); color:var(--text2); display:flex; align-items:center; justify-content:center; flex:none; }
+.rec-info { flex:1; min-width:0; }
+.rec-title { font-weight:600; font-size:14px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.rec-meta { font-size:12px; color:var(--text3); margin-top:2px; }
+.rec-side { display:flex; align-items:center; gap:6px; flex:none; }
+.icon-btn.on { background:var(--accent-soft); color:var(--accent2); border-color:rgba(16,185,129,.3); }
+.rec-tr { margin:10px 48px 4px 0; padding:14px 16px; background:var(--surface2); border:1px solid var(--border); border-radius:10px;
+  font-size:14px; line-height:1.9; white-space:pre-wrap; max-height:360px; overflow:auto; }
+@media (max-width:760px) {
+  .row-3 { grid-template-columns:1fr; gap:0; }
+  .st-hero .hero-actions { width:100%; }
+  .st-hero .hero-actions > * { flex:1; }
+  .st-hero .hero-actions .btn { width:100%; }
+  .rec-main { flex-wrap:wrap; }
+  .rec-side { width:100%; padding-inline-start:48px; }
+  .rec-tr { margin-inline-start:0; }
+}
 </style>
 {% endblock %}
 {% block content %}
+<div class="page">
 {% if student.is_institution_self %}
 <a href="{{ url_for('institution.dashboard') }}" class="back-link">{{ ic('arrow-right', 15) }} חזרה לדף הבית</a>
 <h1 style="margin-top:10px;">קלדנות דיגיטלית</h1>
@@ -29,80 +62,157 @@
   מסמכים ותמלולים שלא שייכים לתלמיד ספציפי (למשל טפסים כלליים של המזכירות) - מועלים ומטופלים כאן.
 </p>
 {% else %}
+{% set low = (student.balance or 0) < low_threshold %}
 <a href="{{ url_for('institution_students.students_tab') }}" class="back-link">{{ ic('arrow-right', 15) }} חזרה לרשימת תלמידים</a>
-<h1 style="margin-top:10px;">{{ student.name }}</h1>
-<p style="color:var(--text2); font-size:13px; margin-bottom:20px;">
-  מספר תלמיד: {{ student.student_number or '—' }} · טלפון: {{ student.phone or '—' }} ·
-  יתרה: {{ "%.2f"|format(student.balance or 0) }} ₪{% if student.self_funded %} (מתוכה {{ "%.2f"|format(student.self_funded) }} ₪ כסף של התלמיד עצמו){% endif %}
-</p>
-{% endif %}
 
-{% if not student.is_institution_self %}
-{# העלאת אודיו לתמלול קיימת רק בתיק תלמיד אמיתי - למסמכים הכלליים של
-   המוסד יש כבר כלי ייעודי לזה (לשונית "יצירת תמלול", ראה
-   routes/institution_transcribe.py) שמחייב נכון את יתרת המוסד עצמו. #}
-<div class="card" style="margin-bottom:24px;">
-  <h3 style="font-size:15px; margin-bottom:12px;">העלאת קובץ נוסף לתמלול עבור התלמיד</h3>
-  <form id="studentUploadForm">
-    <div class="dropzone" id="studentDz">
-      <div class="dz-icon">{{ ic('headphones', 34, 1.6) }}</div>
-      <div class="dz-title">גררו קבצי אודיו/וידאו לכאן או לחצו לבחירה</div>
-      <div class="dz-sub">אפשר לבחור כמה קבצים יחד - כל קובץ יתומלל בנפרד</div>
-      <div class="dz-filename" id="studentDzFilename"></div>
-      <input type="file" name="audio_file" id="studentAudioFile" accept="audio/*,video/*" multiple required>
+<div class="card st-hero mb-18">
+  <span class="avatar">{{ ic('user', 26) }}</span>
+  <div class="who">
+    <h1>{{ student.student_display_name or student.name or 'תלמיד' }}</h1>
+    <div class="meta">
+      <span>#{{ student.student_number or '—' }}</span>
+      {% if student.phone %}<span>{{ ic('phone', 13) }} {{ student.phone }}</span>{% endif %}
+      {% if student.email %}<span>{{ ic('mail', 13) }} {{ student.email }}</span>{% endif %}
+      {% if group_name %}<span class="chip">{{ ic('tag', 11) }}{{ group_name }}</span>{% endif %}
+      {% if student.is_blocked %}<span class="badge badge-red">חסום</span>{% else %}<span class="badge badge-green">פעיל</span>{% endif %}
     </div>
-    <div style="display:flex; gap:12px; flex-wrap:wrap; margin-top:14px;">
-      <div class="field" style="flex:1; min-width:160px;"><label>סוג תמלול</label>
-        <select class="input" name="tier"><option value="gemini">תמלול רגיל</option><option value="premium">תמלול מקצועי</option></select></div>
-      <div class="field" style="flex:1; min-width:160px;"><label>שפת ההקלטה</label>
-        <select class="input" name="language"><option value="he">עברית</option><option value="yi">יידיש</option><option value="en">אנגלית</option></select></div>
-      <div class="field" style="flex:1; min-width:160px;"><label>שפת התמלול</label>
-        <select class="input" name="output_language"><option value="he">עברית</option><option value="original">כמו שפת ההקלטה</option></select></div>
-    </div>
-    <button type="submit" class="btn btn-block" style="margin-top:6px;" id="studentUploadBtn">העלאה</button>
-  </form>
-  <div id="studentUploadMsg" style="font-size:13px; margin-top:10px;"></div>
+  </div>
+  <div class="hero-actions">
+    <button type="button" class="btn" onclick="openModal('creditModal')">{{ ic('wallet', 16) }} זיכוי / הורדה</button>
+    <form method="post" action="{{ url_for('institution_students.toggle_block', student_id=student.id) }}">
+      <input type="hidden" name="back" value="{{ request.path }}">
+      <button type="submit" class="btn btn-secondary">{{ ic('unlock' if student.is_blocked else 'ban', 16) }} {{ 'שחרור' if student.is_blocked else 'חסימה' }}</button>
+    </form>
+  </div>
 </div>
 
-<div class="card" style="margin-bottom:20px;">
-  <h3 style="font-size:15px; margin-bottom:10px;">הקלטות ותמלולים</h3>
-  <table style="width:100%; font-size:13px;">
-    <tr style="text-align:right; border-bottom:1px solid var(--border); color:var(--text2);">
-      <th style="padding:6px 0;">תאריך</th><th>קובץ</th><th>משך</th><th>עלות</th><th>סטטוס</th><th></th>
-    </tr>
+<div class="grid grid-4 stats mb-18">
+  <div class="card stat-card">
+    <span class="ic" style="background:{{ 'var(--red-soft)' if low else 'var(--accent-soft)' }}; color:{{ 'var(--red)' if low else 'var(--accent2)' }};">{{ ic('wallet', 22) }}</span>
+    <div><div class="stat-value" {% if low %}style="color:var(--red)"{% endif %}>{{ "%.2f"|format(student.balance or 0) }} ₪</div>
+      <div class="stat-label">יתרה{% if student.self_funded %} ({{ "%.2f"|format(student.self_funded) }} ₪ של התלמיד){% endif %}</div></div>
+  </div>
+  <div class="card stat-card">
+    <span class="ic" style="background:#f3edfe; color:#7c3aed;">{{ ic('chart', 22) }}</span>
+    <div><div class="stat-value">{{ "%.2f"|format(usage.cost) }} ₪</div><div class="stat-label">שימוש החודש ({{ usage.minutes }} דק')</div></div>
+  </div>
+  <div class="card stat-card">
+    <span class="ic" style="background:var(--blue-soft); color:var(--blue);">{{ ic('headphones', 22) }}</span>
+    <div><div class="stat-value">{{ recordings|length }}</div><div class="stat-label">הקלטות</div></div>
+  </div>
+  <div class="card stat-card">
+    <span class="ic" style="background:var(--surface3); color:var(--text2);">{{ ic('receipt', 22) }}</span>
+    <div><div class="stat-value">{{ "%.2f"|format(total_spent) }} ₪</div><div class="stat-label">סה"כ שימוש</div></div>
+  </div>
+</div>
+
+<div class="grid grid-2 mb-18" style="align-items:stretch;">
+  <div class="card card-flex">
+    <div class="card-head"><span class="ic">{{ ic('edit') }}</span><h3>פרטי התלמיד</h3></div>
+    <div class="card-sub">עדכון הפרטים שמופיעים ברשימת התלמידים ושאליהם נשלחים התמלולים.</div>
+    <form method="post" action="{{ url_for('institution_students.edit_student', student_id=student.id) }}">
+      <input type="hidden" name="back" value="{{ request.path }}">
+      <div class="field"><label>שם</label><input class="input" name="name" required value="{{ student.student_display_name or student.name or '' }}"></div>
+      <div class="row-2">
+        <div class="field"><label>טלפון</label><input class="input" name="phone" inputmode="tel" value="{{ student.phone or '' }}"></div>
+        <div class="field"><label>קבוצה</label><select class="input" name="group_id"><option value="">בלי קבוצה</option>{% for g in groups %}<option value="{{ g.id }}" {{ 'selected' if student.student_group_id == g.id }}>{{ g.name }}</option>{% endfor %}</select></div>
+      </div>
+      <div class="row-2">
+        <div class="field"><label>מייל (לקבלת התמלולים)</label><input class="input" name="email" type="email" value="{{ student.email or '' }}"></div>
+        <div class="field"><label>פקס</label><input class="input" name="fax" inputmode="tel" value="{{ student.fax or '' }}"></div>
+      </div>
+      <div class="card-actions"><button type="submit" class="btn btn-block">שמירת פרטים</button></div>
+    </form>
+  </div>
+
+  {# העלאת אודיו לתמלול - רק בתיק תלמיד אמיתי (למסמכים הכלליים יש את לשונית "יצירת תמלול") #}
+  <div class="card card-flex">
+    <div class="card-head"><span class="ic">{{ ic('upload') }}</span><h3>העלאת קבצים לתמלול</h3></div>
+    <div class="card-sub">התמלול נשמר בתיק התלמיד ונשלח {{ 'למייל שלו' if student.email else 'למייל המוסד' }}. העלות יורדת מיתרת התלמיד.</div>
+    <form id="studentUploadForm" class="card-body">
+      <div class="dropzone" id="studentDz" style="padding:20px 16px;">
+        <div class="dz-icon">{{ ic('headphones', 30, 1.6) }}</div>
+        <div class="dz-title">גררו קבצי אודיו/וידאו או לחצו לבחירה</div>
+        <div class="dz-sub">אפשר כמה קבצים יחד</div>
+        <div class="dz-filename" id="studentDzFilename"></div>
+        <input type="file" name="audio_file" id="studentAudioFile" accept="audio/*,video/*" multiple required>
+      </div>
+      <div class="row-3" style="margin-top:12px;">
+        <div class="field"><label>סוג תמלול</label>
+          <select class="input" name="tier"><option value="gemini">רגיל</option><option value="premium">מקצועי</option></select></div>
+        <div class="field"><label>שפת ההקלטה</label>
+          <select class="input" name="language"><option value="he">עברית</option><option value="yi">יידיש</option><option value="en">אנגלית</option></select></div>
+        <div class="field"><label>שפת התמלול</label>
+          <select class="input" name="output_language"><option value="he">עברית</option><option value="original">כמו ההקלטה</option></select></div>
+      </div>
+      <div class="card-actions">
+        <button type="submit" class="btn btn-block" id="studentUploadBtn">{{ ic('upload', 16) }} העלאה ותמלול</button>
+        <div id="studentUploadMsg" style="font-size:13px; margin-top:8px;"></div>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="card mb-18">
+  <div class="card-head" style="margin-bottom:12px;"><span class="ic">{{ ic('file-text') }}</span><h3>הקלטות ותמלולים ({{ recordings|length }})</h3></div>
+  {% if recordings %}
+  <div class="rec-list">
     {% for r in recordings %}
-    <tr style="border-bottom:1px solid var(--border);">
-      <td style="padding:6px 0;">{{ r.created_at.strftime('%d/%m/%Y %H:%M') if r.created_at else '' }}</td>
-      <td>{{ r.source_filename or '—' }}</td>
-      <td>{% if r.duration_seconds %}{{ '%d:%02d'|format((r.duration_seconds // 60), (r.duration_seconds % 60)) }}{% else %}—{% endif %}</td>
-      <td>{{ "%.2f"|format(r.cost or 0) }} ₪</td>
-      <td>
-        {% if r.status == 'completed' %}<span class="badge badge-green">הושלם</span>
-        {% elif r.status == 'processing' %}<span class="badge badge-amber"><span class="spinner-ring"></span> מעבד</span>
-        {% elif r.status == 'pending_payment' %}<span class="badge badge-amber" title="לתלמיד אין מספיק יתרה - יישלח אוטומטית אחרי זיכוי">ממתין לזיכוי יתרה</span>
-        {% elif r.status in ('delivered', 'transcribed') %}<span class="badge badge-green">הושלם ונשלח</span>
-        {% elif r.status == 'error' %}<span class="badge badge-gray">שגיאה</span>
-        {% else %}<span class="badge badge-gray">{{ r.status }}</span>{% endif %}
-      </td>
-      <td>
-        {% if r.transcript %}
-        <a href="{{ url_for('institution_students.download_student_recording', student_id=student.id, recording_id=r.id) }}"
-           class="btn btn-sm btn-secondary" style="text-decoration:none;display:inline-flex;align-items:center;gap:6px;">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none"><path d="M6 2h9l5 5v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z" fill="#2b579a"/><path d="M15 2v5h5" fill="#1a3f6e"/><text x="12" y="17" font-size="7" fill="#fff" text-anchor="middle" font-family="Arial" font-weight="bold">W</text></svg>
-          הורדת Word
-        </a>
-        {% endif %}
-      </td>
-    </tr>
-    {% else %}
-    <tr><td colspan="6" style="padding:12px 0; color:var(--text2);">אין עדיין הקלטות.</td></tr>
+    <div class="rec">
+      <div class="rec-main">
+        <span class="rec-ic">{{ ic('headphones', 17) }}</span>
+        <div class="rec-info">
+          <div class="rec-title">{{ r.source_filename or ('שיחה מהטלפון' if not (r.call_id or '').startswith('inst_') else 'הקלטה') }}</div>
+          <div class="rec-meta">
+            {{ r.created_at|il_time if r.created_at else '' }}
+            {% if r.duration_seconds %} · {{ '%d:%02d'|format((r.duration_seconds // 60), (r.duration_seconds % 60)) }} דק'{% endif %}
+            {% if r.cost %} · {{ "%.2f"|format(r.cost) }} ₪{% endif %}
+            {% if r.transcription_tier == 'premium' %} · מקצועי{% endif %}
+          </div>
+        </div>
+        <div class="rec-side">
+          {% if r.status == 'processing' or r.status == 'queued' %}<span class="badge badge-amber"><span class="spinner-ring"></span> בתמלול</span>
+          {% elif r.status == 'pending_payment' %}<span class="badge badge-amber" title="לתלמיד אין מספיק יתרה - יישלח אוטומטית אחרי זיכוי">ממתין לזיכוי</span>
+          {% elif r.status == 'error' %}<span class="badge badge-red">שגיאה</span>
+          {% elif r.status in ('delivered', 'transcribed', 'completed') %}<span class="badge badge-green">הושלם</span>
+          {% else %}<span class="badge badge-gray">{{ r.status }}</span>{% endif %}
+          {% if r.transcript and r.status != 'pending_payment' %}
+          <button type="button" class="icon-btn" title="צפייה בתמלול" onclick="toggleTr({{ r.id }}, this)">{{ ic('file-text', 16) }}</button>
+          <a class="icon-btn" title="הורדת Word" href="{{ url_for('institution_students.download_student_recording', student_id=student.id, recording_id=r.id) }}">{{ ic('download', 16) }}</a>
+          {% endif %}
+        </div>
+      </div>
+      {% if r.transcript and r.status != 'pending_payment' %}
+      <div class="rec-tr hidden" id="tr{{ r.id }}">{{ r.transcript }}</div>
+      {% endif %}
+    </div>
     {% endfor %}
-  </table>
+  </div>
+  {% else %}
+  <p class="sub" style="font-size:13px;">אין עדיין הקלטות. הקלטות מהטלפון ומהעלאה כאן יופיעו ברשימה הזו.</p>
+  {% endif %}
+</div>
+
+<div id="creditModal" class="modal-backdrop hidden">
+  <div class="modal-box" style="max-width:400px;" role="dialog">
+    <button type="button" class="modal-close" onclick="closeModal('creditModal')" aria-label="סגירה"></button>
+    <h3>זיכוי / הורדת יתרה</h3>
+    <p class="card-sub">{{ student.student_display_name or student.name }} · יתרה נוכחית {{ "%.2f"|format(student.balance or 0) }} ₪</p>
+    <form method="post" action="{{ url_for('institution_students.credit_student', student_id=student.id) }}">
+      <input type="hidden" name="back" value="{{ request.path }}">
+      <div class="field"><label>סכום (₪)</label><input class="input" name="amount" type="number" step="0.01" required data-autofocus placeholder="למשל 20, או -10 להורדה">
+        <div class="hint">זיכוי יורד מיתרת המוסד ({{ "%.2f"|format(current_user.balance or 0) }} ₪). הורדה חוזרת ליתרת המוסד.</div></div>
+      <div class="modal-actions">
+        <button type="submit" class="btn">עדכון יתרה</button>
+        <button type="button" class="btn btn-secondary" onclick="closeModal('creditModal')">ביטול</button>
+      </div>
+    </form>
+  </div>
 </div>
 {% endif %}
 
-<div class="card" style="margin-bottom:24px;">
-  <h3 style="font-size:15px; margin-bottom:6px; display:flex; align-items:center; gap:8px;"><span class="ic-box" style="width:30px;height:30px;">{{ ic('pen', 16) }}</span>{{ 'מסמך חדש לקלדנות דיגיטלית' if student.is_institution_self else 'כתב יד חדש לקלדנות דיגיטלית' }}</h3>
+<div class="card mb-18">
+  <div class="card-head"><span class="ic">{{ ic('pen') }}</span><h3>{{ 'מסמך חדש לקלדנות דיגיטלית' if student.is_institution_self else 'כתב יד חדש לקלדנות דיגיטלית' }}</h3></div>
   <p style="font-size:12px; color:var(--text2); margin:0 0 12px;">
     {% if student.is_institution_self %}
     העלאת תמונה/PDF של מסמך שלא שייך לתלמיד ספציפי - התוכן המוקלד יימסר לכם כקובץ Word מוכן להדפסה ולהורדה. העלות תחויב מיתרת המוסד.
@@ -130,8 +240,8 @@
   <div id="manuscriptUploadMsg" style="font-size:13px; margin-top:10px;"></div>
 </div>
 
-<div class="card" style="margin-bottom:20px;">
-  <h3 style="font-size:15px; margin-bottom:2px;">כתבי יד ({{ manuscript_pages|length }})</h3>
+<div class="card mb-18">
+  <div class="card-head"><span class="ic">{{ ic('keyboard') }}</span><h3>{{ 'מסמכים' if student.is_institution_self else 'כתבי יד' }} ({{ manuscript_pages|length }})</h3></div>
   {% if manuscript_pages %}
   <p style="font-size:12px; color:var(--text3); margin:0 0 12px; display:flex; align-items:center; gap:6px;">{{ ic('clock', 15) }} קובץ "בתהליך" ממתין לקלדנות דיגיטלית ולאחריה לאישור נציג - בדרך כלל מוכן תוך 24 שעות, ייתכנו עיכובים בזמני עומס.</p>
   {% endif %}
@@ -198,25 +308,44 @@
 </div>
 
 <div class="card">
-  <h3 style="font-size:15px; margin-bottom:10px;">{{ 'עלויות (מחויבות מיתרת המוסד)' if student.is_institution_self else 'תנועות יתרה' }}</h3>
-  <table style="width:100%; font-size:13px;">
-    <tr style="text-align:right; border-bottom:1px solid var(--border); color:var(--text2);">
-      <th style="padding:6px 0;">תאריך</th><th>סכום</th><th>תיאור</th>
-    </tr>
+  <div class="card-head" style="margin-bottom:12px;"><span class="ic">{{ ic('receipt') }}</span><h3>{{ 'עלויות (מחויבות מיתרת המוסד)' if student.is_institution_self else 'תנועות יתרה' }}</h3></div>
+  {% if transactions %}
+  <div class="table-wrap">
+  <table style="font-size:13px;">
+    <tr><th>תאריך</th><th>סכום</th><th>תיאור</th></tr>
     {% for t in transactions %}
-    <tr style="border-bottom:1px solid var(--border);">
-      <td style="padding:6px 0;">{{ t.created_at.strftime('%d/%m/%Y %H:%M') if t.created_at else '' }}</td>
-      <td style="color:{{ 'var(--accent)' if t.amount >= 0 else 'var(--red)' }};">{{ "%.2f"|format(t.amount) }} ₪</td>
+    <tr>
+      <td style="white-space:nowrap;">{{ t.created_at|il_time if t.created_at else '' }}</td>
+      <td style="white-space:nowrap; font-weight:700; color:{{ 'var(--accent2)' if t.amount >= 0 else 'var(--red)' }};">{{ "%.2f"|format(t.amount) }} ₪</td>
       <td>{{ t.description or '' }}</td>
     </tr>
-    {% else %}
-    <tr><td colspan="3" style="padding:12px 0; color:var(--text2);">אין עדיין תנועות.</td></tr>
     {% endfor %}
   </table>
+  </div>
+  {% else %}
+  <p class="sub" style="font-size:13px;">אין עדיין תנועות.</p>
+  {% endif %}
+</div>
 </div>
 
 <script>
+function toggleTr(id, btn) {
+  var el = document.getElementById('tr' + id); if (!el) return;
+  el.classList.toggle('hidden'); btn.classList.toggle('on', !el.classList.contains('hidden'));
+}
+window.openModal = window.openModal || function (id) {
+  var m = document.getElementById(id); m.classList.remove('hidden');
+  var f = m.querySelector('[data-autofocus]'); if (f) setTimeout(function () { f.focus(); }, 30);
+};
+window.closeModal = window.closeModal || function (id) { document.getElementById(id).classList.add('hidden'); };
+document.querySelectorAll('.modal-backdrop').forEach(function (m) {
+  m.addEventListener('click', function (e) { if (e.target === m) closeModal(m.id); });
+});
+document.addEventListener('keydown', function (e) {
+  if (e.key === 'Escape') document.querySelectorAll('.modal-backdrop:not(.hidden)').forEach(function (m) { closeModal(m.id); });
+});
 var STUDENT_ID = {{ student.id }};
+if (document.getElementById('studentDz')) {
 var studentDz = document.getElementById('studentDz');
 var studentFileInput = document.getElementById('studentAudioFile');
 var studentDzFilename = document.getElementById('studentDzFilename');
@@ -269,7 +398,7 @@ document.getElementById('studentUploadForm').addEventListener('submit', async fu
   }
   if (!ids.length) {
     btn.disabled = false;
-    btn.textContent = 'העלאה';
+    btn.innerHTML = 'העלאה ותמלול';
     msgEl.style.color = 'var(--red)';
     msgEl.textContent = errors.join(' · ') || 'שגיאה';
     return;
@@ -290,6 +419,8 @@ document.getElementById('studentUploadForm').addEventListener('submit', async fu
     if (!left.length) { clearInterval(interval); window.location.reload(); }
   }, 3000);
 });
+
+}
 
 // --- העלאת כתב יד חדש לקלדנות דיגיטלית ---
 var manuscriptDz = document.getElementById('manuscriptDz');
@@ -331,14 +462,14 @@ document.getElementById('manuscriptUploadForm').addEventListener('submit', async
     data = await res.json();
   } catch (err) {
     btn.disabled = false;
-    btn.textContent = 'העלאה';
+    btn.innerHTML = 'העלאה ותמלול';
     msgEl.style.color = 'var(--red)';
     msgEl.textContent = 'שגיאת תקשורת, נסה שוב';
     return;
   }
   if (!res.ok) {
     btn.disabled = false;
-    btn.textContent = 'העלאה';
+    btn.innerHTML = 'העלאה ותמלול';
     msgEl.style.color = 'var(--red)';
     msgEl.textContent = data.error || 'שגיאה';
     return;

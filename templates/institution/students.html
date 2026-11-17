@@ -19,6 +19,11 @@
 .st-table th .sort-ic { display:inline-block; width:10px; color:var(--accent2); }
 .st-table td { vertical-align:middle; }
 .st-table tr.sel td { background:var(--accent-soft); }
+.st-table tr.st { cursor:pointer; transition:background .12s; }
+.st-table tr.st:hover td { background:var(--surface2); }
+.st-table tr.st.sel:hover td { background:var(--accent-soft); }
+.open-btn { color:var(--text3); }
+.st-table tr.st:hover .open-btn { color:var(--accent2); border-color:rgba(16,185,129,.3); }
 .st-table .chk { width:34px; }
 .st-table input[type=checkbox] { width:16px; height:16px; accent-color:var(--accent); cursor:pointer; }
 .st-name { font-weight:600; color:var(--text); text-decoration:none; }
@@ -171,6 +176,7 @@
         <form method="post" action="{{ url_for('institution_students.remove_student', student_id=s.id) }}" class="keep-back" onsubmit="return confirm('להסיר את התלמיד מהמוסד? ההיסטוריה שלו נשמרת.')">
           <button type="submit" class="icon-btn danger" title="הסרה מהמוסד">{{ ic('trash') }}</button>
         </form>
+        <a class="icon-btn open-btn" title="לכרטיס התלמיד: תמלולים, פרטים ותנועות" href="{{ url_for('institution_students.student_detail', student_id=s.id) }}">{{ ic('chevron-left') }}</a>
       </div></td>
     </tr>
     {% endfor %}
@@ -426,6 +432,12 @@
     var all = document.getElementById('chkAll');
     all.checked = vis.length > 0 && n === vis.length; all.indeterminate = n > 0 && n < vis.length;
   }
+  /* לחיצה על שורה = מעבר לכרטיס התלמיד (חוץ מסימון ומהכפתורים) */
+  tbody.addEventListener('click', function (e) {
+    if (e.target.closest('input, button, a, form, select, label')) return;
+    var r = e.target.closest('tr.st'); if (!r) return;
+    location.href = '/institution/students/' + r.dataset.id;
+  });
   tbody.addEventListener('change', function (e) {
     if (!e.target.classList.contains('rowchk')) return;
     e.target.closest('tr').classList.toggle('sel', e.target.checked); updateBulk();

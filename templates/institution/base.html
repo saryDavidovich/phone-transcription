@@ -193,6 +193,11 @@ table tr { border-bottom:1px solid var(--border); }
 }
 @media (max-width:560px) {
   .grid-4, .grid-3 { grid-template-columns:1fr; }
+  .grid-4.stats { grid-template-columns:1fr 1fr; gap:10px; }
+  .grid-4.stats .stat-card { padding:14px; gap:10px; align-items:flex-start; flex-direction:column; }
+  .grid-4.stats .stat-card .ic { width:34px; height:34px; border-radius:10px; }
+  .grid-4.stats .stat-value { font-size:19px; }
+  .grid-4.stats .stat-label { font-size:12px; margin-top:3px; }
   .row-2 { flex-direction:column; gap:8px; }
   .row-2 > .field { margin-bottom:6px; }
   .stat-value { font-size:22px; }

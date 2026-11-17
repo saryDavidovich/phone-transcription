@@ -7,6 +7,9 @@
 .quick:hover { border-color:var(--accent); transform:translateY(-1px); }
 .quick .t { font-weight:700; font-size:14px; }
 .quick .d { font-size:12.5px; color:var(--text2); margin-top:2px; }
+.alerts { display:flex; gap:18px; flex-wrap:wrap; }
+.alerts > .alert-card { flex:1 1 320px; }
+.alert-card .go { margin-inline-start:auto; color:var(--amber); display:flex; }
 .alert-card { display:flex; align-items:center; gap:12px; text-decoration:none; color:var(--text); border-color:rgba(217,119,6,.28); background:var(--amber-soft); }
 .alert-card .ic-box { background:#fff; color:var(--amber); }
 .info-row { display:flex; justify-content:space-between; gap:10px; padding:9px 0; border-bottom:1px solid var(--border); font-size:13.5px; }
@@ -18,7 +21,7 @@
 <div class="page">
 <h1>שלום, {{ inst.name }}</h1>
 
-<div class="grid grid-4 mb-18">
+<div class="grid grid-4 stats mb-18">
   <div class="card stat-card">
     <span class="ic" style="background:var(--accent-soft); color:var(--accent2);">{{ ic('wallet', 22) }}</span>
     <div><div class="stat-value">{{ "%.2f"|format(inst.balance or 0) }} ₪</div><div class="stat-label">יתרת המוסד</div></div>
@@ -38,17 +41,19 @@
 </div>
 
 {% if low_count or pending_uploads %}
-<div class="grid grid-2 mb-18">
+<div class="alerts mb-18">
   {% if low_count %}
   <a class="card alert-card" href="{{ url_for('institution_students.students_tab') }}?f=low">
     <span class="ic-box">{{ ic('alert', 18) }}</span>
     <div><div style="font-weight:700;">{{ low_count }} תלמידים עם יתרה נמוכה</div><div class="hint" style="margin:2px 0 0;">מתחת ל-{{ '%g'|format(low_threshold) }} ₪ · לחצו לרשימה ולזיכוי</div></div>
+    <span class="go">{{ ic('chevron-left', 20) }}</span>
   </a>
   {% endif %}
   {% if pending_uploads %}
   <a class="card alert-card" href="{{ url_for('institution_billing.billing_tab') }}">
     <span class="ic-box">{{ ic('hourglass', 18) }}</span>
     <div><div style="font-weight:700;">{{ pending_uploads }} תמלולים ממתינים לטעינת יתרה</div><div class="hint" style="margin:2px 0 0;">ישוחררו אוטומטית מיד אחרי הטעינה</div></div>
+    <span class="go">{{ ic('chevron-left', 20) }}</span>
   </a>
   {% endif %}
 </div>
