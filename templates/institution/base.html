@@ -66,25 +66,11 @@ a { color:inherit; }
 .sidebar-footer a:hover { color:var(--red); }
 
 .side-tools { display:flex; gap:4px; padding:8px 12px; border-top:1px solid var(--border); }
-.side-tool { flex:1; position:relative; background:none; border:0; border-radius:10px; padding:7px 2px; cursor:pointer; color:var(--text2); font-family:inherit; font-size:11.5px; display:flex; flex-direction:column; align-items:center; gap:3px; transition:.15s; }
+.side-tool { flex:1; position:relative; background:none; border:0; border-radius:10px; padding:8px 6px; cursor:pointer; color:var(--text2); font-family:inherit; font-size:13px; display:flex; align-items:center; justify-content:center; gap:8px; transition:.15s; }
 .side-tool:hover { background:var(--surface2); color:var(--text); }
 .side-tool.on { color:var(--accent2); }
-.side-tool .dot { position:absolute; top:5px; left:calc(50% - 14px); width:8px; height:8px; border-radius:50%; background:var(--red); box-shadow:0 0 0 2px var(--surface); }
 #navProgress { position:fixed; top:0; right:0; height:3px; width:0; background:linear-gradient(90deg,#34d399,var(--accent)); z-index:2000; opacity:0; transition:width .4s ease, opacity .3s; pointer-events:none; }
 #navProgress.go { opacity:1; width:70%; transition:width 6s cubic-bezier(.1,.7,.2,1), opacity .2s; }
-.guide-list { display:flex; flex-direction:column; gap:8px; }
-.guide { border:1px solid var(--border); border-radius:12px; background:var(--surface2); }
-.guide summary { list-style:none; cursor:pointer; padding:12px 14px; font-weight:700; font-size:14px; display:flex; align-items:center; gap:10px; }
-.guide summary::-webkit-details-marker { display:none; }
-.guide summary .ic-box { width:30px; height:30px; border-radius:9px; }
-.guide[open] summary { border-bottom:1px solid var(--border); }
-.guide ol { margin:0; padding:12px 34px 14px 16px; font-size:13.5px; line-height:1.75; color:var(--text); }
-.wn-item { display:flex; gap:12px; padding:10px 0; border-bottom:1px solid var(--border); }
-.wn-item:last-child { border-bottom:0; }
-.wn-item .ic-box { width:32px; height:32px; border-radius:9px; }
-.wn-item b { display:block; font-size:14px; margin-bottom:2px; }
-.wn-item span { font-size:13px; color:var(--text2); line-height:1.6; }
-.modal-box.wide { max-width:560px; }
 main { flex:1; margin-right:240px; padding:32px 40px; max-width:1180px; min-width:0; }
 .sidebar-install { margin:0 14px 10px; }
 .topbar { display:none; }
@@ -278,9 +264,7 @@ window.IC = {
   </nav>
   <button type="button" id="pwaInstall" class="btn btn-secondary btn-sm sidebar-install" style="display:none" onclick="pwaInstall()">{{ ic('install', 16) }} התקנה כתוכנה במחשב</button>
   <div class="side-tools">
-    <button type="button" class="side-tool" id="notifyBtn" onclick="instNotifyToggle()" title="התראות בשולחן העבודה">{{ ic('bell-off', 17) }}<span>התראות</span></button>
-    <button type="button" class="side-tool" onclick="instHelp()" title="מדריכים קצרים">{{ ic('help', 17) }}<span>עזרה</span></button>
-    <button type="button" class="side-tool" onclick="instWhatsNew(true)" title="מה חדש">{{ ic('sparkle', 17) }}<span>מה חדש</span><i class="dot hidden" id="newDot"></i></button>
+    <button type="button" class="side-tool" id="notifyBtn" onclick="instNotifyToggle()" title="התראות בשולחן העבודה">{{ ic('bell-off', 17) }}<span id="notifyLbl">התראות בשולחן העבודה</span></button>
   </div>
   <div class="sidebar-footer">
     <a href="{{ url_for('institution.logout') }}">{{ ic('logout', 16) }}<span>התנתקות</span></a>
@@ -403,67 +387,9 @@ window.IC = {
 </script>
 {% if inst_logged_in %}
 <div id="navProgress"></div>
-<div class="modal-backdrop hidden" id="helpModal" onclick="if(event.target===this)this.classList.add('hidden')">
-  <div class="modal-box wide">
-    <button class="modal-close" onclick="document.getElementById('helpModal').classList.add('hidden')">סגירה</button>
-    <h3 style="display:flex;align-items:center;gap:8px;">{{ ic('help', 20) }} מדריכים קצרים</h3>
-    <div class="guide-list">
-      <details class="guide"><summary><span class="ic-box">{{ ic('mic', 16) }}</span>איך יוצרים תמלול</summary><ol>
-        <li>בלשונית "יצירת תמלול" בוחרים אחת משלוש דרכים: <b>קובץ</b> מהמחשב, <b>הקלטה</b> ישירות מהמיקרופון, או <b>קישור</b> מ-Google Drive / ג'מבו מייל.</li>
-        <li>בוחרים שפה וסוג תמלול (רגיל או מקצועי) ולוחצים "לתמלול".</li>
-        <li>אפשר להמשיך לגלוש - התמלול ממשיך ברקע, ומופיע ברשימה כשהוא מוכן.</li>
-        <li>להקלטה של תלמיד מסוים - אותו דבר מתוך כרטיס התלמיד.</li></ol></details>
-      <details class="guide"><summary><span class="ic-box">{{ ic('headphones', 16) }}</span>האזנה לתמלול ותיקון הטקסט</summary><ol>
-        <li>לוחצים על שם התמלול - נפתח דף עם נגן והטקסט המלא.</li>
-        <li>בזמן הניגון המשפט שמושמע מודגש. לחיצה על משפט קופצת אליו.</li>
-        <li>אם ההדגשה מקדימה או מאחרת: בזמן ניגון לוחצים Shift + לחיצה על המשפט שנשמע עכשיו, והסנכרון מתוקן ממנו והלאה.</li>
-        <li>"עריכת הטקסט" - מתקנים ושומרים (Ctrl+S). קובץ ה-Word שיורד אחר כך כולל את התיקונים. אפשר תמיד לחזור לתמלול המקורי.</li></ol></details>
-      <details class="guide"><summary><span class="ic-box">{{ ic('archive', 16) }}</span>הורדה מרוכזת</summary><ol>
-        <li>ב"כל התמלולים" בוחרים טווח תאריכים, קבוצה או תלמיד.</li>
-        <li>אפשר לסמן תמלולים מסוימים, או להוריד את כל מה שמופיע ברשימה.</li>
-        <li>בוחרים: קובץ ZIP עם Word לכל תמלול, או קובץ Word אחד שמאחד הכל (כל תמלול בעמוד חדש).</li></ol></details>
-      <details class="guide"><summary><span class="ic-box">{{ ic('calendar', 16) }}</span>לוח שנה</summary><ol>
-        <li>ב"כל התמלולים" ← "לוח שנה" רואים לכל יום (בתאריך עברי ולועזי) כמה תמלולים היו.</li>
-        <li>לחיצה על יום מציגה את התמלולים שלו.</li></ol></details>
-      <details class="guide"><summary><span class="ic-box">{{ ic('plus-minus', 16) }}</span>זיכוי תלמידים</summary><ol>
-        <li>ב"ניהול תלמידים" לוחצים על כפתור הזיכוי בשורת התלמיד, או מסמנים כמה תלמידים ובוחרים "זיכוי לנבחרים".</li>
-        <li>בהגדרות המוסד אפשר להפעיל זיכוי חודשי אוטומטי והתראת יתרה נמוכה.</li></ol></details>
-      <details class="guide"><summary><span class="ic-box">{{ ic('bell', 16) }}</span>התראות בשולחן העבודה</summary><ol>
-        <li>לוחצים על "התראות" בתחתית התפריט ומאשרים בחלון של הדפדפן.</li>
-        <li>תקבלו הודעה כשתמלול מוכן, כשמגיעה הודעה מהצוות וכשהיתרה נמוכה - כל עוד אזור המוסד פתוח (גם בלשונית ברקע).</li></ol></details>
-      <details class="guide"><summary><span class="ic-box">{{ ic('install', 16) }}</span>התקנה כתוכנה</summary><ol>
-        <li>בכרום או באדג': כפתור "התקנה כתוכנה במחשב" בתפריט (או סמל ההתקנה בשורת הכתובת).</li>
-        <li>אזור המוסד נפתח אז בחלון משלו, עם סמל בשולחן העבודה.</li></ol></details>
-    </div>
-  </div>
-</div>
-<div class="modal-backdrop hidden" id="wnModal" onclick="if(event.target===this)instWhatsNewClose()">
-  <div class="modal-box wide">
-    <button class="modal-close" onclick="instWhatsNewClose()">סגירה</button>
-    <h3 style="display:flex;align-items:center;gap:8px;">{{ ic('sparkle', 20) }} מה חדש באזור המוסד</h3>
-    <div>
-      <div class="wn-item"><span class="ic-box">{{ ic('headphones', 16) }}</span><div><b>נגן עם טקסט מסונכרן</b><span>פותחים תמלול ושומעים את ההקלטה - המשפט שמושמע מודגש, ולחיצה על משפט קופצת אליו.</span></div></div>
-      <div class="wn-item"><span class="ic-box">{{ ic('edit', 16) }}</span><div><b>עריכת תמלול בדפדפן</b><span>מתקנים את הטקסט ושומרים, וה-Word יורד מעודכן. אפשר לחזור למקור בכל רגע.</span></div></div>
-      <div class="wn-item"><span class="ic-box">{{ ic('mic', 16) }}</span><div><b>הקלטה ישירה וקישורים</b><span>מקליטים ישירות מהמחשב או מהטלפון, או מדביקים קישור מ-Drive או מג'מבו מייל - בלי להוריד את הקובץ.</span></div></div>
-      <div class="wn-item"><span class="ic-box">{{ ic('file-text', 16) }}</span><div><b>כל התמלולים במקום אחד</b><span>חיפוש גם בתוך הטקסט, לוח שנה עם תאריך עברי, והורדה מרוכזת (ZIP או קובץ Word אחד).</span></div></div>
-      <div class="wn-item"><span class="ic-box">{{ ic('chart', 16) }}</span><div><b>דוחות וגרפים</b><span>שימוש לפי שבוע, לפי קבוצה, התלמידים הפעילים ושעות השימוש.</span></div></div>
-      <div class="wn-item"><span class="ic-box">{{ ic('image', 16) }}</span><div><b>לוגו המוסד ב-Word</b><span>בהגדרות המוסד מעלים לוגו ושם, והם יופיעו בראש כל קובץ תמלול.</span></div></div>
-      <div class="wn-item"><span class="ic-box">{{ ic('bell', 16) }}</span><div><b>עכשיו במוסד והתראות</b><span>בדשבורד רואים מה קורה ברגע זה, ואפשר לקבל התראה בשולחן העבודה כשתמלול מוכן.</span></div></div>
-    </div>
-    <div class="modal-actions" style="margin-top:14px;"><button class="btn" onclick="instWhatsNewClose()">הבנתי, תודה</button></div>
-  </div>
-</div>
 <script>
 (function () {
-  var WN = '2026-11-18';
   function ls(k, v) { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) { return null; } }
-  window.instHelp = function () { document.body.classList.remove('nav-open'); document.getElementById('helpModal').classList.remove('hidden'); };
-  window.instWhatsNew = function () { document.body.classList.remove('nav-open'); document.getElementById('wnModal').classList.remove('hidden'); };
-  window.instWhatsNewClose = function () { document.getElementById('wnModal').classList.add('hidden'); ls('instWN', WN); document.getElementById('newDot').classList.add('hidden'); };
-  if (ls('instWN') !== WN) {
-    document.getElementById('newDot').classList.remove('hidden');
-    if (!ls('instWNauto' + WN)) { ls('instWNauto' + WN, '1'); setTimeout(window.instWhatsNew, 700); }   // פעם אחת לכל עדכון
-  }
 
   /* פס התקדמות דק במעבר בין עמודים */
   var np = document.getElementById('navProgress');
