@@ -71,6 +71,9 @@ def _is_phone_recording_url(url):
     return 'call2all.co.il' in (url or '')
 
 
+_ALEF_RETRY = {}   # call_id -> כמה ניסיונות חוזרים מאוחרים כבר נעשו (אלף בוט לא זמין)
+
+
 def transcribe_async(call_id, rec_url, customer_id, delivery_method, delivered_to, duration_seconds, transcription_tier='basic', language='he', output_language='he'):
     waiting = _ocr_executor._work_queue.qsize()
     log.info(f"transcribe_async: call_id={call_id} נכנס לתור (ממתינים בתור: {waiting})")
@@ -176,6 +179,7 @@ def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, durat
                 job_id, actual_duration = _alefbot_submit(rec_url, call_id, model_tier=alefbot_tier, translate_to_hebrew=translate_heb)
 
                 if job_id:
+                    _ALEF_RETRY.pop(call_id, None)
                     db.session.remove()
                     rec = Recording.query.filter_by(call_id=call_id).first()
                     if rec:
@@ -253,8 +257,25 @@ def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, durat
                     return
                 else:
                     db.session.remove()
+                    # השרת של אלף בוט לא זמין - ניסיון נוסף אחרי 10 / 20 / 30 דקות, ורק אחר כך התראה למנהל
+                    n = _ALEF_RETRY.get(call_id, 0)
+                    if n < 3:
+                        _ALEF_RETRY[call_id] = n + 1
+                        delay = 600 * (n + 1)
+                        rec = Recording.query.filter_by(call_id=call_id).first()
+                        if rec:
+                            rec.status = 'queued'
+                            db.session.commit()
+                        log.warning(f"AlefBot לא זמין - ניסיון חוזר {n + 1}/3 בעוד {delay // 60} דקות ({call_id})")
+                        import threading as _th
+                        _th.Timer(delay, transcribe_async, args=(call_id, rec_url, customer_id, delivery_method, delivered_to,
+                                                                  duration_seconds, transcription_tier, language, output_language)).start()
+                        return
+                    _ALEF_RETRY.pop(call_id, None)
                     from services.recording_alerts import notify_recording_error
-                    notify_recording_error(call_id, 'השליחה לתמלול מקצועי (אלף-בוט) נכשלה - פרטים בלוג תחת "AlefBot submit error"')
+                    notify_recording_error(call_id, 'השליחה לתמלול מקצועי (אלף-בוט) נכשלה גם אחרי ניסיונות חוזרים במשך כשעה '
+                                                    '(השרת שלהם לא זמין) - פרטים בלוג תחת "AlefBot submit error". '
+                                                    'אפשר להפעיל "תמלול חוזר" מכרטיס ההקלטה.')
                     return
 
             else:
@@ -738,7 +759,21 @@ def save_alefbot_credits_async(call_id):
 
 
 def _alefbot_submit(rec_url, call_id, model_tier='standard', translate_to_hebrew=False):
-    """שולח ל-AlefBot ומחזיר job_id מיד.
+    """שליחה לאלף בוט עם ניסיונות חוזרים מהירים: אם השרת שלהם נפל לרגע (502/503/504, ניתוק,
+    זמן תגובה) - מנסים שוב אחרי 10 ואחרי 30 שניות."""
+    job_id, dur = None, 0
+    for attempt, wait in enumerate((0, 10, 30), 1):
+        if wait:
+            log.warning(f"AlefBot: ניסיון חוזר {attempt}/3 בעוד {wait} שניות ({call_id})")
+            time.sleep(wait)
+        job_id, dur, transient = _alefbot_submit_once(rec_url, call_id, model_tier, translate_to_hebrew)
+        if job_id or not transient:
+            break
+    return job_id, dur
+
+
+def _alefbot_submit_once(rec_url, call_id, model_tier='standard', translate_to_hebrew=False):
+    """שולח ל-AlefBot ומחזיר (job_id, משך, האם השגיאה זמנית).
     הקובץ לא נטען לזיכרון: נקרא מהדיסק (או מורד בזרימה), מומר ל-16kHz מונו
     בחלקים (services/audio_prep.py), ומועלה ישירות מהקובץ. כך גם הקלטה של
     1-2GB לא מפילה את השרת."""
@@ -801,11 +836,14 @@ def _alefbot_submit(rec_url, call_id, model_tier='standard', translate_to_hebrew
         transcribe_res.raise_for_status()
         job_id = transcribe_res.json().get('job_id') or transcribe_res.json().get('id')
         log.info(f"AlefBot job created: {job_id} for call {call_id}")
-        return job_id, actual_duration
+        return job_id, actual_duration, False
 
     except Exception as e:
         log.error(f"AlefBot submit error: {e}")
-        return None, 0
+        code = getattr(getattr(e, 'response', None), 'status_code', None)
+        transient = isinstance(e, (requests.exceptions.ConnectionError, requests.exceptions.Timeout)) or \
+            (code is not None and (code >= 500 or code == 429))
+        return None, 0, transient
     finally:
         audio_prep.cleanup(prepared, src)
 
