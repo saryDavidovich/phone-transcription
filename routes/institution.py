@@ -432,11 +432,22 @@ def dashboard():
     students = Customer.query.filter_by(institution_id=inst.id).filter(Customer.is_institution_self.isnot(True)).all()
     total_recordings = Recording.query.join(Customer).filter(Customer.institution_id == inst.id).count()
     students_balance_sum = sum(s.balance or 0 for s in students)
+    from services import institution_students_ops as ISO
+    from models import InstitutionUpload
+    th = ISO.low_threshold(inst)
+    usage = ISO.month_usage([s.id for s in students])
+    pending = InstitutionUpload.query.filter_by(institution_id=inst.id, status='pending_payment').count()
 
     return render_template(
         'institution/dashboard.html',
         inst=inst,
         student_count=len(students),
+        active_count=sum(1 for s in students if not s.is_blocked),
+        low_count=sum(1 for s in students if not s.is_blocked and (s.balance or 0) < th),
+        low_threshold=th,
+        month_cost=round(sum(u['cost'] for u in usage.values()), 2),
+        month_minutes=sum(u['minutes'] for u in usage.values()),
+        pending_uploads=pending,
         students_balance_sum=students_balance_sum,
         total_recordings=total_recordings,
     )
@@ -449,6 +460,27 @@ def dashboard():
 @institution_login_required
 def settings():
     inst = current_user
+    if request.method == 'POST' and request.form.get('section') == 'automation':
+        # זיכוי חודשי אוטומטי + התראת יתרה נמוכה
+        from models import StudentGroup
+        def _num(key):
+            try:
+                v = float(request.form.get(key) or 0)
+                return round(v, 2) if v > 0 else None
+            except ValueError:
+                return None
+        inst.monthly_credit_amount = _num('monthly_credit_amount') if request.form.get('monthly_on') else None
+        gid = request.form.get('monthly_credit_group_id', type=int)
+        inst.monthly_credit_group_id = gid if gid and StudentGroup.query.filter_by(id=gid, institution_id=inst.id).first() else None
+        if inst.monthly_credit_amount and not inst.monthly_credit_last:
+            # הפעלה ראשונה: החודש הנוכחי נחשב "בוצע" - הזיכוי הראשון יהיה בתחילת החודש הבא
+            from services.institution_students_ops import IL
+            inst.monthly_credit_last = datetime.now(IL).strftime('%Y-%m')
+        inst.low_balance_threshold = _num('low_balance_threshold')
+        inst.low_balance_email = bool(request.form.get('low_balance_email'))
+        db.session.commit()
+        flash('ההגדרות נשמרו')
+        return redirect(url_for('institution.settings'))
     if request.method == 'POST':
         max_minutes = request.form.get('max_minutes_per_period')
         inst.max_minutes_per_period = float(max_minutes) if max_minutes else None
@@ -465,7 +497,12 @@ def settings():
         flash('ההגדרות נשמרו')
         return redirect(url_for('institution.settings'))
     from services.student_links import global_self_topup_enabled
-    return render_template('institution/settings.html', inst=inst, topup_global_on=global_self_topup_enabled())
+    from models import StudentGroup
+    from services.institution_students_ops import DEFAULT_LOW, active_students
+    groups = StudentGroup.query.filter_by(institution_id=inst.id).order_by(StudentGroup.name).all()
+    monthly_count = len(active_students(inst, inst.monthly_credit_group_id)) if inst.monthly_credit_amount else 0
+    return render_template('institution/settings.html', inst=inst, topup_global_on=global_self_topup_enabled(),
+                           groups=groups, default_low=DEFAULT_LOW, monthly_count=monthly_count)
 
 
 @institution_bp.route('/settings/add-authorized', methods=['POST'])

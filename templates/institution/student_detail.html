@@ -1,4 +1,5 @@
 {% extends "institution/base.html" %}
+{% from "institution/_icons.html" import ic %}
 {% block title %}{{ 'קלדנות דיגיטלית' if student.is_institution_self else student.name }}{% endblock %}
 {% block head %}
 <style>
@@ -9,12 +10,12 @@
   font-size:13px; color:var(--text);
 }
 .price-item strong { color:var(--accent2); font-weight:800; }
-.price-ico { font-size:18px; }
+.price-ico { color:var(--accent2); display:flex; }
 .dropzone-compact { padding:14px 16px; text-align:right; }
 .dropzone-compact .dz-row { display:flex; align-items:center; gap:12px; }
 .dropzone-compact .dz-icon-sm {
   width:38px; height:38px; flex:0 0 38px; border-radius:10px; background:var(--surface);
-  border:1px solid var(--border); display:flex; align-items:center; justify-content:center; font-size:18px;
+  border:1px solid var(--border); display:flex; align-items:center; justify-content:center; color:var(--accent2);
 }
 .dropzone-compact .dz-filename { margin-top:8px; }
 .dropzone-compact .dz-filename:empty { display:none; }
@@ -22,13 +23,13 @@
 {% endblock %}
 {% block content %}
 {% if student.is_institution_self %}
-<a href="{{ url_for('institution.dashboard') }}" style="color:var(--text2); font-size:13px; text-decoration:none;">← חזרה לדף הבית</a>
-<h1 style="margin-top:10px;">📎 קלדנות דיגיטלית</h1>
+<a href="{{ url_for('institution.dashboard') }}" class="back-link">{{ ic('arrow-right', 15) }} חזרה לדף הבית</a>
+<h1 style="margin-top:10px;">קלדנות דיגיטלית</h1>
 <p style="color:var(--text2); font-size:13px; margin-bottom:20px;">
   מסמכים ותמלולים שלא שייכים לתלמיד ספציפי (למשל טפסים כלליים של המזכירות) - מועלים ומטופלים כאן.
 </p>
 {% else %}
-<a href="{{ url_for('institution_students.students_tab') }}" style="color:var(--text2); font-size:13px; text-decoration:none;">← חזרה לרשימת תלמידים</a>
+<a href="{{ url_for('institution_students.students_tab') }}" class="back-link">{{ ic('arrow-right', 15) }} חזרה לרשימת תלמידים</a>
 <h1 style="margin-top:10px;">{{ student.name }}</h1>
 <p style="color:var(--text2); font-size:13px; margin-bottom:20px;">
   מספר תלמיד: {{ student.student_number or '—' }} · טלפון: {{ student.phone or '—' }} ·
@@ -44,7 +45,7 @@
   <h3 style="font-size:15px; margin-bottom:12px;">העלאת קובץ נוסף לתמלול עבור התלמיד</h3>
   <form id="studentUploadForm">
     <div class="dropzone" id="studentDz">
-      <div class="dz-icon">🎧</div>
+      <div class="dz-icon">{{ ic('headphones', 34, 1.6) }}</div>
       <div class="dz-title">גררו קבצי אודיו/וידאו לכאן או לחצו לבחירה</div>
       <div class="dz-sub">אפשר לבחור כמה קבצים יחד - כל קובץ יתומלל בנפרד</div>
       <div class="dz-filename" id="studentDzFilename"></div>
@@ -101,7 +102,7 @@
 {% endif %}
 
 <div class="card" style="margin-bottom:24px;">
-  <h3 style="font-size:15px; margin-bottom:6px;">✍️ {{ 'מסמך חדש לקלדנות דיגיטלית' if student.is_institution_self else 'כתב יד חדש לקלדנות דיגיטלית' }}</h3>
+  <h3 style="font-size:15px; margin-bottom:6px; display:flex; align-items:center; gap:8px;"><span class="ic-box" style="width:30px;height:30px;">{{ ic('pen', 16) }}</span>{{ 'מסמך חדש לקלדנות דיגיטלית' if student.is_institution_self else 'כתב יד חדש לקלדנות דיגיטלית' }}</h3>
   <p style="font-size:12px; color:var(--text2); margin:0 0 12px;">
     {% if student.is_institution_self %}
     העלאת תמונה/PDF של מסמך שלא שייך לתלמיד ספציפי - התוכן המוקלד יימסר לכם כקובץ Word מוכן להדפסה ולהורדה. העלות תחויב מיתרת המוסד.
@@ -110,15 +111,15 @@
     {% endif %}
   </p>
   <p style="font-size:12px; color:var(--text3); margin:0 0 12px; display:flex; align-items:center; gap:6px;">
-    ⏳ כל קובץ עובר גם אישור של נציג אנושי לפני שהוא מוכן - בדרך כלל אפשר לצפות ולהוריד תוך 24 שעות, אך ייתכנו עיכובים בזמני עומס.
+    {{ ic('clock', 15) }} כל קובץ עובר גם אישור של נציג אנושי לפני שהוא מוכן - בדרך כלל אפשר לצפות ולהוריד תוך 24 שעות, אך ייתכנו עיכובים בזמני עומס.
   </p>
   <div class="price-strip">
-    <div class="price-item"><span class="price-ico">⌨️</span><span>קלדנות דיגיטלית: <strong>₪{{ "%.2f"|format(char_unit_price) }}</strong> לכל <strong>{{ "{:,}".format(char_unit_size) }}</strong> תווים (חיוב יחסי, מעוגל ל-10 אג')</span></div>
-    <div class="price-item"><span class="price-ico">✏️</span><span>הגהה: <strong>₪{{ "%.2f"|format(proofing_price_per_minute) }}</strong> לכל דקת עבודה</span></div>
+    <div class="price-item"><span class="price-ico">{{ ic('keyboard', 18) }}</span><span>קלדנות דיגיטלית: <strong>₪{{ "%.2f"|format(char_unit_price) }}</strong> לכל <strong>{{ "{:,}".format(char_unit_size) }}</strong> תווים (חיוב יחסי, מעוגל ל-10 אג')</span></div>
+    <div class="price-item"><span class="price-ico">{{ ic('pen', 18) }}</span><span>הגהה: <strong>₪{{ "%.2f"|format(proofing_price_per_minute) }}</strong> לכל דקת עבודה</span></div>
   </div>
   <form id="manuscriptUploadForm">
     <div class="dropzone" id="manuscriptDz">
-      <div class="dz-icon">✍️</div>
+      <div class="dz-icon">{{ ic('upload', 34, 1.6) }}</div>
       <div class="dz-title">גררו תמונה/PDF של כתב היד לכאן או לחצו לבחירה</div>
       <div class="dz-sub">JPG, PNG או PDF</div>
       <div class="dz-filename" id="manuscriptDzFilename"></div>
@@ -132,7 +133,7 @@
 <div class="card" style="margin-bottom:20px;">
   <h3 style="font-size:15px; margin-bottom:2px;">כתבי יד ({{ manuscript_pages|length }})</h3>
   {% if manuscript_pages %}
-  <p style="font-size:12px; color:var(--text3); margin:0 0 12px;">⏳ קובץ "בתהליך" ממתין לקלדנות דיגיטלית ולאחריה לאישור נציג - בדרך כלל מוכן תוך 24 שעות, ייתכנו עיכובים בזמני עומס.</p>
+  <p style="font-size:12px; color:var(--text3); margin:0 0 12px; display:flex; align-items:center; gap:6px;">{{ ic('clock', 15) }} קובץ "בתהליך" ממתין לקלדנות דיגיטלית ולאחריה לאישור נציג - בדרך כלל מוכן תוך 24 שעות, ייתכנו עיכובים בזמני עומס.</p>
   {% endif %}
   {% for page in manuscript_pages %}
   <div style="border:1px solid var(--border); border-radius:10px; padding:12px 14px; margin-bottom:10px;">
@@ -143,12 +144,12 @@
       </div>
       <div style="display:flex; align-items:center; gap:8px;">
         {% if page.status == 'done' %}<span class="badge badge-green">מוכן</span>
-        {% elif page.status in ('pending', 'recording', 'processing', 'review') %}<span class="badge badge-amber" title="בדרך כלל מוכן תוך 24 שעות, ייתכנו עיכובים בזמני עומס">⏳ בתהליך</span>
+        {% elif page.status in ('pending', 'recording', 'processing', 'review') %}<span class="badge badge-amber" title="בדרך כלל מוכן תוך 24 שעות, ייתכנו עיכובים בזמני עומס">{{ ic('hourglass', 13, 2) }} בתהליך</span>
         {% else %}<span class="badge badge-gray">{{ page.status }}</span>{% endif %}
         {% if page.status == 'done' %}
         <a href="{{ url_for('institution_students.download_student_manuscript', student_id=student.id, page_id=page.id) }}"
            class="btn btn-sm btn-secondary" style="text-decoration:none;display:inline-flex;align-items:center;gap:6px;">
-          🖨 הדפסה/הורדה
+          {{ ic('printer', 15) }} הדפסה/הורדה
         </a>
         {% endif %}
       </div>
@@ -164,9 +165,9 @@
           <span class="badge badge-green">הושלם</span>
           <span style="color:var(--text2); font-size:12px;">{{ "%.2f"|format(r.cost or 0) }} ₪</span>
           <a href="{{ url_for('institution_students.download_student_proof', student_id=student.id, page_id=page.id, round_id=r.id) }}"
-             class="btn btn-sm btn-secondary" style="text-decoration:none;">⬇ הורדת הגהה סופית</a>
+             class="btn btn-sm btn-secondary" style="text-decoration:none;">{{ ic('download', 15) }} הורדת הגהה סופית</a>
         {% else %}
-          <span class="badge badge-amber" title="בדרך כלל מוכן תוך 24 שעות, ייתכנו עיכובים בזמני עומס">⏳ ממתין לטיפול</span>
+          <span class="badge badge-amber" title="בדרך כלל מוכן תוך 24 שעות, ייתכנו עיכובים בזמני עומס">{{ ic('hourglass', 13, 2) }} ממתין לטיפול</span>
         {% endif %}
       </div>
       {% else %}
@@ -176,7 +177,7 @@
       <form class="proofUploadForm" data-page-id="{{ page.id }}" style="margin-top:14px;">
         <div class="dropzone dropzone-compact proofDz">
           <div class="dz-row">
-            <span class="dz-icon-sm">📝</span>
+            <span class="dz-icon-sm">{{ ic('file-text', 18) }}</span>
             <div class="dz-texts">
               <div class="dz-title">העלאת הקובץ המוגה לסבב הגהה נוסף</div>
               <div class="dz-sub">גררו לכאן או לחצו לבחירה · Word, PDF או תמונה · הגהה: ₪{{ "%.2f"|format(proofing_price_per_minute) }} לדקת עבודה</div>
@@ -185,7 +186,7 @@
           <div class="dz-filename proofDzFilename"></div>
           <input type="file" name="correction_file" accept=".docx,.pdf,image/*" required>
         </div>
-        <button type="submit" class="btn btn-block" style="margin-top:10px;">📤 שליחה להגהה</button>
+        <button type="submit" class="btn btn-block" style="margin-top:10px;">{{ ic('send', 16) }} שליחה להגהה</button>
         <div class="proofUploadMsg" style="font-size:12.5px; margin-top:8px;"></div>
       </form>
     </div>
@@ -222,7 +223,7 @@ var studentDzFilename = document.getElementById('studentDzFilename');
 
 function showStudentFilename() {
   var n = studentFileInput.files.length;
-  studentDzFilename.textContent = !n ? '' : (n === 1 ? '📄 ' + studentFileInput.files[0].name : '📄 ' + n + ' קבצים נבחרו');
+  studentDzFilename.innerHTML = !n ? '' : IC.file + ' ' + escHtml(n === 1 ? studentFileInput.files[0].name : n + ' קבצים נבחרו');
 }
 studentFileInput.addEventListener('change', showStudentFilename);
 
@@ -296,7 +297,7 @@ var manuscriptFileInput = document.getElementById('manuscriptFile');
 var manuscriptDzFilename = document.getElementById('manuscriptDzFilename');
 
 function showManuscriptFilename() {
-  manuscriptDzFilename.textContent = manuscriptFileInput.files.length ? '📄 ' + manuscriptFileInput.files[0].name : '';
+  manuscriptDzFilename.innerHTML = manuscriptFileInput.files.length ? IC.file + ' ' + escHtml(manuscriptFileInput.files[0].name) : '';
 }
 manuscriptFileInput.addEventListener('change', showManuscriptFilename);
 
@@ -351,7 +352,7 @@ document.getElementById('manuscriptUploadForm').addEventListener('submit', async
 document.querySelectorAll('.proofDz').forEach(function (dz) {
   var input = dz.querySelector('input[type=file]');
   var nameEl = dz.querySelector('.proofDzFilename');
-  function showName() { nameEl.textContent = input.files.length ? '📄 ' + input.files[0].name : ''; }
+  function showName() { nameEl.innerHTML = input.files.length ? IC.file + ' ' + escHtml(input.files[0].name) : ''; }
   input.addEventListener('change', showName);
   ['dragover', 'dragenter'].forEach(function (ev) {
     dz.addEventListener(ev, function (e) { e.preventDefault(); dz.classList.add('dragover'); });

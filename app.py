@@ -562,6 +562,15 @@ def _migrate_db():
         # תמלול של מוסד בלי יתרה מספיקה - ממתין לתשלום (כמו לקוח), נשלח במייל אחרי טעינה
         "ALTER TABLE institution_uploads ADD COLUMN IF NOT EXISTS send_to VARCHAR(200)",
         "ALTER TABLE institution_uploads ADD COLUMN IF NOT EXISTS charged BOOLEAN",
+        # ניהול תלמידים: קבוצות, זיכוי חודשי אוטומטי, התראת יתרה נמוכה
+        "ALTER TABLE customers ADD COLUMN IF NOT EXISTS student_group_id INTEGER REFERENCES student_groups(id) ON DELETE SET NULL",
+        "CREATE INDEX IF NOT EXISTS ix_customers_student_group_id ON customers (student_group_id)",
+        "ALTER TABLE institutions ADD COLUMN IF NOT EXISTS monthly_credit_amount FLOAT",
+        "ALTER TABLE institutions ADD COLUMN IF NOT EXISTS monthly_credit_group_id INTEGER",
+        "ALTER TABLE institutions ADD COLUMN IF NOT EXISTS monthly_credit_last VARCHAR(7)",
+        "ALTER TABLE institutions ADD COLUMN IF NOT EXISTS low_balance_threshold FLOAT",
+        "ALTER TABLE institutions ADD COLUMN IF NOT EXISTS low_balance_email BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE institutions ADD COLUMN IF NOT EXISTS low_balance_last_sent TIMESTAMP",
         # תיקון חד-פעמי: הקלטות שחיכו לתשלום ונשלחו אחרי טעינה, אבל נשארו "שולחת ללקוח" (באג שתוקן) -
         # רק כאלה שחויבו בפועל וקיבלו התראת "תקועה". ההתראות עצמן נסגרות לבד ב-stuck_watch.
         "UPDATE recordings r SET status = 'delivered' WHERE r.status = 'transcribed' AND r.cost > 0 "

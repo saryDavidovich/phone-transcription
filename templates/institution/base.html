@@ -45,7 +45,11 @@ a { color:inherit; }
   padding:22px 0; position:fixed; right:0; top:0; bottom:0; z-index:100; display:flex; flex-direction:column;
 }
 .sidebar-logo { padding:0 22px 20px; margin-bottom:6px; border-bottom:1px solid var(--border); font-weight:800; font-size:17px; color:var(--text); display:flex; align-items:center; gap:8px; }
-.sidebar-logo .dot { width:9px; height:9px; border-radius:50%; background:var(--accent); box-shadow:0 0 0 4px var(--accent-soft); }
+.logo-ic { width:30px; height:30px; border-radius:9px; background:var(--accent); color:#fff; display:inline-flex; align-items:center; justify-content:center; box-shadow:0 4px 12px -4px rgba(16,185,129,.55); flex:none; }
+.ico { display:block; flex-shrink:0; }
+.sidebar-nav a .ico { opacity:.8; }
+.sidebar-nav a.active .ico { opacity:1; }
+.sidebar-footer a { display:inline-flex; align-items:center; gap:8px; }
 .sidebar-nav { flex:1; padding:14px 14px; display:flex; flex-direction:column; gap:3px; }
 .sidebar-nav a {
   color:var(--text2); text-decoration:none; padding:10px 14px; border-radius:10px; font-size:14px; font-weight:500;
@@ -67,7 +71,16 @@ main { flex:1; margin-right:240px; padding:32px 40px; max-width:1180px; min-widt
 .card-flex > form, .card-flex > .card-body { flex:1; display:flex; flex-direction:column; }
 .card-flex .card-actions { margin-top:auto; padding-top:6px; }
 .card-head { display:flex; align-items:center; gap:10px; margin-bottom:6px; }
-.card-head .ic { width:34px; height:34px; border-radius:10px; background:var(--accent-soft); color:var(--accent2); display:flex; align-items:center; justify-content:center; font-size:17px; flex:none; }
+.card-head .ic, .ic-box { width:34px; height:34px; border-radius:10px; background:var(--accent-soft); color:var(--accent2); display:flex; align-items:center; justify-content:center; flex:none; }
+.btn .ico { width:16px; height:16px; }
+.icon-btn { width:32px; height:32px; padding:0; border-radius:9px; background:var(--surface2); border:1px solid var(--border); color:var(--text2); display:inline-flex; align-items:center; justify-content:center; cursor:pointer; transition:.15s; flex:none; }
+.icon-btn:hover { background:var(--surface3); color:var(--text); }
+.icon-btn.danger:hover { background:var(--red-soft); color:var(--red); border-color:rgba(220,38,38,.2); }
+.icon-btn .ico { width:16px; height:16px; }
+.dz-icon { color:var(--accent2); display:flex; justify-content:center; }
+.dz-icon .ico { width:34px; height:34px; }
+.back-link { color:var(--text2); font-size:13px; text-decoration:none; display:inline-flex; align-items:center; gap:6px; }
+.back-link:hover { color:var(--text); }
 .card-head h3, .card-head h2 { margin:0; }
 .card-sub { font-size:12.5px; color:var(--text2); margin-bottom:16px; line-height:1.6; }
 .hint { font-size:12px; color:var(--text3); margin-top:6px; line-height:1.6; }
@@ -138,7 +151,7 @@ table tr { border-bottom:1px solid var(--border); }
 .dropzone .dz-icon { font-size:30px; margin-bottom:8px; }
 .dropzone .dz-title { font-size:14px; font-weight:600; color:var(--text); }
 .dropzone .dz-sub { font-size:12.5px; color:var(--text2); margin-top:4px; }
-.dropzone .dz-filename { font-size:13px; color:var(--accent2); font-weight:600; margin-top:8px; }
+.dropzone .dz-filename { display:flex; align-items:center; justify-content:center; gap:6px; font-size:13px; color:var(--accent2); font-weight:600; margin-top:8px; }
 .dropzone input[type=file] { position:absolute; inset:0; opacity:0; cursor:pointer; width:100%; height:100%; }
 
 /* ספינר עיגול טעינה */
@@ -150,8 +163,16 @@ table tr { border-bottom:1px solid var(--border); }
 .modal-backdrop { position:fixed; inset:0; background:rgba(20,25,40,.45); z-index:900; display:flex; align-items:center; justify-content:center; padding:20px; }
 .modal-box { background:var(--surface); border-radius:16px; padding:26px; max-width:440px; width:100%; box-shadow:var(--shadow-lg); position:relative; max-height:90vh; overflow:auto; }
 .modal-box h3 { margin-bottom:16px; }
-.modal-close { position:absolute; top:14px; left:14px; background:none; border:none; font-size:18px; color:var(--text2); cursor:pointer; }
+.modal-close { position:absolute; top:14px; left:14px; background:none; border:none; color:var(--text2); cursor:pointer; width:30px; height:30px; border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:0; }
+.modal-close:hover { background:var(--surface2); color:var(--text); }
+.modal-close::before { content:''; width:16px; height:16px; background:currentColor;
+  -webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round'%3E%3Cpath d='M18 6L6 18M6 6l12 12'/%3E%3C/svg%3E") center/contain no-repeat;
+          mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round'%3E%3Cpath d='M18 6L6 18M6 6l12 12'/%3E%3C/svg%3E") center/contain no-repeat; }
 
+.modal-actions { display:flex; gap:10px; margin-top:6px; }
+.switch-row { display:flex; gap:10px; align-items:flex-start; cursor:pointer; font-size:13.5px; color:var(--text); margin-bottom:14px; line-height:1.5; }
+.switch-row input[type=checkbox] { width:18px; height:18px; margin-top:1px; accent-color:var(--accent); flex:none; cursor:pointer; }
+.modal-actions > .btn { flex:1; }
 .hidden { display:none !important; }
 
 /* ---- מסכים צרים (טלפון / חלון קטן): סרגל צד נפתח מכפתור, הכול בעמודה אחת ---- */
@@ -160,8 +181,8 @@ table tr { border-bottom:1px solid var(--border); }
   .topbar { display:flex; align-items:center; justify-content:space-between; position:sticky; top:0; z-index:90;
             background:var(--surface); border-bottom:1px solid var(--border); padding:10px 14px; }
   .topbar .t-title { font-weight:800; font-size:16px; display:flex; align-items:center; gap:8px; }
-  .topbar .t-title .dot { width:9px; height:9px; border-radius:50%; background:var(--accent); box-shadow:0 0 0 4px var(--accent-soft); }
-  .topbar button { background:var(--surface2); border:1px solid var(--border); border-radius:10px; width:40px; height:40px; font-size:18px; cursor:pointer; color:var(--text); }
+  .topbar .logo-ic { width:26px; height:26px; }
+  .topbar button { background:var(--surface2); border:1px solid var(--border); border-radius:10px; width:40px; height:40px; cursor:pointer; color:var(--text); display:flex; align-items:center; justify-content:center; }
   .sidebar { transform:translateX(100%); transition:transform .2s; box-shadow:var(--shadow-lg); width:260px; }
   body.nav-open .sidebar { transform:none; }
   body.nav-open .nav-backdrop { display:block; position:fixed; inset:0; background:rgba(20,25,40,.35); z-index:95; }
@@ -179,6 +200,17 @@ table tr { border-bottom:1px solid var(--border); }
 }
 </style>
 {% block head %}{% endblock %}
+{% from "institution/_icons.html" import ic %}
+<script>
+/* שרטוטים לשימוש בסקריפטים של העמודים (במקום אימוג'י) */
+function escHtml(t) { return String(t == null ? '' : t).replace(/[&<>"]/g, function (c) { return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+window.IC = {
+  file: '{{ ic("file-text", 15)|replace("\n", "")|replace("'", "\\'") }}',
+  check: '{{ ic("check", 16, 2.4)|replace("\n", "")|replace("'", "\\'") }}',
+  alert: '{{ ic("alert", 16)|replace("\n", "")|replace("'", "\\'") }}',
+  download: '{{ ic("download", 16)|replace("\n", "")|replace("'", "\\'") }}'
+};
+</script>
 </head>
 {# הסרגל הצדדי רק למוסד מחובר בפועל. אם באותו דפדפן מחובר מנהל המערכת (אותו מנגנון
    התחברות), דף הכניסה של המוסד צריך להיראות נקי - בלי הסרגל של אזור המוסד. כך גם כשמוסד
@@ -187,24 +219,26 @@ table tr { border-bottom:1px solid var(--border); }
 <body class="{{ 'no-sidebar' if not inst_logged_in }}">
 {% if inst_logged_in %}
 <div class="topbar">
-  <div class="t-title"><span class="dot"></span> אזור מוסד</div>
-  <button type="button" aria-label="תפריט" onclick="document.body.classList.toggle('nav-open')">☰</button>
+  <div class="t-title"><span class="logo-ic">{{ ic('logo', 16, 2) }}</span> אזור מוסד</div>
+  <button type="button" aria-label="תפריט" onclick="document.body.classList.toggle('nav-open')">{{ ic('menu', 20) }}</button>
 </div>
 <div class="nav-backdrop" onclick="document.body.classList.remove('nav-open')"></div>
 <aside class="sidebar">
-  <div class="sidebar-logo"><span class="dot"></span> אזור מוסד</div>
+  <div class="sidebar-logo"><span class="logo-ic">{{ ic('logo', 16, 2) }}</span> אזור מוסד</div>
+  {% set ep = request.endpoint or '' %}
+  {% set self_page = student is defined and student.is_institution_self %}
   <nav class="sidebar-nav">
-    <a href="{{ url_for('institution.dashboard') }}" class="{{ 'active' if request.endpoint == 'institution.dashboard' }}">📊 דשבורד</a>
-    <a href="{{ url_for('institution_students.students_tab') }}" class="{{ 'active' if request.endpoint and request.endpoint.startswith('institution_students.') and not (student is defined and student.is_institution_self) }}">👥 ניהול תלמידים</a>
-    <a href="{{ url_for('institution.self_manuscripts') }}" class="{{ 'active' if student is defined and student.is_institution_self }}">📎 קלדנות דיגיטלית</a>
-    <a href="{{ url_for('institution_transcribe.transcribe_tab') }}" class="{{ 'active' if request.endpoint == 'institution_transcribe.transcribe_tab' }}">🎙 יצירת תמלול</a>
-    <a href="{{ url_for('institution.settings') }}" class="{{ 'active' if request.endpoint == 'institution.settings' }}">⚙️ הגדרות מוסד</a>
-    <a href="{{ url_for('institution_billing.billing_tab') }}" class="{{ 'active' if request.endpoint == 'institution_billing.billing_tab' }}">💳 הגדרות חיוב</a>
-    <a href="{{ url_for('institution.contact') }}" class="{{ 'active' if request.endpoint == 'institution.contact' }}">✉️ צור קשר</a>
+    <a href="{{ url_for('institution.dashboard') }}" class="{{ 'active' if ep == 'institution.dashboard' }}">{{ ic('dashboard') }}<span>דשבורד</span></a>
+    <a href="{{ url_for('institution_students.students_tab') }}" class="{{ 'active' if ep.startswith('institution_students.') and not self_page }}">{{ ic('users') }}<span>ניהול תלמידים</span></a>
+    <a href="{{ url_for('institution.self_manuscripts') }}" class="{{ 'active' if self_page }}">{{ ic('keyboard') }}<span>קלדנות דיגיטלית</span></a>
+    <a href="{{ url_for('institution_transcribe.transcribe_tab') }}" class="{{ 'active' if ep == 'institution_transcribe.transcribe_tab' }}">{{ ic('mic') }}<span>יצירת תמלול</span></a>
+    <a href="{{ url_for('institution.settings') }}" class="{{ 'active' if ep == 'institution.settings' }}">{{ ic('settings') }}<span>הגדרות מוסד</span></a>
+    <a href="{{ url_for('institution_billing.billing_tab') }}" class="{{ 'active' if ep == 'institution_billing.billing_tab' }}">{{ ic('card') }}<span>הגדרות חיוב</span></a>
+    <a href="{{ url_for('institution.contact') }}" class="{{ 'active' if ep == 'institution.contact' }}">{{ ic('mail') }}<span>צור קשר</span></a>
   </nav>
-  <button type="button" id="pwaInstall" class="btn btn-secondary btn-sm sidebar-install" style="display:none" onclick="pwaInstall()">⬇ התקנה כתוכנה במחשב</button>
+  <button type="button" id="pwaInstall" class="btn btn-secondary btn-sm sidebar-install" style="display:none" onclick="pwaInstall()">{{ ic('install', 16) }} התקנה כתוכנה במחשב</button>
   <div class="sidebar-footer">
-    <a href="{{ url_for('institution.logout') }}">התנתקות</a>
+    <a href="{{ url_for('institution.logout') }}">{{ ic('logout', 16) }}<span>התנתקות</span></a>
   </div>
 </aside>
 {% endif %}
@@ -214,6 +248,7 @@ table tr { border-bottom:1px solid var(--border); }
   {% endwith %}
   {% block content %}{% endblock %}
 </main>
+
 <div id="dlToast" class="hidden" style="position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:#1c2333;color:#fff;padding:10px 18px;border-radius:12px;font-size:13.5px;z-index:999;box-shadow:var(--shadow-lg);display:flex;align-items:center;gap:10px;"></div>
 <script>
 /* הורדות (Word / אקסל / שמע / דוחות) - בלי לעבור לדף אחר: הקובץ נמשך ברקע ונשמר מהדף הנוכחי.
@@ -286,10 +321,10 @@ table tr { border-bottom:1px solid var(--border); }
       if (ct.indexOf('text/html') >= 0) res = await fromPage(await r.text());
       else res = [await r.blob(), fname(r)];
       save(res[0], res[1]);
-      say('✓ הקובץ ירד: ' + (res[1] || ''), 3500);
+      say(IC.check + ' הקובץ ירד: ' + (res[1] || '').replace(/</g, '&lt;'), 3500);
     } catch (err) {
       var msg = String(err && err.message || '');
-      if (msg && msg.length < 200 && !/^\d+$/.test(msg) && msg !== 'no-file') say('⚠ ' + msg.replace(/</g, '&lt;'), 6000);
+      if (msg && msg.length < 200 && !/^\d+$/.test(msg) && msg !== 'no-file') say(IC.alert + ' ' + msg.replace(/</g, '&lt;'), 6000);
       else { toast.classList.add('hidden'); location.href = url.href; }     // גיבוי: ההתנהגות הקודמת
     } finally { delete a.dataset.busy; }
   });

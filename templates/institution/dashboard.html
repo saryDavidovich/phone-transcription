@@ -1,33 +1,79 @@
 {% extends "institution/base.html" %}
+{% from "institution/_icons.html" import ic %}
 {% block title %}דשבורד{% endblock %}
+{% block head %}
+<style>
+.quick { display:flex; align-items:center; gap:12px; text-decoration:none; color:var(--text); transition:.15s; }
+.quick:hover { border-color:var(--accent); transform:translateY(-1px); }
+.quick .t { font-weight:700; font-size:14px; }
+.quick .d { font-size:12.5px; color:var(--text2); margin-top:2px; }
+.alert-card { display:flex; align-items:center; gap:12px; text-decoration:none; color:var(--text); border-color:rgba(217,119,6,.28); background:var(--amber-soft); }
+.alert-card .ic-box { background:#fff; color:var(--amber); }
+.info-row { display:flex; justify-content:space-between; gap:10px; padding:9px 0; border-bottom:1px solid var(--border); font-size:13.5px; }
+.info-row:last-child { border-bottom:0; }
+.info-row span:first-child { color:var(--text2); }
+</style>
+{% endblock %}
 {% block content %}
+<div class="page">
 <h1>שלום, {{ inst.name }}</h1>
 
-<div class="grid grid-4" style="margin-bottom:24px;">
-  <div class="card">
-    <div class="stat-value">{{ student_count }}</div>
-    <div class="stat-label">תלמידים מחוברים</div>
+<div class="grid grid-4 mb-18">
+  <div class="card stat-card">
+    <span class="ic" style="background:var(--accent-soft); color:var(--accent2);">{{ ic('wallet', 22) }}</span>
+    <div><div class="stat-value">{{ "%.2f"|format(inst.balance or 0) }} ₪</div><div class="stat-label">יתרת המוסד</div></div>
   </div>
-  <div class="card">
-    <div class="stat-value">{{ "%.2f"|format(students_balance_sum) }} ₪</div>
-    <div class="stat-label">סה"כ יתרת תלמידים</div>
+  <div class="card stat-card">
+    <span class="ic" style="background:var(--blue-soft); color:var(--blue);">{{ ic('users', 22) }}</span>
+    <div><div class="stat-value">{{ student_count }}</div><div class="stat-label">תלמידים ({{ active_count }} פעילים)</div></div>
   </div>
-  <div class="card">
-    <div class="stat-value">{{ total_recordings }}</div>
-    <div class="stat-label">הקלטות שבוצעו</div>
+  <div class="card stat-card">
+    <span class="ic" style="background:#f3edfe; color:#7c3aed;">{{ ic('chart', 22) }}</span>
+    <div><div class="stat-value">{{ "%.2f"|format(month_cost) }} ₪</div><div class="stat-label">שימוש התלמידים החודש ({{ month_minutes }} דק')</div></div>
   </div>
-  <div class="card">
-    <div class="stat-value">{{ "%.2f"|format(inst.balance or 0) }} ₪</div>
-    <div class="stat-label">יתרת המוסד הכללית</div>
+  <div class="card stat-card">
+    <span class="ic" style="background:var(--surface3); color:var(--text2);">{{ ic('receipt', 22) }}</span>
+    <div><div class="stat-value">{{ "%.2f"|format(students_balance_sum) }} ₪</div><div class="stat-label">סה"כ יתרות התלמידים</div></div>
   </div>
 </div>
 
-<div class="card">
-  <h2 style="font-size:16px; margin-bottom:14px;">פרטי המוסד</h2>
-  <div class="form-grid" style="color:var(--text2); font-size:14px; line-height:2.1;">
-    <div>שם: <strong style="color:var(--text);">{{ inst.name }}</strong></div>
-    <div>מייל: <strong style="color:var(--text);">{{ inst.email or '—' }}</strong></div>
-    <div>טלפון: <strong style="color:var(--text);">{{ inst.phone or '—' }}</strong></div>
+{% if low_count or pending_uploads %}
+<div class="grid grid-2 mb-18">
+  {% if low_count %}
+  <a class="card alert-card" href="{{ url_for('institution_students.students_tab') }}?f=low">
+    <span class="ic-box">{{ ic('alert', 18) }}</span>
+    <div><div style="font-weight:700;">{{ low_count }} תלמידים עם יתרה נמוכה</div><div class="hint" style="margin:2px 0 0;">מתחת ל-{{ '%g'|format(low_threshold) }} ₪ · לחצו לרשימה ולזיכוי</div></div>
+  </a>
+  {% endif %}
+  {% if pending_uploads %}
+  <a class="card alert-card" href="{{ url_for('institution_billing.billing_tab') }}">
+    <span class="ic-box">{{ ic('hourglass', 18) }}</span>
+    <div><div style="font-weight:700;">{{ pending_uploads }} תמלולים ממתינים לטעינת יתרה</div><div class="hint" style="margin:2px 0 0;">ישוחררו אוטומטית מיד אחרי הטעינה</div></div>
+  </a>
+  {% endif %}
+</div>
+{% endif %}
+
+<div class="grid grid-2" style="align-items:stretch;">
+  <div class="card">
+    <div class="card-head" style="margin-bottom:12px;"><span class="ic">{{ ic('dashboard') }}</span><h2>פעולות מהירות</h2></div>
+    <div class="grid" style="gap:10px;">
+      <a class="card quick" style="padding:14px; box-shadow:none;" href="{{ url_for('institution_transcribe.transcribe_tab') }}">
+        <span class="ic-box">{{ ic('mic') }}</span><div><div class="t">יצירת תמלול</div><div class="d">העלאת קבצי שמע או וידאו</div></div></a>
+      <a class="card quick" style="padding:14px; box-shadow:none;" href="{{ url_for('institution_students.students_tab') }}">
+        <span class="ic-box">{{ ic('users') }}</span><div><div class="t">ניהול תלמידים</div><div class="d">הוספה, זיכוי, קבוצות וחיפוש</div></div></a>
+      <a class="card quick" style="padding:14px; box-shadow:none;" href="{{ url_for('institution_billing.billing_tab') }}">
+        <span class="ic-box">{{ ic('card') }}</span><div><div class="t">טעינת יתרה ודוחות</div><div class="d">כרטיס אשראי ודוח עלויות באקסל</div></div></a>
+    </div>
   </div>
+  <div class="card">
+    <div class="card-head" style="margin-bottom:8px;"><span class="ic">{{ ic('info') }}</span><h2>פרטי המוסד</h2></div>
+    <div class="info-row"><span>שם</span><b>{{ inst.name }}</b></div>
+    <div class="info-row"><span>מייל</span><b>{{ inst.email or '—' }}</b></div>
+    <div class="info-row"><span>טלפון</span><b>{{ inst.phone or '—' }}</b></div>
+    <div class="info-row"><span>הקלטות שבוצעו</span><b>{{ total_recordings }}</b></div>
+    <div class="info-row"><span>זיכוי חודשי אוטומטי</span><b>{% if inst.monthly_credit_amount %}{{ '%.2f'|format(inst.monthly_credit_amount) }} ₪ לתלמיד{% else %}כבוי{% endif %}</b></div>
+  </div>
+</div>
 </div>
 {% endblock %}

@@ -1,10 +1,11 @@
 {% extends "institution/base.html" %}
+{% from "institution/_icons.html" import ic %}
 {% block title %}צור קשר{% endblock %}
 {% block content %}
 <div class="page-narrow">
 <h1>צור קשר</h1>
 <div class="card">
-  <div class="card-head"><span class="ic">✉️</span><h2>הודעה להנהלת המערכת</h2></div>
+  <div class="card-head"><span class="ic">{{ ic("mail") }}</span><h2>הודעה להנהלת המערכת</h2></div>
   <div class="card-sub">שאלה, בקשה או תקלה - ההודעה מגיעה ישירות אלינו, ונחזור אליכם בהקדם.</div>
   <form method="post">
     <div class="field">

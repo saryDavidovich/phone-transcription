@@ -1,10 +1,11 @@
 {% extends "institution/base.html" %}
+{% from "institution/_icons.html" import ic %}
 {% block title %}התחברות{% endblock %}
 {% block content %}
 <div style="max-width:400px; width:100%;">
   <div class="card" style="box-shadow:var(--shadow-lg);">
     <div style="text-align:center; margin-bottom:18px;">
-      <div style="width:44px;height:44px;border-radius:12px;background:var(--accent-soft);display:flex;align-items:center;justify-content:center;margin:0 auto 12px;font-size:22px;">🏫</div>
+      <div style="width:44px;height:44px;border-radius:12px;background:var(--accent-soft);display:flex;align-items:center;justify-content:center;margin:0 auto 12px;color:var(--accent2);">{{ ic('lock', 22) }}</div>
       <h1 style="margin-bottom:4px;">כניסת מוסד</h1>
       <p style="font-size:13px;color:var(--text2);">מערכת ניהול תמלול לתלמידים</p>
     </div>
@@ -44,7 +45,7 @@
 
 <div id="forgotModal" class="modal-backdrop hidden">
   <div class="modal-box" style="max-width:380px;">
-    <button class="modal-close" onclick="closeForgot()">✕</button>
+    <button type="button" class="modal-close" onclick="closeForgot()" aria-label="סגירה"></button>
     <h3>שחזור גישה</h3>
     <p style="font-size:13px;color:var(--text2);margin-bottom:14px;">הזינו את כתובת המייל של המוסד - אם היא רשומה במערכת, יישלח אליה קוד כניסה זמני חדש.</p>
     <div class="field">

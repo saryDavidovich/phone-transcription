@@ -47,6 +47,7 @@ class Customer(db.Model):
     institution_id = db.Column(db.Integer, db.ForeignKey('institutions.id'), nullable=True, index=True)
     student_number = db.Column(db.String(10), unique=True, nullable=True, index=True)  # 6 ספרות, לזיהוי בשלוחה 7
     student_display_name = db.Column(db.String(100), nullable=True)  # שם שהמוסד נתן לתלמיד (עשוי להיות שונה מ-name)
+    student_group_id = db.Column(db.Integer, db.ForeignKey('student_groups.id', ondelete='SET NULL'), nullable=True, index=True)  # קבוצה/שיעור במוסד
     # "לקוח-דמה" אחד לכל מוסד (נוצר עצלנית - ראה routes/institution.py
     # ensure_institution_self_customer) המייצג את המוסד עצמו ולא תלמיד
     # ספציפי - משמש להעלאת כתבי-יד כלליים של המוסד (לא קשורים לתלמיד בודד),
@@ -98,6 +99,14 @@ class Institution(db.Model, UserMixin):
     billing_unit = db.Column(db.Integer, nullable=True)   # 5 = חיוב לפי 5 דקות (המוסד וברירת מחדל לתלמידים); ריק/20 = לפי 20
     failed_logins = db.Column(db.Integer, nullable=True, default=0)   # ניסיונות שגויים רצופים
     locked_until = db.Column(db.DateTime, nullable=True)              # נעילה זמנית אחרי 10 ניסיונות שגויים
+    # זיכוי חודשי אוטומטי לתלמידים (מיתרת המוסד), בתחילת כל חודש
+    monthly_credit_amount = db.Column(db.Float, nullable=True)
+    monthly_credit_group_id = db.Column(db.Integer, nullable=True)    # ריק = כל התלמידים הפעילים
+    monthly_credit_last = db.Column(db.String(7), nullable=True)      # 'YYYY-MM' של הזיכוי האחרון שבוצע
+    # התראת יתרה נמוכה: סימון ברשימה + מייל שבועי למוסד
+    low_balance_threshold = db.Column(db.Float, nullable=True)        # ריק = 5 ₪
+    low_balance_email = db.Column(db.Boolean, nullable=True, default=False)
+    low_balance_last_sent = db.Column(db.DateTime, nullable=True)
 
     @property
     def secret_token(self):
@@ -154,6 +163,15 @@ class InstitutionUpload(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     institution = db.relationship('Institution', backref='uploads')
+
+
+class StudentGroup(db.Model):
+    """קבוצה/שיעור בתוך מוסד - לסינון תלמידים, זיכוי לקבוצה ודוח עלויות לפי קבוצה."""
+    __tablename__ = 'student_groups'
+    id = db.Column(db.Integer, primary_key=True)
+    institution_id = db.Column(db.Integer, db.ForeignKey('institutions.id', ondelete='CASCADE'), nullable=False, index=True)
+    name = db.Column(db.String(80), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
 
 class InstitutionLoginLog(db.Model):

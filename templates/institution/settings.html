@@ -1,4 +1,5 @@
 {% extends "institution/base.html" %}
+{% from "institution/_icons.html" import ic %}
 {% block title %}הגדרות מוסד{% endblock %}
 {% block content %}
 <div class="page">
@@ -7,7 +8,7 @@
 {# שני הכרטיסים העליונים הם טופס אחד (שמירה אחת לשניהם) #}
 <form method="post" class="grid grid-2 mb-18" style="align-items:stretch;">
   <div class="card card-flex">
-    <div class="card-head"><span class="ic">⏱</span><h3>מגבלות שימוש לתלמידים</h3></div>
+    <div class="card-head"><span class="ic">{{ ic("clock") }}</span><h3>מגבלות שימוש לתלמידים</h3></div>
     <div class="card-sub">כמה ומתי התלמידים יכולים להשתמש בשירות.</div>
     <div class="card-body">
       <div class="field">
@@ -35,7 +36,7 @@
   </div>
 
   <div class="card card-flex">
-    <div class="card-head"><span class="ic">📨</span><h3>קבלת תמלולים</h3></div>
+    <div class="card-head"><span class="ic">{{ ic("mail") }}</span><h3>קבלת תמלולים</h3></div>
     <div class="card-sub">לאן נשלחים תמלולים של תלמידים שאין להם מייל אישי.</div>
     <div class="card-body">
       <div class="field">
@@ -48,9 +49,9 @@
       </div>
       {% if topup_global_on %}
       <div class="field">
-        <label style="display:flex;gap:8px;align-items:center;cursor:pointer;color:var(--text);">
-          <input type="checkbox" name="allow_student_topup" value="1" style="width:auto" {{ 'checked' if inst.allow_student_topup is not false }}>
-          לאפשר לתלמידים לטעון יתרה בעצמם
+        <label class="switch-row" style="margin-bottom:0;">
+          <input type="checkbox" name="allow_student_topup" value="1" {{ 'checked' if inst.allow_student_topup is not false }}>
+          <span>לאפשר לתלמידים לטעון יתרה בעצמם</span>
         </label>
         <div class="hint">הכסף שהתלמיד טוען נשאר שלו - אי אפשר להורידו מהמוסד.</div>
       </div>
@@ -60,9 +61,54 @@
   </div>
 </form>
 
+<form method="post" class="grid grid-2 mb-18" style="align-items:stretch;">
+  <input type="hidden" name="section" value="automation">
+  <div class="card card-flex">
+    <div class="card-head"><span class="ic">{{ ic("repeat") }}</span><h3>זיכוי חודשי אוטומטי</h3></div>
+    <div class="card-sub">בתחילת כל חודש כל תלמיד פעיל מקבל סכום קבוע, מיתרת המוסד. בסיום נשלח אליכם סיכום במייל.</div>
+    <div class="card-body">
+      <label class="switch-row">
+        <input type="checkbox" name="monthly_on" value="1" {{ 'checked' if inst.monthly_credit_amount }}>
+        <span>להפעיל זיכוי חודשי</span>
+      </label>
+      <div class="row-2">
+        <div class="field"><label>סכום לכל תלמיד (₪)</label>
+          <input class="input" name="monthly_credit_amount" type="number" step="0.01" min="0" value="{{ '%g'|format(inst.monthly_credit_amount) if inst.monthly_credit_amount else '' }}" placeholder="למשל 20"></div>
+        <div class="field"><label>למי</label>
+          <select class="input" name="monthly_credit_group_id">
+            <option value="">כל התלמידים הפעילים</option>
+            {% for g in groups %}<option value="{{ g.id }}" {{ 'selected' if inst.monthly_credit_group_id == g.id }}>קבוצה: {{ g.name }}</option>{% endfor %}
+          </select></div>
+      </div>
+      <div class="hint" style="margin-top:-6px;">
+        {% if inst.monthly_credit_amount %}פעיל: {{ monthly_count }} תלמידים × {{ '%.2f'|format(inst.monthly_credit_amount) }} ₪ = {{ '%.2f'|format(monthly_count * inst.monthly_credit_amount) }} ₪ בחודש.
+        {% if inst.monthly_credit_last %}הזיכוי האחרון: {{ inst.monthly_credit_last[5:] }}/{{ inst.monthly_credit_last[:4] }}.{% endif %}
+        {% else %}הזיכוי הראשון יתבצע בתחילת החודש הבא. אם יתרת המוסד לא תספיק לכולם - מי שלא זוכה יופיע בסיכום.{% endif %}
+      </div>
+      <div class="card-actions"><button type="submit" class="btn btn-block">שמירת הגדרות</button></div>
+    </div>
+  </div>
+
+  <div class="card card-flex">
+    <div class="card-head"><span class="ic">{{ ic("bell") }}</span><h3>התראת יתרה נמוכה</h3></div>
+    <div class="card-sub">תלמיד שהיתרה שלו מתחת לסף מסומן באדום ברשימה, ואפשר לקבל עליו מייל.</div>
+    <div class="card-body">
+      <div class="field"><label>סף יתרה נמוכה (₪)</label>
+        <input class="input" name="low_balance_threshold" type="number" step="0.01" min="0" value="{{ '%g'|format(inst.low_balance_threshold) if inst.low_balance_threshold is not none else '' }}" placeholder="{{ '%g'|format(default_low) }}">
+        <div class="hint">ריק = {{ '%g'|format(default_low) }} ₪.</div></div>
+      <label class="switch-row">
+        <input type="checkbox" name="low_balance_email" value="1" {{ 'checked' if inst.low_balance_email }}>
+        <span>מייל שבועי (ביום ראשון בבוקר) עם רשימת התלמידים שהיתרה שלהם נמוכה</span>
+      </label>
+      <div class="hint">המייל נשלח ל{{ inst.notify_email or inst.email or 'מייל המוסד' }}, ורק אם יש תלמידים כאלה.</div>
+      <div class="card-actions"><button type="submit" class="btn btn-block">שמירת הגדרות</button></div>
+    </div>
+  </div>
+</form>
+
 <div class="grid grid-2" style="align-items:stretch;">
   <div class="card card-flex">
-    <div class="card-head"><span class="ic">👤</span><h3>מורשי כניסה נוספים</h3></div>
+    <div class="card-head"><span class="ic">{{ ic("user-plus") }}</span><h3>מורשי כניסה נוספים</h3></div>
     <div class="card-sub">אנשים נוספים שנכנסים לאותו חשבון, עם מייל או טלפון משלהם ואותה סיסמה.</div>
     {% if inst.authorized_logins %}
     <div style="margin-bottom:12px;">
@@ -90,7 +136,7 @@
   </div>
 
   <div class="card card-flex">
-    <div class="card-head"><span class="ic">🔒</span><h3>{{ 'החלפת סיסמה' if inst.password_hash else 'הגדרת סיסמה' }}</h3></div>
+    <div class="card-head"><span class="ic">{{ ic("lock") }}</span><h3>{{ 'החלפת סיסמה' if inst.password_hash else 'הגדרת סיסמה' }}</h3></div>
     <div class="card-sub">לפחות 8 תווים, עם אותיות וגם ספרות. אחרי ההחלפה שאר המכשירים המחוברים יתנתקו.</div>
     <form method="post" action="{{ url_for('institution.change_password') }}" autocomplete="off">
       {% if inst.password_hash %}

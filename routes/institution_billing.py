@@ -62,10 +62,12 @@ def billing_tab():
     mosad = os.environ.get('NEDARIM_MOSAD', '')
     from models import InstitutionUpload
     pending = InstitutionUpload.query.filter_by(institution_id=inst.id, status='pending_payment').all()
+    from models import StudentGroup
+    groups = StudentGroup.query.filter_by(institution_id=inst.id).order_by(StudentGroup.name).all()
     return render_template(
         'institution/billing.html',
         inst=inst, charges=charges, success_count=success_count,
-        pending_count=len(pending), pending_sum=round(sum(u.cost or 0 for u in pending), 2),
+        groups=groups, pending_count=len(pending), pending_sum=round(sum(u.cost or 0 for u in pending), 2),
         nedarim_configured=bool(mosad),
     )
 
@@ -77,9 +79,13 @@ def cost_report():
     from flask_login import current_user
     from services import institution_cost_report as R
     from routes.download_utils import render_data_uri_download_page
-    data = R.build_xlsx(current_user, request.args.get('from') or None, request.args.get('to') or None)
+    from models import StudentGroup
+    gid = request.args.get('group', type=int)
+    group = StudentGroup.query.filter_by(id=gid, institution_id=current_user.id).first() if gid else None
+    data = R.build_xlsx(current_user, request.args.get('from') or None, request.args.get('to') or None,
+                        group.id if group else None)
     return render_data_uri_download_page(
-        data, R.filename(current_user),
+        data, R.filename(current_user, group.name if group else None),
         mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', page_title='דוח העלויות מוכן')
 
 

@@ -1,4 +1,5 @@
 {% extends "institution/base.html" %}
+{% from "institution/_icons.html" import ic %}
 {% block title %}יצירת תמלול{% endblock %}
 {% block content %}
 <h1>יצירת תמלול</h1>
@@ -6,7 +7,7 @@
 <div class="card" style="margin-bottom:24px;">
   <form id="uploadForm">
     <div class="dropzone" id="transcribeDz">
-      <div class="dz-icon">🎧</div>
+      <div class="dz-icon">{{ ic('headphones', 34, 1.6) }}</div>
       <div class="dz-title">גררו קבצי אודיו/וידאו לכאן או לחצו לבחירה</div>
       <div class="dz-sub">אפשר לבחור כמה קבצים יחד - כל קובץ יתומלל בנפרד ויקבל קובץ Word משלו</div>
       <div class="dz-filename" id="transcribeDzFilename"></div>
@@ -93,7 +94,7 @@ var transcribeDzFilename = document.getElementById('transcribeDzFilename');
 
 function showTranscribeFilename() {
   var n = audioFileInput.files.length;
-  transcribeDzFilename.textContent = !n ? '' : (n === 1 ? '📄 ' + audioFileInput.files[0].name : '📄 ' + n + ' קבצים נבחרו');
+  transcribeDzFilename.innerHTML = !n ? '' : IC.file + ' ' + escHtml(n === 1 ? audioFileInput.files[0].name : n + ' קבצים נבחרו');
 }
 audioFileInput.addEventListener('change', showTranscribeFilename);
 

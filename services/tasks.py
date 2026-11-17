@@ -416,15 +416,19 @@ def run_due(now=None):
 def _loop(app):
     time.sleep(45)
     while True:
-        for job in ('tasks', 'admin'):
+        for job in ('tasks', 'admin', 'institutions'):
             try:
                 with app.app_context():
                     if job == 'tasks':
                         run_due()
-                    else:                                   # משימות המנהל: צינתוק + דוח שבועי
+                    elif job == 'admin':                    # משימות המנהל: צינתוק + דוח שבועי
                         from services import admin_tasks as AT
                         AT.run_notify()
                         AT.run_weekly_email()
+                    else:                                   # מוסדות: זיכוי חודשי + מייל יתרה נמוכה
+                        from services import institution_students_ops as ISO
+                        ISO.run_monthly_credits()
+                        ISO.run_low_balance_emails()
             except Exception as e:
                 log.warning(f'{job} loop: {e}')
                 try:

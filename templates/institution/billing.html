@@ -1,4 +1,5 @@
 {% extends "institution/base.html" %}
+{% from "institution/_icons.html" import ic %}
 {% block title %}הגדרות חיוב{% endblock %}
 {% block content %}
 <div class="page">
@@ -6,16 +7,16 @@
 
 <div class="grid grid-3 mb-18">
   <div class="card stat-card">
-    <span class="ic" style="background:var(--accent-soft); color:var(--accent2);">₪</span>
+    <span class="ic" style="background:var(--accent-soft); color:var(--accent2);">{{ ic("wallet", 22) }}</span>
     <div><div class="stat-value">{{ "%.2f"|format(inst.balance or 0) }} ₪</div><div class="stat-label">יתרת המוסד</div></div>
   </div>
   <div class="card stat-card">
-    <span class="ic" style="background:{{ 'var(--amber-soft)' if pending_count else 'var(--surface3)' }}; color:{{ 'var(--amber)' if pending_count else 'var(--text2)' }};">⏳</span>
+    <span class="ic" style="background:{{ 'var(--amber-soft)' if pending_count else 'var(--surface3)' }}; color:{{ 'var(--amber)' if pending_count else 'var(--text2)' }};">{{ ic("hourglass", 22) }}</span>
     <div><div class="stat-value">{{ pending_count }}{% if pending_count %} <span style="font-size:14px; font-weight:600; color:var(--text2);">({{ "%.2f"|format(pending_sum) }} ₪)</span>{% endif %}</div>
       <div class="stat-label">תמלולים ממתינים לטעינה</div></div>
   </div>
   <div class="card stat-card">
-    <span class="ic" style="background:var(--blue-soft); color:var(--blue);">✓</span>
+    <span class="ic" style="background:var(--blue-soft); color:var(--blue);">{{ ic("check", 22, 2.2) }}</span>
     <div><div class="stat-value">{{ success_count }}</div><div class="stat-label">טעינות שבוצעו</div></div>
   </div>
 </div>
@@ -26,7 +27,7 @@
 
 <div class="grid grid-2 mb-18" style="align-items:stretch;">
   <div class="card card-flex">
-    <div class="card-head"><span class="ic">💳</span><h2>טעינת יתרה בכרטיס אשראי</h2></div>
+    <div class="card-head"><span class="ic">{{ ic("card") }}</span><h2>טעינת יתרה בכרטיס אשראי</h2></div>
     <div class="card-sub">פרטי הכרטיס מוזנים בחלון המאובטח של נדרים פלוס ולא מגיעים אלינו.</div>
     <div class="card-body">
       <div class="field">
@@ -42,16 +43,21 @@
   </div>
 
   <div class="card card-flex">
-    <div class="card-head"><span class="ic">📑</span><h2>דוח עלויות (Excel)</h2></div>
+    <div class="card-head"><span class="ic">{{ ic("report") }}</span><h2>דוח עלויות (Excel)</h2></div>
     <div class="card-sub">טעינות, תמלולים של המוסד, זיכויים לתלמידים ושימוש מפורט לפי תלמיד. בלי תאריכים = כל התקופה.</div>
     <div class="card-body">
       <div class="row-2">
         <div class="field"><label for="crFrom">מתאריך</label><input class="input" type="date" id="crFrom"></div>
         <div class="field"><label for="crTo">עד תאריך</label><input class="input" type="date" id="crTo"></div>
       </div>
+      {% if groups %}
+      <div class="field"><label for="crGroup">קבוצה</label>
+        <select class="input" id="crGroup"><option value="">כל המוסד</option>{% for g in groups %}<option value="{{ g.id }}">{{ g.name }}</option>{% endfor %}</select>
+      </div>
+      {% endif %}
       <div class="card-actions">
         <a class="btn btn-block" href="{{ url_for('institution_billing.cost_report') }}" style="text-decoration:none;"
-           onclick="this.href='{{ url_for('institution_billing.cost_report') }}?from='+document.getElementById('crFrom').value+'&to='+document.getElementById('crTo').value">הורדת הדוח</a>
+           onclick="var g=document.getElementById('crGroup');this.href='{{ url_for('institution_billing.cost_report') }}?from='+document.getElementById('crFrom').value+'&to='+document.getElementById('crTo').value+(g&&g.value?'&group='+g.value:'')">{{ ic('download', 16) }} הורדת הדוח</a>
       </div>
     </div>
   </div>
@@ -132,7 +138,7 @@
 </script>
 
 <div class="card">
-  <div class="card-head" style="margin-bottom:12px;"><span class="ic">🧾</span><h2>היסטוריית חיובים</h2></div>
+  <div class="card-head" style="margin-bottom:12px;"><span class="ic">{{ ic("receipt") }}</span><h2>היסטוריית חיובים</h2></div>
   {% if charges %}
   <div class="table-wrap">
     <table style="font-size:13.5px;">

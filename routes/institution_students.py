@@ -51,7 +51,17 @@ def students_tab():
                      .filter(StudentLinkRequest.status.in_(('pending', 'declined', 'expired')))
                      .order_by(StudentLinkRequest.created_at.desc()).limit(30).all())
     from services.student_links import global_self_topup_enabled, institution_self_topup_on
+    from services import institution_students_ops as ISO
+    from models import StudentGroup
+    groups = StudentGroup.query.filter_by(institution_id=current_user.id).order_by(StudentGroup.name).all()
+    group_counts = {}
+    for st in students:
+        group_counts[st.student_group_id] = group_counts.get(st.student_group_id, 0) + 1
     return render_template('institution/students.html', students=students, self_topups=self_topups,
+                           usage=ISO.month_usage([st.id for st in students]), groups=groups,
+                           group_names={g.id: g.name for g in groups}, group_counts=group_counts,
+                           low_threshold=ISO.low_threshold(current_user),
+                           month_label=datetime.now(ISO.IL).strftime('%m/%Y'),
                            link_requests=link_requests, now=datetime.utcnow(),
                            topup_global_on=global_self_topup_enabled(),
                            topup_inst_on=institution_self_topup_on(current_user))
@@ -66,6 +76,7 @@ def add_student():
     fax = (request.form.get('fax') or '').strip() or None
     initial_balance = float(request.form.get('initial_balance') or 0)
     inst = current_user
+    group_id = _own_group_id(request.form.get('group_id'))
 
     existing = __import__('services.customer_phones', fromlist=['x']).find_customer_by_phone(phone) if phone else None
     if existing:
@@ -87,6 +98,7 @@ def add_student():
         institution_id=current_user.id,
         student_number=_generate_student_number(),
         student_display_name=name,
+        student_group_id=group_id,
     )
     db.session.add(student)
     db.session.commit()
@@ -101,6 +113,156 @@ def add_student():
     return redirect(url_for('institution_students.students_tab'))
 
 
+def _back():
+    """חזרה לרשימת התלמידים עם אותו חיפוש/סינון שהיה (נשלח בטופס כ-back)."""
+    back = request.form.get('back') or ''
+    if back.startswith('/institution/students') and '//' not in back:
+        return back
+    return url_for('institution_students.students_tab')
+
+
+def _own_group_id(raw):
+    from models import StudentGroup
+    try:
+        gid = int(raw or 0)
+    except ValueError:
+        return None
+    if not gid:
+        return None
+    g = StudentGroup.query.filter_by(id=gid, institution_id=current_user.id).first()
+    return g.id if g else None
+
+
+@institution_students_bp.route('/institution/students/<int:student_id>/edit', methods=['POST'])
+@institution_login_required
+def edit_student(student_id):
+    """עריכת פרטי תלמיד מתוך הרשימה: שם, טלפון, מייל, פקס, קבוצה."""
+    student = Customer.query.filter_by(id=student_id, institution_id=current_user.id).first_or_404()
+    name = (request.form.get('name') or '').strip()
+    phone = (request.form.get('phone') or '').strip().replace('-', '').replace(' ', '') or None
+    email = (request.form.get('email') or '').strip() or None
+    fax = (request.form.get('fax') or '').strip() or None
+    if not name:
+        flash('יש להזין שם')
+        return redirect(_back())
+    if phone and phone != student.phone:
+        from services.customer_phones import find_customer_by_phone
+        other = find_customer_by_phone(phone)
+        if other and other.id != student.id:
+            flash(f'המספר {phone} כבר רשום במערכת אצל לקוח אחר - אי אפשר לשייך אותו לתלמיד הזה')
+            return redirect(_back())
+    if not student.name or student.name == student.student_display_name:
+        student.name = name           # תלמיד שהמוסד יצר - השם שלו הוא השם שהמוסד נתן
+    student.student_display_name = name
+    student.phone = phone
+    student.email = email
+    student.fax = fax
+    student.student_group_id = _own_group_id(request.form.get('group_id'))
+    db.session.commit()
+    flash('פרטי התלמיד עודכנו')
+    return redirect(_back())
+
+
+@institution_students_bp.route('/institution/students/bulk', methods=['POST'])
+@institution_login_required
+def bulk_action():
+    """פעולה על כמה תלמידים יחד: זיכוי/הורדה, שיוך לקבוצה, חסימה, שחרור, הסרה."""
+    from services import institution_students_ops as ISO
+    ids = [int(x) for x in request.form.getlist('ids') if str(x).isdigit()]
+    action = request.form.get('action')
+    students = (Customer.query.filter(Customer.id.in_(ids), Customer.institution_id == current_user.id)
+                .filter(Customer.is_institution_self.isnot(True)).all()) if ids else []
+    if not students:
+        flash('לא נבחרו תלמידים')
+        return redirect(_back())
+    n = len(students)
+    if action == 'credit':
+        try:
+            amount = round(float(request.form.get('amount')), 2)
+        except (TypeError, ValueError):
+            flash('סכום לא תקין')
+            return redirect(_back())
+        if not amount:
+            flash('סכום לא תקין')
+            return redirect(_back())
+        inst = current_user
+        if amount > 0 and (inst.balance or 0) + 1e-9 < amount * n:
+            flash(f'אין למוסד מספיק יתרה: {n} תלמידים × {amount:.2f} ₪ = {amount * n:.2f} ₪, '
+                  f'ויתרת המוסד {inst.balance or 0:.2f} ₪. נא לטעון יתרה בלשונית "הגדרות חיוב".')
+            return redirect(_back())
+        errors, done = [], []
+        for st in students:
+            err = ISO.change_balance(inst, st, amount)
+            if err:
+                errors.append(err)
+            else:
+                done.append(st.id)
+        db.session.commit()
+        if amount > 0:
+            ISO.after_credit(done)
+        msg = f'{"זוכו" if amount > 0 else "הורדה יתרה ל-"} {len(done)} תלמידים ({abs(amount):.2f} ₪ לכל אחד)'
+        if errors:
+            msg += f' · {len(errors)} דולגו: ' + '; '.join(errors[:3]) + (' ...' if len(errors) > 3 else '')
+        flash(msg)
+    elif action == 'group':
+        gid = _own_group_id(request.form.get('group_id'))
+        for st in students:
+            st.student_group_id = gid
+        db.session.commit()
+        flash(f'{n} תלמידים שויכו לקבוצה' if gid else f'{n} תלמידים הוצאו מהקבוצה')
+    elif action in ('block', 'unblock'):
+        for st in students:
+            st.is_blocked = (action == 'block')
+        db.session.commit()
+        flash(f'{n} תלמידים {"נחסמו" if action == "block" else "שוחררו מחסימה"}')
+    elif action == 'remove':
+        for st in students:
+            st.institution_id = None
+            st.student_number = None
+            st.self_funded = 0.0
+            st.student_group_id = None
+        db.session.commit()
+        flash(f'{n} תלמידים הוסרו מהמוסד')
+    else:
+        flash('פעולה לא מוכרת')
+    return redirect(_back())
+
+
+@institution_students_bp.route('/institution/students/groups', methods=['POST'])
+@institution_login_required
+def groups_action():
+    """ניהול קבוצות: הוספה, שינוי שם, מחיקה (התלמידים נשארים - רק בלי קבוצה)."""
+    from models import StudentGroup
+    action = request.form.get('action')
+    name = (request.form.get('name') or '').strip()[:80]
+    if action == 'add':
+        if not name:
+            flash('יש להזין שם לקבוצה')
+        elif StudentGroup.query.filter_by(institution_id=current_user.id, name=name).first():
+            flash('כבר יש קבוצה בשם הזה')
+        else:
+            db.session.add(StudentGroup(institution_id=current_user.id, name=name))
+            db.session.commit()
+            flash(f'הקבוצה "{name}" נוספה')
+    else:
+        g = StudentGroup.query.filter_by(id=request.form.get('group_id', type=int), institution_id=current_user.id).first()
+        if not g:
+            flash('הקבוצה לא נמצאה')
+        elif action == 'rename' and name:
+            g.name = name
+            db.session.commit()
+            flash('שם הקבוצה עודכן')
+        elif action == 'delete':
+            Customer.query.filter_by(institution_id=current_user.id, student_group_id=g.id).update(
+                {Customer.student_group_id: None}, synchronize_session=False)
+            if current_user.monthly_credit_group_id == g.id:
+                current_user.monthly_credit_group_id = None
+            db.session.delete(g)
+            db.session.commit()
+            flash('הקבוצה נמחקה (התלמידים נשארו, בלי קבוצה)')
+    return redirect(_back())
+
+
 @institution_students_bp.route('/institution/students/<int:student_id>/credit', methods=['POST'])
 @institution_login_required
 def credit_student(student_id):
@@ -112,46 +274,17 @@ def credit_student(student_id):
         flash('סכום לא תקין')
         return redirect(url_for('institution_students.students_tab'))
 
-    # זיכוי תלמיד (סכום חיובי) יורד בפועל מיתרת המוסד עצמה - אחרת נוצר "כסף
-    # מהאוויר". הורדת כסף מתלמיד (סכום שלילי) מחזירה את הסכום ליתרת המוסד
-    # (למשל: 100 -> זיכוי 20 = 80 -> הורדה 15 = 95). אי אפשר להוריד מתלמיד
-    # יותר ממה שיש לו - אחרת היתרה שלו תרד מתחת לאפס והמוסד "ירוויח" כסף.
-    if amount > 0:
-        if (inst.balance or 0) < amount:
-            flash(f'אין למוסד מספיק יתרה לזיכוי הזה (יתרת המוסד: {inst.balance or 0:.2f} ₪). נא לטעון יתרה בלשונית "הגדרות חיוב".')
-            return redirect(url_for('institution_students.students_tab'))
-        inst.balance = round((inst.balance or 0) - amount, 2)
-    elif amount < 0:
-        take = -amount
-        from services.student_links import institution_withdrawable
-        can_take = institution_withdrawable(student)
-        if take > can_take + 1e-9:
-            own = round(student.self_funded or 0, 2)
-            extra = f' (מתוך היתרה {own:.2f} ₪ הם כסף של התלמיד עצמו - לא ניתן להורידו)' if own > 0 else ''
-            flash(f'אי אפשר להוריד לתלמיד {take:.2f} ₪ - ניתן להוריד עד {can_take:.2f} ₪{extra}.')
-            return redirect(url_for('institution_students.students_tab'))
-        inst.balance = round((inst.balance or 0) + take, 2)
-
-    student.balance = round((student.balance or 0) + amount, 2)
-    db.session.add(Transaction(
-        customer_id=student.id, amount=amount,
-        type='credit' if amount >= 0 else 'debit',
-        description='זיכוי ע"י המוסד' if amount >= 0 else 'הורדת יתרה ע"י המוסד (הוחזר ליתרת המוסד)',
-    ))
+    # זיכוי (חיובי) יורד מיתרת המוסד; הורדה (שלילי) חוזרת למוסד - רק מחלק המוסד ביתרת התלמיד
+    from services import institution_students_ops as ISO
+    err = ISO.change_balance(inst, student, amount)
+    if err:
+        flash(err)
+        return redirect(_back())
     db.session.commit()
     if amount > 0:
-        try:
-            from routes.dictate import trigger_pending_manuscripts
-            trigger_pending_manuscripts(customer_id=student.id)
-        except Exception:
-            pass
-        try:   # הקלטות של התלמיד שחיכו לתשלום - נשלחות עכשיו (כמו אחרי טעינת ארנק של לקוח)
-            from services.transcribe import process_pending_recordings
-            threading.Thread(target=process_pending_recordings, args=(student.id,), daemon=True).start()
-        except Exception:
-            pass
+        ISO.after_credit([student.id])
     flash('היתרה עודכנה')
-    return redirect(url_for('institution_students.students_tab'))
+    return redirect(_back())
 
 
 @institution_students_bp.route('/institution/students/<int:student_id>/block', methods=['POST'])
@@ -161,7 +294,7 @@ def toggle_block(student_id):
     student.is_blocked = not student.is_blocked
     db.session.commit()
     flash('התלמיד נחסם' if student.is_blocked else 'החסימה בוטלה')
-    return redirect(url_for('institution_students.students_tab'))
+    return redirect(_back())
 
 
 @institution_students_bp.route('/institution/students/<int:student_id>/remove', methods=['POST'])
@@ -173,9 +306,10 @@ def remove_student(student_id):
     student.institution_id = None
     student.student_number = None
     student.self_funded = 0.0
+    student.student_group_id = None
     db.session.commit()
     flash('התלמיד הוסר מהמוסד')
-    return redirect(url_for('institution_students.students_tab'))
+    return redirect(_back())
 
 
 def _style_sheet(ws, widths, text_cols=(), money_cols=()):
