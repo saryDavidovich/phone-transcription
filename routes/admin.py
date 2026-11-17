@@ -731,7 +731,7 @@ def _customer_defaults(customer):
 def customer_billing_unit(id):
     """מחירון ללקוח: חיוב לפי 20 דקות (ברירת מחדל) או לפי 5 דקות."""
     customer = Customer.query.get_or_404(id)
-    customer.billing_unit = 5 if request.form.get('billing_unit') == '5' else None
+    customer.billing_unit = 5 if request.form.get('billing_unit') == '5' else 20   # 20 במפורש - גובר גם על מוסד שמוגדר ל-5
     db.session.commit()
     flash('✔ המחירון של הלקוח עודכן: ' + ('חיוב לפי 5 דקות' if customer.billing_unit == 5 else 'חיוב לפי 20 דקות (רגיל)'))
     return redirect(url_for('admin.customer_detail', id=id) + '#billing')
@@ -3515,6 +3515,19 @@ def institution_detail(inst_id):
     students = Customer.query.filter_by(institution_id=inst.id).all()
     charges = InstitutionChargeLog.query.filter_by(institution_id=inst.id).order_by(InstitutionChargeLog.created_at.desc()).limit(20).all()
     return render_template('admin/institution_detail.html', inst=inst, students=students, charges=charges)
+
+
+@admin_bp.route('/institutions/<int:inst_id>/billing-unit', methods=['POST'])
+@login_required
+def institution_billing_unit(inst_id):
+    """מחירון למוסד: לפי 20 דקות (ברירת מחדל) או 5 דקות - חל על ההעלאות של המוסד ועל תלמידים
+    שאין להם מחירון אישי בכרטיס."""
+    from models import Institution
+    inst = Institution.query.get_or_404(inst_id)
+    inst.billing_unit = 5 if request.form.get('billing_unit') == '5' else None
+    db.session.commit()
+    flash('המחירון של המוסד עודכן: ' + ('חיוב לפי 5 דקות' if inst.billing_unit == 5 else 'חיוב לפי 20 דקות (רגיל)'))
+    return redirect(url_for('admin.institution_detail', inst_id=inst_id))
 
 
 @admin_bp.route('/institutions/<int:inst_id>/adjust-balance', methods=['POST'])

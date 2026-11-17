@@ -25,11 +25,24 @@
     <div class="field">
       <label>סוג תמלול</label>
       <select class="input" name="tier">
-        <option value="gemini">תמלול רגיל - {{ price_basic }} ₪ ל-20 דקות</option>
-        <option value="premium">תמלול מקצועי - {{ price_premium }} ₪ ל-20 דקות</option>
+        <option value="gemini">תמלול רגיל - {{ price_basic }} ₪ ל-{{ unit }} דקות</option>
+        <option value="premium">תמלול מקצועי - {{ price_premium }} ₪ ל-{{ unit }} דקות</option>
       </select>
       <div style="font-size:12px; color:var(--text2); margin-top:4px;">תמלול מקצועי מדויק יותר (מינוח תורני, שמות, ארמית), ולוקח מעט יותר זמן.</div>
     </div>
+
+    <div class="field">
+      <label>שפת התמלול</label>
+      <select class="input" name="output_language">
+        <option value="he">עברית (הקלטה ביידיש / אנגלית - מתורגמת לעברית)</option>
+        <option value="original">כמו שפת ההקלטה</option>
+      </select>
+    </div>
+
+    <label style="display:flex; gap:8px; align-items:center; font-size:14px; margin:4px 0 14px; cursor:pointer;">
+      <input type="checkbox" name="send_email" value="1" {% if current_user.notify_email or current_user.email %}checked{% endif %}>
+      לשלוח את התמלול גם במייל{% if current_user.notify_email or current_user.email %} ({{ current_user.notify_email or current_user.email }}){% endif %}
+    </label>
 
     <button type="submit" class="btn btn-block" id="uploadBtn">העלאה ותמלול</button>
   </form>

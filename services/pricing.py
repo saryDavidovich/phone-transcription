@@ -48,7 +48,21 @@ def _setting(key, default):
 
 
 def unit_minutes(customer):
-    return 5 if customer is not None and getattr(customer, 'billing_unit', None) == 5 else 20
+    """20 או 5. לקוח עם מחירון אישי (5/20) - לפיו; תלמיד בלי מחירון אישי - לפי המוסד שלו;
+    מוסד (Institution) - לפי ההגדרה שלו."""
+    if customer is None:
+        return 20
+    bu = getattr(customer, 'billing_unit', None)
+    if bu in (5, 20):
+        return bu
+    if getattr(customer, 'institution_id', None):
+        try:
+            inst = customer.institution
+        except Exception:
+            inst = None
+        if inst is not None and getattr(inst, 'billing_unit', None) == 5:
+            return 5
+    return 20
 
 
 def kind_for_tier(tier, is_video=False):

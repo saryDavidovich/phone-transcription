@@ -95,6 +95,7 @@ class Institution(db.Model, UserMixin):
     # --- הגדרות חיוב (נדרים פלוס - ראו routes/institution_billing.py) ---
     card_last4 = db.Column(db.String(4), nullable=True)
     nedarim_token = db.Column(db.String(200), nullable=True)  # טוקן חיוב קבוע, אם נדרים פלוס מספקים כזה
+    billing_unit = db.Column(db.Integer, nullable=True)   # 5 = חיוב לפי 5 דקות (המוסד וברירת מחדל לתלמידים); ריק/20 = לפי 20
 
     students = db.relationship('Customer', backref='institution', lazy=True,
                                 foreign_keys='Customer.institution_id')

@@ -50,7 +50,15 @@
       <div class="dz-filename" id="studentDzFilename"></div>
       <input type="file" name="audio_file" id="studentAudioFile" accept="audio/*,video/*" required>
     </div>
-    <button type="submit" class="btn btn-block" style="margin-top:14px;" id="studentUploadBtn">העלאה</button>
+    <div style="display:flex; gap:12px; flex-wrap:wrap; margin-top:14px;">
+      <div class="field" style="flex:1; min-width:160px;"><label>סוג תמלול</label>
+        <select class="input" name="tier"><option value="gemini">תמלול רגיל</option><option value="premium">תמלול מקצועי</option></select></div>
+      <div class="field" style="flex:1; min-width:160px;"><label>שפת ההקלטה</label>
+        <select class="input" name="language"><option value="he">עברית</option><option value="yi">יידיש</option><option value="en">אנגלית</option></select></div>
+      <div class="field" style="flex:1; min-width:160px;"><label>שפת התמלול</label>
+        <select class="input" name="output_language"><option value="he">עברית</option><option value="original">כמו שפת ההקלטה</option></select></div>
+    </div>
+    <button type="submit" class="btn btn-block" style="margin-top:6px;" id="studentUploadBtn">העלאה</button>
   </form>
   <div id="studentUploadMsg" style="font-size:13px; margin-top:10px;"></div>
 </div>

@@ -553,6 +553,7 @@ def _migrate_db():
         # הגדרות ארוכות (יומן עדכוני גרסה) - בלי מגבלת 500 תווים
         "ALTER TABLE settings ALTER COLUMN value TYPE TEXT",
         "ALTER TABLE recordings ADD COLUMN IF NOT EXISTS status_at TIMESTAMP",
+        "ALTER TABLE institutions ADD COLUMN IF NOT EXISTS billing_unit INTEGER",
         # תיקון חד-פעמי: הקלטות שחיכו לתשלום ונשלחו אחרי טעינה, אבל נשארו "שולחת ללקוח" (באג שתוקן) -
         # רק כאלה שחויבו בפועל וקיבלו התראת "תקועה". ההתראות עצמן נסגרות לבד ב-stuck_watch.
         "UPDATE recordings r SET status = 'delivered' WHERE r.status = 'transcribed' AND r.cost > 0 "

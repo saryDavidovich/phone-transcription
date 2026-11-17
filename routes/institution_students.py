@@ -536,9 +536,13 @@ def upload_for_student(student_id):
     base_url = os.environ.get('APP_BASE_URL', os.environ.get('APP_URL', '')).rstrip('/')
     rec_url = f"{base_url}/static/fax_tmp/{filename}"
 
+    tier = 'premium' if request.form.get('tier') == 'premium' else 'gemini'
+    language = request.form.get('language') if request.form.get('language') in ('he', 'yi', 'en') else 'he'
+    output_language = 'original' if request.form.get('output_language') == 'original' else 'he'
     recording = Recording(
         customer_id=student.id, call_id=f"inst_{uuid.uuid4().hex[:12]}",
         status='processing', source_filename=file.filename, rec_url=rec_url,
+        transcription_tier=tier, language=language, output_language=output_language,
     )
     db.session.add(recording)
     db.session.commit()
@@ -556,21 +560,24 @@ def _process_student_upload(flask_app, recording_id, rec_url):
         recording = Recording.query.get(recording_id)
         student = Customer.query.get(recording.customer_id)
         try:
-            from services.transcribe import _gemini_from_url, _send_email, _send_fax
-            transcript, duration, _ = _gemini_from_url(rec_url)
+            from services.transcribe import _gemini_from_url, _send_email, _send_fax, alefbot_transcribe_wait
+            tier = recording.transcription_tier or 'gemini'
+            is_video = False
+            if tier == 'premium':     # תמלול מקצועי - אלף בוט, כמו ללקוח רגיל
+                transcript, duration = alefbot_transcribe_wait(rec_url, recording.call_id,
+                                                               translate_to_hebrew=(recording.output_language != 'original'))
+            else:
+                transcript, duration, is_video = _gemini_from_url(rec_url, recording.language or 'he',
+                                                                  recording.output_language or 'he')
             if not transcript:
                 recording.status = 'error'
                 db.session.commit()
                 return
 
-            # מחיר לפי מחירון המנהל הראשי (מחירון בסיסי, יחידות של 20 דקות -
-            # מעוגל כלפי מעלה, בדיוק כמו בכל שאר המערכת) - לא PRICE_PER_30MIN
-            # הישן שלא היה קשור בכלל למחירון האמיתי.
-            import math
-            from routes.admin import get_setting
-            price_per_20min = float(get_setting('price_per_20min_basic', '0.90'))
-            units = math.ceil((duration or 0) / 1200) or 1
-            cost = round(units * price_per_20min, 2)
+            # מחיר כמו ללקוח רגיל: סוג השירות (רגיל / מקצועי / וידאו) ויחידות של 20 או 5 דקות -
+            # לפי המחירון האישי של התלמיד, ואם אין לו - לפי המוסד (services/pricing.unit_minutes)
+            from services import pricing as P
+            cost = P.cost_for(student, duration or 0, P.kind_for_tier(tier, is_video))
 
             recording.transcript = transcript
             recording.duration_seconds = duration
@@ -586,7 +593,7 @@ def _process_student_upload(flask_app, recording_id, rec_url):
             target_fax = student.fax or (institution.notify_fax if institution else None)
             try:
                 if target_email:
-                    _send_email(target_email, transcript, student, rec_url, duration)
+                    _send_email(target_email, transcript, student, rec_url, duration, is_premium=(tier == 'premium'))
                 elif target_fax:
                     _send_fax(target_fax, transcript, student, duration)
             except Exception:

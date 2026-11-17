@@ -30,10 +30,10 @@ def transcribe_tab():
     uploads = InstitutionUpload.query.filter_by(institution_id=current_user.id).order_by(
         InstitutionUpload.created_at.desc()
     ).limit(30).all()
-    from routes.admin import get_setting
-    return render_template('institution/transcribe.html', uploads=uploads,
-                           price_basic=get_setting('price_per_20min_basic', '0.90'),
-                           price_premium=get_setting('price_per_20min_premium', '1.90'))
+    from services import pricing as P
+    return render_template('institution/transcribe.html', uploads=uploads, unit=P.unit_minutes(current_user),
+                           price_basic='%.2f' % P.unit_price(current_user, 'basic'),
+                           price_premium='%.2f' % P.unit_price(current_user, 'premium'))
 
 
 @institution_transcribe_bp.route('/institution/transcribe/upload', methods=['POST'])
@@ -48,11 +48,11 @@ def upload():
 
     tier = 'premium' if request.form.get('tier') == 'premium' else 'gemini'
     if tier == 'premium':
-        from routes.admin import get_setting
-        if (current_user.balance or 0) < float(get_setting('price_per_20min_premium', '1.90')):
+        from services import pricing as P
+        if (current_user.balance or 0) < P.unit_price(current_user, 'premium'):
             return jsonify({'error': 'אין למוסד יתרה מספיקה לתמלול מקצועי. נא לטעון יתרה בלשונית "הגדרות חיוב".'}), 402
     language = request.form.get('language', 'he')
-    output_language = request.form.get('output_language', 'he')
+    output_language = 'original' if request.form.get('output_language') == 'original' else 'he'
 
     os.makedirs(STATIC_TMP_DIR, exist_ok=True)
     from services.security import safe_audio_ext
@@ -76,7 +76,8 @@ def upload():
     from app import app as flask_app
     t = threading.Thread(
         target=_process_upload,
-        args=(flask_app, record.id, rec_url, tier, language, output_language),
+        args=(flask_app, record.id, rec_url, tier, language, output_language,
+              (current_user.notify_email or current_user.email) if request.form.get('send_email') else None),
         daemon=True,
     )
     t.start()
@@ -84,37 +85,32 @@ def upload():
     return jsonify({'uploadId': record.id})
 
 
-def _process_upload(flask_app, upload_id, rec_url, tier, language, output_language):
+def _process_upload(flask_app, upload_id, rec_url, tier, language, output_language, send_to=None):
     from services.job_tracker import tracked
     with flask_app.app_context(), tracked('institution_upload', label=f'העלאה {upload_id}'):
         record = InstitutionUpload.query.get(upload_id)
         try:
+            is_video = False
             if tier == 'premium':      # תמלול מקצועי - אלף בוט, כמו בתמלול מקצועי של לקוח
                 from services.transcribe import alefbot_transcribe_wait
                 transcript, duration = alefbot_transcribe_wait(rec_url, f'inst-{upload_id}',
                                                                translate_to_hebrew=(output_language == 'he'))
             else:
                 from services.transcribe import _gemini_from_url
-                transcript, duration, _ = _gemini_from_url(rec_url, language, output_language)
+                transcript, duration, is_video = _gemini_from_url(rec_url, language, output_language)
             if not transcript:
                 record.status = 'error'
                 record.error_message = 'התמלול נכשל - לא התקבל טקסט'
                 db.session.commit()
                 return
 
-            # חיוב יתרת המוסד לפי מחירון המנהל הראשי (יחידות של 20 דקות,
-            # מעוגל כלפי מעלה) - בדיוק כמו תמלול תלמיד. בכוונה לא חוסמים כאן
-            # אם התוצאה חורגת מעט מהיתרה שנותרה (העבודה כבר בוצעה בפועל) -
-            # החסימה האמיתית היא לפני תחילת ההעלאה (upload route).
-            import math
-            from routes.admin import get_setting
+            # חיוב יתרת המוסד לפי המחירון - כמו לקוח רגיל: סוג השירות (רגיל / מקצועי / וידאו) ויחידות
+            # של 20 או 5 דקות (לפי הגדרת המוסד). בכוונה לא חוסמים כאן אם התוצאה חורגת מעט מהיתרה
+            # (העבודה כבר בוצעה) - החסימה היא לפני ההעלאה.
+            from services import pricing as P
             from models import Institution
-            price_per_20min = float(get_setting('price_per_20min_premium', '1.90') if tier == 'premium'
-                                    else get_setting('price_per_20min_basic', '0.90'))
-            units = math.ceil((duration or 0) / 1200) or 1
-            cost = round(units * price_per_20min, 2)
-
             institution = Institution.query.get(record.institution_id)
+            cost = P.cost_for(institution, duration or 0, P.kind_for_tier(tier, is_video))
             if institution:
                 institution.balance = max(0, (institution.balance or 0) - cost)
 
@@ -125,11 +121,40 @@ def _process_upload(flask_app, upload_id, rec_url, tier, language, output_langua
             record.docx_filename = docx_filename
             record.status = 'done'
             db.session.commit()
+            if send_to:
+                try:
+                    _email_docx(send_to, institution, record, docx_filename)
+                except Exception:
+                    log.exception(f'Institution upload {upload_id}: שליחת המייל נכשלה (התמלול עצמו הצליח)')
         except Exception as e:
             log.exception(f'Institution upload {upload_id} failed')
             record.status = 'error'
             record.error_message = str(e)[:500]
             db.session.commit()
+
+
+def _email_docx(to, institution, record, docx_filename):
+    """התמלול של המוסד גם במייל (כמו ללקוח רגיל), עם קובץ ה-Word מצורף."""
+    import base64
+    import sendgrid
+    from html import escape
+    from sendgrid.helpers.mail import Mail, Email, Attachment, FileContent, FileName, FileType, Disposition
+    from services import email_layout as L
+    with open(os.path.join(STATIC_TMP_DIR, docx_filename), 'rb') as fh:
+        data = fh.read()
+    name = record.original_filename or 'הקלטה'
+    card = (L.title('התמלול מוכן')
+            + L.text_block(f'הקובץ "{name}" תומלל ({"מקצועי" if record.tier == "premium" else "רגיל"}, '
+                           f'{max(1, round((record.duration_seconds or 0) / 60))} דקות). קובץ ה-Word מצורף, '
+                           f'והוא זמין גם בלשונית "יצירת תמלול" באזור המוסד.')
+            + L.signature(can_reply=True))
+    msg = Mail(from_email=Email(os.environ.get('SENDGRID_FROM_EMAIL', os.environ.get('GMAIL_USER', '')), 'תמלול פון'),
+               to_emails=to, subject=f'תמלול: {name}', html_content=L.wrap(card, show_circles=False))
+    msg.attachment = Attachment(FileContent(base64.b64encode(data).decode()), FileName(f'תמלול - {name}.docx'),
+                                FileType('application/vnd.openxmlformats-officedocument.wordprocessingml.document'),
+                                Disposition('attachment'))
+    sendgrid.SendGridAPIClient(api_key=os.environ.get('SENDGRID_API_KEY')).send(msg)
+    log.info(f'Institution upload {record.id}: נשלח במייל ל-{to}')
 
 
 def _make_docx(transcript, original_filename):
