@@ -138,11 +138,15 @@ def plan_label(customer):
     return 'לפי 5 דקות' if unit_minutes(customer) == 5 else 'לפי 20 דקות'
 
 
-# ---------------------------------------------------------------- מבצע: דקות תמלול רגיל חינם בכל יום
+# ---------------------------------------------------------------- מבצע: הקלטה ראשונה ביום חינם
+# בזמן המבצע, ההקלטה הראשונה של כל יום (תמלול רגיל) לא מחויבת על היחידות שבתוך "דקות החינם"
+# (ברירת מחדל 20): לקוח לפי 20 דקות - יחידה אחת חינם (21 דקות = יחידה אחת בתשלום במקום 2);
+# לקוח לפי 5 דקות - 4 יחידות חינם (21 דקות = יחידה אחת בתשלום במקום 5). שאר ההקלטות באותו יום - כרגיל.
 # הגדרות (בממשק > הגדרות > מבצע): promo_free_on, promo_free_scope ('all' / 'marked'),
-# promo_free_until ('YYYY-MM-DD', כולל היום הזה, שעון ישראל), promo_free_minutes (ברירת מחדל 20).
+# promo_free_until ('YYYY-MM-DD', כולל, שעון ישראל), promo_free_minutes (20),
+# promo_free_needs_balance ('1' = רק מי שיש לו יתרה בארנק; '0' = כל אחד, גם בלי יתרה).
 # 'marked' = רק לקוחות שסומנו בכרטיס הלקוח (Customer.promo_free). לא חל על תלמידי מוסד.
-# הדקות שנוצלו נשמרות על ההקלטה (Recording.promo_free_seconds) - הספירה היומית לפי שעון ישראל.
+# ניצול היום מסומן על ההקלטה (Recording.promo_free_seconds > 0).
 def _il_now():
     from datetime import datetime
     from zoneinfo import ZoneInfo
@@ -155,6 +159,7 @@ def promo_settings():
         'scope': _setting('promo_free_scope', 'marked') or 'marked',
         'until': (_setting('promo_free_until', '') or '').strip(),
         'minutes': int(float(_setting('promo_free_minutes', '20') or 20)),
+        'needs_balance': _setting('promo_free_needs_balance', '1') != '0',
     }
 
 
@@ -166,38 +171,48 @@ def promo_active(customer):
         return False
     if s['until'] and _il_now().strftime('%Y-%m-%d') > s['until']:
         return False
+    if s['needs_balance'] and (customer.balance or 0) < unit_price(customer, 'basic'):
+        return False             # רק מי שיש לו ארנק טעון (לפחות מחיר יחידה, כמו כניסה רגילה להקלטה)
     return s['scope'] == 'all' or bool(getattr(customer, 'promo_free', False))
 
 
-def promo_seconds_left(customer, exclude_recording_id=None):
-    """כמה שניות חינם נשארו ללקוח היום (0 אם אין מבצע פעיל עבורו)."""
-    if not promo_active(customer):
-        return 0
+def _promo_used_today(customer, exclude_recording_id=None):
     from zoneinfo import ZoneInfo
-    from sqlalchemy import func
-    from app import db
     from models import Recording
     start = _il_now().replace(hour=0, minute=0, second=0, microsecond=0).astimezone(ZoneInfo('UTC')).replace(tzinfo=None)
-    q = db.session.query(func.coalesce(func.sum(Recording.promo_free_seconds), 0)).filter(
-        Recording.customer_id == customer.id, Recording.created_at >= start)
+    q = Recording.query.filter(Recording.customer_id == customer.id, Recording.created_at >= start,
+                               Recording.promo_free_seconds > 0)
     if exclude_recording_id:
         q = q.filter(Recording.id != exclude_recording_id)
-    used = int(q.scalar() or 0)
-    return max(0, promo_settings()['minutes'] * 60 - used)
+    return q.first() is not None
+
+
+def promo_free_units(customer, exclude_recording_id=None):
+    """כמה יחידות חינם להקלטה הבאה (0 אם אין מבצע עבורו או שכבר ניצל היום)."""
+    if not promo_active(customer) or _promo_used_today(customer, exclude_recording_id):
+        return 0
+    return max(1, promo_settings()['minutes'] // unit_minutes(customer))
+
+
+def promo_seconds_left(customer, exclude_recording_id=None):
+    """לשלוחות: כמה דקות (בשניות) ההקלטה הבאה חינם היום (0 = אין)."""
+    return promo_free_units(customer, exclude_recording_id) * unit_minutes(customer) * 60
 
 
 def basic_cost_with_promo(customer, seconds, recording_id=None):
-    """עלות תמלול רגיל אחרי המבצע: (עלות, שניות_חינם). מה שמעבר לדקות החינם - בחיוב רגיל."""
+    """עלות תמלול רגיל אחרי המבצע: (עלות, שניות_חינם). שניות_חינם > 0 מסמן שהמבצע של היום נוצל."""
     secs = int(seconds or 0)
-    free = min(secs, promo_seconds_left(customer, exclude_recording_id=recording_id)) if secs > 0 else 0
-    if free <= 0:
+    free_u = promo_free_units(customer, recording_id)
+    if free_u <= 0 or secs <= 0:
         return cost_for(customer, secs, 'basic'), 0
-    paid = secs - free
-    return (cost_for(customer, paid, 'basic') if paid > 0 else 0.0), free
+    units = units_for(customer, secs)
+    used_u = min(units, free_u)
+    cost = round((units - used_u) * unit_price(customer, 'basic'), 2)
+    return cost, max(1, min(secs, used_u * unit_minutes(customer) * 60))
 
 
 def promo_fax_fee(customer, seconds, delivery_method, free_seconds):
-    """הקלטה חינם במבצע שנשלחת בפקס - חיוב הפקס הרגיל (30 אג'), גם ללקוח לפי 20 דקות."""
+    """הקלטה במבצע שנשלחת בפקס - חיוב הפקס הרגיל (30 אג'), גם ללקוח לפי 20 דקות."""
     if delivery_method != 'fax' or not free_seconds:
         return 0.0
     if fax_surcharge(customer, seconds, delivery_method):

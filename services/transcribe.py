@@ -408,8 +408,7 @@ def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, durat
                 customer.balance -= cost
                 promo_note = ''
                 if promo_free:
-                    promo_note = (' - חינם במבצע' if not cost else
-                                  f' - {max(1, round(promo_free / 60))} דק׳ חינם במבצע')
+                    promo_note = ' - הקלטה ראשונה היום, חינם במבצע' if not cost else ' - הקלטה ראשונה היום, חלקית חינם במבצע'
                 txn = Transaction(
                     customer_id=customer_id,
                     amount=-cost,
@@ -568,7 +567,7 @@ def process_pending_recordings(customer_id):
                     customer_id=customer_id,
                     amount=-cost,
                     type='debit',
-                    description=f'תמלול {(rec.duration_seconds or 0)//60} דקות' + (' (חלקית/כולה חינם במבצע)' if promo_free else ''),
+                    description=f'תמלול {(rec.duration_seconds or 0)//60} דקות' + (' (הקלטה ראשונה היום - מבצע)' if promo_free else ''),
                     recording_id=rec.id
                 )
                 db.session.add(txn)

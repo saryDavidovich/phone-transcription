@@ -237,10 +237,12 @@
 </div>
 
 <div class="card" style="margin-top:24px" id="promo">
-  <div style="font-size:16px;font-weight:700;margin-bottom:6px">🎁 מבצע: דקות תמלול רגיל חינם בכל יום</div>
+  <div style="font-size:16px;font-weight:700;margin-bottom:6px">🎁 מבצע: הקלטה ראשונה ביום חינם</div>
   <div style="font-size:13px;color:var(--text2);margin-bottom:12px">
-    בזמן המבצע כל לקוח (או רק לקוחות שסומנו בכרטיס הלקוח) מקבל בכל יום מספר דקות של תמלול רגיל בחינם. מה שמעבר לזה - בחיוב רגיל.
-    שליחה בפקס של תמלול חינם - בחיוב הפקס הרגיל (₪{{ settings.fax_surcharge_5min or '0.30' }}). לא חל על תלמידי מוסדות, תמלול מקצועי, וידאו ושאר השירותים.
+    בזמן המבצע, ההקלטה הראשונה של כל יום (תמלול רגיל) לא מחויבת על {{ promo.minutes }} הדקות הראשונות:
+    לקוח לפי 20 דקות - יחידה אחת חינם (21 דקות = יחידה אחת בתשלום במקום 2); לקוח לפי 5 דקות - {{ promo.minutes // 5 }} יחידות חינם
+    (21 דקות = יחידה אחת בתשלום). שאר ההקלטות באותו יום - כרגיל. שליחה בפקס - בחיוב הפקס הרגיל (₪{{ settings.fax_surcharge_5min or '0.30' }}).
+    לא חל על תלמידי מוסדות, תמלול מקצועי, וידאו ושאר השירותים.
   </div>
   <form method="post" action="{{ url_for('admin.promo_settings_save') }}" style="display:flex;flex-wrap:wrap;gap:14px 20px;align-items:flex-end">
     <label style="display:flex;gap:8px;align-items:center;cursor:pointer;font-weight:700">
@@ -250,7 +252,12 @@
         <option value="marked" {{ 'selected' if promo.scope != 'all' }}>רק לקוחות שסומנו ({{ promo_stats.marked }})</option>
         <option value="all" {{ 'selected' if promo.scope == 'all' }}>כל הלקוחות</option>
       </select></div>
-    <div><label class="form-label">דקות חינם ביום</label>
+    <div><label class="form-label">מי יכול להקליט במבצע</label>
+      <select class="form-input" name="promo_free_needs_balance" style="width:auto">
+        <option value="1" {{ 'selected' if promo.needs_balance }}>רק מי שיש לו יתרה בארנק</option>
+        <option value="0" {{ 'selected' if not promo.needs_balance }}>כל אחד, גם בלי יתרה</option>
+      </select></div>
+    <div><label class="form-label">דקות חינם בהקלטה</label>
       <input class="form-input" type="number" name="promo_free_minutes" min="1" max="600" value="{{ promo.minutes }}" style="width:110px"></div>
     <div><label class="form-label">בתוקף עד (כולל)</label>
       <input class="form-input" type="date" name="promo_free_until" value="{{ promo.until }}" style="width:auto"></div>
@@ -260,7 +267,7 @@
     {% if promo.on and not promo_stats.expired %}<b style="color:var(--green)">● פעיל</b>{% if promo.until %} עד {{ promo.until[8:10] }}/{{ promo.until[5:7] }}/{{ promo.until[:4] }}{% else %} ללא תאריך סיום{% endif %}
     {% elif promo.on and promo_stats.expired %}<b style="color:var(--amber)">● פג תוקף</b> - המבצע הסתיים ב-{{ promo.until[8:10] }}/{{ promo.until[5:7] }}
     {% else %}<b>● כבוי</b>{% endif %}
-    · היום: {{ promo_stats.today_customers }} לקוחות, {{ promo_stats.today_minutes }} דקות חינם.
+    · היום: {{ promo_stats.today_recordings }} הקלטות במבצע.
     סימון לקוח למבצע - בכרטיס הלקוח, בחלק "מחירון".
   </div>
 </div>

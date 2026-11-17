@@ -70,6 +70,7 @@ def get_customer(phone):
         'new_email_replies': _new_reply_count(customer),
         # מבצע דקות חינם: כמה שניות תמלול רגיל חינם נשארו היום (0 = אין מבצע עבורו)
         'promo_free_left': _promo_left(customer),
+        'promo_needs_balance': __import__('services.pricing', fromlist=['x']).promo_settings()['needs_balance'],
     })
 
 

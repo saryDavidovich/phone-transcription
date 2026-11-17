@@ -1001,9 +1001,13 @@ def _promo_line(customer):
             return '(תלמיד מוסד - המבצע לא חל)'
         if st['until'] and P._il_now().strftime('%Y-%m-%d') > st['until']:
             return '(המבצע הסתיים)'
+        if st['needs_balance'] and (customer.balance or 0) < P.unit_price(customer, 'basic') and (st['scope'] == 'all' or customer.promo_free):
+            return '(המבצע רק למי שיש לו יתרה בארנק - ללקוח אין יתרה)'
         return '(המבצע כרגע רק ללקוחות מסומנים)'
     left = P.promo_seconds_left(customer)
-    return f'פעיל ללקוח: נותרו היום {left // 60} מתוך {st["minutes"]} דקות' + (' (המבצע לכל הלקוחות)' if st['scope'] == 'all' else '')
+    txt = (f'פעיל ללקוח: ההקלטה הבאה היום חינם עד {left // 60} דקות' if left
+           else 'פעיל ללקוח: ההקלטה החינמית של היום כבר נוצלה')
+    return txt + (' (המבצע לכל הלקוחות)' if st['scope'] == 'all' else '')
 
 
 def _mail_and_tasks_for(customer):
@@ -1952,6 +1956,7 @@ def promo_settings_save():
     except ValueError:
         mins = 20
     set_setting('promo_free_minutes', str(mins))
+    set_setting('promo_free_needs_balance', '0' if request.form.get('promo_free_needs_balance') == '0' else '1')
     flash('✔ הגדרות המבצע נשמרו')
     return redirect(url_for('admin.settings') + '#promo')
 
@@ -2084,8 +2089,7 @@ def settings():
         'marked': Customer.query.filter(Customer.promo_free.is_(True)).count(),
         'today_customers': db.session.query(_f.count(_f.distinct(Recording.customer_id))).filter(
             Recording.promo_free_seconds > 0, Recording.created_at >= _start).scalar() or 0,
-        'today_minutes': round((db.session.query(_f.coalesce(_f.sum(Recording.promo_free_seconds), 0)).filter(
-            Recording.created_at >= _start).scalar() or 0) / 60),
+        'today_recordings': Recording.query.filter(Recording.promo_free_seconds > 0, Recording.created_at >= _start).count(),
         'expired': bool(promo['until'] and _P._il_now().strftime('%Y-%m-%d') > promo['until']),
     }
     return render_template('admin/settings.html', settings=current_settings, slow_pages=slow_pages,
