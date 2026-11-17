@@ -59,19 +59,19 @@
 {% if recording.transcription_tier == 'excel' %}
 <div class="card" style="margin-bottom:20px">
   <div style="font-size:14px;font-weight:600;margin-bottom:6px">📊 טבלת אקסל מהקלטה</div>
-  <div style="color:#8892b0;font-size:13px;margin-bottom:10px">
+  <div style="color:var(--text2);font-size:13px;margin-bottom:10px">
     תבנית: <b>{{ excel_template_name or '—' }}</b> · מצב: <b>{{ 'המשך טבלה קיימת' if recording.excel_mode == 'continue' else 'טבלה חדשה' }}</b>
   </div>
   {% if recording.excel_file %}
   <a class="btn btn-primary" style="font-size:13px" href="{{ url_for('admin.recording_excel_download', id=recording.id) }}">⬇ הורדת הטבלה שנשלחה ללקוח</a>
   {% else %}
-  <span style="color:#8892b0;font-size:13px">הטבלה עוד לא נבנתה</span>
+  <span style="color:var(--text2);font-size:13px">הטבלה עוד לא נבנתה</span>
   {% endif %}
 </div>
 {% endif %}
 <div class="card" style="margin-bottom:20px">
   <div style="font-size:14px;font-weight:600;margin-bottom:6px">🔁 שליחה חוזרת לתמלול</div>
-  <div style="color:#8892b0;font-size:13px;margin-bottom:12px">
+  <div style="color:var(--text2);font-size:13px;margin-bottom:12px">
     סטטוס נוכחי: <b>{{ rec_status(recording).label }}</b> · סוג תמלול שנשמר: <b>{{ 'מקצועי' if recording.transcription_tier == 'premium' else ('טבלת אקסל' if recording.transcription_tier == 'excel' else 'רגיל') }}</b>
     · יתרת הלקוח: <b>₪{{ "%.2f"|format(rt_balance) }}</b> · יחידות חיוב ({{ rt_unit_minutes }} דק׳): <b>{{ rt_units }}</b>
   </div>
@@ -90,7 +90,7 @@
       <input type="checkbox" name="refund" value="1" checked> לזכות את הלקוח ב-₪{{ "%.2f"|format(rt_prior_charge) }} שכבר נגבו על ההקלטה הזו (כדי שלא ישלם פעמיים)
     </label>
     {% endif %}
-    <div style="font-size:12px;color:#8892b0;margin-bottom:10px">הלקוח יחויב כרגיל לפי משך ההקלטה, והתמלול יישלח אליו בסיום ({{ recording.delivered_to or recording.customer.email or 'אין כתובת למסירה' }}). אם היתרה לא מספיקה - הוא יקבל הודעה כמו בתמלול רגיל.</div>
+    <div style="font-size:12px;color:var(--text2);margin-bottom:10px">הלקוח יחויב כרגיל לפי משך ההקלטה, והתמלול יישלח אליו בסיום ({{ recording.delivered_to or recording.customer.email or 'אין כתובת למסירה' }}). אם היתרה לא מספיקה - הוא יקבל הודעה כמו בתמלול רגיל.</div>
     <button type="submit" class="btn btn-primary">🔁 שלח שוב לתמלול</button>
   </form>
 </div>
@@ -104,11 +104,11 @@ function confirmRetranscribe(f) {
 {% if recording.summary %}
 <div class="card" style="margin-bottom:20px">
   <div style="font-size:14px;font-weight:600;margin-bottom:12px">📋 סיכום</div>
-  <div style="color:#8892b0;line-height:1.7">{{ recording.summary }}</div>
+  <div style="color:var(--text2);line-height:1.7">{{ recording.summary }}</div>
 </div>
 {% endif %}
 <div class="card">
   <div style="font-size:14px;font-weight:600;margin-bottom:12px">📝 תמלול מלא</div>
-  <div style="background:#22263a;padding:20px;border-radius:8px;line-height:1.8;white-space:pre-wrap;font-size:14px">{{ recording.transcript or 'אין תמלול זמין' }}</div>
+  <div style="background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:20px;border-radius:8px;line-height:1.8;white-space:pre-wrap;font-size:14px">{{ recording.transcript or 'אין תמלול זמין' }}</div>
 </div>
 {% endblock %}

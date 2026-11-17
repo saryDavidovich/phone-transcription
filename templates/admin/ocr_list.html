@@ -42,7 +42,7 @@
       <tr>
         <td style="text-align:center" onclick="event.stopPropagation()"><input type="checkbox" name="ocr_ids" value="{{ r.id }}" class="row-check"></td>
         <td onclick="location='/admin/ocr/{{r.id}}'" style="cursor:pointer"><strong>{{ r.customer.phone }}</strong></td>
-        <td onclick="location='/admin/ocr/{{r.id}}'" style="cursor:pointer;color:#8892b0;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.original_filename }}</td>
+        <td onclick="location='/admin/ocr/{{r.id}}'" style="cursor:pointer;color:var(--text2);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.original_filename }}</td>
         <td onclick="location='/admin/ocr/{{r.id}}'" style="cursor:pointer">{{ r.char_count }}</td>
         <td onclick="location='/admin/ocr/{{r.id}}'" style="cursor:pointer">₪{{ "%.2f"|format(r.cost) }}</td>
         <td onclick="location='/admin/ocr/{{r.id}}'" style="cursor:pointer"><span class="badge badge-blue">{{ r.engine }}</span></td>
@@ -52,7 +52,7 @@
           {% elif r.status == 'expired' %}<span class="badge badge-gray">פג תוקף</span>
           {% else %}<span class="badge badge-red">שגיאה</span>{% endif %}
         </td>
-        <td onclick="location='/admin/ocr/{{r.id}}'" style="cursor:pointer;color:#8892b0">{{ r.created_at | il_time }}</td>
+        <td onclick="location='/admin/ocr/{{r.id}}'" style="cursor:pointer;color:var(--text2)">{{ r.created_at | il_time }}</td>
         <td><a href="/admin/ocr/{{r.id}}" class="btn btn-ghost" style="font-size:12px;padding:4px 10px">פרטים</a></td>
       </tr>
       {% endfor %}

@@ -36,7 +36,7 @@
       {% for l in logins %}
       <div style="font-size:12.5px;padding:4px 0;border-bottom:1px solid #2d3561;">{{ l.created_at | il_time }} · {{ {'password':'סיסמה','code':'קוד','google':'גוגל','pw_change':'החלפת סיסמה'}.get(l.method, l.method) }} ·
         <span style="color:{{ '#22c55e' if l.success else '#ef4444' }}">{{ 'הצליחה' if l.success else 'נכשלה' }}</span> · {{ l.ip or '' }}</div>
-      {% else %}<div style="font-size:12.5px;color:#8892b0;">אין עדיין.</div>{% endfor %}
+      {% else %}<div style="font-size:12.5px;color:var(--text2);">אין עדיין.</div>{% endfor %}
     </details>
     {% if inst.locked_until and inst.locked_until > now_utc %}
     <form method="post" action="{{ url_for('admin.institution_unlock', inst_id=inst.id) }}" style="margin-top:12px;">
@@ -57,7 +57,7 @@
     <form method="post" action="{{ url_for('admin.institution_billing_unit', inst_id=inst.id) }}" style="display:flex;flex-direction:column;gap:8px">
       <label style="cursor:pointer"><input type="radio" name="billing_unit" value="20" {% if inst.billing_unit != 5 %}checked{% endif %}> חיוב לפי <b>20 דקות</b> (רגיל)</label>
       <label style="cursor:pointer"><input type="radio" name="billing_unit" value="5" {% if inst.billing_unit == 5 %}checked{% endif %}> חיוב לפי <b>5 דקות</b></label>
-      <div style="font-size:12px;color:#8892b0">חל על התמלולים של המוסד ועל התלמידים שלו (תלמיד עם מחירון אישי בכרטיס - לפי שלו).</div>
+      <div style="font-size:12px;color:var(--text2)">חל על התמלולים של המוסד ועל התלמידים שלו (תלמיד עם מחירון אישי בכרטיס - לפי שלו).</div>
       <button type="submit" class="btn btn-primary" style="align-self:flex-start">שמירה</button>
     </form>
   </div>
@@ -71,7 +71,7 @@
     </form>
     <details style="margin-top:14px">
       <summary style="cursor:pointer;color:#ef4444;font-size:13px">🗑 מחיקת המוסד</summary>
-      <div style="font-size:12.5px;color:#8892b0;margin:8px 0;line-height:1.7">
+      <div style="font-size:12.5px;color:var(--text2);margin:8px 0;line-height:1.7">
         {{ students|length }} תלמידים ינותקו מהמוסד ויהפכו ללקוחות רגילים, עם היתרה וההיסטוריה שלהם.<br>
         {% if inst.balance %}<b style="color:#ef4444">יתרת המוסד (₪{{ "%.2f"|format(inst.balance) }}) תימחק.</b><br>{% endif %}
         לאישור, הקלידו את שם המוסד בדיוק: <b>{{ inst.name }}</b>

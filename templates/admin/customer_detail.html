@@ -30,7 +30,7 @@
     <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:20px">
       <div>
         <div style="font-size:22px;font-weight:800">{{ customer.phone }}</div>
-        <div style="color:#8892b0;font-size:13px">מצטרף מ-{{ customer.created_at | il_time('%d/%m/%Y') }}</div>
+        <div style="color:var(--text2);font-size:13px">מצטרף מ-{{ customer.created_at | il_time('%d/%m/%Y') }}</div>
       </div>
       <div style="display:flex;gap:8px">
         <form method="POST" action="/admin/customers/{{ customer.id }}/block">
@@ -133,11 +133,11 @@
 <div class="card" style="margin-top:20px">
   <div style="font-size:14px;font-weight:600;margin-bottom:12px">🏫 שיוך למוסד</div>
   {% if customer.is_institution_self %}
-    <div style="font-size:13px;color:#8892b0">זהו חשבון של מוסד, לא לקוח רגיל.</div>
+    <div style="font-size:13px;color:var(--text2)">זהו חשבון של מוסד, לא לקוח רגיל.</div>
   {% elif customer.institution_id %}
     <div style="font-size:13px">תלמיד של <a href="/admin/institutions/{{ customer.institution_id }}"><b>{{ customer.institution.name }}</b></a> · מספר תלמיד {{ customer.student_number or '—' }}</div>
   {% elif all_institutions %}
-    <div style="font-size:13px;color:#8892b0;margin-bottom:12px">צירוף מיידי כתלמיד, <b>בלי</b> לשלוח ללקוח בקשת אישור. היתרה הנוכחית (₪{{ "%.2f"|format(customer.balance or 0) }}) נשארת של הלקוח, והמוסד לא יוכל להוריד אותה.</div>
+    <div style="font-size:13px;color:var(--text2);margin-bottom:12px">צירוף מיידי כתלמיד, <b>בלי</b> לשלוח ללקוח בקשת אישור. היתרה הנוכחית (₪{{ "%.2f"|format(customer.balance or 0) }}) נשארת של הלקוח, והמוסד לא יוכל להוריד אותה.</div>
     <form method="POST" action="/admin/customers/{{ customer.id }}/link-institution" style="display:flex;gap:8px;flex-wrap:wrap;align-items:end"
           onsubmit="return confirm('לצרף את הלקוח כתלמיד של המוסד שנבחר, בלי אישור הלקוח?')">
       <div><label class="form-label">מוסד</label>
@@ -150,7 +150,7 @@
       <button class="btn btn-primary" type="submit">צרף כתלמיד</button>
     </form>
   {% else %}
-    <div style="font-size:13px;color:#8892b0">אין מוסדות במערכת.</div>
+    <div style="font-size:13px;color:var(--text2)">אין מוסדות במערכת.</div>
   {% endif %}
 </div>
 </details>
@@ -159,7 +159,7 @@
 <div id="extra-phones" style="margin-top:20px" class="table-card">
   <div class="table-header"><span class="table-title">📞 מספרי טלפון נוספים (חשבון חיוב משותף)</span></div>
   <div style="padding:16px">
-    <div style="font-size:13px;color:#8892b0;margin-bottom:12px">
+    <div style="font-size:13px;color:var(--text2);margin-bottom:12px">
       כל מספר שמוסיפים כאן מזוהה במערכת כמו המספר הראשי ({{ customer.phone or '—' }}): אותה יתרה, אותה היסטוריה, וטעינה מכל אחד מהמספרים נכנסת לאותו חשבון.
     </div>
 
@@ -168,7 +168,7 @@
         <input type="checkbox" name="separate" value="1" {% if customer.phones_separate %}checked{% endif %}>
         מייל / פקס נפרד לכל מספר
       </label>
-      <div style="font-size:12px;color:#8892b0;margin:6px 0 8px">
+      <div style="font-size:12px;color:var(--text2);margin:6px 0 8px">
         כבוי: כל התמלולים נשלחים למייל/הפקס של הלקוח למעלה. דלוק: לכל מספר אפשר להגדיר מייל/פקס משלו, והתמלול יישלח למספר שהקליט (מספר בלי הגדרה - למייל/פקס של הלקוח).
       </div>
       <button class="btn" type="submit">שמור מצב משלוח</button>
@@ -202,7 +202,7 @@
       </tbody>
     </table>
     {% else %}
-    <div style="color:#8892b0;font-size:13px;margin-bottom:8px">אין עדיין מספרים נוספים.</div>
+    <div style="color:var(--text2);font-size:13px;margin-bottom:8px">אין עדיין מספרים נוספים.</div>
     {% endif %}
 
     <form method="POST" action="/admin/customers/{{ customer.id }}/phones/add" style="display:flex;gap:8px;flex-wrap:wrap;align-items:end;margin-top:14px">
@@ -216,7 +216,7 @@
         <input class="form-input" name="fax"></div>
       <button class="btn btn-primary" type="submit">➕ חבר מספר</button>
     </form>
-    <div style="font-size:12px;color:#8892b0;margin-top:8px">מייל/פקס שמוזנים כאן פעילים רק כשמצב "מייל / פקס נפרד לכל מספר" דלוק.</div>
+    <div style="font-size:12px;color:var(--text2);margin-top:8px">מייל/פקס שמוזנים כאן פעילים רק כשמצב "מייל / פקס נפרד לכל מספר" דלוק.</div>
   </div>
 </div>
 </details>
@@ -238,7 +238,7 @@
     {% endfor %}
     </tbody>
   </table>
-  <div style="font-size:12px;color:#8892b0;margin-top:10px">
+  <div style="font-size:12px;color:var(--text2);margin-top:10px">
     בחיוב לפי 5 דקות: תמלול שנשלח <b>בפקס</b> והקלטה קצרה מ-20 דקות (פחות מ-4 חיובים) - תוספת פקס של ₪{{ '%.2f'|format(billing.fax) }} בתנועה נפרדת.
     המחירים נקבעים בהגדרות.
   </div>
@@ -248,7 +248,7 @@
 <details class="cd-sec" data-sec="defaults"><summary>⚙️ ברירת מחדל להקלטה (שלוחה 4)</summary>
 <div class="card" id="defaults">
   {% set d = cust_defaults %}
-  <div style="font-size:13px;color:#8892b0;margin-bottom:12px">
+  <div style="font-size:13px;color:var(--text2);margin-bottom:12px">
     מה שהלקוח מגדיר בטלפון בשלוחה 2 ← 4, ומשמש בהקלטה מהירה (שלוחה 4 בתפריט הראשי).
     {% if not d.is_set %}<b>הלקוח עוד לא הגדיר</b> - כרגע בשימוש: תמלול רגיל, עברית.{% endif %}
   </div>
@@ -304,7 +304,7 @@
       <tr data-rec-id="{{ rec.id }}">
         <td><input type="checkbox" name="recording_ids" value="{{ rec.id }}" form="sendRecForm" class="rec-check"></td>
         <td onclick="location='/admin/recordings/{{rec.id}}'" style="cursor:pointer">{{ rec.created_at | il_time }}</td>
-        <td onclick="location='/admin/recordings/{{rec.id}}'" style="cursor:pointer;color:#8892b0;font-family:monospace">{% if rec.rec_url %}<button type="button" class="rec-play" title="השמעה" onclick="event.stopPropagation();recPlay(this,{{ rec.id }})">▶</button> {% endif %}{{ rec.rec_url | yemot_rec_number or '—' }}</td>
+        <td onclick="location='/admin/recordings/{{rec.id}}'" style="cursor:pointer;color:var(--text2);font-family:monospace">{% if rec.rec_url %}<button type="button" class="rec-play" title="השמעה" onclick="event.stopPropagation();recPlay(this,{{ rec.id }})">▶</button> {% endif %}{{ rec.rec_url | yemot_rec_number or '—' }}</td>
         <td onclick="location='/admin/recordings/{{rec.id}}'" class="rec-dur" style="cursor:pointer">{{ rec.duration_seconds // 60 }}:{{ '%02d'%(rec.duration_seconds % 60) }}</td>
         <td onclick="location='/admin/recordings/{{rec.id}}'" class="rec-cost" style="cursor:pointer">₪{{ "%.2f"|format(rec.cost) }}</td>
         <td onclick="location='/admin/recordings/{{rec.id}}'" style="cursor:pointer">{{ rec.delivered_to or '—' }}</td>
@@ -368,7 +368,7 @@ function confirmRecDelete() {
       <tr>
         <td><input type="checkbox" name="ocr_ids" value="{{ r.id }}" class="ocr-check"></td>
         <td onclick="location='/admin/ocr/{{r.id}}'" style="cursor:pointer">{{ r.created_at | il_time }}</td>
-        <td onclick="location='/admin/ocr/{{r.id}}'" style="cursor:pointer;color:#8892b0;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.original_filename }}</td>
+        <td onclick="location='/admin/ocr/{{r.id}}'" style="cursor:pointer;color:var(--text2);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.original_filename }}</td>
         <td onclick="location='/admin/ocr/{{r.id}}'" style="cursor:pointer">{{ r.char_count }}</td>
         <td onclick="location='/admin/ocr/{{r.id}}'" style="cursor:pointer">₪{{ "%.2f"|format(r.cost) }}</td>
         <td onclick="location='/admin/ocr/{{r.id}}'" style="cursor:pointer">
@@ -458,7 +458,7 @@ function confirmOcrDelete() {
       <input class="form-input" type="text" name="label" placeholder="למשל: חידושים פרשת נח">
     </div>
     <button class="btn btn-primary" type="submit" style="font-size:13px">📤 הוסף לתור ההקראה</button>
-    <div style="flex-basis:100%;font-size:12px;color:#8892b0">תמונות, PDF או ZIP של תיקייה. כמה קבצים מאוחדים לקובץ אחד לפי סדר השמות (מספרים לפי הערך, אותיות לפי הא-ב). החיוב כרגיל, כשהמסמך נשלח ללקוח.</div>
+    <div style="flex-basis:100%;font-size:12px;color:var(--text2)">תמונות, PDF או ZIP של תיקייה. כמה קבצים מאוחדים לקובץ אחד לפי סדר השמות (מספרים לפי הערך, אותיות לפי הא-ב). החיוב כרגיל, כשהמסמך נשלח ללקוח.</div>
   </form>
   <table>
     <thead><tr>
@@ -469,7 +469,7 @@ function confirmOcrDelete() {
       {% set pending_rounds = m.proofing_rounds | selectattr('status', 'equalto', 'pending') | list %}
       <tr>
         <td onclick="location='/admin/dictate/{{m.id}}'" style="cursor:pointer">{{ m.created_at | il_time }}</td>
-        <td onclick="location='/admin/dictate/{{m.id}}'" style="cursor:pointer;color:#8892b0;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ m.original_filename }}</td>
+        <td onclick="location='/admin/dictate/{{m.id}}'" style="cursor:pointer;color:var(--text2);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ m.original_filename }}</td>
         <td onclick="location='/admin/dictate/{{m.id}}'" style="cursor:pointer">{{ m.char_count or '—' }}</td>
         <td onclick="location='/admin/dictate/{{m.id}}'" style="cursor:pointer">{% if m.cost %}₪{{ "%.2f"|format(m.cost) }}{% else %}—{% endif %}</td>
         <td onclick="location='/admin/dictate/{{m.id}}'" style="cursor:pointer">
@@ -484,12 +484,12 @@ function confirmOcrDelete() {
         <td>
           {% if pending_rounds %}<span class="badge badge-blue">✏️ {{ pending_rounds|length }} ממתין{{ 'ים' if pending_rounds|length > 1 else '' }}</span>
           {% elif m.proofing_rounds %}<span class="badge badge-green">{{ m.proofing_rounds|length }} הושלמ{{ 'ו' if m.proofing_rounds|length > 1 else '' }}</span>
-          {% else %}<span style="color:#8892b0">—</span>{% endif %}
+          {% else %}<span style="color:var(--text2)">—</span>{% endif %}
         </td>
         <td><a href="/admin/dictate/{{m.id}}" class="btn btn-ghost" style="font-size:12px;padding:4px 10px">{% if m.status=='done' %}צפייה{% else %}פתח{% endif %}</a></td>
       </tr>
       {% else %}
-      <tr><td colspan="7" style="text-align:center;color:#8892b0;padding:24px">אין עדיין הקראות כתב יד ללקוח זה</td></tr>
+      <tr><td colspan="7" style="text-align:center;color:var(--text2);padding:24px">אין עדיין הקראות כתב יד ללקוח זה</td></tr>
       {% endfor %}
     </tbody>
   </table>
@@ -509,7 +509,7 @@ function confirmOcrDelete() {
       {% for r in proofing_rounds %}
       <tr>
         <td onclick="location='/admin/dictate/proof/{{r.id}}'" style="cursor:pointer">{{ r.requested_at | il_time }}</td>
-        <td onclick="location='/admin/dictate/{{r.manuscript_page_id}}'" style="cursor:pointer;color:#8892b0;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.manuscript_page.original_filename }} ({{ r.manuscript_page.created_at | il_time('%d/%m/%y') }})</td>
+        <td onclick="location='/admin/dictate/{{r.manuscript_page_id}}'" style="cursor:pointer;color:var(--text2);max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.manuscript_page.original_filename }} ({{ r.manuscript_page.created_at | il_time('%d/%m/%y') }})</td>
         <td onclick="location='/admin/dictate/proof/{{r.id}}'" style="cursor:pointer">{% if r.status == 'done' %}{{ r.timer_accumulated_seconds | minutes_billed }} דק׳{% else %}—{% endif %}</td>
         <td onclick="location='/admin/dictate/proof/{{r.id}}'" style="cursor:pointer">{% if r.cost %}₪{{ "%.2f"|format(r.cost) }}{% else %}—{% endif %}</td>
         <td onclick="location='/admin/dictate/proof/{{r.id}}'" style="cursor:pointer">
@@ -519,7 +519,7 @@ function confirmOcrDelete() {
         <td><a href="/admin/dictate/proof/{{r.id}}" class="btn btn-ghost" style="font-size:12px;padding:4px 10px">{% if r.status == 'pending' %}פתח הגהה{% else %}צפייה{% endif %}</a></td>
       </tr>
       {% else %}
-      <tr><td colspan="6" style="text-align:center;color:#8892b0;padding:24px">אין עדיין הגהות ללקוח זה</td></tr>
+      <tr><td colspan="6" style="text-align:center;color:var(--text2);padding:24px">אין עדיין הגהות ללקוח זה</td></tr>
       {% endfor %}
     </tbody>
   </table>
@@ -529,7 +529,7 @@ function confirmOcrDelete() {
 <details class="cd-sec" data-sec="manual"><summary>🔁 תמלול חוזר / הוספת הקלטה ידנית</summary>
 <div style="margin-top:20px" class="card" id="manual-transcribe">
   <div style="font-weight:700;margin-bottom:4px">🔁 תמלול חוזר / הוספת הקלטה ידנית</div>
-  <div style="font-size:12px;color:#8892b0;margin-bottom:12px">להקלטה שנתקעה או לא הגיעה: מעלים קובץ, או מושכים מימות לפי מספר ההקלטה (למשל 1507 = /recordings/1507.wav). נוצרת הקלטה חדשה בכרטיס, והיא מתומללת, מחויבת ונשלחת כרגיל.</div>
+  <div style="font-size:12px;color:var(--text2);margin-bottom:12px">להקלטה שנתקעה או לא הגיעה: מעלים קובץ, או מושכים מימות לפי מספר ההקלטה (למשל 1507 = /recordings/1507.wav). נוצרת הקלטה חדשה בכרטיס, והיא מתומללת, מחויבת ונשלחת כרגיל.</div>
   <form method="POST" action="{{ url_for('admin.customer_manual_transcribe', id=customer.id) }}" enctype="multipart/form-data"
         style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap"
         onsubmit="var b=this.querySelector('button[type=submit]');setTimeout(function(){b.disabled=true;b.textContent='⏳ שולח...'},0);return true">
@@ -580,7 +580,7 @@ function confirmOcrDelete() {
         <input class="form-input" type="email" name="to_email" value="{{ customer.email or '' }}" placeholder="כתובת מייל" required style="width:220px"></div>
       <button class="btn btn-primary" type="submit" style="font-size:13px">📧 שליחה במייל</button>
     </form>
-    <div style="flex-basis:100%;font-size:12px;color:#8892b0">בלי תאריכים - כל התקופה. בקובץ: סיכום לפי סוג שירות (תמלול, אקסל, כתב יד, קלדנות, הגהה, פקס) ופירוט של כל התנועות.</div>
+    <div style="flex-basis:100%;font-size:12px;color:var(--text2)">בלי תאריכים - כל התקופה. בקובץ: סיכום לפי סוג שירות (תמלול, אקסל, כתב יד, קלדנות, הגהה, פקס) ופירוט של כל התנועות.</div>
   </div>
   <div class="table-header"><span class="table-title">💳 עסקאות</span>
     {% if transactions_total > transactions|length %}<a href="?all=1" style="font-size:13px;color:var(--accent)">מוצגות {{ transactions|length }} האחרונות מתוך {{ transactions_total }} · הצג הכל</a>{% endif %}</div>
@@ -597,7 +597,7 @@ function confirmOcrDelete() {
             {% elif txn.type == 'debit' %}<span class="badge badge-red">חיוב</span>
             {% elif txn.type == 'credit' %}<span class="badge badge-blue">זיכוי</span>
             {% else %}<span class="badge badge-gray">{{ txn.type }}</span>{% endif %}</td>
-        <td style="color:#8892b0">{{ txn.description }}</td>
+        <td style="color:var(--text2)">{{ txn.description }}</td>
       </tr>
       {% endfor %}
     </tbody>
@@ -640,7 +640,7 @@ function confirmOcrDelete() {
       {% for it in th['items'] %}
         <div style="display:flex;justify-content:{{ 'flex-start' if it.dir == 'out' else 'flex-end' }}">
           <div style="max-width:75%;width:fit-content;padding:8px 12px;border-radius:12px;font-size:13px;line-height:1.55;
-                      {% if it.dir == 'out' %}background:#1e3a8a;color:#fff;border-bottom-right-radius:3px{% else %}background:#2d3561;color:#e2e8f0;border-bottom-left-radius:3px{% endif %}">
+                      {% if it.dir == 'out' %}background:#1e3a8a;color:#fff;border-bottom-right-radius:3px{% else %}background:var(--surface2);color:var(--text);border:1px solid var(--border);border-bottom-left-radius:3px{% endif %}">
             <div style="font-size:11px;opacity:.75;margin-bottom:3px;white-space:normal">
               {% if it.dir == 'out' %}🎙️ {{ customer.name or 'הלקוח' }} (מהטלפון){% if it.reply %} · ↪ תשובה{% endif %}
               {% else %}<span dir="ltr">{{ it['from'] }}</span>{% endif %} · {{ it.at | il_time('%d/%m %H:%M') }}
@@ -707,7 +707,7 @@ function confirmOcrDelete() {
 </div>
 
 {% if not threads %}
-<div style="margin-top:20px;color:#8892b0;font-size:13px">אין עדיין שיחות עם הלקוח הזה.</div>
+<div style="margin-top:20px;color:var(--text2);font-size:13px">אין עדיין שיחות עם הלקוח הזה.</div>
 {% endif %}
 
 {% for t in threads %}
@@ -728,7 +728,7 @@ function confirmOcrDelete() {
     {% for m in t.messages %}
     <div style="display:flex;{% if m.direction == 'out' %}justify-content:flex-start{% else %}justify-content:flex-end{% endif %}">
       <div style="max-width:70%;width:fit-content;padding:8px 12px;border-radius:10px;white-space:pre-wrap;font-size:13px;line-height:1.5;
-                  {% if m.direction == 'out' %}background:#1e3a8a;color:#fff{% else %}background:#2d3561;color:#e2e8f0{% endif %}">
+                  {% if m.direction == 'out' %}background:#1e3a8a;color:#fff{% else %}background:var(--surface2);color:var(--text);border:1px solid var(--border){% endif %}">
         <div style="font-size:11px;opacity:0.7;margin-bottom:3px">
           {% if m.direction == 'out' %}מנהל{% else %}לקוח{% endif %} · {{ m.created_at | il_time }}
         </div>

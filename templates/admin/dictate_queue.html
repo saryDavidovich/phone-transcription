@@ -63,15 +63,15 @@ async function sendFree(id, btn) {
     <tbody>
       {% for f in incoming_faxes %}
       <tr>
-        <td onclick="location='/admin/dictate/fax/{{f.id}}'" style="cursor:pointer;color:#8892b0">{{ f.received_at | il_time }}</td>
-        <td onclick="location='/admin/dictate/fax/{{f.id}}'" style="cursor:pointer;color:#8892b0;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ f.filename or '—' }}</td>
-        <td onclick="location='/admin/dictate/fax/{{f.id}}'" style="cursor:pointer;color:#8892b0;font-size:12px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ f.from_email or '—' }}</td>
+        <td onclick="location='/admin/dictate/fax/{{f.id}}'" style="cursor:pointer;color:var(--text2)">{{ f.received_at | il_time }}</td>
+        <td onclick="location='/admin/dictate/fax/{{f.id}}'" style="cursor:pointer;color:var(--text2);max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ f.filename or '—' }}</td>
+        <td onclick="location='/admin/dictate/fax/{{f.id}}'" style="cursor:pointer;color:var(--text2);font-size:12px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ f.from_email or '—' }}</td>
         <td>
           <a href="/admin/dictate/fax/{{f.id}}" class="btn btn-primary" style="font-size:12px;padding:4px 10px">🔎 שיוך</a>
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="4" style="text-align:center;color:#8892b0;padding:24px">אין פקסים ממתינים לשיוך כרגע</td></tr>
+      <tr><td colspan="4" style="text-align:center;color:var(--text2);padding:24px">אין פקסים ממתינים לשיוך כרגע</td></tr>
       {% endfor %}
     </tbody>
   </table>
@@ -96,10 +96,10 @@ async function sendFree(id, btn) {
     <tbody>
       {% for r in proof_rounds %}
       <tr>
-        <td onclick="location='/admin/dictate/proof/{{r.id}}'" style="cursor:pointer"><strong>{{ r.manuscript_page.customer.display_name }}</strong>{% if r.manuscript_page.customer.institution %}<span style="color:#8892b0;font-size:11.5px"> · 🏫 {{ r.manuscript_page.customer.institution.name }}</span>{% endif %}</td>
-        <td onclick="location='/admin/dictate/proof/{{r.id}}'" style="cursor:pointer;color:#8892b0;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.manuscript_page.original_filename }}</td>
-        <td onclick="location='/admin/dictate/proof/{{r.id}}'" style="cursor:pointer;color:#8892b0;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.customer_file_filename or '—' }}</td>
-        <td onclick="location='/admin/dictate/proof/{{r.id}}'" style="cursor:pointer;color:#8892b0">{{ r.requested_at | il_time }}</td>
+        <td onclick="location='/admin/dictate/proof/{{r.id}}'" style="cursor:pointer"><strong>{{ r.manuscript_page.customer.display_name }}</strong>{% if r.manuscript_page.customer.institution %}<span style="color:var(--text2);font-size:11.5px"> · 🏫 {{ r.manuscript_page.customer.institution.name }}</span>{% endif %}</td>
+        <td onclick="location='/admin/dictate/proof/{{r.id}}'" style="cursor:pointer;color:var(--text2);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.manuscript_page.original_filename }}</td>
+        <td onclick="location='/admin/dictate/proof/{{r.id}}'" style="cursor:pointer;color:var(--text2);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.customer_file_filename or '—' }}</td>
+        <td onclick="location='/admin/dictate/proof/{{r.id}}'" style="cursor:pointer;color:var(--text2)">{{ r.requested_at | il_time }}</td>
         <td style="display:flex;gap:6px">
           <a href="/admin/dictate/proof/{{r.id}}" class="btn btn-ghost" style="font-size:12px;padding:4px 10px">פתח הגהה</a>
           <form method="POST" action="/admin/dictate/proof/{{r.id}}/delete" onsubmit="return confirm('לבטל את סבב ההגהה הזה בלי לחייב את הלקוח?')">
@@ -108,7 +108,7 @@ async function sendFree(id, btn) {
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="5" style="text-align:center;color:#8892b0;padding:24px">אין הגהות ממתינות כרגע</td></tr>
+      <tr><td colspan="5" style="text-align:center;color:var(--text2);padding:24px">אין הגהות ממתינות כרגע</td></tr>
       {% endfor %}
     </tbody>
   </table>
@@ -133,17 +133,17 @@ async function sendFree(id, btn) {
     <tbody>
       {% for r in proof_rounds %}
       <tr>
-        <td onclick="location='/admin/dictate/proof/{{r.id}}'" style="cursor:pointer"><strong>{{ r.manuscript_page.customer.display_name }}</strong>{% if r.manuscript_page.customer.institution %}<span style="color:#8892b0;font-size:11.5px"> · 🏫 {{ r.manuscript_page.customer.institution.name }}</span>{% endif %}</td>
-        <td onclick="location='/admin/dictate/proof/{{r.id}}'" style="cursor:pointer;color:#8892b0;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.manuscript_page.original_filename }}</td>
-        <td onclick="location='/admin/dictate/proof/{{r.id}}'" style="cursor:pointer;color:#8892b0">{{ r.timer_accumulated_seconds | minutes_billed }} דק׳</td>
+        <td onclick="location='/admin/dictate/proof/{{r.id}}'" style="cursor:pointer"><strong>{{ r.manuscript_page.customer.display_name }}</strong>{% if r.manuscript_page.customer.institution %}<span style="color:var(--text2);font-size:11.5px"> · 🏫 {{ r.manuscript_page.customer.institution.name }}</span>{% endif %}</td>
+        <td onclick="location='/admin/dictate/proof/{{r.id}}'" style="cursor:pointer;color:var(--text2);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.manuscript_page.original_filename }}</td>
+        <td onclick="location='/admin/dictate/proof/{{r.id}}'" style="cursor:pointer;color:var(--text2)">{{ r.timer_accumulated_seconds | minutes_billed }} דק׳</td>
         <td onclick="location='/admin/dictate/proof/{{r.id}}'" style="cursor:pointer">{% if r.cost %}₪{{ "%.2f"|format(r.cost) }}{% else %}—{% endif %}</td>
-        <td onclick="location='/admin/dictate/proof/{{r.id}}'" style="cursor:pointer;color:#8892b0">{{ r.completed_at | il_time }}</td>
+        <td onclick="location='/admin/dictate/proof/{{r.id}}'" style="cursor:pointer;color:var(--text2)">{{ r.completed_at | il_time }}</td>
         <td>
           <a href="/admin/dictate/proof/{{r.id}}" class="btn btn-ghost" style="font-size:12px;padding:4px 10px">צפייה</a>
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="6" style="text-align:center;color:#8892b0;padding:24px">אין עדיין הגהות שהושלמו</td></tr>
+      <tr><td colspan="6" style="text-align:center;color:var(--text2);padding:24px">אין עדיין הגהות שהושלמו</td></tr>
       {% endfor %}
     </tbody>
   </table>
@@ -171,24 +171,24 @@ async function sendFree(id, btn) {
     <tbody>
       {% for p in pages %}
       <tr>
-        <td onclick="location='/admin/dictate/{{p.id}}'" style="cursor:pointer"><strong>{{ p.customer.display_name }}</strong>{% if p.customer.institution %}<span style="color:#8892b0;font-size:11.5px"> · 🏫 {{ p.customer.institution.name }}</span>{% endif %}</td>
-        <td onclick="location='/admin/dictate/{{p.id}}'" style="cursor:pointer;color:#8892b0;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ p.original_filename }}</td>
+        <td onclick="location='/admin/dictate/{{p.id}}'" style="cursor:pointer"><strong>{{ p.customer.display_name }}</strong>{% if p.customer.institution %}<span style="color:var(--text2);font-size:11.5px"> · 🏫 {{ p.customer.institution.name }}</span>{% endif %}</td>
+        <td onclick="location='/admin/dictate/{{p.id}}'" style="cursor:pointer;color:var(--text2);max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ p.original_filename }}</td>
         <td onclick="location='/admin/dictate/{{p.id}}'" style="cursor:pointer">
           {% if p.status == 'pending' %}<span class="badge badge-gray">ממתין</span>
           {% elif p.status == 'recording' %}<span class="badge badge-blue">בהקלטה</span>
           {% elif p.status == 'processing' %}<span class="badge badge-amber">מתמלל...</span>
           {% elif p.status == 'review' %}<span class="badge badge-amber">ממתין לאישור</span>
-          {% elif p.status == 'paused' %}<span class="badge badge-blue">⏸ מושהה</span>{% if p.bookmark_page %} <span style="color:#8892b0;font-size:11.5px">סימניה: עמוד {{ p.bookmark_page }}{% if p.bookmark_note %} · {{ p.bookmark_note[:40] }}{% endif %}</span>{% endif %}
-          {% elif p.status == 'pending_payment' %}<span class="badge badge-amber">💳 ממתין לתשלום</span>{% if p.due_cost %} <span style="color:#8892b0;font-size:11.5px">₪{{ "%.2f"|format(p.due_cost) }}</span>{% endif %}
-          {% elif p.status == 'awaiting_topup' %}<span class="badge badge-gray">❄️ ממתין לטעינה</span> <span style="color:#8892b0;font-size:11.5px">נשלחה ללקוח הודעה - העיבוד לא התחיל</span>
-          {% elif p.frozen_note %}<span class="badge badge-gray">❄️ מוקפא</span> <span style="color:#8892b0;font-size:11.5px">{{ p.frozen_note }}</span>
+          {% elif p.status == 'paused' %}<span class="badge badge-blue">⏸ מושהה</span>{% if p.bookmark_page %} <span style="color:var(--text2);font-size:11.5px">סימניה: עמוד {{ p.bookmark_page }}{% if p.bookmark_note %} · {{ p.bookmark_note[:40] }}{% endif %}</span>{% endif %}
+          {% elif p.status == 'pending_payment' %}<span class="badge badge-amber">💳 ממתין לתשלום</span>{% if p.due_cost %} <span style="color:var(--text2);font-size:11.5px">₪{{ "%.2f"|format(p.due_cost) }}</span>{% endif %}
+          {% elif p.status == 'awaiting_topup' %}<span class="badge badge-gray">❄️ ממתין לטעינה</span> <span style="color:var(--text2);font-size:11.5px">נשלחה ללקוח הודעה - העיבוד לא התחיל</span>
+          {% elif p.frozen_note %}<span class="badge badge-gray">❄️ מוקפא</span> <span style="color:var(--text2);font-size:11.5px">{{ p.frozen_note }}</span>
           {% elif p.status == 'done' %}<span class="badge badge-green">נשלח</span>
           {% else %}<span class="badge badge-red">שגיאה</span>{% endif %}
           {% if p.proofing_rounds | selectattr('status', 'equalto', 'pending') | list %}<span class="badge badge-blue" style="margin-right:4px">✏️ הגהה ממתינה</span>{% endif %}
         </td>
-        <td onclick="location='/admin/dictate/{{p.id}}'" style="cursor:pointer;color:#8892b0;font-size:12px">{% if p.engine == 'gemini' %}ג׳מיני{% elif p.engine == 'openai' %}OpenAI{% else %}—{% endif %}</td>
-        <td onclick="location='/admin/dictate/{{p.id}}'" style="cursor:pointer;color:#8892b0">{{ p.claimed_by or '—' }}</td>
-        <td onclick="location='/admin/dictate/{{p.id}}'" style="cursor:pointer;color:#8892b0">{{ p.created_at | il_time }}</td>
+        <td onclick="location='/admin/dictate/{{p.id}}'" style="cursor:pointer;color:var(--text2);font-size:12px">{% if p.engine == 'gemini' %}ג׳מיני{% elif p.engine == 'openai' %}OpenAI{% else %}—{% endif %}</td>
+        <td onclick="location='/admin/dictate/{{p.id}}'" style="cursor:pointer;color:var(--text2)">{{ p.claimed_by or '—' }}</td>
+        <td onclick="location='/admin/dictate/{{p.id}}'" style="cursor:pointer;color:var(--text2)">{{ p.created_at | il_time }}</td>
         <td style="display:flex;gap:6px">
           <a href="/admin/dictate/{{p.id}}" class="btn btn-ghost" style="font-size:12px;padding:4px 10px">{% if p.status=='done' %}צפייה{% else %}פתח{% endif %}</a>
           {% if p.status == 'awaiting_topup' %}<button type="button" class="btn btn-ghost" style="font-size:12px;padding:4px 10px" onclick="unfreezePage({{p.id}}, this)" title="להחזיר לתור הרגיל בלי לחכות לטעינה">↩ החזר לתור</button>{% endif %}
@@ -199,7 +199,7 @@ async function sendFree(id, btn) {
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="7" style="text-align:center;color:#8892b0;padding:24px">אין דפים כרגע</td></tr>
+      <tr><td colspan="7" style="text-align:center;color:var(--text2);padding:24px">אין דפים כרגע</td></tr>
       {% endfor %}
     </tbody>
   </table>

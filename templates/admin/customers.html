@@ -92,8 +92,8 @@
         </td>
         <td onclick="location='/admin/customers/{{c.id}}'" style="cursor:pointer"><strong>{{ c.phone }}</strong></td>
         <td onclick="location='/admin/customers/{{c.id}}'" style="cursor:pointer">{{ c.name or '—' }}</td>
-        <td onclick="location='/admin/customers/{{c.id}}'" style="cursor:pointer;color:#8892b0">{{ c.email or '—' }}</td>
-        <td onclick="location='/admin/customers/{{c.id}}'" style="cursor:pointer;color:#8892b0">{{ c.fax or '—' }}</td>
+        <td onclick="location='/admin/customers/{{c.id}}'" style="cursor:pointer;color:var(--text2)">{{ c.email or '—' }}</td>
+        <td onclick="location='/admin/customers/{{c.id}}'" style="cursor:pointer;color:var(--text2)">{{ c.fax or '—' }}</td>
         <td onclick="location='/admin/customers/{{c.id}}'" style="cursor:pointer;color:{% if c.balance < 5 %}#ef4444{% else %}#10b981{% endif %}">₪{{ "%.2f"|format(c.balance) }}</td>
         <td onclick="location='/admin/customers/{{c.id}}'" style="cursor:pointer">{{ recording_counts.get(c.id, 0) }}</td>
         <td onclick="location='/admin/customers/{{c.id}}'" style="cursor:pointer">{{ load_counts.get(c.id, 0) }}</td>
@@ -102,7 +102,7 @@
           {% if c.is_blocked %}<span class="badge badge-red">חסום</span>
           {% else %}<span class="badge badge-green">פעיל</span>{% endif %}
         </td>
-        <td onclick="location='/admin/customers/{{c.id}}'" style="cursor:pointer;color:#8892b0">{{ c.created_at | il_time('%d/%m/%Y') }}</td>
+        <td onclick="location='/admin/customers/{{c.id}}'" style="cursor:pointer;color:var(--text2)">{{ c.created_at | il_time('%d/%m/%Y') }}</td>
       </tr>
       {% endfor %}
     </tbody>

@@ -9,22 +9,22 @@
   .lv-btn { background:rgba(79,110,247,.15); color:var(--accent); border:1px solid rgba(79,110,247,.4); border-radius:8px; padding:5px 10px; font-size:13px; cursor:pointer; white-space:nowrap }
   .lv-hang { background:rgba(239,68,68,.12); color:#ef4444; border-color:rgba(239,68,68,.45) }
   .lv-btn[disabled] { opacity:.45; cursor:not-allowed }
-  .lv-menu { display:none; position:absolute; left:0; top:100%; z-index:50; min-width:230px; background:#0d1b2a; border:1px solid rgba(136,146,176,.3); border-radius:10px; padding:6px; box-shadow:0 8px 24px rgba(0,0,0,.45) }
+  .lv-menu { display:none; position:absolute; left:0; top:100%; z-index:50; min-width:230px; background:var(--surface); color:var(--text); border:1px solid var(--border); border-radius:10px; padding:6px; box-shadow:0 8px 24px rgba(0,0,0,.25) }
   .lv-act:hover .lv-menu, .lv-act:focus-within .lv-menu { display:block }
   .lv-act:has(.lv-btn[disabled]) .lv-menu { display:none }
   .lv-menu button { display:block; width:100%; text-align:right; background:none; border:0; color:inherit; padding:6px 8px; border-radius:6px; font-size:13px; cursor:pointer }
   .lv-menu button:hover { background:rgba(79,110,247,.18) }
   .lv-menu .lv-sep { border-top:1px solid rgba(136,146,176,.2); margin:5px 0 }
   .lv-menu .lv-folder { display:flex; gap:6px; padding:4px 8px }
-  .lv-menu .lv-folder input { flex:1; min-width:0; background:#112240; border:1px solid rgba(136,146,176,.3); border-radius:6px; color:inherit; padding:4px 6px; font-size:13px; direction:ltr }
+  .lv-menu .lv-folder input { flex:1; min-width:0; background:var(--surface2); border:1px solid var(--border); border-radius:6px; color:inherit; padding:4px 6px; font-size:13px; direction:ltr }
   .lv-menu .lv-folder button { width:auto; background:rgba(79,110,247,.2) }
   .lv-path { display:inline-block; background:rgba(16,185,129,.14); color:#10b981; border-radius:6px; padding:1px 7px; font-weight:700; margin-left:6px; direction:ltr }
-  .lv-sub { color:#8892b0; font-size:12.5px; font-weight:400; margin-top:3px }
+  .lv-sub { color:var(--text2); font-size:12.5px; font-weight:400; margin-top:3px }
 </style>
 <div class="table-card" style="margin-bottom:20px;overflow:visible">
   <div class="table-header">
     <span class="table-title"><span id="liveDot" style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#8892b0;margin-left:6px"></span>על הקו עכשיו</span>
-    <span id="liveCount" style="color:#8892b0;font-size:13px">טוען...</span>
+    <span id="liveCount" style="color:var(--text2);font-size:13px">טוען...</span>
   </div>
   <div id="liveBody" style="padding:6px 16px 14px"></div>
   <div id="liveMsg" style="display:none;margin:0 16px 12px;padding:8px 12px;border-radius:8px;font-size:13px"></div>
@@ -87,14 +87,14 @@
       dot.style.background = d.calls.length ? '#10b981' : '#8892b0';
       cnt.textContent = d.calls.length ? d.calls.length + ' שיחות פעילות' : 'אין שיחות כרגע';
       if (body.querySelector('.lv-act:hover, .lv-act:focus-within')) return;
-      if (!d.calls.length) { body.innerHTML = '<div style="color:#8892b0;padding:8px 0">אף אחד לא על הקו</div>'; return; }
-      body.innerHTML = '<table style="width:100%;border-collapse:collapse;font-size:14px"><thead><tr style="color:#8892b0;text-align:right">'
+      if (!d.calls.length) { body.innerHTML = '<div style="color:var(--text2);padding:8px 0">אף אחד לא על הקו</div>'; return; }
+      body.innerHTML = '<table style="width:100%;border-collapse:collapse;font-size:14px"><thead><tr style="color:var(--text2);text-align:right">'
         + '<th style="padding:6px">מתקשר</th><th style="padding:6px">שלוחה / שלב</th><th style="padding:6px">בשלב הזה</th><th style="padding:6px">משך השיחה</th><th style="padding:6px"></th></tr></thead><tbody>'
         + d.calls.map(c => {
             const who = c.customer_id
-              ? `<a href="${CUST_URL.replace('/0', '/' + c.customer_id)}" style="color:var(--accent)">${esc(c.name || c.phone)}</a> <span style="color:#8892b0">${esc(c.name ? c.phone : '')}</span>`
-              : `${esc(c.phone)} <span style="color:#8892b0">(לא רשום)</span>`;
-            const idle = c.idle_seconds > 90 && !c.recording ? ` <span style="color:#8892b0;font-weight:400" title="לא התקבלה פעולה מהמתקשר">· שקט ${dur(c.idle_seconds)}</span>` : '';
+              ? `<a href="${CUST_URL.replace('/0', '/' + c.customer_id)}" style="color:var(--accent)">${esc(c.name || c.phone)}</a> <span style="color:var(--text2)">${esc(c.name ? c.phone : '')}</span>`
+              : `${esc(c.phone)} <span style="color:var(--text2)">(לא רשום)</span>`;
+            const idle = c.idle_seconds > 90 && !c.recording ? ` <span style="color:var(--text2);font-weight:400" title="לא התקבלה פעולה מהמתקשר">· שקט ${dur(c.idle_seconds)}</span>` : '';
             const path = (c.keys && c.keys.length) ? `<span class="lv-path" title="המקשים שהמתקשר הקיש מהתפריט הראשי">${esc(c.keys.join(' › '))}</span>` : '';
             const rec = c.recording ? ' <span style="color:#ef4444">● מקליט</span>' : '';
             const sub = c.sub_num !== null && c.sub_num !== undefined
@@ -133,13 +133,13 @@
     <div class="stat-icon" style="background:rgba(16,185,129,0.15)">💰</div>
     <div class="stat-label">הכנסות החודש</div>
     <div class="stat-value">₪{{ "%.2f"|format(stats.month_revenue) }}</div>
-    <div class="stat-change" style="color:#8892b0">סה"כ ₪{{ "%.2f"|format(stats.total_revenue) }}</div>
+    <div class="stat-change" style="color:var(--text2)">סה"כ ₪{{ "%.2f"|format(stats.total_revenue) }}</div>
   </div>
   <div class="stat-card">
     <div class="stat-icon" style="background:rgba(245,158,11,0.15)">🎧</div>
     <div class="stat-label">הקלטות היום</div>
     <div class="stat-value">{{ stats.today_recordings }}</div>
-    <div class="stat-change" style="color:#8892b0">סה"כ {{ stats.total_recordings }}</div>
+    <div class="stat-change" style="color:var(--text2)">סה"כ {{ stats.total_recordings }}</div>
   </div>
   <div class="stat-card">
     <div class="stat-icon" style="background:rgba(124,58,237,0.15)">💳</div>
@@ -151,7 +151,7 @@
     <div class="stat-icon" style="background:rgba(245,158,11,0.15)">⏳</div>
     <div class="stat-label">ממתינים לתשלום</div>
     <div class="stat-value" style="{{ 'color:#f59e0b' if pending_stats.total > 0 else '' }}">{{ pending_stats.total }}</div>
-    <div class="stat-change" style="color:#8892b0">{{ pending_stats.recordings }} הקלטות, {{ pending_stats.ocr }} OCR</div>
+    <div class="stat-change" style="color:var(--text2)">{{ pending_stats.recordings }} הקלטות, {{ pending_stats.ocr }} OCR</div>
   </div>
 </div>
 
@@ -159,11 +159,11 @@
 <div class="table-card" style="margin-bottom:20px">
   <div class="table-header">
     <span class="table-title">💳 חיובי ארנקות היום</span>
-    <span style="color:#8892b0;font-size:13px">סה"כ: ₪{{ "%.2f"|format(billing_stats.total_cost) }} | {{ billing_stats.count }} הקלטות</span>
+    <span style="color:var(--text2);font-size:13px">סה"כ: ₪{{ "%.2f"|format(billing_stats.total_cost) }} | {{ billing_stats.count }} הקלטות</span>
   </div>
   <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;padding:16px">
-    <div style="background:#0d1b2a;border-radius:10px;padding:14px">
-      <div style="font-weight:700;margin-bottom:10px;color:#8892b0">לפי סוג תמלול</div>
+    <div style="background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:14px">
+      <div style="font-weight:700;margin-bottom:10px;color:var(--text2)">לפי סוג תמלול</div>
       <div style="display:flex;justify-content:space-between;margin-bottom:6px">
         <span>רגיל</span>
         <span>₪{{ "%.2f"|format(billing_stats.basic_cost) }} ({{ billing_stats.basic_count }})</span>
@@ -177,8 +177,8 @@
         <span>₪{{ "%.2f"|format(billing_stats.video_cost) }} ({{ billing_stats.video_count }})</span>
       </div>
     </div>
-    <div style="background:#0d1b2a;border-radius:10px;padding:14px">
-      <div style="font-weight:700;margin-bottom:10px;color:#8892b0">לפי ערוץ קבלה</div>
+    <div style="background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:14px">
+      <div style="font-weight:700;margin-bottom:10px;color:var(--text2)">לפי ערוץ קבלה</div>
       <div style="display:flex;justify-content:space-between;margin-bottom:6px">
         <span>📞 טלפון</span>
         <span>₪{{ "%.2f"|format(billing_stats.phone_cost) }} ({{ billing_stats.phone_count }})</span>
@@ -188,8 +188,8 @@
         <span>₪{{ "%.2f"|format(billing_stats.email_cost) }} ({{ billing_stats.email_count }})</span>
       </div>
     </div>
-    <div style="background:#0d1b2a;border-radius:10px;padding:14px">
-      <div style="font-weight:700;margin-bottom:10px;color:#8892b0">לפי שיטת שליחה</div>
+    <div style="background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:14px">
+      <div style="font-weight:700;margin-bottom:10px;color:var(--text2)">לפי שיטת שליחה</div>
       <div style="display:flex;justify-content:space-between;margin-bottom:6px">
         <span>📧 נשלח למייל</span>
         <span>{{ billing_stats.sent_email_count }}</span>
@@ -209,16 +209,16 @@
     <a href="/admin/ocr" class="btn btn-ghost" style="font-size:12px;padding:5px 12px">כל הרשומות</a>
   </div>
   <div style="display:flex;gap:16px;padding:16px">
-    <div style="flex:1;background:#0d1b2a;border-radius:10px;padding:14px;text-align:center">
-      <div style="color:#8892b0;font-size:13px;margin-bottom:6px">מסמכים</div>
+    <div style="flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:14px;text-align:center">
+      <div style="color:var(--text2);font-size:13px;margin-bottom:6px">מסמכים</div>
       <div style="font-size:24px;font-weight:700">{{ ocr_stats.count }}</div>
     </div>
-    <div style="flex:1;background:#0d1b2a;border-radius:10px;padding:14px;text-align:center">
-      <div style="color:#8892b0;font-size:13px;margin-bottom:6px">תווים שזוהו</div>
+    <div style="flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:14px;text-align:center">
+      <div style="color:var(--text2);font-size:13px;margin-bottom:6px">תווים שזוהו</div>
       <div style="font-size:24px;font-weight:700">{{ ocr_stats.total_chars }}</div>
     </div>
-    <div style="flex:1;background:#0d1b2a;border-radius:10px;padding:14px;text-align:center">
-      <div style="color:#8892b0;font-size:13px;margin-bottom:6px">הכנסות OCR</div>
+    <div style="flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:14px;text-align:center">
+      <div style="color:var(--text2);font-size:13px;margin-bottom:6px">הכנסות OCR</div>
       <div style="font-size:24px;font-weight:700">₪{{ "%.2f"|format(ocr_stats.total_cost) }}</div>
     </div>
   </div>
@@ -227,11 +227,11 @@
 <!-- לקוחות לא פעילים -->
 <div style="display:flex;gap:12px;margin-bottom:20px">
   <a href="/admin/customers-filter?filter=inactive_month" style="flex:1;background:var(--surface2);border-radius:10px;padding:14px;text-decoration:none;display:flex;justify-content:space-between;align-items:center">
-    <span style="color:#8892b0">😴 לא פעילים חודש</span>
+    <span style="color:var(--text2)">😴 לא פעילים חודש</span>
     <span style="font-size:22px;font-weight:700;color:#f59e0b">{{ stats.inactive_month }}</span>
   </a>
   <a href="/admin/customers-filter?filter=inactive_year" style="flex:1;background:var(--surface2);border-radius:10px;padding:14px;text-decoration:none;display:flex;justify-content:space-between;align-items:center">
-    <span style="color:#8892b0">💤 לא פעילים שנה</span>
+    <span style="color:var(--text2)">💤 לא פעילים שנה</span>
     <span style="font-size:22px;font-weight:700;color:#ef4444">{{ stats.inactive_year }}</span>
   </a>
 </div>
@@ -288,7 +288,7 @@
             {% elif txn.type == 'credit' %}<span class="badge badge-blue">זיכוי</span>
             {% else %}<span class="badge badge-gray">{{ txn.type }}</span>{% endif %}
           </td>
-          <td style="color:#8892b0">{{ txn.created_at | il_time('%d/%m %H:%M') }}</td>
+          <td style="color:var(--text2)">{{ txn.created_at | il_time('%d/%m %H:%M') }}</td>
         </tr>
         {% endfor %}
       </tbody>

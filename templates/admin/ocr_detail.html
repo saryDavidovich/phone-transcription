@@ -12,16 +12,16 @@
   <div class="card">
     <div class="card-title">פרטים</div>
     <table style="width:100%">
-      <tr><td style="color:#8892b0;padding:6px 0">לקוח</td><td><strong>{{ ocr.customer.phone }}</strong></td></tr>
-      <tr><td style="color:#8892b0;padding:6px 0">קובץ מקורי</td><td>{{ ocr.original_filename }}</td></tr>
-      <tr><td style="color:#8892b0;padding:6px 0">מנוע</td><td><span class="badge badge-blue">{{ ocr.engine }}</span></td></tr>
-      <tr><td style="color:#8892b0;padding:6px 0">תווים</td><td>{{ ocr.char_count }}</td></tr>
-      <tr><td style="color:#8892b0;padding:6px 0">עלות</td><td>₪{{ "%.2f"|format(ocr.cost) }}</td></tr>
-      <tr><td style="color:#8892b0;padding:6px 0">סטטוס</td><td>
+      <tr><td style="color:var(--text2);padding:6px 0">לקוח</td><td><strong>{{ ocr.customer.phone }}</strong></td></tr>
+      <tr><td style="color:var(--text2);padding:6px 0">קובץ מקורי</td><td>{{ ocr.original_filename }}</td></tr>
+      <tr><td style="color:var(--text2);padding:6px 0">מנוע</td><td><span class="badge badge-blue">{{ ocr.engine }}</span></td></tr>
+      <tr><td style="color:var(--text2);padding:6px 0">תווים</td><td>{{ ocr.char_count }}</td></tr>
+      <tr><td style="color:var(--text2);padding:6px 0">עלות</td><td>₪{{ "%.2f"|format(ocr.cost) }}</td></tr>
+      <tr><td style="color:var(--text2);padding:6px 0">סטטוס</td><td>
         {% if ocr.status == 'completed' %}<span class="badge badge-green">הושלם</span>
         {% else %}<span class="badge badge-red">שגיאה</span>{% endif %}
       </td></tr>
-      <tr><td style="color:#8892b0;padding:6px 0">תאריך</td><td>{{ ocr.created_at | il_time }}</td></tr>
+      <tr><td style="color:var(--text2);padding:6px 0">תאריך</td><td>{{ ocr.created_at | il_time }}</td></tr>
     </table>
   </div>
 
@@ -37,7 +37,7 @@
         <a href="/admin/ocr/{{ ocr.id }}/file" class="btn btn-ghost" style="margin-top:12px">⬇ הורד קובץ</a>
       {% endif %}
     {% else %}
-      <p style="color:#8892b0;margin-top:8px">הקובץ המקורי אינו זמין</p>
+      <p style="color:var(--text2);margin-top:8px">הקובץ המקורי אינו זמין</p>
     {% endif %}
   </div>
 </div>

@@ -1,7 +1,7 @@
 <script src="/static/js/voicefx.js?v=6"></script>
 {# הודעה קולית ללקוח (vm_customer_id) או תפוצתית (vm_customer_id=None). רשימה: voice_messages_list #}
 <div id="voice">
-  <div style="font-size:13px;color:#8892b0;margin-bottom:12px">
+  <div style="font-size:13px;color:var(--text2);margin-bottom:12px">
     {% if vm_customer_id %}הלקוח ישמע את ההודעה בכניסה הבאה למערכת, עד הסוף ובלי אפשרות לדלג (אחרי "שלום, ברוכים הבאים"). אפשר לבחור שישמע אותה בכמה כניסות. אחר כך אפשר לשמוע אותה שוב בשלוחה 9.
     {% else %}כל הלקוחות הרשומים ישמעו את ההודעה בכניסה הבאה למערכת, עד הסוף. אפשר לבחור שישמעו אותה בכמה כניסות. אחר כך אפשר לשמוע שוב בשלוחה 9. לקוח חדש שנרשם אחרי השליחה לא ישמע אותה.{% endif %}
   </div>
@@ -73,10 +73,10 @@
       <tr style="{% if not m.active %}opacity:.55{% endif %}">
         <td style="white-space:nowrap">{{ m.created_at | il_time }}</td>
         <td>{% if m.kind == 'file' %}<audio controls preload="none" src="{{ url_for('admin.voice_message_listen', mid=m.id) }}" style="height:32px;width:260px;max-width:100%"></audio>
-            {% if m.text %}<div style="font-size:12px;color:#8892b0;margin-top:3px">🗣️ {{ m.text }}</div>{% endif %}
+            {% if m.text %}<div style="font-size:12px;color:var(--text2);margin-top:3px">🗣️ {{ m.text }}</div>{% endif %}
             {% else %}✍️ {{ m.text }}{% endif %}</td>
-        <td style="white-space:nowrap">{% if vm_customer_id %}{{ (v.heard_at | il_time) if v.heard_at else 'עוד לא' }}{% if (m.repeat_times or 1) > 1 %}<div style="font-size:11px;color:#8892b0">{{ v.times }} מתוך {{ m.repeat_times }} פעמים</div>{% endif %}
-            {% else %}{{ v.heard_count }} לקוחות{% if (m.repeat_times or 1) > 1 %}<div style="font-size:11px;color:#8892b0">כל אחד {{ m.repeat_times }} פעמים</div>{% endif %}{% endif %}</td>
+        <td style="white-space:nowrap">{% if vm_customer_id %}{{ (v.heard_at | il_time) if v.heard_at else 'עוד לא' }}{% if (m.repeat_times or 1) > 1 %}<div style="font-size:11px;color:var(--text2)">{{ v.times }} מתוך {{ m.repeat_times }} פעמים</div>{% endif %}
+            {% else %}{{ v.heard_count }} לקוחות{% if (m.repeat_times or 1) > 1 %}<div style="font-size:11px;color:var(--text2)">כל אחד {{ m.repeat_times }} פעמים</div>{% endif %}{% endif %}</td>
         <td>
           <form method="POST" action="{{ url_for('admin.voice_message_toggle', mid=m.id) }}" style="display:inline">
             <button class="btn btn-ghost" style="font-size:12px" type="submit">{{ '✅ פעילה - השבת' if m.active else '⏸ מושבתת - הפעל' }}</button>

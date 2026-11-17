@@ -15,7 +15,7 @@
     <div><label class="form-label">מספר הודעת מערכת</label>
       <input class="form-input nr-num" id="nrNum" value="{{ num }}" placeholder="083" inputmode="numeric" maxlength="3"
              oninput="nrSyncNum(this.value)"></div>
-    <div style="font-size:13px;color:#8892b0;max-width:520px">
+    <div style="font-size:13px;color:var(--text2);max-width:520px">
       ההודעה נשמרת בימות בתיקייה <b>הודעות מערכת/<span class="nr-num-echo">{{ num or 'NNN' }}</span></b> כקובץ <b>000.wav</b> -
       בדיוק כמו שהמערכת משמיעה אותה. ההעלאה מחליפה את הקובץ הקיים (ועותק שלו נשמר לשחזור).
     </div>
@@ -70,7 +70,7 @@
 
   <div class="card">
     <div style="font-size:15px;font-weight:700;margin-bottom:4px">🎙️ הקלטה במחשב - עם מחליף קול</div>
-    <div style="font-size:12px;color:#8892b0;margin-bottom:10px;line-height:1.6">מקליטים במיקרופון, והקול עובר עיבוד קבוע (בלי בינה מלאכותית - אותה תוצאה בכל פעם):
+    <div style="font-size:12px;color:var(--text2);margin-bottom:10px;line-height:1.6">מקליטים במיקרופון, והקול עובר עיבוד קבוע (בלי בינה מלאכותית - אותה תוצאה בכל פעם):
       ניקוי, קול עמוק יותר, אקולייזר וקומפרסור של קריין. אחרי ההקלטה אפשר להחליף סגנון ולהשוות למקורי.</div>
     <form method="POST" action="{{ url_for('admin.narrator_upload_file') }}" enctype="multipart/form-data" onsubmit="return nrBusy(this)" id="nrRecForm">
       <input type="hidden" name="num" class="nr-num-field" value="{{ num }}">
@@ -86,7 +86,7 @@
     <form method="POST" action="{{ url_for('admin.narrator_upload_file') }}" enctype="multipart/form-data" onsubmit="return nrBusy(this)">
       <input type="hidden" name="num" class="nr-num-field" value="{{ num }}">
       <input class="form-input" type="file" name="audio_file" accept="audio/*,video/*" required style="max-width:100%">
-      <div style="font-size:12px;color:#8892b0;margin-top:6px">כל פורמט שמע (WAV, MP3, M4A...) - מומר אוטומטית לפורמט של ימות. רק הקובץ עצמו, בלי תיקייה.</div>
+      <div style="font-size:12px;color:var(--text2);margin-top:6px">כל פורמט שמע (WAV, MP3, M4A...) - מומר אוטומטית לפורמט של ימות. רק הקובץ עצמו, בלי תיקייה.</div>
       <label style="font-size:13px;display:block;margin-top:10px"><input type="checkbox" name="trim" value="1" checked> חיתוך שקט בהתחלה ובסוף</label>
       <button class="btn btn-primary" type="submit" style="margin-top:12px">⬆ הכן להעלאה</button>
     </form>
@@ -108,7 +108,7 @@
       <button class="btn btn-ghost" type="submit">↩ שחזר את הקודמת</button>
     </form>{% endif %}
   </div>
-  {% if sel.text %}<div style="margin-top:8px;font-size:13px;color:#8892b0">{{ sel.text }}</div>{% endif %}
+  {% if sel.text %}<div style="margin-top:8px;font-size:13px;color:var(--text2)">{{ sel.text }}</div>{% endif %}
 </div>
 {% endif %}
 
@@ -123,7 +123,7 @@
       <input class="form-input" id="ctSearch" placeholder="חיפוש בנוסח / מספר" style="width:200px;font-size:13px">
     </div>
   </div>
-  <div style="padding:8px 16px;font-size:12px;color:#8892b0">אפשר לשנות כל נוסח - נשמר אוטומטית. הודעה בהקראה ממוחשבת: השיחות הבאות כבר ישמעו את הנוסח החדש. "🎙️ לקריין" מעביר את הנוסח למעלה להקראה ולהעלאה; אחרי ההעלאה ההודעה עוברת ל"מוקלטת" והמערכת משמיעה את ההקלטה.</div>
+  <div style="padding:8px 16px;font-size:12px;color:var(--text2)">אפשר לשנות כל נוסח - נשמר אוטומטית. הודעה בהקראה ממוחשבת: השיחות הבאות כבר ישמעו את הנוסח החדש. "🎙️ לקריין" מעביר את הנוסח למעלה להקראה ולהעלאה; אחרי ההעלאה ההודעה עוברת ל"מוקלטת" והמערכת משמיעה את ההקלטה.</div>
   <table>
     <thead><tr><th style="width:60px">מספר</th><th>נוסח</th><th style="width:170px">איפה נשמעת</th><th style="width:120px">מצב</th><th style="width:150px"></th></tr></thead>
     <tbody>
@@ -131,9 +131,9 @@
       {% set st = 'recorded' if (m.recorded or m.kind == 'recorded') else m.kind %}
       <tr class="ct-row" data-st="{{ st }}" data-num="{{ '%03d'|format(m.num) }}">
         <td><b>{{ '%03d'|format(m.num) if m.kind != 'dynamic' else '—' }}</b></td>
-        <td>{% if m.kind == 'dynamic' %}<span style="color:#8892b0">{{ m.text }}</span>
+        <td>{% if m.kind == 'dynamic' %}<span style="color:var(--text2)">{{ m.text }}</span>
             {% else %}<textarea class="form-input ct-text" rows="1" data-num="{{ m.num }}" style="width:100%;font-size:13px;resize:vertical;min-height:34px">{{ m.text }}</textarea>{% endif %}</td>
-        <td style="font-size:12px;color:#8892b0">{{ m.context }}</td>
+        <td style="font-size:12px;color:var(--text2)">{{ m.context }}</td>
         <td>{% if st == 'recorded' %}<span class="nr-tag badge-green">🎙️ מוקלטת</span>
             {% elif st == 'tts' %}<span class="nr-tag badge-amber">🤖 הקראה ממוחשבת</span>
             {% elif st == 'unused' %}<span class="nr-tag badge-gray">לא בשימוש</span>
@@ -172,7 +172,7 @@
     {% endfor %}
     </tbody>
   </table>
-  {% else %}<div style="padding:16px;color:#8892b0">עוד לא הופקו הקראות.</div>{% endif %}
+  {% else %}<div style="padding:16px;color:var(--text2)">עוד לא הופקו הקראות.</div>{% endif %}
 </div>
 
 <script>

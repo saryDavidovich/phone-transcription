@@ -4,16 +4,16 @@
 {% block content %}
 <style>
 .ichat { max-width:860px; }
-.ichat-box { display:flex; flex-direction:column; border:1px solid var(--border,#2d3561); border-radius:14px; overflow:hidden; background:var(--card,#1a1d27); }
+.ichat-box { display:flex; flex-direction:column; border:1px solid var(--border); border-radius:14px; overflow:hidden; background:var(--surface); }
 .ichat-body { height:calc(100vh - 330px); min-height:340px; overflow-y:auto; padding:16px; display:flex; flex-direction:column; gap:4px;
   background:rgba(127,127,127,.06); }
-.ichat-day { align-self:center; font-size:11.5px; color:var(--text2,#8892b0); background:rgba(127,127,127,.14); padding:3px 12px; border-radius:8px; margin:10px 0 6px; }
+.ichat-day { align-self:center; font-size:11.5px; color:var(--text2); background:rgba(127,127,127,.14); padding:3px 12px; border-radius:8px; margin:10px 0 6px; }
 .ichat-msg { max-width:76%; padding:7px 11px 5px; border-radius:10px; font-size:14px; line-height:1.6; white-space:pre-wrap; word-wrap:break-word; }
 .ichat-msg .meta { font-size:10.5px; opacity:.7; text-align:left; margin-top:2px; }
 .ichat-msg .by { font-size:11.5px; font-weight:700; color:#10b981; margin-bottom:1px; }
-.ichat-msg.them { align-self:flex-start; background:var(--bg2,#232737); border:1px solid var(--border,#2d3561); border-top-right-radius:3px; }
-.ichat-msg.me { align-self:flex-end; background:rgba(16,185,129,.16); border:1px solid rgba(16,185,129,.3); border-top-left-radius:3px; }
-.ichat-form { display:flex; gap:8px; align-items:flex-end; padding:10px 12px; border-top:1px solid var(--border,#2d3561); }
+.ichat-msg.them { align-self:flex-start; background:var(--surface2); color:var(--text); border:1px solid var(--border); border-top-right-radius:3px; }
+.ichat-msg.me { align-self:flex-end; color:var(--text); background:rgba(16,185,129,.16); border:1px solid rgba(16,185,129,.3); border-top-left-radius:3px; }
+.ichat-form { display:flex; gap:8px; align-items:flex-end; padding:10px 12px; border-top:1px solid var(--border); }
 .ichat-form textarea { flex:1; resize:vertical; min-height:46px; max-height:220px; }
 </style>
 <div class="ichat">
