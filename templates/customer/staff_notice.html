@@ -1,0 +1,19 @@
+{% extends "customer/base.html" %}
+{% from "institution/_icons.html" import ic %}
+{% block content %}
+<div class="auth-wrap">
+  <div class="card auth-card">
+    <div class="auth-head">
+      <span class="ic-box">{{ ic('lock', 20) }}</span>
+      <h1>{{ 'אתה מחובר כמנהל בדפדפן הזה' if who == 'admin' else 'מוסד מחובר בדפדפן הזה' }}</h1>
+      <p>כניסה לאזור הלקוחות באותו דפדפן תנתק את {{ 'ממשק הניהול' if who == 'admin' else 'כניסת המוסד' }}.<br>
+        כדי לבדוק את אזור הלקוחות בלי להתנתק - פתחו אותו ב<b>חלון גלישה בסתר</b> (Ctrl+Shift+N) או בדפדפן אחר.</p>
+    </div>
+    <a class="btn btn-block" href="{{ '/admin/' if who == 'admin' else '/institution/dashboard' }}">{{ ic('arrow-right', 16) }} חזרה ל{{ 'ממשק הניהול' if who == 'admin' else 'אזור המוסד' }}</a>
+    <form method="post" action="{{ url_for('customer.leave_staff') }}" style="margin-top:10px;">
+      <button type="submit" class="btn btn-secondary btn-block">התנתקות והמשך לכניסת לקוח</button>
+    </form>
+  </div>
+</div>
+{% include "customer/_auth_style.html" %}
+{% endblock %}

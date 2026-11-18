@@ -73,6 +73,40 @@ def _cust_ctx():
     return {}
 
 
+def _staff_session():
+    """'admin' / 'inst' אם בדפדפן הזה מחובר מנהל או מוסד. כניסה כלקוח באותו דפדפן מחליפה את הכניסה
+    (עוגיית סשן אחת לכל האתר) - לכן לא נותנים לזה לקרות בשקט."""
+    try:
+        from services.security import is_valid_admin_session
+        if is_valid_admin_session():
+            return 'admin'
+        if current_user.is_authenticated and current_user.__class__.__name__ == 'Institution':
+            return 'inst'
+    except Exception:
+        pass
+    return None
+
+
+_GUARDED = ('customer.login', 'customer.signup', 'customer.google_start', 'customer.google_callback')
+
+
+@customer_bp.before_request
+def _protect_staff_session():
+    if request.endpoint in _GUARDED:
+        who = _staff_session()
+        if who:
+            return render_template('customer/staff_notice.html', who=who), 409
+    return None
+
+
+@customer_bp.route('/leave-staff', methods=['POST'])
+def leave_staff():
+    """בחירה מפורשת: יציאה מממשק הניהול / המוסד בדפדפן הזה, ומעבר לכניסת לקוח."""
+    logout_user()
+    session.clear()
+    return redirect(url_for('customer.login'))
+
+
 def _loc(dt, fmt='%d/%m/%Y %H:%M'):
     return dt.replace(tzinfo=timezone.utc).astimezone(IL).strftime(fmt) if dt else ''
 
