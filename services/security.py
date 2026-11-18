@@ -346,6 +346,8 @@ def init_security(app):
             try:
                 if current_user.is_authenticated and current_user.__class__.__name__ == 'Institution' and wants_page:
                     return redirect('/institution/dashboard')
+                if current_user.is_authenticated and current_user.__class__.__name__ == 'Customer' and wants_page:
+                    return redirect('/my/')
             except Exception:
                 pass
             if wants_page:
@@ -365,6 +367,23 @@ def init_security(app):
         if not _same_origin():
             log.warning(f'institution request blocked: cross-origin {request.method} {path}')
             return jsonify({'error': 'forbidden'}), 403
+        return None
+
+    @app.before_request
+    def _customer_csrf_guard():
+        """אזור הלקוח (/my): כל בקשה שמשנה מידע - מאותו אתר וגם עם אסימון הסשן (CSRF כפול)."""
+        path = request.path or ''
+        if request.method in SAFE_METHODS or not (path == '/my' or path.startswith('/my/')):
+            return None
+        from services.customer_auth import csrf_ok
+        if not _same_origin() or not csrf_ok():
+            log.warning(f'customer request blocked: csrf/origin {request.method} {path}')
+            if 'application/json' in (request.headers.get('Accept') or '') or request.is_json or \
+                    request.headers.get('X-CSRF-Token') is not None:
+                return jsonify({'error': 'הבקשה נחסמה. רעננו את הדף ונסו שוב'}), 403
+            from flask import flash
+            flash('הבקשה נחסמה מטעמי אבטחה. נסו שוב')
+            return redirect(request.path if request.path.startswith('/my') else '/my/login')
         return None
 
     @app.before_request
@@ -401,7 +420,10 @@ def init_security(app):
                 resp.headers['Content-Security-Policy'] = "default-src 'none'; sandbox"
                 resp.headers['Content-Type'] = 'application/octet-stream'
                 resp.headers['Content-Disposition'] = 'attachment'
-        if path == '/admin' or path.startswith('/admin/') or path.startswith('/institution'):
+        if path == '/admin' or path.startswith('/admin/') or path.startswith('/institution') or path == '/my' or path.startswith('/my/'):
             resp.headers['Cache-Control'] = 'no-store'
             resp.headers.setdefault('Pragma', 'no-cache')
+        if path == '/my' or path.startswith('/my/'):
+            resp.headers['X-Frame-Options'] = 'DENY'
+            resp.headers.setdefault('Permissions-Policy', 'camera=(), geolocation=(), microphone=(self)')
         return resp

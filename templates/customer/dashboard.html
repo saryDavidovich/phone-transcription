@@ -1,0 +1,178 @@
+{% extends "customer/base.html" %}
+{% from "institution/_icons.html" import ic %}
+{% block title %}דשבורד{% endblock %}
+{% block head %}
+<style>
+.quick { display:flex; align-items:center; gap:12px; text-decoration:none; color:var(--text); transition:.15s; }
+.quick:hover { border-color:var(--accent); transform:translateY(-1px); }
+.quick .t { font-weight:700; font-size:14px; }
+.quick .d { font-size:12.5px; color:var(--text2); margin-top:2px; }
+.alerts { display:flex; gap:18px; flex-wrap:wrap; }
+.alerts > .alert-card { flex:1 1 320px; }
+.alert-card .go { margin-inline-start:auto; color:var(--amber); display:flex; }
+.alert-card { display:flex; align-items:center; gap:12px; text-decoration:none; color:var(--text); border-color:rgba(217,119,6,.28); background:var(--amber-soft); }
+.alert-card .ic-box { background:#fff; color:var(--amber); }
+.info-row { display:flex; justify-content:space-between; gap:10px; padding:9px 0; border-bottom:1px solid var(--border); font-size:13.5px; }
+.info-row:last-child { border-bottom:0; }
+.info-row span:first-child { color:var(--text2); }
+.live-dot { width:8px; height:8px; border-radius:50%; background:var(--accent); box-shadow:0 0 0 0 rgba(16,185,129,.6); animation:live 2s infinite; flex:none; }
+@keyframes live { 0% { box-shadow:0 0 0 0 rgba(16,185,129,.55); } 70% { box-shadow:0 0 0 8px rgba(16,185,129,0); } 100% { box-shadow:0 0 0 0 rgba(16,185,129,0); } }
+.live-lbl { margin-inline-start:auto; display:flex; align-items:center; gap:7px; font-size:12px; color:var(--text2); }
+.busy-chip { font-size:12px; font-weight:600; background:var(--blue-soft); color:var(--blue); padding:3px 9px; border-radius:20px; display:inline-flex; align-items:center; gap:6px; }
+.busy-chip .spinner-ring { width:11px; height:11px; border-width:2px; border-top-color:var(--blue); }
+.feed { display:flex; flex-direction:column; max-height:390px; overflow:auto; margin:0 -6px; padding:0 6px; }
+.fe { display:flex; gap:11px; align-items:flex-start; padding:10px 6px; border-bottom:1px solid var(--border); text-decoration:none; color:var(--text); border-radius:10px; transition:background .15s; }
+.fe:last-child { border-bottom:0; }
+a.fe:hover { background:var(--surface2); }
+.fe .fi { width:32px; height:32px; border-radius:10px; display:flex; align-items:center; justify-content:center; flex:none; }
+.fe.ready .fi { background:var(--accent-soft); color:var(--accent2); }
+.fe.new .fi { background:var(--blue-soft); color:var(--blue); }
+.fe.pending .fi { background:var(--amber-soft); color:var(--amber); }
+.fe.error .fi { background:var(--red-soft); color:var(--red); }
+.fe.chat .fi { background:#f3edfe; color:#7c3aed; }
+.fe .ft { flex:1; min-width:0; }
+.fe .ft b { display:block; font-size:13.5px; font-weight:700; }
+.fe .ft span { display:block; font-size:12.5px; color:var(--text2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.fe time { font-size:11.5px; color:var(--text3); white-space:nowrap; margin-top:2px; }
+.fe.enter { animation:feIn .5s ease-out; background:var(--accent-soft); }
+@keyframes feIn { from { opacity:0; transform:translateY(-8px); } to { opacity:1; transform:none; } }
+.feed-empty { text-align:center; color:var(--text2); font-size:13px; padding:26px 10px; }
+.feed-empty .ico { margin:0 auto 8px; color:var(--text3); width:30px; height:30px; }
+.ways { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; }
+.ways > div { background:var(--surface2); border:1px solid var(--border); border-radius:12px; padding:12px 14px; font-size:13px; line-height:1.6; min-width:0; overflow-wrap:anywhere; }
+.ways b { display:flex; align-items:center; gap:6px; color:var(--accent2); margin-bottom:3px; font-size:13.5px; }
+@media (max-width:760px) { .ways { grid-template-columns:1fr; } }
+.info-strip { display:flex; flex-wrap:wrap; gap:8px 28px; font-size:13.5px; }
+.info-strip div span { color:var(--text2); margin-inline-end:6px; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="page">
+<h1>שלום{% if c.name %}, {{ c.name }}{% endif %}</h1>
+
+<div class="grid grid-4 stats mb-18">
+  <div class="card stat-card">
+    <span class="ic" style="background:var(--accent-soft); color:var(--accent2);">{{ ic('wallet', 22) }}</span>
+    <div><div class="stat-value" id="balVal">{{ "%.2f"|format(c.balance or 0) }} ₪</div><div class="stat-label">היתרה שלך</div></div>
+  </div>
+  <div class="card stat-card">
+    <span class="ic" style="background:var(--blue-soft); color:var(--blue);">{{ ic('file-text', 22) }}</span>
+    <div><div class="stat-value">{{ month_count }}</div><div class="stat-label">תמלולים החודש ({{ month_minutes }} דק')</div></div>
+  </div>
+  <div class="card stat-card">
+    <span class="ic" style="background:#f3edfe; color:#7c3aed;">{{ ic('chart', 22) }}</span>
+    <div><div class="stat-value">{{ "%.2f"|format(month_cost) }} ₪</div><div class="stat-label">עלות החודש</div></div>
+  </div>
+  <div class="card stat-card">
+    <span class="ic" style="background:var(--surface3); color:var(--text2);">{{ ic('archive', 22) }}</span>
+    <div><div class="stat-value">{{ total }}</div><div class="stat-label">תמלולים בסך הכל</div></div>
+  </div>
+</div>
+
+{% if pending or (c.balance or 0) < 3 %}
+<div class="alerts mb-18">
+  {% if pending %}
+  <a class="card alert-card" href="/my/billing">
+    <span class="ic-box">{{ ic('hourglass', 18) }}</span>
+    <div><div style="font-weight:700;">{{ pending }} תמלולים ממתינים לטעינת יתרה</div><div class="hint" style="margin:2px 0 0;">יישלחו אוטומטית מיד אחרי הטעינה</div></div>
+    <span class="go">{{ ic('chevron-left', 20) }}</span>
+  </a>
+  {% endif %}
+  {% if (c.balance or 0) < 3 %}
+  <a class="card alert-card" href="/my/billing">
+    <span class="ic-box">{{ ic('alert', 18) }}</span>
+    <div><div style="font-weight:700;">היתרה כמעט נגמרה</div><div class="hint" style="margin:2px 0 0;">לטעינה מהירה באשראי - לחצו כאן</div></div>
+    <span class="go">{{ ic('chevron-left', 20) }}</span>
+  </a>
+  {% endif %}
+</div>
+{% endif %}
+
+<div class="grid grid-2 mb-18" style="align-items:stretch;">
+  <div class="card">
+    <div class="card-head" style="margin-bottom:10px;"><span class="ic">{{ ic('activity') }}</span><h2>פעילות אחרונה</h2>
+      <span class="busy-chip hidden" id="busyChip"><span class="spinner-ring"></span><span id="busyN"></span></span>
+      <span class="live-lbl"><i class="live-dot"></i>מתעדכן חי</span></div>
+    <div class="feed" id="feed"><div class="feed-empty"><span class="spinner-ring"></span></div></div>
+  </div>
+  <div class="card">
+    <div class="card-head" style="margin-bottom:12px;"><span class="ic">{{ ic('dashboard') }}</span><h2>פעולות מהירות</h2></div>
+    <div class="grid" style="gap:10px;">
+      <a class="card quick" style="padding:14px; box-shadow:none;" href="/my/transcribe">
+        <span class="ic-box">{{ ic('mic') }}</span><div><div class="t">תמלול חדש</div><div class="d">קובץ, הקלטה ישירה או קישור מ-Drive / ג'מבו</div></div></a>
+      <a class="card quick" style="padding:14px; box-shadow:none;" href="/my/transcripts">
+        <span class="ic-box">{{ ic('file-text') }}</span><div><div class="t">התמלולים שלי</div><div class="d">האזנה, עריכה, חיפוש והורדה</div></div></a>
+      <a class="card quick" style="padding:14px; box-shadow:none;" href="/my/billing">
+        <span class="ic-box">{{ ic('wallet') }}</span><div><div class="t">טעינת יתרה</div><div class="d">באשראי, והיסטוריית חיובים</div></div></a>
+      <a class="card quick" style="padding:14px; box-shadow:none;" href="/my/settings#phone">
+        <span class="ic-box">{{ ic('phone') }}</span><div><div class="t">הגדרות הטלפון</div><div class="d">סוג תמלול, שפה ואיך מקבלים</div></div></a>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-head" style="margin-bottom:10px;"><span class="ic">{{ ic('info') }}</span><h2>איך שולחים לתמלול</h2></div>
+  <div class="ways">
+    <div><b>{{ ic('phone', 16) }} בטלפון</b><span>מתקשרים ל-<span dir="ltr">03-3131795</span> מהמספר שלך ומקליטים</span></div>
+    <div><b>{{ ic('mail', 16) }} במייל</b><span>שולחים קובץ או קישור ל-<span dir="ltr">{{ inbound_email }}</span>, ובנושא מספר הטלפון שלך</span></div>
+    <div><b>{{ ic('upload', 16) }} כאן באתר</b><span>בלשונית "תמלול חדש" - קובץ, הקלטה מהמיקרופון או קישור</span></div>
+  </div>
+</div>
+</div>
+<script>
+(function () {
+  var ICONS = {
+    ready: '{{ ic("check", 16, 2.2)|replace("\n", "")|replace("'", "\\'") }}',
+    new: '{{ ic("clock", 16)|replace("\n", "")|replace("'", "\\'") }}',
+    pending: '{{ ic("hourglass", 16)|replace("\n", "")|replace("'", "\\'") }}',
+    error: '{{ ic("alert", 16)|replace("\n", "")|replace("'", "\\'") }}',
+    chat: '{{ ic("mail", 16)|replace("\n", "")|replace("'", "\\'") }}'
+  };
+  var feed = document.getElementById('feed'), items = [];
+  function ago(ts) {
+    var s = Math.max(0, Date.now() / 1000 - ts);
+    if (s < 60) return 'עכשיו';
+    if (s < 3600) return 'לפני ' + Math.round(s / 60) + ' דק\'';
+    if (s < 86400) return 'לפני ' + Math.round(s / 3600) + ' שע\'';
+    var d = new Date(ts * 1000); return d.getDate() + '/' + (d.getMonth() + 1);
+  }
+  function row(ev, isNew) {
+    var tag = ev.url ? 'a' : 'div', el = document.createElement(tag);
+    el.className = 'fe ' + ev.type + (isNew ? ' enter' : ''); el.dataset.id = ev.id;
+    if (ev.url) el.href = ev.url;
+    el.innerHTML = '<span class="fi">' + (ICONS[ev.type] || ICONS.new) + '</span><div class="ft"><b>' + escHtml(ev.title) + '</b><span>' +
+      escHtml(ev.sub || '') + (ev.min ? ' · ' + ev.min + ' דק\'' : '') + '</span></div><time data-ts="' + ev.ts + '">' + ago(ev.ts) + '</time>';
+    if (isNew) setTimeout(function () { el.classList.remove('enter'); }, 2500);
+    return el;
+  }
+  function paint(d, first) {
+    var bv = document.getElementById('balVal'); if (bv && typeof d.balance === 'number') bv.textContent = d.balance.toFixed(2) + ' ₪';
+    var chip = document.getElementById('busyChip');
+    chip.classList.toggle('hidden', !d.busy);
+    document.getElementById('busyN').textContent = d.busy + ' בתמלול כעת';
+    var byId = {};
+    items.forEach(function (e) { byId[e.id.split(':')[0]] = e; });
+    var changed = false;
+    d.events.slice().reverse().forEach(function (ev) {
+      var key = ev.id.split(':')[0], old = byId[key];
+      if (old && old.id === ev.id) return;
+      if (old) { items.splice(items.indexOf(old), 1); var oe = feed.querySelector('[data-id="' + old.id + '"]'); if (oe) oe.remove(); }
+      items.unshift(ev); byId[key] = ev; changed = true;
+      var empty = feed.querySelector('.feed-empty'); if (empty) empty.remove();
+      feed.prepend(row(ev, !first));
+    });
+    if (first && !d.events.length) {
+      feed.innerHTML = '<div class="feed-empty">{{ ic("activity", 30)|replace("\n", "")|replace("'", "\\'") }}אין פעילות בימים האחרונים. כשתקליטו או כשתמלול יהיה מוכן - זה יופיע כאן מיד.</div>';
+    }
+    while (items.length > 25) { var x = items.pop(), xe = feed.querySelector('[data-id="' + x.id + '"]'); if (xe) xe.remove(); }
+  }
+  setInterval(function () { feed.querySelectorAll('time[data-ts]').forEach(function (t) { t.textContent = ago(+t.dataset.ts); }); }, 30000);
+  document.addEventListener('DOMContentLoaded', function () {
+    if (!window.InstPulse) return;
+    InstPulse.fast = true;
+    InstPulse.on(paint);
+    InstPulse.refresh();
+  });
+})();
+</script>
+{% endblock %}

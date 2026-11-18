@@ -1,4 +1,4 @@
-{% extends "institution/base.html" %}
+{% extends portal_base %}
 {% from "institution/_icons.html" import ic %}
 {% block title %}כל התמלולים{% endblock %}
 {% block head %}
@@ -109,9 +109,9 @@ a.t:hover { color:var(--accent2); }
       <option value="month">החודש</option><option value="prev">החודש הקודם</option><option value="90">3 חודשים</option><option value="custom">טווח תאריכים...</option>
     </select>
     <span class="custom-range hidden" id="fRange"><input type="date" class="input" id="fFrom" aria-label="מתאריך"> - <input type="date" class="input" id="fTo" aria-label="עד תאריך"></span>
-    <select class="input" id="fScope" aria-label="של מי"><option value="all">הכל</option><option value="students">של תלמידים</option><option value="inst">של המוסד</option></select>
+{% if not is_cust %}    <select class="input" id="fScope" aria-label="של מי"><option value="all">הכל</option><option value="students">של תלמידים</option><option value="inst">של המוסד</option></select>
     {% if groups %}<select class="input" id="fGroup" aria-label="קבוצה"><option value="">כל הקבוצות</option>{% for g in groups %}<option value="{{ g.id }}">{{ g.name }}</option>{% endfor %}</select>{% endif %}
-    <select class="input" id="fStudent" aria-label="תלמיד"><option value="">כל התלמידים</option>{% for s in students %}<option value="{{ s.id }}">{{ s.name or ('#' ~ s.id) }}</option>{% endfor %}</select>
+    <select class="input" id="fStudent" aria-label="תלמיד"><option value="">כל התלמידים</option>{% for s in students %}<option value="{{ s.id }}">{{ s.name or ('#' ~ s.id) }}</option>{% endfor %}</select>{% endif %}
   </div>
 </div>
 
@@ -141,7 +141,7 @@ a.t:hover { color:var(--accent2); }
 <div class="pane" data-pane="export">
   <div class="card page-narrow" style="max-width:720px; margin:0;">
     <div class="card-head"><span class="ic">{{ ic('archive') }}</span><h2>הורדה מרוכזת</h2></div>
-    <div class="card-sub">כל התמלולים המוכנים לפי הסינון שלמעלה (תקופה, קבוצה, תלמיד או חיפוש) - בבת אחת, עם הלוגו והשם של המוסד.</div>
+    <div class="card-sub">{% if is_cust %}כל התמלולים המוכנים לפי הסינון שלמעלה (תקופה או חיפוש) - בבת אחת.{% else %}כל התמלולים המוכנים לפי הסינון שלמעלה (תקופה, קבוצה, תלמיד או חיפוש) - בבת אחת, עם הלוגו והשם של המוסד.{% endif %}</div>
     <div class="fmt-cards">
       <label class="fmt on"><input type="radio" name="fmt" value="zip" checked><span class="ic-box">{{ ic('archive', 18) }}</span><div><b>קובץ ZIP</b><span>קובץ Word נפרד לכל תמלול, ארוזים יחד</span></div></label>
       <label class="fmt"><input type="radio" name="fmt" value="merged"><span class="ic-box">{{ ic('file-text', 18) }}</span><div><b>קובץ Word אחד</b><span>כל התמלולים במסמך אחד, כל תמלול בעמוד חדש</span></div></label>
@@ -193,8 +193,8 @@ a.t:hover { color:var(--accent2); }
   var f = { q: params.get('q') || '', period: params.get('period') || '', from: params.get('from') || '', to: params.get('to') || '',
             scope: params.get('scope') || 'all', group: params.get('group') || '', student: params.get('student') || '' };
   if ((f.from || f.to) && !f.period) f.period = 'custom';
-  $('fQ').value = f.q; $('fPeriod').value = f.period; $('fFrom').value = f.from; $('fTo').value = f.to; $('fScope').value = f.scope;
-  if ($('fGroup')) $('fGroup').value = f.group; $('fStudent').value = f.student;
+  $('fQ').value = f.q; $('fPeriod').value = f.period; $('fFrom').value = f.from; $('fTo').value = f.to; if ($('fScope')) $('fScope').value = f.scope;
+  if ($('fGroup')) $('fGroup').value = f.group; if ($('fStudent')) $('fStudent').value = f.student;
   $('fRange').classList.toggle('hidden', f.period !== 'custom');
   function range() {
     var now = new Date(), d0 = null, d1 = null;
@@ -222,9 +222,9 @@ a.t:hover { color:var(--accent2); }
   var qt; $('fQ').addEventListener('input', function () { clearTimeout(qt); var v = this.value.trim(); qt = setTimeout(function () { f.q = v; changed(); }, 350); });
   $('fPeriod').addEventListener('change', function () { f.period = this.value; $('fRange').classList.toggle('hidden', f.period !== 'custom'); if (f.period !== 'custom') changed(); });
   ['fFrom', 'fTo'].forEach(function (id) { $(id).addEventListener('change', function () { f.from = $('fFrom').value; f.to = $('fTo').value; changed(); }); });
-  $('fScope').addEventListener('change', function () { f.scope = this.value; changed(); });
+  if ($('fScope')) $('fScope').addEventListener('change', function () { f.scope = this.value; changed(); });
   if ($('fGroup')) $('fGroup').addEventListener('change', function () { f.group = this.value; changed(); });
-  $('fStudent').addEventListener('change', function () { f.student = this.value; changed(); });
+  if ($('fStudent')) $('fStudent').addEventListener('change', function () { f.student = this.value; changed(); });
 
   /* ---------- לשוניות ---------- */
   function setTab(t) {
@@ -258,7 +258,7 @@ a.t:hover { color:var(--accent2); }
   async function loadList() {
     var my = ++req;
     $('list').innerHTML = '<div class="skel"></div><div class="skel"></div><div class="skel"></div>';
-    var d = await (await fetch('/institution/transcripts/data?' + query({ limit: 300 }), { credentials: 'same-origin' })).json();
+    var d = await (await fetch('{{ P }}/transcripts/data?' + query({ limit: 300 }), { credentials: 'same-origin' })).json();
     if (my !== req) return;
     lastItems = d.items;
     $('listCount').textContent = d.total ? (d.total > d.items.length ? 'מוצגים ' + d.items.length + ' מתוך ' + d.total : d.total + ' תמלולים') : '';
@@ -304,7 +304,7 @@ a.t:hover { color:var(--accent2); }
     var q = query({ format: fmt }), fd = new FormData();
     q.forEach(function (v, k) { fd.append(k, v); });
     if (onlySel && selCount()) fd.append('ids', Object.keys(sel).join(','));
-    return instDownload('/institution/transcripts/export', { method: 'POST', body: fd });
+    return instDownload('{{ P }}/transcripts/export', { method: 'POST', body: fd });
   }
   window.exportSel = function (fmt) { doExport(fmt, true); };
   document.querySelectorAll('.fmt').forEach(function (l) { l.addEventListener('click', function () { document.querySelectorAll('.fmt').forEach(function (x) { x.classList.toggle('on', x === l); }); }); });
@@ -315,7 +315,7 @@ a.t:hover { color:var(--accent2); }
   async function loadExportSum() {
     var my = ++req;
     $('expSum').innerHTML = IK.spin + ' סופרים...';
-    var d = await (await fetch('/institution/transcripts/data?' + query({ done: 1, limit: 1000 }), { credentials: 'same-origin' })).json();
+    var d = await (await fetch('{{ P }}/transcripts/data?' + query({ done: 1, limit: 1000 }), { credentials: 'same-origin' })).json();
     if (my !== req) return;
     var n = d.total, mins = d.items.reduce(function (a, it) { return a + (it.min || 0); }, 0);
     $('expSum').innerHTML = n ? '<b>' + n + '</b> תמלולים מוכנים להורדה' + (mins ? ' · כ-' + mins + ' דקות' : '') + (n > 300 ? ' <span class="chip">יורדו 300 הראשונים</span>' : '')
@@ -371,7 +371,7 @@ a.t:hover { color:var(--accent2); }
     var end = new Date(start); end.setDate(start.getDate() + 41);
     calData = {}; paintCal();
     var q = query({ limit: 1000 }); q.set('from', ymd(start)); q.set('to', ymd(end));
-    var d = await (await fetch('/institution/transcripts/data?' + q, { credentials: 'same-origin' })).json();
+    var d = await (await fetch('{{ P }}/transcripts/data?' + q, { credentials: 'same-origin' })).json();
     if (my !== req) return;
     d.items.forEach(function (it) { (calData[it.day] = calData[it.day] || []).push(it); });
     paintCal();

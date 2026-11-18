@@ -759,7 +759,7 @@ def upload_for_student(student_id):
     return jsonify({'recordingId': recording.id, 'name': name})
 
 
-def _process_student_upload(flask_app, recording_id, local_path, link=None):
+def _process_student_upload(flask_app, recording_id, local_path, link=None, send=True):
     from services.job_tracker import tracked
     from services import portal_media as PM
     with flask_app.app_context(), tracked('institution_student', label=f'הקלטה {recording_id}'):
@@ -836,7 +836,9 @@ def _process_student_upload(flask_app, recording_id, local_path, link=None):
             db.session.commit()
 
             try:
-                if target_email:
+                if not send:
+                    pass          # לקוח פרטי שבחר לא לקבל במייל (התמלול זמין באזור האישי)
+                elif target_email:
                     _send_email(target_email, transcript, student, rec_url, duration, is_premium=(tier == 'premium'))
                 elif target_fax:
                     _send_fax(target_fax, transcript, student, duration)

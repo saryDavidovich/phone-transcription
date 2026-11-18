@@ -1,4 +1,4 @@
-{% extends "institution/base.html" %}
+{% extends portal_base %}
 {% from "institution/_icons.html" import ic %}
 {% block head %}
 <style>
@@ -89,7 +89,7 @@ mark.hit.cur { background:#f59e0b; color:#fff; }
     <div class="tr-actions">
       <button type="button" class="btn btn-secondary" id="editBtn" onclick="editStart()">{{ ic('edit', 16) }} עריכה</button>
       <button type="button" class="btn btn-secondary" onclick="copyText(this)">{{ ic('copy', 16) }} העתקה</button>
-      <a class="btn" href="/institution/t/{{ kind }}/{{ obj.id }}/download">{{ ic('download', 16) }} הורדת Word</a>
+      <a class="btn" href="{{ P }}/t/{{ kind }}/{{ obj.id }}/download">{{ ic('download', 16) }} הורדת Word</a>
     </div>
   </div>
 
@@ -153,7 +153,7 @@ mark.hit.cur { background:#f59e0b; color:#fff; }
 
 <script>
 (function () {
-  var KIND = '{{ kind }}', ID = {{ obj.id }}, BASE = '/institution/t/' + KIND + '/' + ID;
+  var KIND = '{{ kind }}', ID = {{ obj.id }}, BASE = '{{ P }}/t/' + KIND + '/' + ID;
   var TEXT = {{ obj.transcript|tojson }};
   var DUR_HINT = {{ duration|int }};
   var ICP = { play: '{{ ic("play", 22, 1)|replace("\n", "")|replace("'", "\\'") }}', pause: '{{ ic("pause", 22, 1)|replace("\n", "")|replace("'", "\\'") }}' };
@@ -285,6 +285,11 @@ mark.hit.cur { background:#f59e0b; color:#fff; }
   audio.addEventListener('pause', function () { plPlay.innerHTML = ICP.play; plPlay.setAttribute('aria-label', 'ניגון'); savePos(); });
   audio.addEventListener('error', function () { if (hasAudio) showState('{{ ic("alert", 16)|replace("\n", "")|replace("'", "\\'") }} לא הצלחנו לנגן את השמע כרגע. נסו לרענן בעוד רגע'); });
   plPlay.onclick = function () {
+    if (!local && !audio.getAttribute('src')) {     // השמע נטען דרכנו (לא ישר מימות) - מנגנים כשהוא מוכן
+      ensureLocal(); wantPlay = !wantPlay; plPlay.innerHTML = wantPlay ? ICP.pause : ICP.play;
+      var n = document.getElementById('plLoad'); if (n) { n.textContent = 'טוענים את ההקלטה... ' + Math.round(loadPct * 100) + '%'; n.classList.toggle('hidden', !wantPlay); }
+      return;
+    }
     if (!local && pendingSeek != null) { ensureLocal(); showLoadNote(true); wantPlay = !wantPlay; plPlay.innerHTML = wantPlay ? ICP.pause : ICP.play; return; }
     audio.paused ? audio.play().catch(function () {}) : audio.pause();
   };
@@ -336,7 +341,7 @@ mark.hit.cur { background:#f59e0b; color:#fff; }
     var n = document.getElementById('plLoad');
     if (!n) return;
     n.classList.toggle('hidden', !on || local);
-    n.textContent = 'מכינים את ההקלטה לקפיצה... ' + Math.round(loadPct * 100) + '%';
+    n.textContent = 'טוענים את ההקלטה... ' + Math.round(loadPct * 100) + '%';
   }
   async function loadLocal() {
     var parts = [], total = 1, mime = 'audio/mpeg';
@@ -349,7 +354,7 @@ mark.hit.cur { background:#f59e0b; color:#fff; }
         var bin = atob(d.b64), bytes = new Uint8Array(bin.length);
         for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
         parts.push(bytes);
-        loadPct = (n + 1) / total; paint(); if (pendingSeek != null) showLoadNote(true);
+        loadPct = (n + 1) / total; paint(); if (pendingSeek != null || wantPlay) showLoadNote(true);
       }
     } catch (e) {
       var n2 = document.getElementById('plLoad');
@@ -374,7 +379,7 @@ mark.hit.cur { background:#f59e0b; color:#fff; }
     fetch(BASE + '/audio-state', { credentials: 'same-origin' }).then(function (r) { return r.json(); }).then(function (d) {
       if (d.state === 'ready') {
         hasAudio = true;
-        audio.src = d.src;
+        if (d.src) audio.src = d.src;
         document.getElementById('plState').classList.add('hidden');
         document.getElementById('plUi').classList.remove('hidden');
         document.getElementById('plDur').textContent = fmt(DUR_HINT);

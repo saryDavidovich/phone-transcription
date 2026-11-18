@@ -80,6 +80,12 @@ def load_user(user_id):
     if isinstance(user_id, str) and user_id.startswith('inst-'):
         from models import Institution
         return Institution.query.get(int(user_id.split('-', 1)[1]))
+    if isinstance(user_id, str) and user_id.startswith('cust-'):
+        from models import Customer
+        try:
+            return Customer.query.get(int(user_id.split('-', 1)[1]))
+        except ValueError:
+            return None
     return AdminUser.query.get(int(user_id))
 
 def get_setting(key, default=''):
@@ -983,7 +989,7 @@ def customer_detail(id):
         threads=threads, timedelta=timedelta, lite=lite, promo_line=_promo_line(customer),
         excel_templates=_excel_templates_for(customer),
         cust_defaults=_customer_defaults(customer),
-        billing=_billing_info(customer),
+        billing=_billing_info(customer), portal=_portal_info(customer),
         voice_messages=_voice_messages_for(customer.id),
         recordings_total=recordings_total, transactions_total=transactions_total,
         msg_attachments={} if lite else _attachments_for('customer_message_id', [m.id for t in threads for m in t.messages]),
@@ -1961,6 +1967,62 @@ def promo_settings_save():
     return redirect(url_for('admin.settings') + '#promo')
 
 
+def _portal_info(customer):
+    """מצב האזור האישי של הלקוח (/my) לכרטיס הלקוח."""
+    from services import customer_auth as CA
+    acc = customer.account
+    return {'mode': CA.portal_mode(), 'private': CA.is_private_customer(customer), 'enabled': bool(acc and acc.enabled),
+            'allowed': CA.portal_allowed(customer), 'has_pw': bool(acc and acc.password_hash),
+            'google': bool(acc and acc.google_id), 'last': acc.last_login_at if acc else None,
+            'locked': CA.locked(acc), 'has_email': bool((customer.email or '').strip())}
+
+
+@admin_bp.route('/settings/customer-portal', methods=['POST'])
+@login_required
+def customer_portal_mode_save():
+    mode = request.form.get('mode')
+    set_setting('customer_portal_mode', mode if mode in ('off', 'marked', 'all') else 'off')
+    flash('✔ הגדרת האזור האישי ללקוחות נשמרה')
+    return redirect(url_for('admin.settings') + '#customer-portal')
+
+
+@admin_bp.route('/customers/<int:id>/portal', methods=['POST'])
+@login_required
+def customer_portal_action(id):
+    """סימון לקוח לאזור האישי / ניתוק מכל המכשירים / איפוס סיסמה / ביטול נעילה."""
+    from services import customer_auth as CA
+    from models import CustomerDevice
+    customer = Customer.query.get_or_404(id)
+    action = request.form.get('action')
+    acc = CA.account_for(customer)
+    if action == 'enable':
+        acc.enabled = True
+        msg = '✔ הלקוח סומן לאזור האישי'
+    elif action == 'disable':
+        acc.enabled = False
+        acc.session_ver = (acc.session_ver or 0) + 1
+        msg = '✔ הסימון הוסר והלקוח נותק'
+    elif action == 'logout_all':
+        acc.session_ver = (acc.session_ver or 0) + 1
+        CustomerDevice.query.filter_by(customer_id=customer.id, revoked=False).update({CustomerDevice.revoked: True})
+        msg = '✔ הלקוח נותק מכל המכשירים'
+    elif action == 'reset_password':
+        acc.password_hash = None
+        acc.google_id = None
+        acc.google_email = None
+        acc.session_ver = (acc.session_ver or 0) + 1
+        CustomerDevice.query.filter_by(customer_id=customer.id, revoked=False).update({CustomerDevice.revoked: True})
+        msg = '✔ הסיסמה אופסה - בכניסה הבאה הלקוח ייכנס בקוד למייל ויבחר סיסמה חדשה'
+    elif action == 'unlock':
+        CA.clear_fails(acc)
+        msg = '✔ הנעילה בוטלה'
+    else:
+        msg = 'פעולה לא מוכרת'
+    db.session.commit()
+    flash(msg)
+    return redirect(url_for('admin.customer_detail', id=id) + '#portal')
+
+
 @admin_bp.route('/customers/<int:id>/promo', methods=['POST'])
 @login_required
 def customer_promo_toggle(id):
@@ -2092,8 +2154,13 @@ def settings():
         'today_recordings': Recording.query.filter(Recording.promo_free_seconds > 0, Recording.created_at >= _start).count(),
         'expired': bool(promo['until'] and _P._il_now().strftime('%Y-%m-%d') > promo['until']),
     }
+    from models import CustomerAccount
+    from services import customer_auth as _CA
+    portal = {'mode': _CA.portal_mode(),
+              'marked': CustomerAccount.query.filter(CustomerAccount.enabled.is_(True)).count(),
+              'active': CustomerAccount.query.filter(CustomerAccount.password_hash.isnot(None)).count()}
     return render_template('admin/settings.html', settings=current_settings, slow_pages=slow_pages,
-                           promo=promo, promo_stats=promo_stats)
+                           promo=promo, promo_stats=promo_stats, portal=portal)
 
 
 @admin_bp.route('/maintenance')

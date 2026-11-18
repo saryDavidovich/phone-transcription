@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+{% set _c_logged = current_user.is_authenticated and current_user.__class__.__name__ == 'Customer' %}
+{% set _c_name = (current_user.name or current_user.phone or 'האזור האישי') if _c_logged else '' %}
+<title>{% if _c_logged %}{{ _c_name }} - האזור האישי{% else %}כניסה לאזור האישי{% endif %} - תמלול פון</title>
+<link rel="manifest" href="/my/manifest.webmanifest?v=1" crossorigin="use-credentials">
+<meta name="theme-color" content="#4f46e5">
+<meta name="csrf-token" content="{{ csrf_token() }}">
+<meta name="referrer" content="same-origin">
+<link rel="icon" type="image/png" sizes="192x192" href="https://raw.githubusercontent.com/saryDavidovich/phone-transcription/main/static/pwa/inst-icon-192.png">
+<link rel="apple-touch-icon" href="https://raw.githubusercontent.com/saryDavidovich/phone-transcription/main/static/pwa/inst-icon-192.png">
+<script>
+/* הגנת CSRF: כל בקשה משנה-מידע לאתר שלנו נושאת את אסימון הסשן (כותרת לבקשות fetch, שדה נסתר לטפסים) */
+(function () {
+  function tok() { return document.querySelector('meta[name=csrf-token]').getAttribute('content'); }
+  var of = window.fetch;
+  window.fetch = function (input, init) {
+    init = init || {};
+    var url = typeof input === 'string' ? input : (input && input.url) || '';
+    var method = (init.method || (input && input.method) || 'GET').toUpperCase();
+    var same = !/^https?:/i.test(url) || url.indexOf(location.origin) === 0;
+    if (same) {
+      var h = new Headers(init.headers || {});
+      h.set('X-Requested-With', 'fetch');
+      if (method !== 'GET' && method !== 'HEAD') h.set('X-CSRF-Token', tok());
+      init.headers = h;
+    }
+    return of.call(this, input, init);
+  };
+  document.addEventListener('submit', function (e) {
+    var f = e.target;
+    if (!f || !f.method || f.method.toLowerCase() !== 'post' || f.querySelector('input[name=csrf_token]')) return;
+    var i = document.createElement('input'); i.type = 'hidden'; i.name = 'csrf_token'; i.value = tok(); f.appendChild(i);
+  }, true);
+})();
+/* התקנת אזור המוסד כתוכנה (PWA) - static/pwa/inst-sw.js */
+(function () {
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', function () { navigator.serviceWorker.register('/my/sw.js', { scope: '/my/' }).catch(function () {}); });
+  }
+  window.addEventListener('beforeinstallprompt', function (e) {
+    e.preventDefault(); window.__pwaPrompt = e;
+    var b = document.getElementById('pwaInstall'); if (b) b.style.display = '';
+  });
+  window.pwaInstall = function () {
+    var p = window.__pwaPrompt; if (!p) return;
+    p.prompt(); p.userChoice.finally(function () { window.__pwaPrompt = null; var b = document.getElementById('pwaInstall'); if (b) b.style.display = 'none'; });
+  };
+})();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #f3f5fa; --surface: #ffffff; --surface2: #f4f6fb; --surface3: #eef1f8; --border: #e3e7f1;
+  --accent: #4f46e5; --accent2: #4338ca; --accent-soft: #eef0fe;
+  --red: #dc2626; --red-soft: #fdecec; --amber: #d97706; --amber-soft: #fdf3e2; --blue: #3b6ef6; --blue-soft: #eaf0fe;
+  --text: #1c2333; --text2: #64708a; --text3: #99a2b8;
+  --shadow: 0 1px 2px rgba(20,25,40,.04), 0 8px 24px -12px rgba(20,25,40,.10);
+  --shadow-lg: 0 12px 32px -12px rgba(20,25,40,.18);
+  --radius: 14px;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:'Heebo',sans-serif; background:var(--bg); color:var(--text); min-height:100vh; display:flex; }
+a { color:inherit; }
+
+.sidebar {
+  width:240px; min-height:100vh; background:var(--surface); border-left:1px solid var(--border);
+  padding:22px 0; position:fixed; right:0; top:0; bottom:0; z-index:100; display:flex; flex-direction:column;
+}
+.sidebar-logo { padding:0 18px 18px; margin-bottom:6px; border-bottom:1px solid var(--border); display:flex; align-items:center; gap:10px; }
+.inst-name { font-weight:800; font-size:19px; line-height:1.25; color:var(--accent2); overflow-wrap:anywhere; }
+.logo-ic { width:30px; height:30px; border-radius:9px; background:var(--accent); color:#fff; display:inline-flex; align-items:center; justify-content:center; box-shadow:0 4px 12px -4px rgba(79,70,229,.55); flex:none; }
+.ico { display:block; flex-shrink:0; }
+.sidebar-nav a .ico { opacity:.8; }
+.sidebar-nav a.active .ico { opacity:1; }
+.nav-badge { margin-inline-start:auto; min-width:20px; height:20px; padding:0 6px; border-radius:10px; background:var(--red); color:#fff; font-size:11.5px; font-weight:700; display:inline-flex; align-items:center; justify-content:center; }
+.sidebar-nav a.active .nav-badge { background:#fff; color:var(--accent2); }
+.sidebar-footer a { display:inline-flex; align-items:center; gap:8px; }
+.sidebar-nav { flex:1; padding:14px 14px; display:flex; flex-direction:column; gap:3px; }
+.sidebar-nav a {
+  color:var(--text2); text-decoration:none; padding:10px 14px; border-radius:10px; font-size:14px; font-weight:500;
+  display:flex; align-items:center; gap:10px; transition:.15s;
+}
+.sidebar-nav a:hover { background:var(--surface2); color:var(--text); }
+.sidebar-nav a.active { background:var(--accent); color:#fff; box-shadow:0 4px 12px -4px rgba(79,70,229,.5); }
+.sidebar-footer { padding:14px; border-top:1px solid var(--border); }
+.sidebar-footer a { color:var(--text2); font-size:13px; text-decoration:none; }
+.sidebar-footer a:hover { color:var(--red); }
+
+.side-tools { display:flex; gap:4px; padding:8px 12px; border-top:1px solid var(--border); }
+.side-tool { flex:1; position:relative; background:none; border:0; border-radius:10px; padding:8px 6px; cursor:pointer; color:var(--text2); font-family:inherit; font-size:13px; display:flex; align-items:center; justify-content:center; gap:8px; transition:.15s; }
+.side-tool:hover { background:var(--surface2); color:var(--text); }
+.side-tool.on { color:var(--accent2); }
+#navProgress { position:fixed; top:0; right:0; height:3px; width:0; background:linear-gradient(90deg,#34d399,var(--accent)); z-index:2000; opacity:0; transition:width .4s ease, opacity .3s; pointer-events:none; }
+#navProgress.go { opacity:1; width:70%; transition:width 6s cubic-bezier(.1,.7,.2,1), opacity .2s; }
+main { flex:1; margin-right:240px; padding:32px 40px; max-width:1180px; min-width:0; }
+.sidebar-install { margin:0 14px 10px; }
+.topbar { display:none; }
+.nav-backdrop { display:none; }
+.page { max-width:1040px; margin:0 auto; }
+.page-narrow { max-width:640px; margin:0 auto; }
+.card-flex { display:flex; flex-direction:column; }
+.card-flex > form, .card-flex > .card-body { flex:1; display:flex; flex-direction:column; }
+.card-flex .card-actions { margin-top:auto; padding-top:6px; }
+.card-head { display:flex; align-items:center; gap:10px; margin-bottom:6px; }
+.card-head .ic, .ic-box { width:34px; height:34px; border-radius:10px; background:var(--accent-soft); color:var(--accent2); display:flex; align-items:center; justify-content:center; flex:none; }
+.btn .ico { width:16px; height:16px; }
+.icon-btn { width:32px; height:32px; padding:0; border-radius:9px; background:var(--surface2); border:1px solid var(--border); color:var(--text2); display:inline-flex; align-items:center; justify-content:center; cursor:pointer; transition:.15s; flex:none; }
+.icon-btn:hover { background:var(--surface3); color:var(--text); }
+.icon-btn.danger:hover { background:var(--red-soft); color:var(--red); border-color:rgba(220,38,38,.2); }
+.icon-btn .ico { width:16px; height:16px; }
+.dz-icon { color:var(--accent2); display:flex; justify-content:center; }
+.dz-icon .ico { width:34px; height:34px; }
+.back-link { color:var(--text2); font-size:13px; text-decoration:none; display:inline-flex; align-items:center; gap:6px; }
+.back-link:hover { color:var(--text); }
+.card-head h3, .card-head h2 { margin:0; }
+.card-sub { font-size:12.5px; color:var(--text2); margin-bottom:16px; line-height:1.6; }
+.hint { font-size:12px; color:var(--text3); margin-top:6px; line-height:1.6; }
+.row-2 { display:flex; gap:10px; }
+.row-2 > * { flex:1; min-width:0; }
+.table-wrap { overflow-x:auto; -webkit-overflow-scrolling:touch; }
+.stat-card { display:flex; align-items:center; gap:14px; }
+.stat-card .ic { width:44px; height:44px; border-radius:12px; display:flex; align-items:center; justify-content:center; font-size:20px; flex:none; }
+.mb-18 { margin-bottom:18px; }
+body.no-sidebar { display:block; background:linear-gradient(160deg,#f3f5fa 0%,#ecebfb 55%,#f3f5fa 100%); min-height:100vh; }
+body.no-sidebar main { margin-right:0; max-width:100%; padding:20px; min-height:100vh; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px; }
+body.no-sidebar main .flash { max-width:380px; width:100%; }
+
+.card { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:22px; box-shadow:var(--shadow); }
+.grid { display:grid; gap:18px; }
+.grid > * { min-width:0; }
+.grid-4 { grid-template-columns:repeat(4,1fr); }
+.grid-3 { grid-template-columns:repeat(3,1fr); }
+.grid-2 { grid-template-columns:repeat(2,1fr); }
+@media (max-width:900px) { .grid-4, .grid-3 { grid-template-columns:1fr 1fr; } }
+@media (max-width:760px) { .grid-2 { grid-template-columns:1fr; } }
+
+.stat-value { font-size:26px; font-weight:800; color:var(--text); }
+.stat-label { font-size:13px; color:var(--text2); margin-top:6px; }
+
+.btn { text-decoration:none; background:var(--accent); color:#fff; border:none; border-radius:10px; padding:10px 20px; font-family:inherit; font-size:14px; font-weight:600; cursor:pointer; transition:.15s; display:inline-flex; align-items:center; gap:8px; justify-content:center; }
+.btn:hover { background:var(--accent2); transform:translateY(-1px); }
+.btn:disabled { opacity:.5; cursor:not-allowed; transform:none; }
+.btn-secondary { background:var(--surface2); color:var(--text); border:1px solid var(--border); }
+.btn-secondary:hover { background:var(--surface3); }
+.btn-danger { background:var(--red-soft); color:var(--red); border:1px solid rgba(220,38,38,.15); }
+.btn-danger:hover { background:#fbdada; }
+.btn-sm { padding:6px 12px; font-size:12.5px; border-radius:8px; }
+.btn-block { width:100%; }
+
+.field { margin-bottom:14px; }
+.field label { display:block; font-size:13px; color:var(--text2); font-weight:500; margin-bottom:6px; }
+.field input, .field select, .field textarea, input.input, select.input, textarea.input {
+  width:100%; padding:10px 12px; border-radius:10px; border:1px solid var(--border); background:var(--surface2); color:var(--text);
+  font-family:inherit; font-size:14px; transition:.15s;
+}
+.field input:focus, .field select:focus, .field textarea:focus, input.input:focus, textarea.input:focus, select.input:focus {
+  outline:none; border-color:var(--accent); background:var(--surface); box-shadow:0 0 0 3px var(--accent-soft);
+}
+.form-grid { display:grid; grid-template-columns:1fr 1fr; gap:0 14px; }
+@media (max-width:640px) { .form-grid { grid-template-columns:1fr; } }
+
+.flash { background:var(--amber-soft); border:1px solid rgba(217,119,6,.2); color:var(--amber); padding:12px 16px; border-radius:10px; margin-bottom:18px; font-size:14px; }
+h1 { font-size:21px; font-weight:800; margin-bottom:22px; }
+h2 { font-size:16px; font-weight:700; }
+h3 { font-size:15px; font-weight:700; }
+table { border-collapse:collapse; width:100%; }
+table th { text-align:right; color:var(--text2); font-weight:600; font-size:12.5px; }
+table td, table th { padding:10px 8px; }
+table tr { border-bottom:1px solid var(--border); }
+
+.badge { display:inline-flex; align-items:center; gap:5px; padding:4px 10px; border-radius:20px; font-size:12px; font-weight:600; }
+.badge-green { background:var(--accent-soft); color:var(--accent2); }
+.badge-red { background:var(--red-soft); color:var(--red); }
+.badge-amber { background:var(--amber-soft); color:var(--amber); }
+.badge-gray { background:var(--surface3); color:var(--text2); }
+
+/* Dropzone - כפתור בחירת קובץ מעוצב עם תמיכה בגרירה */
+.dropzone {
+  border:2px dashed var(--border); border-radius:var(--radius); background:var(--surface2);
+  padding:28px 20px; text-align:center; cursor:pointer; transition:.15s; position:relative;
+}
+.dropzone:hover, .dropzone.dragover { border-color:var(--accent); background:var(--accent-soft); }
+.dropzone .dz-icon { font-size:30px; margin-bottom:8px; }
+.dropzone .dz-title { font-size:14px; font-weight:600; color:var(--text); }
+.dropzone .dz-sub { font-size:12.5px; color:var(--text2); margin-top:4px; }
+.dropzone .dz-filename { display:flex; align-items:center; justify-content:center; gap:6px; font-size:13px; color:var(--accent2); font-weight:600; margin-top:8px; }
+.dropzone input[type=file] { position:absolute; inset:0; opacity:0; cursor:pointer; width:100%; height:100%; }
+
+/* ספינר עיגול טעינה */
+.spinner-ring { display:inline-block; width:16px; height:16px; border:2.5px solid var(--surface3); border-top-color:var(--accent); border-radius:50%; animation:spin .7s linear infinite; vertical-align:middle; }
+.spinner-ring.lg { width:34px; height:34px; border-width:3.5px; }
+@keyframes spin { to { transform:rotate(360deg); } }
+
+/* מודל */
+.modal-backdrop { position:fixed; inset:0; background:rgba(20,25,40,.45); z-index:900; display:flex; align-items:center; justify-content:center; padding:20px; }
+.modal-box { background:var(--surface); border-radius:16px; padding:26px; max-width:440px; width:100%; box-shadow:var(--shadow-lg); position:relative; max-height:90vh; overflow:auto; }
+.modal-box h3 { margin-bottom:16px; }
+.modal-close { position:absolute; top:14px; left:14px; background:none; border:none; color:var(--text2); cursor:pointer; width:30px; height:30px; border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:0; }
+.modal-close:hover { background:var(--surface2); color:var(--text); }
+.modal-close::before { content:''; width:16px; height:16px; background:currentColor;
+  -webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round'%3E%3Cpath d='M18 6L6 18M6 6l12 12'/%3E%3C/svg%3E") center/contain no-repeat;
+          mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round'%3E%3Cpath d='M18 6L6 18M6 6l12 12'/%3E%3C/svg%3E") center/contain no-repeat; }
+
+#flashToasts { position:fixed; bottom:22px; left:50%; transform:translateX(-50%); z-index:1000; display:flex; flex-direction:column; gap:8px;
+  align-items:center; pointer-events:none; width:max-content; max-width:calc(100vw - 32px); }
+.ftoast { pointer-events:auto; display:flex; gap:10px; align-items:center; padding:11px 14px 11px 16px; border-radius:12px; font-size:14px; font-weight:600;
+  color:#fff; background:#4338ca; box-shadow:0 10px 30px rgba(20,25,40,.28); animation:toastIn .25s ease-out; transition:opacity .4s, transform .4s; line-height:1.5; }
+.ftoast.bad { background:#dc2626; }
+.ftoast.out { opacity:0; transform:translateY(12px); }
+.ftoast .x { background:none; border:0; color:inherit; opacity:.75; cursor:pointer; padding:2px; display:flex; }
+.ftoast .x:hover { opacity:1; }
+@keyframes toastIn { from { opacity:0; transform:translateY(14px); } to { opacity:1; transform:none; } }
+.modal-actions { display:flex; gap:10px; margin-top:6px; }
+.switch-row { display:flex; gap:10px; align-items:flex-start; cursor:pointer; font-size:13.5px; color:var(--text); margin-bottom:14px; line-height:1.5; }
+.switch-row input[type=checkbox] { width:18px; height:18px; margin-top:1px; accent-color:var(--accent); flex:none; cursor:pointer; }
+.modal-actions > .btn { flex:1; }
+.hidden { display:none !important; }
+
+/* ---- מסכים צרים (טלפון / חלון קטן): סרגל צד נפתח מכפתור, הכול בעמודה אחת ---- */
+@media (max-width:900px) {
+  body { display:block; }
+  .topbar { display:flex; align-items:center; justify-content:space-between; position:sticky; top:0; z-index:90;
+            background:var(--surface); border-bottom:1px solid var(--border); padding:10px 14px; }
+  .topbar .t-title { font-weight:800; font-size:16px; display:flex; align-items:center; gap:8px; }
+  .topbar .logo-ic { width:26px; height:26px; }
+  .topbar button { background:var(--surface2); border:1px solid var(--border); border-radius:10px; width:40px; height:40px; cursor:pointer; color:var(--text); display:flex; align-items:center; justify-content:center; }
+  /* כמו בממשק הניהול: סרגל סמלים צר שתמיד קיים; לחיצה על התפריט / על הסרגל פותחת אותו עם השמות */
+  .sidebar { width:64px; transition:width .2s, box-shadow .2s; overflow:hidden auto; padding-top:12px; }
+  body.nav-open .sidebar, .sidebar:hover { width:250px; box-shadow:var(--shadow-lg); }
+  body.nav-open .nav-backdrop { display:block; position:fixed; inset:0; background:rgba(20,25,40,.35); z-index:95; }
+  .topbar { margin-right:64px; }
+  main { margin-right:64px; padding:16px 12px 28px; max-width:100%; }
+  .sidebar-logo { padding:0 0 12px; justify-content:center; cursor:pointer; }
+  .sidebar-nav { padding:10px 8px; }
+  .sidebar-nav a { position:relative; }
+  body:not(.nav-open) .sidebar:not(:hover) .sidebar-nav a { justify-content:center; padding:11px 0; }
+  body:not(.nav-open) .sidebar:not(:hover) .inst-name,
+  body:not(.nav-open) .sidebar:not(:hover) .sidebar-nav a span,
+  body:not(.nav-open) .sidebar:not(:hover) .side-tool span,
+  body:not(.nav-open) .sidebar:not(:hover) .sidebar-footer span,
+  body:not(.nav-open) .sidebar:not(:hover) #pwaInstall { display:none !important; }
+  body:not(.nav-open) .sidebar:not(:hover) .sidebar-nav .nav-badge { position:absolute; top:3px; left:6px; min-width:17px; height:17px; font-size:10px; padding:0 4px; box-shadow:0 0 0 2px var(--surface); }
+  body:not(.nav-open) .sidebar:not(:hover) .side-tools { padding:8px 4px; }
+  body:not(.nav-open) .sidebar:not(:hover) .sidebar-footer { padding:12px 0; text-align:center; }
+  body.nav-open .sidebar-logo, .sidebar:hover .sidebar-logo { justify-content:flex-start; padding:0 16px 12px; }
+  .topbar { justify-content:flex-start; gap:10px; }
+  h1 { font-size:19px; margin-bottom:16px; }
+  .card { padding:18px; }
+  table { font-size:13px; }
+}
+@media (max-width:560px) {
+  .grid-4, .grid-3 { grid-template-columns:1fr; }
+  .grid-4.stats { grid-template-columns:1fr 1fr; gap:10px; }
+  .grid-4.stats .stat-card { padding:14px; gap:10px; align-items:flex-start; flex-direction:column; }
+  .grid-4.stats .stat-card .ic { width:34px; height:34px; border-radius:10px; }
+  .grid-4.stats .stat-value { font-size:19px; }
+  .grid-4.stats .stat-label { font-size:12px; margin-top:3px; }
+  .row-2 { flex-direction:column; gap:8px; }
+  .row-2 > .field { margin-bottom:6px; }
+  .stat-value { font-size:22px; }
+  .card table { display:block; overflow-x:auto; white-space:nowrap; }
+}
+</style>
+{% block head %}{% endblock %}
+{% from "institution/_icons.html" import ic %}
+<script>
+/* שרטוטים לשימוש בסקריפטים של העמודים (במקום אימוג'י) */
+function escHtml(t) { return String(t == null ? '' : t).replace(/[&<>"]/g, function (c) { return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+window.IC = {
+  file: '{{ ic("file-text", 15)|replace("\n", "")|replace("'", "\\'") }}',
+  check: '{{ ic("check", 16, 2.4)|replace("\n", "")|replace("'", "\\'") }}',
+  alert: '{{ ic("alert", 16)|replace("\n", "")|replace("'", "\\'") }}',
+  download: '{{ ic("download", 16)|replace("\n", "")|replace("'", "\\'") }}'
+};
+</script>
+</head>
+{# הסרגל הצדדי רק ללקוח מחובר בפועל. אם באותו דפדפן מחובר מנהל המערכת (אותו מנגנון
+   התחברות), דף הכניסה של המוסד צריך להיראות נקי - בלי הסרגל של אזור המוסד. כך גם כשמוסד
+   מחובר וגולש שוב לדף הכניסה (institution.login). #}
+{% set inst_logged_in = _c_logged and request.endpoint not in ('customer.login', 'customer.set_password') %}
+<body class="{{ 'no-sidebar' if not inst_logged_in }}">
+{% if inst_logged_in %}
+<div class="topbar">
+  <button type="button" aria-label="תפריט" onclick="document.body.classList.toggle('nav-open')">{{ ic('menu', 20) }}</button>
+  <div class="t-title"><span class="inst-name" style="font-size:17px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:62vw;">{{ _c_name }}</span></div>
+</div>
+<div class="nav-backdrop" onclick="document.body.classList.remove('nav-open')"></div>
+<aside class="sidebar">
+  <div class="sidebar-logo" onclick="if (window.innerWidth <= 900) document.body.classList.toggle('nav-open')"><span class="logo-ic">{{ ic('logo', 16, 2) }}</span> <span class="inst-name">{{ _c_name }}</span></div>
+  {% set ep = request.endpoint or '' %}
+  <nav class="sidebar-nav">
+    <a href="/my/" class="{{ 'active' if ep == 'customer.dashboard' }}">{{ ic('dashboard') }}<span>ראשי</span></a>
+    <a href="/my/transcribe" class="{{ 'active' if ep == 'customer.transcribe' }}">{{ ic('mic') }}<span>תמלול חדש</span></a>
+    <a href="/my/transcripts" class="{{ 'active' if ep in ('customer.transcripts', 'customer.transcript_page') }}">{{ ic('file-text') }}<span>התמלולים שלי</span></a>
+    <a href="/my/reports" class="{{ 'active' if ep == 'customer.reports' }}">{{ ic('chart') }}<span>דוחות וגרפים</span></a>
+    <a href="/my/billing" class="{{ 'active' if ep == 'customer.billing' }}">{{ ic('wallet') }}<span>יתרה וחיובים</span></a>
+    <a href="/my/settings" class="{{ 'active' if ep == 'customer.settings' }}">{{ ic('settings') }}<span>הגדרות</span></a>
+    <a href="/my/contact" class="{{ 'active' if ep == 'customer.contact' }}">{{ ic('mail') }}<span>צור קשר</span>{% if cust_chat_unread %}<b class="nav-badge" id="chatBadge">{{ cust_chat_unread }}</b>{% else %}<b class="nav-badge hidden" id="chatBadge"></b>{% endif %}</a>
+  </nav>
+  <button type="button" id="pwaInstall" class="btn btn-secondary btn-sm sidebar-install" style="display:none" onclick="pwaInstall()">{{ ic('install', 16) }} התקנה כתוכנה במחשב</button>
+  <div class="side-tools">
+    <button type="button" class="side-tool" id="notifyBtn" onclick="instNotifyToggle()" title="התראות בשולחן העבודה">{{ ic('bell-off', 17) }}<span id="notifyLbl">התראות בשולחן העבודה</span></button>
+  </div>
+  <div class="sidebar-footer">
+    <a href="/my/logout">{{ ic('logout', 16) }}<span>התנתקות</span></a>
+  </div>
+</aside>
+{% endif %}
+<main>
+  {# הודעות אחרי פעולה: בועה קטנה למטה שנעלמת לבד אחרי כמה שניות (כמו בממשק הניהול) #}
+  {% with messages = get_flashed_messages() %}{% if messages %}
+  <div id="flashToasts">
+  {% for msg in messages %}
+    {% set m = msg|string %}
+    {% set bad = m.startswith('לא ') or m.startswith('אין ') or m.startswith('אי אפשר') or m.startswith('יש להזין') or m.startswith('יותר מדי')
+                 or 'שגוי' in m or 'נכשל' in m or 'שגיאה' in m or 'לא תקין' in m or 'לא נמצא' in m or 'כבר רשום' in m
+                 or 'חייבת' in m or 'פשוטה מדי' in m or 'אינן תואמות' in m or 'ננעל' in m or 'כבר יש' in m or 'זהה לנוכחית' in m %}
+    <div class="ftoast {{ 'bad' if bad }}" role="status">
+      {{ ic('alert' if bad else 'check', 17, 2.2) }}<span>{{ msg }}</span>
+      <button type="button" class="x" aria-label="סגירה" onclick="this.parentNode.remove()">{{ ic('close', 14, 2.4) }}</button>
+    </div>
+  {% endfor %}
+  </div>
+  <script>
+  document.querySelectorAll('#flashToasts .ftoast').forEach(function (t, i) {
+    var ms = (t.classList.contains('bad') ? 7000 : 3800) + i * 600;
+    setTimeout(function () { t.classList.add('out'); setTimeout(function () { t.remove(); }, 450); }, ms);
+  });
+  </script>
+  {% endif %}{% endwith %}
+  {% block content %}{% endblock %}
+</main>
+
+<div id="dlToast" class="hidden" style="position:fixed;bottom:22px;left:50%;transform:translateX(-50%);background:#1c2333;color:#fff;padding:10px 18px;border-radius:12px;font-size:13.5px;z-index:999;box-shadow:var(--shadow-lg);display:flex;align-items:center;gap:10px;"></div>
+<script>
+/* הורדות (Word / אקסל / שמע / דוחות) - בלי לעבור לדף אחר: הקובץ נמשך ברקע ונשמר מהדף הנוכחי.
+   השרת מחזיר "דף הורדה" (בגלל נטפרי - ראו routes/download_utils.py); כאן קוראים ממנו את הקובץ
+   ושומרים אותו ישירות. אם משהו לא מצליח - חוזרים להתנהגות הרגילה (מעבר לדף ההורדה). */
+(function () {
+  var DL = /\/(download|excel-template|export-excel|cost-report)(\/|\?|$)/;
+  var toast = document.getElementById('dlToast'), tmr;
+  function say(html, ms) {
+    toast.innerHTML = html; toast.classList.remove('hidden');
+    clearTimeout(tmr); if (ms) tmr = setTimeout(function () { toast.classList.add('hidden'); }, ms);
+  }
+  function save(blob, name) {
+    var url = URL.createObjectURL(blob), a = document.createElement('a');
+    a.href = url; a.download = name || 'file'; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
+  }
+  function b64blob(b64, type) {
+    var bin = atob(b64), bytes = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return new Blob([bytes], { type: type || 'application/octet-stream' });
+  }
+  function fname(r) {
+    var cd = r.headers.get('Content-Disposition') || '', m = cd.match(/filename\*=UTF-8''([^;]+)/i);
+    if (m) return decodeURIComponent(m[1]);
+    m = cd.match(/filename="?([^";]+)"?/i); return m ? m[1] : 'file';
+  }
+  async function fromPage(html) {
+    var doc = new DOMParser().parseFromString(html, 'text/html');
+    var a = doc.getElementById('dl');
+    if (a && /^data:/.test(a.getAttribute('href') || '')) {          // הקובץ מוטמע בדף
+      var href = a.getAttribute('href'), comma = href.indexOf(',');
+      var type = href.slice(5, href.indexOf(';'));
+      return [b64blob(href.slice(comma + 1), type), a.getAttribute('download')];
+    }
+    var m = html.match(/fetch\('([^']+)'\)/);                       // הקובץ נמשך בבקשה נוספת
+    if (m && html.indexOf('b64_chunk') < 0) {
+      var r = await fetch(m[1].replace(/&amp;/g, '&'), { credentials: 'same-origin' });
+      if (!r.ok) throw new Error(r.status);
+      var d = await r.json();
+      return [b64blob(d.b64, d.mimetype), d.filename];
+    }
+    var cm = html.match(/var\s+base\s*=\s*'([^']+)'/) || html.match(/fetch\(\s*'([^']+)'\s*\+/);
+    if (cm) {                                                         // בחתיכות
+      var base = cm[1].replace(/&amp;/g, '&').replace(/\/$/, ''), parts = [], i = 0, meta;
+      while (true) {
+        var rr = await fetch(base + '/' + i, { credentials: 'same-origin' });
+        if (!rr.ok) throw new Error(rr.status);
+        meta = await rr.json(); parts.push(meta.b64_chunk);
+        if (meta.is_last || i + 1 >= (meta.total_chunks || 0)) break; i++;
+      }
+      return [b64blob(parts.join(''), meta.mimetype), meta.filename];
+    }
+    throw new Error('no-file');
+  }
+  /* הורדה מכל מקום בעמוד (גם POST - למשל הורדה מרוכזת): window.instDownload(url, {method, body}) */
+  window.instDownload = async function (href, init) {
+    say('<span class="spinner-ring" style="border-color:#4b556b;border-top-color:#fff"></span> מכינים את הקובץ...');
+    try {
+      var r = await fetch(href, Object.assign({ credentials: 'same-origin' }, init || {}));
+      if (r.redirected && /\/login/.test(r.url)) { location.href = r.url; return false; }
+      if (!r.ok) throw new Error(await r.text());
+      var ct = r.headers.get('Content-Type') || '', res;
+      if (ct.indexOf('text/html') >= 0) res = await fromPage(await r.text());
+      else res = [await r.blob(), fname(r)];
+      save(res[0], res[1]);
+      say(IC.check + ' הקובץ ירד: ' + (res[1] || '').replace(/</g, '&lt;'), 3500);
+      return true;
+    } catch (err) {
+      var msg = String(err && err.message || '');
+      if (msg && msg.length < 200 && !/^\d+$/.test(msg) && msg !== 'no-file') { say(IC.alert + ' ' + msg.replace(/</g, '&lt;'), 6000); return false; }
+      toast.classList.add('hidden');
+      if (!init || !init.method || init.method === 'GET') location.href = href;     // גיבוי: ההתנהגות הקודמת
+      else say(IC.alert + ' ההורדה נכשלה - נסו שוב', 6000);
+      return false;
+    }
+  };
+  document.addEventListener('click', async function (e) {
+    var a = e.target.closest && e.target.closest('a[href]');
+    if (!a || e.defaultPrevented || e.ctrlKey || e.metaKey || e.shiftKey || e.button !== 0) return;
+    var url = new URL(a.getAttribute('href'), location.href);
+    if (url.origin !== location.origin || !DL.test(url.pathname)) return;
+    e.preventDefault();
+    if (a.dataset.busy) return;
+    a.dataset.busy = '1';
+    try { await window.instDownload(url.href); } finally { delete a.dataset.busy; }
+  });
+})();
+</script>
+{% if inst_logged_in %}
+<div id="navProgress"></div>
+<script>
+(function () {
+  function ls(k, v) { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) { return null; } }
+
+  /* פס התקדמות דק במעבר בין עמודים */
+  var np = document.getElementById('navProgress');
+  document.addEventListener('click', function (e) {
+    var a = e.target.closest && e.target.closest('a[href]');
+    if (!a || e.defaultPrevented || a.target || a.hasAttribute('download') || e.ctrlKey || e.metaKey || e.shiftKey || e.button !== 0) return;
+    var u = new URL(a.getAttribute('href'), location.href);
+    if (u.origin !== location.origin || u.href === location.href || u.hash && u.pathname === location.pathname) return;
+    setTimeout(function () { if (!e.defaultPrevented) np.classList.add('go'); }, 0);
+  });
+  document.addEventListener('submit', function (e) { if (!e.defaultPrevented && !e.target.dataset.ajax) setTimeout(function () { if (!e.defaultPrevented) np.classList.add('go'); }, 0); });
+  window.addEventListener('pageshow', function () { np.classList.remove('go'); });
+
+  /* ---- עדכונים חיים: אירועים אחרונים (לדשבורד), תג הודעות, התראות בשולחן העבודה ---- */
+  var P = window.InstPulse = { listeners: [], last: null, since: null, fast: false };
+  var seen = {}; try { (JSON.parse(ls('instSeen') || '[]') || []).forEach(function (id) { seen[id] = 1; }); } catch (e) {}
+  function remember(id) { seen[id] = 1; var ids = Object.keys(seen); if (ids.length > 300) ids = ids.slice(-300); ls('instSeen', JSON.stringify(ids)); }
+  function notifyOn() { return ls('instNotify') === '1' && 'Notification' in window && Notification.permission === 'granted'; }
+  function paintBell() {
+    var b = document.getElementById('notifyBtn'); if (!b) return;
+    var on = notifyOn();
+    b.classList.toggle('on', on);
+    b.querySelector('svg').outerHTML = on ? '{{ ic("bell", 17)|replace("\n", "")|replace("'", "\\'") }}' : '{{ ic("bell-off", 17)|replace("\n", "")|replace("'", "\\'") }}';
+    b.title = on ? 'התראות פעילות - לחיצה לכיבוי' : 'הפעלת התראות בשולחן העבודה';
+  }
+  function show(title, body, url, tag) {
+    var opts = { body: body || '', tag: tag, dir: 'rtl', lang: 'he', icon: 'https://raw.githubusercontent.com/saryDavidovich/phone-transcription/main/static/pwa/inst-icon-192.png', data: { url: url || '/my/' } };
+    if (navigator.serviceWorker && navigator.serviceWorker.getRegistration) {
+      navigator.serviceWorker.getRegistration('/my/').then(function (reg) {
+        if (reg && reg.showNotification) reg.showNotification(title, opts); else fallback();
+      }).catch(fallback);
+    } else fallback();
+    function fallback() { try { var n = new Notification(title, opts); n.onclick = function () { window.focus(); if (url) location.href = url; n.close(); }; } catch (e) {} }
+  }
+  window.instNotifyToggle = function () {
+    if (!('Notification' in window)) { instToast('הדפדפן הזה לא תומך בהתראות', true); return; }
+    if (notifyOn()) { ls('instNotify', '0'); paintBell(); instToast('ההתראות כובו'); return; }
+    if (Notification.permission === 'denied') { instToast('ההתראות חסומות בדפדפן. לחצו על סמל המנעול שליד כתובת האתר ← התראות ← אפשר', true); return; }
+    Notification.requestPermission().then(function (p) {
+      if (p === 'granted') { ls('instNotify', '1'); paintBell(); instToast('ההתראות הופעלו'); show('ההתראות פועלות', 'נודיע כאן כשתמלול מוכן או כשמגיעה הודעה מהצוות', null, 'inst-test'); schedule(); }
+      else instToast('לא אושרו התראות', true);
+    });
+  };
+  window.instToast = window.instToast || function (html, bad) {
+    var box = document.getElementById('flashToasts');
+    if (!box) { box = document.createElement('div'); box.id = 'flashToasts'; document.body.appendChild(box); }
+    var t = document.createElement('div'); t.className = 'ftoast' + (bad ? ' bad' : '');
+    t.innerHTML = (bad ? IC.alert : IC.check) + '<span>' + html + '</span>';
+    box.appendChild(t);
+    setTimeout(function () { t.classList.add('out'); setTimeout(function () { t.remove(); }, 450); }, bad ? 7000 : 3200);
+  };
+  P.on = function (fn) { P.listeners.push(fn); if (P.last) fn(P.last, true); };
+  var timer = null, busy = false;
+  function tick() {
+    if (busy) return; busy = true;
+    var url = '/my/pulse' + (P.since ? '?after=' + (P.since - 3) : '');
+    fetch(url, { credentials: 'same-origin', headers: { 'X-Requested-With': 'fetch' } })
+      .then(function (r) { if (!r.ok || r.redirected) throw 0; return r.json(); })
+      .then(function (d) {
+        var first = !P.since;
+        P.since = d.now; P.last = d;
+        var badge = document.getElementById('chatBadge');
+        if (badge) { badge.textContent = d.chat || ''; badge.classList.toggle('hidden', !d.chat); }
+        var fresh = [];
+        d.events.forEach(function (ev) { if (!seen[ev.id]) { if (!first) fresh.push(ev); remember(ev.id); } });
+        if (notifyOn()) {
+          var toShow = fresh.filter(function (e) { return /ready|chat|error|pending/.test(e.type); }).slice(0, 3);
+          // גיבוי: מספר ההודעות שלא נקראו עלה, אבל ההודעה עצמה לא הגיעה כאירוע - בכל זאת מודיעים
+          if (!first && d.chat > (P.lastChat || 0) && !toShow.some(function (e) { return e.type === 'chat'; }))
+            toShow.push({ title: 'הודעה חדשה מהצוות', sub: 'לקריאה בלשונית צור קשר', url: '/my/contact', id: 'chat-' + d.chat + '-' + Math.round(d.now) });
+          toShow.forEach(function (e) { show(e.title, e.sub, e.url, e.id); });
+          var day = new Date().toISOString().slice(0, 10);
+          if (d.low && ls('instLowDay') !== day) { ls('instLowDay', day); show('היתרה שלך נמוכה', 'היתרה כעת ₪' + d.balance.toFixed(2) + ' - לטעינה בלשונית יתרה וחיובים', '/my/billing', 'cust-low'); }
+        }
+        P.lastChat = d.chat;
+        P.listeners.forEach(function (fn) { try { fn(d, first, fresh); } catch (e) {} });
+        P.busyCount = d.busy;
+      })
+      .catch(function () {})
+      .then(function () { busy = false; schedule(); });
+  }
+  function schedule() {
+    clearTimeout(timer);
+    var ms = P.fast || P.busyCount ? 15000 : 30000;
+    if (document.hidden) ms = notifyOn() ? 45000 : 180000;
+    timer = setTimeout(tick, ms);
+  }
+  P.refresh = function () { clearTimeout(timer); tick(); };
+  document.addEventListener('visibilitychange', function () { if (!document.hidden && P.since && Date.now() / 1000 - P.since > 20) P.refresh(); });
+  paintBell();
+  setTimeout(tick, 1200);
+})();
+</script>
+{% endif %}
+</body>
+</html>

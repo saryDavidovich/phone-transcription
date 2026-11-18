@@ -74,13 +74,40 @@ def _up_state(u):
     return {'done': 'done', 'pending_payment': 'pending', 'error': 'error'}.get(u.status, 'processing')
 
 
+def _is_cust():
+    """הקוד הזה משרת גם את אזור הלקוח הפרטי (/my, routes/customer_portal.py): שם רואים רק את
+    ההקלטות של הלקוח עצמו - בלי העלאות מוסד, קבוצות, תלמידים או מיתוג."""
+    return current_user.__class__.__name__ == 'Customer'
+
+
+def _own():
+    """תנאי הבעלות על הקלטות: של הלקוח עצמו, או של תלמידי המוסד."""
+    return (Recording.customer_id == current_user.id) if _is_cust() else (Customer.institution_id == current_user.id)
+
+
+def _P():
+    return '/my' if _is_cust() else '/institution'
+
+
+def _brand_owner():
+    return None if _is_cust() else current_user
+
+
+def _groups_q():
+    return [] if _is_cust() else StudentGroup.query.filter_by(institution_id=current_user.id).order_by(StudentGroup.name).all()
+
+
 def _students_q():
+    if _is_cust():
+        return Customer.query.filter(Customer.id == -1)
     return Customer.query.filter(Customer.institution_id == current_user.id)
 
 
 def _get(kind, item_id):
     """(obj, student) - רק של המוסד המחובר."""
     if kind == 'u':
+        if _is_cust():
+            abort(404)
         obj = InstitutionUpload.query.filter_by(id=item_id, institution_id=current_user.id).first()
         if not obj:
             abort(404)
@@ -88,7 +115,9 @@ def _get(kind, item_id):
     if kind == 'r':
         obj = Recording.query.options(defer(Recording.file_data), defer(Recording.excel_file)).get(item_id)
         student = Customer.query.get(obj.customer_id) if obj else None
-        if not obj or not student or student.institution_id != current_user.id:
+        if not obj or not student:
+            abort(404)
+        if (student.id != current_user.id) if _is_cust() else (student.institution_id != current_user.id):
             abort(404)
         return obj, student
     abort(404)
@@ -97,6 +126,8 @@ def _get(kind, item_id):
 def _title(kind, obj, student):
     if kind == 'u':
         return obj.original_filename or 'תמלול'
+    if _is_cust():
+        return obj.source_filename or 'שיחה מהטלפון'
     from routes.institution_students import recording_title
     return recording_title(obj, student)
 
@@ -104,7 +135,7 @@ def _title(kind, obj, student):
 def _meta(kind, obj, student):
     if kind == 'r':
         from routes.institution_students import recording_meta
-        return recording_meta(obj, student)
+        return recording_meta(obj, None if _is_cust() else student)
     from services import portal_docx as PD
     parts = [_loc(obj.created_at).strftime('%d/%m/%Y %H:%M') if obj.created_at else '']
     if obj.duration_seconds:
@@ -119,8 +150,8 @@ def _ser(kind, obj, student=None, groups=None, snippet=None):
     item = {
         'k': kind, 'id': obj.id,
         'title': _title(kind, obj, student),
-        'who': 'המוסד' if kind == 'u' or (student and student.is_institution_self) else (student.name if student else ''),
-        'sid': student.id if (student and not student.is_institution_self) else None,
+        'who': '' if _is_cust() else ('המוסד' if kind == 'u' or (student and student.is_institution_self) else (student.name if student else '')),
+        'sid': None if _is_cust() else (student.id if (student and not student.is_institution_self) else None),
         'group': (groups or {}).get(student.student_group_id) if student else None,
         'day': lt.strftime('%Y-%m-%d') if lt else '',
         'time': lt.strftime('%H:%M') if lt else '',
@@ -160,12 +191,14 @@ def _collect(args, with_text=False, limit=500):
     only_done = args.get('done') == '1'
     ids = set(x for x in (args.get('ids') or '').split(',') if x)
 
-    groups = {g.id: g.name for g in StudentGroup.query.filter_by(institution_id=current_user.id)}
+    groups = {g.id: g.name for g in _groups_q()}
     out = []
+    if _is_cust():
+        scope, group_id, student_id = 'students', None, None
 
     if scope in ('all', 'students') or student_id or group_id:
         rq = (db.session.query(Recording, Customer).join(Customer, Customer.id == Recording.customer_id)
-              .filter(Customer.institution_id == current_user.id)
+              .filter(_own())
               .options(defer(Recording.file_data), defer(Recording.excel_file)))
         if not with_text and not q:
             rq = rq.options(defer(Recording.transcript), defer(Recording.transcript_original), defer(Recording.summary))
@@ -177,7 +210,7 @@ def _collect(args, with_text=False, limit=500):
             rq = rq.filter(Customer.id == student_id)
         if group_id:
             rq = rq.filter(Customer.student_group_id == group_id)
-        if scope == 'students':
+        if scope == 'students' and not _is_cust():
             rq = rq.filter(Customer.is_institution_self.isnot(True))
         if only_done:
             rq = rq.filter(Recording.transcript.isnot(None), Recording.status != 'pending_payment')
@@ -191,7 +224,7 @@ def _collect(args, with_text=False, limit=500):
                 continue
             out.append(('r', r, c))
 
-    if scope in ('all', 'inst') and not student_id and not group_id:
+    if scope in ('all', 'inst') and not student_id and not group_id and not _is_cust():
         uq = InstitutionUpload.query.filter_by(institution_id=current_user.id)
         if not with_text and not q:
             uq = uq.options(defer(InstitutionUpload.transcript), defer(InstitutionUpload.transcript_original))
@@ -225,9 +258,12 @@ def transcript_page(kind, item_id):
     if state != 'done' or not obj.transcript:
         flash('התמלול עדיין לא מוכן' if state == 'processing' else
               ('התמלול ממתין לטעינת יתרה' if state == 'pending' else 'אין תמלול להקלטה הזו'))
-        return redirect(request.referrer or url_for('institution_portal.transcripts'))
-    back = (url_for('institution_students.student_detail', student_id=student.id)
-            if student is not None and not student.is_institution_self else url_for('institution_portal.transcripts'))
+        return redirect(_P() + '/transcripts')
+    if _is_cust():
+        back = '/my/transcripts'
+    else:
+        back = (url_for('institution_students.student_detail', student_id=student.id)
+                if student is not None and not student.is_institution_self else url_for('institution_portal.transcripts'))
     return render_template('institution/transcript.html', kind=kind, obj=obj, student=student,
                            title=_title(kind, obj, student), meta=_meta(kind, obj, student),
                            duration=obj.duration_seconds or 0, back=back,
@@ -292,7 +328,7 @@ def transcript_download(kind, item_id):
     from services import portal_docx as PD
     from routes.download_utils import render_data_uri_download_page
     title = _title(kind, obj, student)
-    data = PD.single(current_user, title, obj.transcript, _meta(kind, obj, student))
+    data = PD.single(_brand_owner(), title, obj.transcript, _meta(kind, obj, student))
     return render_data_uri_download_page(
         data, f'תמלול - {PD.safe_name(title)}.docx',
         mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document')
@@ -356,20 +392,12 @@ def _start_push(kind, obj):
 def audio_state(kind, item_id):
     obj, _student = _get(kind, item_id)
     if _audio_target(kind, obj):
-        return jsonify({'state': 'ready', 'src': f'/institution/audio/{kind}/{item_id}'})
+        # בלי כתובת ימות לדפדפן: הכתובת נושאת מפתח הורדה של כל המערכת, ומי שמחזיק בו יכול היה
+        # לנסות להוריד הקלטות של אחרים. השמע מגיע רק דרכנו (audio-chunk), אחרי בדיקת בעלות.
+        return jsonify({'state': 'ready'})
     if _start_push(kind, obj):
         return jsonify({'state': 'preparing'})
     return jsonify({'state': 'none'})
-
-
-@institution_portal_bp.route('/institution/audio/<kind>/<int:item_id>')
-@institution_login_required
-def audio(kind, item_id):
-    obj, _student = _get(kind, item_id)
-    target = _audio_target(kind, obj)
-    if not target:
-        return 'אין קובץ שמע זמין', 404
-    return redirect(target, code=302)
 
 
 # קפיצה בנגן: ימות לא תומכים בהורדה חלקית (Range), ולכן דפדפן שמנגן ישר משם לא יכול לקפוץ
@@ -456,7 +484,7 @@ def audio_chunk(kind, item_id, n):
 @institution_portal_bp.route('/institution/transcripts')
 @institution_login_required
 def transcripts():
-    groups = StudentGroup.query.filter_by(institution_id=current_user.id).order_by(StudentGroup.name).all()
+    groups = _groups_q()
     students = (_students_q().filter(Customer.is_institution_self.isnot(True))
                 .with_entities(Customer.id, Customer.name).order_by(Customer.name).all())
     return render_template('institution/transcripts.html', groups=groups, students=students,
@@ -475,7 +503,12 @@ def transcripts_data():
 @institution_login_required
 def transcripts_export():
     from services import portal_docx as PD
+    from services import security as sec
     from routes.download_utils import render_data_uri_download_page
+    rk = f'export:{current_user.get_id()}'
+    if sec.hits_blocked(rk, 20, 3600):
+        return 'יותר מדי הורדות מרוכזות בשעה האחרונה. נסו שוב מאוחר יותר', 429
+    sec.hits_add(rk)
     args = request.form.copy()
     args['done'] = '1'
     _items, total, objs = _collect(args, with_text=True, limit=MAX_EXPORT)
@@ -489,13 +522,13 @@ def transcripts_export():
     if request.form.get('student', type=int):
         s = _students_q().filter(Customer.id == request.form.get('student', type=int)).first()
         label += f' - {s.name}' if s and s.name else ''
-    elif request.form.get('group', type=int):
+    elif request.form.get('group', type=int) and not _is_cust():
         g = StudentGroup.query.filter_by(id=request.form.get('group', type=int), institution_id=current_user.id).first()
         label += f' - {g.name}' if g else ''
     if period:
         label += f' ({period})'
     if fmt == 'merged':
-        data = PD.merged(current_user, [(_title(k, o, s), _meta(k, o, s), o.transcript) for k, o, s in reversed(objs)],
+        data = PD.merged(_brand_owner(), [(_title(k, o, s), _meta(k, o, s), o.transcript) for k, o, s in reversed(objs)],
                          heading=label)
         return render_data_uri_download_page(
             data, f'{PD.safe_name(label)}.docx',
@@ -504,10 +537,10 @@ def transcripts_export():
     for k, o, s in objs:
         lt = _loc(o.created_at)
         base = f"{lt.strftime('%Y-%m-%d') if lt else ''} {_title(k, o, s)}"
-        if k == 'r' and s is not None and s.name and s.name not in base:
+        if k == 'r' and s is not None and s.name and s.name not in base and not _is_cust():
             base += f' - {s.name}'
         entries.append((base, _title(k, o, s), _meta(k, o, s), o.transcript))
-    return render_data_uri_download_page(PD.zip_of(current_user, entries), f'{PD.safe_name(label)}.zip',
+    return render_data_uri_download_page(PD.zip_of(_brand_owner(), entries), f'{PD.safe_name(label)}.zip',
                                          mimetype='application/zip')
 
 
@@ -515,7 +548,7 @@ def transcripts_export():
 @institution_portal_bp.route('/institution/reports')
 @institution_login_required
 def reports():
-    groups = StudentGroup.query.filter_by(institution_id=current_user.id).order_by(StudentGroup.name).all()
+    groups = _groups_q()
     return render_template('institution/reports.html', groups=groups)
 
 
@@ -524,21 +557,23 @@ def reports():
 def reports_data():
     days = request.args.get('days', 90, type=int)
     days = days if days in (30, 90, 180, 365) else 90
-    group_id = request.args.get('group', type=int)
+    group_id = None if _is_cust() else request.args.get('group', type=int)
     now_l = datetime.now(IL)
     start_d = (now_l - timedelta(days=days - 1)).date()
     since = _utc(start_d)
 
-    groups = {g.id: g.name for g in StudentGroup.query.filter_by(institution_id=current_user.id)}
+    groups = {g.id: g.name for g in _groups_q()}
     rq = (db.session.query(Recording.created_at, Recording.duration_seconds, Recording.cost, Recording.transcription_tier,
                            Customer.id, Customer.name, Customer.student_group_id, Customer.is_institution_self)
           .join(Customer, Customer.id == Recording.customer_id)
-          .filter(Customer.institution_id == current_user.id, Recording.created_at >= since,
+          .filter(_own(), Recording.created_at >= since,
                   Recording.status.in_(DONE_REC + ('pending_payment',))))
     if group_id:
         rq = rq.filter(Customer.student_group_id == group_id)
     rows = rq.all()
-    ups = [] if group_id else (db.session.query(InstitutionUpload.created_at, InstitutionUpload.duration_seconds,
+    if _is_cust():          # לקוח פרטי: סדרה אחת, בלי קבוצות ותלמידים
+        rows = [(a, b, c, d, e, f, g, True) for a, b, c, d, e, f, g, _h in rows]
+    ups = [] if (group_id or _is_cust()) else (db.session.query(InstitutionUpload.created_at, InstitutionUpload.duration_seconds,
                                                 InstitutionUpload.cost, InstitutionUpload.tier)
                                .filter(InstitutionUpload.institution_id == current_user.id,
                                        InstitutionUpload.created_at >= since,
@@ -638,6 +673,8 @@ def pulse():
     since = max(since, now - timedelta(days=14))
     limit = 12 if not after else 30
     events = []
+    if _is_cust():
+        return _pulse_customer(now, since, limit)
 
     rq = (db.session.query(Recording.id, Recording.status, Recording.status_at, Recording.created_at,
                            Recording.source_filename, Recording.duration_seconds, Customer.id, Customer.name,
@@ -704,6 +741,51 @@ def pulse():
         'chat': unread_for_institution(current_user.id),
         'busy': busy, 'balance': bal, 'low': bal < max(th, 1),
     })
+
+
+def customer_chat_unread(c):
+    from models import CustomerMessage
+    acc = c.account
+    q = CustomerMessage.query.filter(CustomerMessage.customer_id == c.id, CustomerMessage.direction == 'out')
+    if acc and acc.chat_seen_at:
+        q = q.filter(CustomerMessage.created_at > acc.chat_seen_at)
+    return q.count()
+
+
+def _pulse_customer(now, since, limit):
+    from models import CustomerMessage
+    events = []
+    rq = (Recording.query.filter(Recording.customer_id == current_user.id,
+                                 func.coalesce(Recording.status_at, Recording.created_at) > since,
+                                 Recording.status.notin_(('recording', 'cancelled', 'too_short')))
+          .options(defer(Recording.file_data), defer(Recording.excel_file), defer(Recording.transcript),
+                   defer(Recording.transcript_original), defer(Recording.summary))
+          .order_by(func.coalesce(Recording.status_at, Recording.created_at).desc()).limit(limit))
+    for r in rq.all():
+        t = r.status_at or r.created_at
+        title = r.source_filename or 'שיחה מהטלפון'
+        if r.status in DONE_REC:
+            ev = ('ready', 'התמלול מוכן', title, f'/my/t/r/{r.id}')
+        elif r.status == 'pending_payment':
+            ev = ('pending', 'ממתין לטעינת יתרה', f'{title} · יישלח אוטומטית אחרי הטעינה', '/my/billing')
+        elif r.status in ('error', 'failed'):
+            ev = ('error', 'התמלול נכשל', title, '/my/transcribe')
+        else:
+            ev = ('new', 'הקלטה חדשה בתמלול', title, '/my/transcribe')
+        events.append({'id': f'r{r.id}:{ev[0]}', 'type': ev[0], 'ts': _ts(t), 'title': ev[1], 'sub': ev[2],
+                       'url': ev[3], 'min': max(1, round((r.duration_seconds or 0) / 60)) if r.duration_seconds else None})
+    for m in (CustomerMessage.query.filter(CustomerMessage.customer_id == current_user.id,
+                                           CustomerMessage.direction == 'out', CustomerMessage.created_at > since)
+              .order_by(CustomerMessage.created_at.desc()).limit(5)):
+        events.append({'id': f'c{m.id}', 'type': 'chat', 'ts': _ts(m.created_at), 'title': 'הודעה חדשה מהצוות',
+                       'sub': (m.body or '')[:120], 'url': '/my/contact'})
+    events.sort(key=lambda e: -e['ts'])
+    busy = Recording.query.filter(Recording.customer_id == current_user.id,
+                                  Recording.status.in_(('processing', 'queued', 'transcribing')),
+                                  Recording.created_at > now - timedelta(days=2)).count()
+    bal = round(current_user.balance or 0, 2)
+    return jsonify({'now': _ts(now), 'events': events[:limit], 'chat': customer_chat_unread(current_user),
+                    'busy': busy, 'balance': bal, 'low': bal < 3})
 
 
 # ------------------------------------------------------------------ מיתוג (לוגו + שם ל-Word)

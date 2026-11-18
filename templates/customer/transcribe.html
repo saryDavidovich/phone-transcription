@@ -1,0 +1,169 @@
+{% extends "customer/base.html" %}
+{% from "institution/_icons.html" import ic %}
+{% block title %}יצירת תמלול{% endblock %}
+{% block head %}
+<style>
+.opts { display:grid; grid-template-columns:repeat(3,1fr); gap:0 14px; margin-top:16px; }
+@media (max-width:760px) { .opts { grid-template-columns:1fr; } }
+.ul-row { display:flex; align-items:center; gap:12px; padding:11px 4px; border-bottom:1px solid var(--border); transition:background .3s; }
+.ul-row:last-child { border-bottom:0; }
+.ul-row.flash { background:var(--accent-soft); }
+.ul-row .ic-box { width:34px; height:34px; }
+.ul-row .nm { flex:1; min-width:0; }
+.ul-row .nm a, .ul-row .nm b { font-weight:700; font-size:14px; color:var(--text); text-decoration:none; display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ul-row .nm a:hover { color:var(--accent2); }
+.ul-row .nm small { font-size:12px; color:var(--text2); }
+.ul-row .act { display:flex; gap:6px; align-items:center; flex:none; }
+.tag-pro { font-size:11px; padding:1px 7px; border-radius:8px; background:rgba(124,58,237,.12); color:#7c3aed; font-weight:600; margin-inline-start:4px; }
+.st { font-size:12.5px; display:inline-flex; align-items:center; gap:6px; }
+.st.wait { color:var(--text2); }
+.st.pend { color:var(--amber); font-weight:600; text-decoration:none; }
+.st.err { color:var(--red); }
+@media (max-width:560px) {
+  .ul-row { flex-wrap:wrap; }
+  .ul-row .act { width:100%; justify-content:flex-start; padding-inline-start:46px; }
+}
+</style>
+{% endblock %}
+{% block content %}
+<div class="page">
+<h1>תמלול חדש</h1>
+
+<div class="card mb-18">
+  <form id="uploadForm">
+    {% set sp_id = 'srcPick' %}{% set sp_file_sub = 'אפשר לבחור כמה קבצים יחד - כל קובץ יתומלל בנפרד ויקבל קובץ Word משלו' %}
+    {% include "institution/_source_picker.html" %}
+
+    <div class="opts">
+      <div class="field">
+        <label>שפת ההקלטה</label>
+        <select class="input" name="language">
+          <option value="he" {{ 'selected' if d.language == 'he' }}>עברית</option><option value="en" {{ 'selected' if d.language == 'en' }}>אנגלית</option><option value="yi" {{ 'selected' if d.language == 'yi' }}>יידיש</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>סוג תמלול</label>
+        <select class="input" name="tier">
+          <option value="gemini">רגיל - {{ price_basic }} ₪ ל-{{ unit }} דק'</option>
+          <option value="premium" {{ 'selected' if d.tier == 'premium' }}>מקצועי - {{ price_premium }} ₪ ל-{{ unit }} דק'</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>שפת התמלול</label>
+        <select class="input" name="output_language">
+          <option value="he">עברית (יידיש / אנגלית - מתורגם)</option>
+          <option value="original" {{ 'selected' if d.output_language == 'original' or (d.output_language != 'he' and d.output_language == d.language) }}>כמו שפת ההקלטה</option>
+        </select>
+      </div>
+    </div>
+    <div class="hint" style="margin:-6px 0 12px;">תמלול מקצועי מדויק יותר (מינוח תורני, שמות, ארמית), ולוקח מעט יותר זמן.</div>
+
+    <label class="switch-row">
+      <input type="checkbox" name="send_email" value="1" checked>
+      <span>לשלוח את התמלול גם במייל ({{ current_user.email }})</span>
+    </label>
+
+    <div class="hint" style="margin-bottom:12px;">היתרה שלך: {{ '%.2f'|format(current_user.balance or 0) }} ₪. אם היתרה לא תספיק - התמלול יישמר כ"ממתין לטעינת יתרה" ויישלח אוטומטית מיד אחרי הטעינה. ברירות המחדל כאן - לפי ההגדרות שלך בטלפון.</div>
+    <button type="submit" class="btn btn-block" id="uploadBtn">{{ ic('upload', 16) }} לתמלול</button>
+  </form>
+</div>
+
+<div class="card">
+  <div class="card-head" style="margin-bottom:10px;"><span class="ic">{{ ic('file-text') }}</span><h2>תמלולים אחרונים</h2>
+    <a href="/my/transcripts" class="btn btn-secondary btn-sm" style="margin-inline-start:auto;">לכל התמלולים {{ ic('chevron-left', 14) }}</a></div>
+  <div id="uploadsList">
+    {% for r in recs %}
+    {% set src = 'file' if r.source_filename else 'phone' %}
+    {% set st = 'done' if r.status in ('completed', 'transcribed', 'delivered', 'sent', 'done') else ('pending' if r.status == 'pending_payment' else ('error' if r.status in ('error', 'failed') else 'processing')) %}
+    <div class="ul-row" data-id="{{ r.id }}" data-status="{{ 'processing' if st == 'processing' else st }}">
+      <span class="ic-box">{{ ic('phone' if src == 'phone' else 'file', 17) }}</span>
+      <div class="nm">
+        {% if st == 'done' %}<a href="/my/t/r/{{ r.id }}">{{ r.source_filename or 'שיחה מהטלפון' }}</a>{% else %}<b>{{ r.source_filename or 'שיחה מהטלפון' }}</b>{% endif %}
+        <small>{{ r.created_at|il_time }}{% if r.duration_seconds %} · {{ [1, (r.duration_seconds / 60)|round|int]|max }} דק'{% endif %}{% if r.transcription_tier == 'premium' %}<span class="tag-pro">מקצועי</span>{% endif %}</small>
+      </div>
+      <div class="act">
+        {% if st == 'processing' %}<span class="st wait"><span class="spinner-ring"></span> מתמלל...</span>
+        {% elif st == 'pending' %}<a class="st pend" href="/my/billing">{{ ic('hourglass', 14) }} ממתין לטעינת יתרה ({{ '%.2f'|format(r.cost or 0) }} ₪)</a>
+        {% elif st == 'done' %}
+          <a class="btn btn-secondary btn-sm" href="/my/t/r/{{ r.id }}">{{ ic('headphones', 14) }} האזנה ועריכה</a>
+          <a class="btn btn-sm" href="/my/t/r/{{ r.id }}/download">{{ ic('download', 14) }} Word</a>
+        {% else %}<span class="st err">{{ ic('alert', 14) }} שגיאה</span>{% endif %}
+      </div>
+    </div>
+    {% else %}
+    <p class="empty" style="color:var(--text2); font-size:13px; padding:8px 0;">עדיין אין תמלולים.</p>
+    {% endfor %}
+  </div>
+</div>
+</div>
+
+<script>
+(function () {
+  var ICON = {
+    file: '{{ ic("file", 17)|replace("\n", "")|replace("'", "\\'") }}', record: '{{ ic("mic", 17)|replace("\n", "")|replace("'", "\\'") }}',
+    link: '{{ ic("link", 17)|replace("\n", "")|replace("'", "\\'") }}', head: '{{ ic("headphones", 14)|replace("\n", "")|replace("'", "\\'") }}',
+    dl: '{{ ic("download", 14)|replace("\n", "")|replace("'", "\\'") }}', hour: '{{ ic("hourglass", 14)|replace("\n", "")|replace("'", "\\'") }}'
+  };
+  var picker = SrcPicker(document.getElementById('srcPick'));
+  var list = document.getElementById('uploadsList');
+
+  function addRow(id, name, mode) {
+    var empty = list.querySelector('.empty'); if (empty) empty.remove();
+    var row = document.createElement('div');
+    row.className = 'ul-row flash'; row.dataset.id = id;
+    row.innerHTML = '<span class="ic-box">' + (ICON[mode] || ICON.file) + '</span><div class="nm"><b></b><small>עכשיו</small></div>' +
+      '<div class="act"><span class="st wait"><span class="spinner-ring"></span> ' + (mode === 'link' ? 'מוריד מהקישור ומתמלל...' : 'מתמלל...') + '</span></div>';
+    row.querySelector('b').textContent = name;
+    list.prepend(row);
+    setTimeout(function () { row.classList.remove('flash'); }, 1600);
+    return row;
+  }
+
+  document.getElementById('uploadForm').addEventListener('submit', async function (e) {
+    e.preventDefault();
+    var err = picker.error(); if (err) { instToast(err, true); return; }
+    var items = picker.items(), mode = picker.mode(), btn = document.getElementById('uploadBtn'), old = btn.innerHTML;
+    btn.disabled = true;
+    var base = new FormData(this); base.delete('audio_file');
+    var ok = 0, errors = [];
+    for (var k = 0; k < items.length; k++) {
+      btn.innerHTML = '<span class="spinner-ring" style="border-color:rgba(255,255,255,.35);border-top-color:#fff"></span> ' +
+        (mode === 'link' ? 'שולחים' : 'מעלים') + (items.length > 1 ? ' ' + (k + 1) + ' מתוך ' + items.length : '') + '...';
+      var fd = new FormData(); base.forEach(function (v, key) { fd.append(key, v); }); items[k].fill(fd);
+      try {
+        var res = await fetch('/my/transcribe/upload', { method: 'POST', body: fd, credentials: 'same-origin' });
+        var data = await res.json();
+        if (res.ok) { ok++; poll(data.recordingId, addRow(data.recordingId, data.name || items[k].label, mode)); }
+        else errors.push(items[k].label + ': ' + (data.error || 'שגיאה בהעלאה'));
+      } catch (x) { errors.push(items[k].label + ': שגיאת תקשורת'); }
+    }
+    btn.disabled = false; btn.innerHTML = old;
+    if (ok) { picker.reset(); instToast((ok === 1 ? 'נשלח לתמלול' : ok + ' נשלחו לתמלול') + ' - אפשר להמשיך לגלוש, נעדכן כאן כשמוכן'); }
+    if (errors.length) instToast(escHtml(errors.join(' · ')), true);
+  });
+
+  function poll(id, row) {
+    var n = 0;
+    (function again() {
+      setTimeout(async function () {
+        var d; try { d = await (await fetch('/my/transcribe/status/' + id, { credentials: 'same-origin' })).json(); } catch (e) { return again(); }
+        var act = row.querySelector('.act');
+        if (d.name) { var b = row.querySelector('.nm b, .nm a'); if (b && b.textContent !== d.name) b.textContent = d.name; }
+        if (['completed', 'transcribed', 'delivered', 'sent', 'done'].indexOf(d.status) >= 0) {
+          var nm = row.querySelector('.nm b');
+          if (nm) { var a = document.createElement('a'); a.href = d.viewUrl; a.textContent = nm.textContent; nm.replaceWith(a); }
+          row.querySelector('.nm small').textContent = 'עכשיו' + (d.durationSeconds ? ' · ' + Math.max(1, Math.round(d.durationSeconds / 60)) + ' דק\'' : '');
+          act.innerHTML = '<a class="btn btn-secondary btn-sm" href="' + d.viewUrl + '">' + ICON.head + ' האזנה ועריכה</a><a class="btn btn-sm" href="' + d.downloadUrl + '">' + ICON.dl + ' Word</a>';
+          row.classList.add('flash'); setTimeout(function () { row.classList.remove('flash'); }, 1600);
+        } else if (d.status === 'pending_payment') {
+          act.innerHTML = '<a class="st pend" href="/my/billing">' + ICON.hour + ' ממתין לטעינת יתרה (' + (d.cost || 0).toFixed(2) + ' ₪)</a>';
+        } else if (d.status === 'error' || d.status === 'failed') {
+          act.innerHTML = '<span class="st err">' + IC.alert + ' שגיאה - בדקו את הקובץ או הקישור</span>';
+        } else again();
+      }, n++ < 10 ? 3000 : 6000);
+    })();
+  }
+  list.querySelectorAll('.ul-row[data-status=processing]').forEach(function (row) { poll(row.dataset.id, row); });
+})();
+</script>
+{% endblock %}

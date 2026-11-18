@@ -1,4 +1,4 @@
-{% extends "institution/base.html" %}
+{% extends portal_base %}
 {% from "institution/_icons.html" import ic %}
 {% block title %}דוחות וגרפים{% endblock %}
 {% block head %}
@@ -63,19 +63,19 @@ a.hb:hover .hb-name { color:var(--accent2); }
 <div class="grid grid-4 stats mb-18">
   <div class="card stat-card kpi"><span class="ic" style="background:var(--accent-soft); color:var(--accent2);">{{ ic('clock', 22) }}</span><div><div class="stat-value" id="kMin">—</div><div class="stat-label">דקות תמלול</div></div></div>
   <div class="card stat-card kpi"><span class="ic" style="background:var(--blue-soft); color:var(--blue);">{{ ic('file-text', 22) }}</span><div><div class="stat-value" id="kCount">—</div><div class="stat-label">תמלולים</div></div></div>
-  <div class="card stat-card kpi"><span class="ic" style="background:#f3edfe; color:#7c3aed;">{{ ic('users', 22) }}</span><div><div class="stat-value" id="kActive">—</div><div class="stat-label">תלמידים פעילים</div></div></div>
+  <div class="card stat-card kpi"><span class="ic" style="background:#f3edfe; color:#7c3aed;">{{ ic('users', 22) }}</span><div><div class="stat-value" id="kActive">—</div><div class="stat-label">{{ 'דקות בממוצע לתמלול' if is_cust else 'תלמידים פעילים' }}</div></div></div>
   <div class="card stat-card kpi"><span class="ic" style="background:var(--surface3); color:var(--text2);">{{ ic('shekel', 22) }}</span><div><div class="stat-value" id="kCost">—</div><div class="stat-label">עלות התמלולים</div></div></div>
 </div>
 
 <div class="card chart-card mb-18">
   <div class="card-head"><span class="ic">{{ ic('chart') }}</span><h2 id="trendTitle">דקות תמלול לפי שבוע</h2></div>
-  <div class="legend"><span><i style="background:var(--s1)"></i>תלמידים</span><span><i style="background:var(--s2)"></i>המוסד</span></div>
+  {% if not is_cust %}<div class="legend"><span><i style="background:var(--s1)"></i>תלמידים</span><span><i style="background:var(--s2)"></i>המוסד</span></div>{% else %}<div style="height:10px"></div>{% endif %}
   <svg class="vchart" id="trend" role="img" aria-label="גרף דקות תמלול לאורך זמן"></svg>
   <div class="tip" id="tip"></div>
   <details class="tbl-toggle"><summary>הצגה כטבלה</summary><div class="table-wrap"><table id="trendTbl"></table></div></details>
 </div>
 
-<div class="grid grid-2 mb-18" style="align-items:stretch;">
+{% if not is_cust %}<div class="grid grid-2 mb-18" style="align-items:stretch;">
   <div class="card">
     <div class="card-head" style="margin-bottom:14px;"><span class="ic">{{ ic('folder') }}</span><h2>לפי קבוצה</h2></div>
     <div class="hbars" id="groups"></div>
@@ -86,6 +86,7 @@ a.hb:hover .hb-name { color:var(--accent2); }
   </div>
 </div>
 
+{% endif %}
 <div class="grid grid-3" style="align-items:stretch;">
   <div class="card">
     <div class="card-head"><span class="ic">{{ ic('calendar') }}</span><h2>לפי יום בשבוע</h2></div>
@@ -107,6 +108,7 @@ a.hb:hover .hb-name { color:var(--accent2); }
 <script>
 (function () {
   var $ = function (id) { return document.getElementById(id); };
+  var IS_CUST = {{ 'true' if is_cust else 'false' }};
   var st = { days: 90, group: '' };
   try { var sv = JSON.parse(localStorage.getItem('instReports') || '{}'); if (sv.days) st.days = sv.days; } catch (e) {}
   var nf = new Intl.NumberFormat('he-IL');
@@ -158,8 +160,8 @@ a.hb:hover .hb-name { color:var(--accent2); }
   }
   function showTip(s, x, y, monthly) {
     var tip = $('tip'), svg = $('trend'), r = svg.getBoundingClientRect(), pr = svg.parentNode.getBoundingClientRect();
-    tip.innerHTML = '<b>' + (monthly ? 'חודש ' : 'שבוע מ-') + s.label + '</b><br><i style="background:var(--s1)"></i>תלמידים: ' + fmtMin(s.students) +
-      '<br><i style="background:var(--s2)"></i>המוסד: ' + fmtMin(s.inst) + '<br>' + s.count + ' תמלולים';
+    tip.innerHTML = '<b>' + (monthly ? 'חודש ' : 'שבוע מ-') + s.label + '</b><br>' + (IS_CUST ? fmtMin(s.students + s.inst) :
+      '<i style="background:var(--s1)"></i>תלמידים: ' + fmtMin(s.students) + '<br><i style="background:var(--s2)"></i>המוסד: ' + fmtMin(s.inst)) + '<br>' + s.count + ' תמלולים';
     var sx = r.width / (svg.viewBox.baseVal.width || r.width);
     tip.style.left = (r.left - pr.left + x * sx) + 'px'; tip.style.top = (r.top - pr.top + y * sx) + 'px'; tip.classList.add('on');
   }
@@ -186,16 +188,17 @@ a.hb:hover .hb-name { color:var(--accent2); }
     $('wrap').classList.add('loading-ov');
     document.querySelectorAll('#days button').forEach(function (b) { b.classList.toggle('on', +b.dataset.d === st.days); });
     try { localStorage.setItem('instReports', JSON.stringify({ days: st.days })); } catch (e) {}
-    var d = await (await fetch('/institution/reports/data?days=' + st.days + (st.group ? '&group=' + st.group : ''), { credentials: 'same-origin' })).json();
+    var d = await (await fetch('{{ P }}/reports/data?days=' + st.days + (st.group ? '&group=' + st.group : ''), { credentials: 'same-origin' })).json();
     last = d;
     $('wrap').classList.remove('loading-ov');
     countUp($('kMin'), d.totals.minutes, function (v) { return nf.format(Math.round(v)); });
     countUp($('kCount'), d.totals.count, function (v) { return nf.format(Math.round(v)); });
-    countUp($('kActive'), d.totals.active, function (v) { return nf.format(Math.round(v)); });
+    if (IS_CUST) countUp($('kActive'), d.totals.count ? d.totals.minutes / d.totals.count : 0, function (v) { return nf.format(Math.round(v)); });
+    else countUp($('kActive'), d.totals.active, function (v) { return nf.format(Math.round(v)); });
     countUp($('kCost'), d.totals.cost, function (v) { return '₪' + nf.format(Math.round(v)); });
     trend(d.series, d.monthly);
-    hbars($('groups'), d.groups, null, function (r) { return fmtMin(r.min) + ' · ' + r.students + ' תלמידים'; });
-    hbars($('top'), d.top, function (r) { return '/institution/students/' + r.id; }, function (r) { return fmtMin(r.min) + ' · ' + r.count + ' תמלולים'; });
+    if ($('groups')) hbars($('groups'), d.groups, null, function (r) { return fmtMin(r.min) + ' · ' + r.students + ' תלמידים'; });
+    if ($('top')) hbars($('top'), d.top, function (r) { return '/institution/students/' + r.id; }, function (r) { return fmtMin(r.min) + ' · ' + r.count + ' תמלולים'; });
     var wdN = ['א׳', 'ב׳', 'ג׳', 'ד׳', 'ה׳', 'ו׳', 'ש׳'];
     mini($('wd'), d.weekdays, wdN, function (i, v) { return 'יום ' + wdN[i] + ': ' + v + ' תמלולים'; });
     var hl = d.hours.map(function (_, i) { return String(i); });

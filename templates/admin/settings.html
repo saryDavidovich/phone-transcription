@@ -272,6 +272,25 @@
   </div>
 </div>
 
+<div class="card" style="margin-top:24px" id="customer-portal">
+  <div style="font-size:16px;font-weight:700;margin-bottom:6px">🔐 האזור האישי ללקוחות פרטיים</div>
+  <div style="font-size:13px;color:var(--text2);margin-bottom:12px;line-height:1.7">
+    אזור כמו של המוסדות, ללקוח פרטי: התמלולים שלו עם נגן ועריכה, תמלול חדש, יתרה וחיובים, הגדרות הטלפון וצור קשר.
+    כתובת: <b dir="ltr">/my</b>. כניסה ראשונה בקוד למייל הרשום ובחירת סיסמה; ממכשיר חדש - תמיד גם קוד למייל.
+    רק ללקוח פרטי עם מייל (לא תלמידי מוסדות). הטלפון של המנהל נכנס תמיד, לבדיקות.
+  </div>
+  <form method="post" action="{{ url_for('admin.customer_portal_mode_save') }}" style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end">
+    <div><label class="form-label">מי יכול להיכנס</label>
+      <select class="form-input" name="mode" style="width:auto">
+        <option value="off" {{ 'selected' if portal.mode == 'off' }}>כבוי - אף לקוח</option>
+        <option value="marked" {{ 'selected' if portal.mode == 'marked' }}>רק לקוחות שסומנו ({{ portal.marked }})</option>
+        <option value="all" {{ 'selected' if portal.mode == 'all' }}>כל הלקוחות הפרטיים</option>
+      </select></div>
+    <button class="btn btn-primary" type="submit">💾 שמירה</button>
+  </form>
+  <div style="font-size:12.5px;margin-top:10px;color:var(--text2)">{{ portal.active }} לקוחות כבר הגדירו סיסמה. סימון לקוח - בכרטיס הלקוח, בחלק "האזור האישי".</div>
+</div>
+
 <div class="card" style="margin-top:24px" id="slow-pages">
   <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px">
     <div style="font-size:16px;font-weight:700">🐢 עמודים איטיים אחרונים</div>

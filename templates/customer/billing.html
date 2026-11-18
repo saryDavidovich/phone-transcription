@@ -1,0 +1,89 @@
+{% extends "customer/base.html" %}
+{% from "institution/_icons.html" import ic %}
+{% block head %}
+<style>
+.bal-card { display:flex; align-items:center; gap:18px; flex-wrap:wrap; }
+.bal-card .big { font-size:34px; font-weight:800; font-variant-numeric:tabular-nums; }
+.bal-card .lbl { font-size:13px; color:var(--text2); }
+.bal-card .act { margin-inline-start:auto; display:flex; flex-direction:column; gap:6px; align-items:flex-end; }
+.price-list { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
+.price-list div { background:var(--surface2); border:1px solid var(--border); border-radius:12px; padding:12px; text-align:center; }
+.price-list b { display:block; font-size:20px; font-variant-numeric:tabular-nums; }
+.price-list span { font-size:12.5px; color:var(--text2); }
+.tx-row { display:grid; grid-template-columns:120px 1fr auto; gap:10px; align-items:center; padding:10px 4px; border-bottom:1px solid var(--border); font-size:13.5px; }
+.tx-row:last-child { border-bottom:0; }
+.tx-row time { color:var(--text2); font-size:12.5px; font-variant-numeric:tabular-nums; }
+.tx-row .amt { font-weight:700; font-variant-numeric:tabular-nums; direction:ltr; }
+.tx-row .amt.plus { color:var(--accent2); } .tx-row .amt.minus { color:var(--text); }
+.tx-filter { display:flex; gap:6px; margin-inline-start:auto; }
+.tx-filter button { border:1px solid var(--border); background:var(--surface); border-radius:20px; padding:4px 12px; font-family:inherit; font-size:12.5px; cursor:pointer; color:var(--text2); }
+.tx-filter button.on { background:var(--accent); color:#fff; border-color:var(--accent); }
+@media (max-width:560px) {
+  .bal-card .act { margin:0; width:100%; align-items:stretch; }
+  .price-list { grid-template-columns:1fr; }
+  .tx-row { grid-template-columns:1fr auto; } .tx-row time { grid-column:1 / -1; }
+}
+</style>
+{% endblock %}
+{% block content %}
+<div class="page">
+<h1>יתרה וחיובים</h1>
+
+<div class="card bal-card mb-18">
+  <span class="ic-box" style="width:52px;height:52px;border-radius:14px;">{{ ic('wallet', 26) }}</span>
+  <div><div class="big" id="balVal">{{ '%.2f'|format(c.balance or 0) }} ₪</div><div class="lbl">היתרה הנוכחית</div></div>
+  <div class="act">
+    {% if nedarim_on and c.phone and c.phone.isdigit() %}
+    <a class="btn" href="/my/billing/topup" target="_blank" rel="noopener noreferrer">{{ ic('card', 16) }} טעינת יתרה באשראי</a>
+    <span class="hint" style="margin:0;">נפתח בדף התשלום המאובטח של נדרים פלוס. היתרה כאן מתעדכנת לבד תוך כדקה.</span>
+    {% else %}
+    <span class="hint">לטעינת יתרה התקשרו ל-<span dir="ltr">03-3131795</span> (שלוחת טעינה), או כתבו לנו בצור קשר.</span>
+    {% endif %}
+  </div>
+</div>
+
+{% if pending %}
+<div class="card mb-18" style="background:var(--amber-soft); border-color:rgba(217,119,6,.28); display:flex; gap:12px; align-items:center;">
+  <span class="ic-box" style="background:#fff; color:var(--amber);">{{ ic('hourglass', 18) }}</span>
+  <div><b>{{ pending }} תמלולים ממתינים לטעינת יתרה ({{ '%.2f'|format(pending_sum) }} ₪)</b>
+    <div class="hint" style="margin:2px 0 0;">הם כבר מוכנים - יישלחו אוטומטית מיד אחרי הטעינה.</div></div>
+</div>
+{% endif %}
+
+<div class="card mb-18">
+  <div class="card-head"><span class="ic">{{ ic('receipt') }}</span><h2>המחירון שלך</h2></div>
+  <div class="card-sub">החיוב לפי יחידות של {{ unit }} דקות (כל יחידה שהתחילה נספרת).</div>
+  <div class="price-list">
+    {% for k, v in prices.items() %}<div><b>{{ '%.2f'|format(v) }} ₪</b><span>{{ names.get(k, k) }} · ל-{{ unit }} דק'</span></div>{% endfor %}
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-head" style="margin-bottom:10px;"><span class="ic">{{ ic('list') }}</span><h2>תנועות אחרונות</h2>
+    <div class="tx-filter" role="tablist"><button type="button" class="on" data-f="all">הכל</button><button type="button" data-f="plus">טעינות</button><button type="button" data-f="minus">חיובים</button></div></div>
+  <div id="txList">
+  {% for t in tx %}
+    <div class="tx-row" data-k="{{ 'plus' if (t.amount or 0) > 0 else 'minus' }}">
+      <time>{{ loc(t.created_at) }}</time>
+      <span>{{ t.description or ('טעינה' if (t.amount or 0) > 0 else 'חיוב') }}</span>
+      <span class="amt {{ 'plus' if (t.amount or 0) > 0 else 'minus' }}">{{ '%+.2f'|format(t.amount or 0) }} ₪</span>
+    </div>
+  {% else %}
+    <p style="color:var(--text2); font-size:13px;">אין עדיין תנועות.</p>
+  {% endfor %}
+  </div>
+</div>
+</div>
+<script>
+document.querySelectorAll('.tx-filter button').forEach(function (b) {
+  b.addEventListener('click', function () {
+    document.querySelectorAll('.tx-filter button').forEach(function (x) { x.classList.toggle('on', x === b); });
+    document.querySelectorAll('#txList .tx-row').forEach(function (r) { r.classList.toggle('hidden', b.dataset.f !== 'all' && r.dataset.k !== b.dataset.f); });
+  });
+});
+document.addEventListener('DOMContentLoaded', function () {
+  if (!window.InstPulse) return;
+  InstPulse.on(function (d) { var e = document.getElementById('balVal'); if (e && typeof d.balance === 'number') e.textContent = d.balance.toFixed(2) + ' ₪'; });
+});
+</script>
+{% endblock %}

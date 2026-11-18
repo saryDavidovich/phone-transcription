@@ -250,6 +250,30 @@
 </div>
 </details>
 
+{% if portal.private %}
+<details class="cd-sec" data-sec="portal"><summary>🔐 האזור האישי</summary>
+<div class="card" id="portal">
+  <div style="display:flex;flex-wrap:wrap;gap:8px 22px;font-size:13px;margin-bottom:12px">
+    <span>מצב: {% if portal.allowed %}<b style="color:var(--green)">● יכול להיכנס</b>{% else %}<b>● אין גישה</b>{% endif %}</span>
+    <span>סיסמה: <b>{{ 'הוגדרה' if portal.has_pw else 'עוד לא' }}</b></span>
+    <span>Google: <b>{{ 'מקושר' if portal.google else 'לא' }}</b></span>
+    <span>כניסה אחרונה: <b>{{ portal.last|il_time if portal.last else '—' }}</b></span>
+    {% if portal.locked %}<span style="color:var(--red)"><b>נעול זמנית</b></span>{% endif %}
+  </div>
+  {% if not portal.has_email %}<div style="font-size:12.5px;color:var(--amber);margin-bottom:10px">ללקוח אין מייל - לא יוכל לקבל קוד כניסה.</div>{% endif %}
+  {% if portal.mode == 'off' %}<div style="font-size:12.5px;color:var(--text2);margin-bottom:10px">האזור האישי כבוי בהגדרות.</div>{% endif %}
+  <form method="POST" action="{{ url_for('admin.customer_portal_action', id=customer.id) }}" style="display:flex;gap:8px;flex-wrap:wrap">
+    {% if portal.enabled %}<button class="btn btn-secondary" name="action" value="disable">הסרת הסימון</button>
+    {% else %}<button class="btn btn-primary" name="action" value="enable">סימון לאזור האישי</button>{% endif %}
+    <button class="btn btn-secondary" name="action" value="logout_all">ניתוק מכל המכשירים</button>
+    <button class="btn btn-secondary" name="action" value="reset_password" onclick="return confirm('לאפס את הסיסמה? הלקוח ייכנס בקוד למייל ויבחר סיסמה חדשה')">איפוס סיסמה</button>
+    {% if portal.locked %}<button class="btn btn-secondary" name="action" value="unlock">ביטול נעילה</button>{% endif %}
+  </form>
+  <div style="font-size:12px;color:var(--text2);margin-top:8px">הסיסמה עצמה לא נשמרת אצלנו (רק גיבוב), ולכן אי אפשר לראות אותה - רק לאפס.</div>
+</div>
+</details>
+{% endif %}
+
 <details class="cd-sec" data-sec="defaults"><summary>⚙️ ברירת מחדל להקלטה (שלוחה 4)</summary>
 <div class="card" id="defaults">
   {% set d = cust_defaults %}

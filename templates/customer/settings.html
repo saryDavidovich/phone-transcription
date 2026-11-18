@@ -1,0 +1,250 @@
+{% extends "customer/base.html" %}
+{% from "institution/_icons.html" import ic %}
+{% block head %}
+<style>
+.set-nav { display:flex; gap:4px; background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:4px; margin-bottom:16px; width:max-content; max-width:100%; box-shadow:var(--shadow); }
+.set-nav a { padding:8px 16px; border-radius:9px; text-decoration:none; color:var(--text2); font-size:13.5px; font-weight:600; display:flex; gap:7px; align-items:center; white-space:nowrap; }
+.set-nav a.on { background:var(--accent); color:#fff; }
+.sec { display:none; } .sec.on { display:block; animation:paneIn .2s ease-out; }
+@keyframes paneIn { from { opacity:0; transform:translateY(4px); } to { opacity:1; transform:none; } }
+.seg { display:flex; gap:6px; flex-wrap:wrap; }
+.seg label { flex:1 1 140px; border:2px solid var(--border); border-radius:12px; padding:11px 12px; cursor:pointer; display:flex; gap:9px; align-items:flex-start; transition:.15s; background:var(--surface); }
+.seg label:hover { border-color:#c7c9fb; }
+.seg label.on { border-color:var(--accent); background:var(--accent-soft); }
+.seg input { margin-top:3px; accent-color:var(--accent); width:auto !important; flex:none; padding:0; }
+.seg label > div { flex:1; min-width:0; }
+.seg b { display:block; font-size:13.5px; } .seg span { font-size:12px; color:var(--text2); }
+.phone-note { display:flex; gap:10px; align-items:flex-start; background:var(--blue-soft); color:#1e3a8a; border-radius:12px; padding:11px 13px; font-size:13px; line-height:1.6; margin-bottom:16px; }
+.kv { display:flex; justify-content:space-between; gap:10px; padding:10px 0; border-bottom:1px solid var(--border); font-size:13.5px; align-items:center; flex-wrap:wrap; }
+.kv:last-child { border-bottom:0; } .kv > span:first-child { color:var(--text2); }
+.dev { display:flex; gap:12px; align-items:center; padding:10px 0; border-bottom:1px solid var(--border); font-size:13.5px; }
+.dev:last-child { border-bottom:0; } .dev .info { flex:1; min-width:0; } .dev small { display:block; color:var(--text2); font-size:12px; }
+.chip-now { font-size:11px; font-weight:700; background:var(--accent-soft); color:var(--accent2); padding:1px 8px; border-radius:10px; margin-inline-start:6px; }
+.log-row { display:grid; grid-template-columns:auto 1fr auto; gap:10px; align-items:center; font-size:12.5px; padding:7px 0; border-bottom:1px solid var(--border); }
+.log-row:last-child { border-bottom:0; }
+.dot { width:8px; height:8px; border-radius:50%; } .dot.ok { background:var(--accent); } .dot.bad { background:var(--red); }
+.danger-zone { border-color:rgba(220,38,38,.25); }
+@media (max-width:560px) { .set-nav { width:100%; } .set-nav a { flex:1; justify-content:center; padding:8px 4px; font-size:12.5px; } }
+</style>
+{% endblock %}
+{% block content %}
+<div class="page">
+<h1>הגדרות</h1>
+<nav class="set-nav">
+  <a href="#phone" data-s="phone">{{ ic('phone', 15) }} הטלפון</a>
+  <a href="#profile" data-s="profile">{{ ic('user', 15) }} פרטים</a>
+  <a href="#security" data-s="security">{{ ic('lock', 15) }} אבטחה</a>
+</nav>
+
+<!-- ====== הטלפון ====== -->
+<section class="sec" data-sec="phone">
+  <div class="phone-note">{{ ic('info', 17) }}<div>אלה אותן הגדרות שאפשר לשנות בשיחה (שלוחה 4 - ברירת מחדל). מה ששומרים כאן חל מיד גם על ההקלטות בטלפון.</div></div>
+  <div class="card mb-18">
+    <div class="card-head"><span class="ic">{{ ic('mic') }}</span><h3>ברירת מחדל להקלטה</h3></div>
+    <div class="card-sub">כך יתומללו ההקלטות שלך כברירת מחדל.</div>
+    <div class="field"><label>סוג תמלול</label>
+      <div class="seg" data-name="tier">
+        <label><input type="radio" name="tier" value="gemini" {{ 'checked' if d.tier == 'gemini' }}><div><b>רגיל</b><span>מהיר וזול, מתאים לרוב השיחות</span></div></label>
+        <label><input type="radio" name="tier" value="premium" {{ 'checked' if d.tier == 'premium' }}><div><b>מקצועי</b><span>מדויק יותר במינוח תורני, שמות וארמית</span></div></label>
+      </div></div>
+    <div class="row-2">
+      <div class="field" id="langF"><label for="language">שפת ההקלטה</label>
+        <select class="input" id="language"><option value="he">עברית</option><option value="yi">יידיש</option><option value="en">אנגלית</option></select></div>
+      <div class="field"><label for="output">שפת התמלול</label><select class="input" id="output"></select></div>
+    </div>
+  </div>
+  <div class="card mb-18">
+    <div class="card-head"><span class="ic">{{ ic('send') }}</span><h3>איך מקבלים את התמלול</h3></div>
+    <div class="seg" data-name="delivery">
+      <label><input type="radio" name="delivery" value="email" {{ 'checked' if c.delivery_method != 'fax' }}><div><b>במייל</b><span dir="ltr">{{ c.email }}</span></div></label>
+      <label><input type="radio" name="delivery" value="fax" {{ 'checked' if c.delivery_method == 'fax' }} {{ 'disabled' if not c.fax }}><div><b>בפקס</b><span>{{ c.fax or 'קודם שומרים מספר פקס בלשונית "פרטים"' }}</span></div></label>
+    </div>
+    <div class="modal-actions" style="margin-top:14px;"><button class="btn" id="savePhone">{{ ic('check', 16, 2.2) }} שמירה</button></div>
+  </div>
+</section>
+
+<!-- ====== פרטים ====== -->
+<section class="sec" data-sec="profile">
+  <div class="grid grid-2" style="align-items:start;">
+    <div class="card">
+      <div class="card-head"><span class="ic">{{ ic('user') }}</span><h3>פרטים אישיים</h3></div>
+      <div class="field"><label for="pname">שם</label><input class="input" id="pname" maxlength="100" value="{{ c.name or '' }}"></div>
+      <div class="field"><label for="pfax">מספר פקס (לא חובה)</label><input class="input" id="pfax" inputmode="tel" dir="ltr" value="{{ c.fax or '' }}" placeholder="0XXXXXXXXX"></div>
+      <button class="btn btn-block" id="saveProfile">{{ ic('check', 16, 2.2) }} שמירת פרטים</button>
+      <div class="kv" style="margin-top:14px;"><span>טלפונים בחשבון</span><b dir="ltr">{{ phones|join(', ') or '—' }}</b></div>
+      <p class="hint">לשינוי מספרי הטלפון - כתבו לנו בצור קשר (מטעמי אבטחה זה נעשה על ידי הצוות).</p>
+    </div>
+    <div class="card">
+      <div class="card-head"><span class="ic">{{ ic('mail') }}</span><h3>כתובת מייל</h3></div>
+      <div class="card-sub">אליה נשלחים התמלולים וקודי הכניסה, וממנה אפשר לשלוח הקלטות. שינוי דורש סיסמה וקוד שנשלח לכתובת החדשה.</div>
+      <div class="kv"><span>הכתובת הנוכחית</span><b dir="ltr" id="curMail">{{ c.email }}</b></div>
+      <div id="mailStep1" class="{{ 'hidden' if pending_email }}">
+        <div class="field" style="margin-top:12px;"><label for="newMail">כתובת חדשה</label><input class="input" id="newMail" type="email" dir="ltr" autocomplete="email"></div>
+        <div class="field"><label for="mailPw">הסיסמה שלך</label><input class="input" id="mailPw" type="password" autocomplete="current-password"></div>
+        <button class="btn btn-secondary btn-block" id="mailStart">שליחת קוד לכתובת החדשה</button>
+      </div>
+      <div id="mailStep2" class="{{ '' if pending_email else 'hidden' }}">
+        <p class="hint" style="margin-top:12px;">שלחנו קוד ל-<b dir="ltr" id="pendMail">{{ pending_email or '' }}</b></p>
+        <div class="field"><label for="mailCode">הקוד</label><input class="input" id="mailCode" inputmode="numeric" maxlength="6" dir="ltr" autocomplete="one-time-code"></div>
+        <div class="modal-actions"><button class="btn" id="mailVerify">אישור</button><button class="btn btn-secondary" id="mailBack">ביטול</button></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ====== אבטחה ====== -->
+<section class="sec" data-sec="security">
+  <div class="grid grid-2 mb-18" style="align-items:start;">
+    <div class="card">
+      <div class="card-head"><span class="ic">{{ ic('lock') }}</span><h3>החלפת סיסמה</h3></div>
+      <div class="field"><label for="pwCur">הסיסמה הנוכחית</label><input class="input" type="password" id="pwCur" autocomplete="current-password"></div>
+      <div class="field"><label for="pwNew">סיסמה חדשה</label><input class="input" type="password" id="pwNew" autocomplete="new-password"></div>
+      <div class="field"><label for="pwNew2">שוב, לאימות</label><input class="input" type="password" id="pwNew2" autocomplete="new-password"></div>
+      <button class="btn btn-block" id="pwSave">החלפת סיסמה</button>
+      <p class="hint">8 תווים לפחות, אותיות וספרות. אחרי ההחלפה כל שאר המכשירים מתנתקים.</p>
+    </div>
+    <div class="card">
+      <div class="card-head"><span class="ic">
+        <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3c-1.6 4.7-6.1 8-11.3 8-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34.5 6.2 29.5 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.7-.4-3.5z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.6 15.9 18.9 13 24 13c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34.5 6.2 29.5 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.4 0 10.3-2.1 14-5.5l-6.5-5.5c-2 1.4-4.6 2.3-7.5 2.3-5.2 0-9.6-3.3-11.3-8l-6.6 5.1C9.6 39.6 16.3 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.3-2.2 4.3-4 5.7l6.5 5.5C41.5 36 44 30.5 44 24c0-1.3-.1-2.7-.4-3.5z"/></svg>
+      </span><h3>כניסה עם Google</h3></div>
+      {% if acc.google_id %}
+        <div class="kv"><span>מקושר לחשבון</span><b dir="ltr">{{ acc.google_email or 'Google' }}</b></div>
+        <p class="hint">אפשר להיכנס בלחיצה על "כניסה עם Google" בדף הכניסה, בלי סיסמה וקוד.</p>
+        <button class="btn btn-danger btn-block" id="gUnlink">ניתוק חשבון Google</button>
+      {% elif google_on %}
+        <p class="card-sub">מקשרים פעם אחת, ומהכניסה הבאה נכנסים בלחיצה - Google כבר מאמת אתכם.</p>
+        <a class="btn btn-secondary btn-block" href="{{ url_for('customer.google_start') }}?mode=link">קישור חשבון Google</a>
+      {% else %}
+        <p class="card-sub">כניסה עם Google עוד לא זמינה.</p>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="card mb-18">
+    <div class="card-head"><span class="ic">{{ ic('install') }}</span><h3>מכשירים מאומתים</h3></div>
+    <div class="card-sub">ממכשירים אלה נכנסים בסיסמה בלבד. מכל מכשיר אחר יידרש גם קוד למייל.</div>
+    <div id="devList">
+    {% for dv in devices %}
+      <div class="dev" data-id="{{ dv.id }}">
+        <span class="ic-box">{{ ic('install', 16) }}</span>
+        <div class="info"><b>{{ dv.label or 'מכשיר' }}</b>{% if dv.id == cur_dev %}<span class="chip-now">המכשיר הזה</span>{% endif %}
+          <small>אומת {{ loc(dv.created_at, '%d/%m/%Y') }} · שימוש אחרון {{ loc(dv.last_seen) }}</small></div>
+        {% if dv.id != cur_dev %}<button class="btn btn-secondary btn-sm" data-revoke="{{ dv.id }}">הסרה</button>{% endif %}
+      </div>
+    {% else %}
+      <p class="hint">אין מכשירים מאומתים.</p>
+    {% endfor %}
+    </div>
+  </div>
+
+  <div class="grid grid-2" style="align-items:start;">
+    <div class="card">
+      <div class="card-head"><span class="ic">{{ ic('clock') }}</span><h3>כניסות אחרונות</h3></div>
+      {% for l in logins %}
+        <div class="log-row"><i class="dot {{ 'ok' if l.success else 'bad' }}"></i>
+          <span>{{ {'password': 'סיסמה', 'code': 'קוד למייל', 'google': 'Google'}.get(l.method, l.method) }}{{ '' if l.success else ' - נכשל' }}</span>
+          <time style="color:var(--text2); direction:ltr;">{{ loc(l.created_at) }}</time></div>
+      {% else %}<p class="hint">אין עדיין.</p>{% endfor %}
+    </div>
+    <div class="card danger-zone">
+      <div class="card-head"><span class="ic" style="background:var(--red-soft); color:var(--red);">{{ ic('logout') }}</span><h3>ניתוק מכל המכשירים</h3></div>
+      <p class="card-sub">אם יש חשש שמישהו אחר נכנס - מנתקים את כל המכשירים חוץ מזה, וכולם יצטרכו שוב קוד למייל. מומלץ להחליף גם סיסמה.</p>
+      <button class="btn btn-danger btn-block" id="logoutAll">ניתוק כל שאר המכשירים</button>
+    </div>
+  </div>
+</section>
+</div>
+
+<div class="modal-backdrop hidden" id="confirmBox">
+  <div class="modal-box">
+    <h3 id="confirmT"></h3><p class="card-sub" id="confirmP"></p>
+    <div class="modal-actions"><button class="btn btn-danger" id="confirmYes">כן</button><button class="btn btn-secondary" onclick="document.getElementById('confirmBox').classList.add('hidden')">ביטול</button></div>
+  </div>
+</div>
+
+<script>
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  function toast(m, bad) { (window.instToast || alert)(escHtml(m), bad); }
+  async function post(url, data) {
+    var r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data || {}) });
+    var d = {}; try { d = await r.json(); } catch (e) {}
+    if (r.status === 401) { location.href = '/my/login'; throw new Error('יש להתחבר מחדש'); }
+    if (!r.ok) throw new Error(d.error || 'הפעולה נכשלה');
+    if (d.csrf) document.querySelector('meta[name=csrf-token]').setAttribute('content', d.csrf);
+    return d;
+  }
+  function busy(btn, fn) {
+    return async function () { if (btn.disabled) return; btn.disabled = true;
+      try { await fn(); } catch (e) { toast(e.message, true); } finally { btn.disabled = false; } };
+  }
+  function ask(t, p, yes) { $('confirmT').textContent = t; $('confirmP').textContent = p; $('confirmBox').classList.remove('hidden');
+    $('confirmYes').onclick = function () { $('confirmBox').classList.add('hidden'); yes(); }; }
+
+  /* לשוניות לפי #hash */
+  function show() {
+    var s = (location.hash || '#phone').slice(1); if (!document.querySelector('[data-sec="' + s + '"]')) s = 'phone';
+    document.querySelectorAll('.sec').forEach(function (x) { x.classList.toggle('on', x.dataset.sec === s); });
+    document.querySelectorAll('.set-nav a').forEach(function (a) { a.classList.toggle('on', a.dataset.s === s); });
+  }
+  window.addEventListener('hashchange', show); show();
+
+  /* בחירות מעוצבות */
+  function paintSeg() { document.querySelectorAll('.seg label').forEach(function (l) { l.classList.toggle('on', l.querySelector('input').checked); }); }
+  document.querySelectorAll('.seg input').forEach(function (i) { i.addEventListener('change', function () { paintSeg(); syncLang(); }); }); paintSeg();
+
+  /* שפות - אותם כללים כמו בשלוחה 4 */
+  var D = {{ d|tojson }};
+  $('language').value = D.language;
+  function tier() { return document.querySelector('input[name=tier]:checked').value; }
+  function syncLang(keep) {
+    var t = tier(), lang = $('language').value, out = $('output'), cur = keep || out.value, opts;
+    $('langF').style.display = t === 'premium' ? 'none' : '';
+    if (t === 'premium') opts = [['he', 'עברית'], ['original', 'כמו שפת ההקלטה']];
+    else if (lang === 'yi') opts = [['yi', 'יידיש'], ['he', 'עברית (תרגום)']];
+    else if (lang === 'en') opts = [['en', 'אנגלית'], ['he', 'עברית (תרגום)']];
+    else opts = [['he', 'עברית']];
+    out.innerHTML = opts.map(function (o) { return '<option value="' + o[0] + '">' + o[1] + '</option>'; }).join('');
+    if (opts.some(function (o) { return o[0] === cur; })) out.value = cur;
+  }
+  $('language').addEventListener('change', function () { syncLang(); });
+  syncLang(D.output_language);
+
+  $('savePhone').onclick = busy($('savePhone'), async function () {
+    var d = await post('/my/settings/phone', { tier: tier(), language: $('language').value, output_language: $('output').value,
+      delivery_method: document.querySelector('input[name=delivery]:checked').value });
+    toast(d.message);
+  });
+
+  $('saveProfile').onclick = busy($('saveProfile'), async function () {
+    var d = await post('/my/settings/profile', { name: $('pname').value, fax: $('pfax').value });
+    toast(d.message);
+  });
+
+  $('mailStart').onclick = busy($('mailStart'), async function () {
+    var d = await post('/my/settings/email/start', { email: $('newMail').value, password: $('mailPw').value });
+    $('mailPw').value = ''; $('pendMail').textContent = d.pending;
+    $('mailStep1').classList.add('hidden'); $('mailStep2').classList.remove('hidden'); $('mailCode').focus(); toast(d.message);
+  });
+  $('mailVerify').onclick = busy($('mailVerify'), async function () {
+    var d = await post('/my/settings/email/verify', { code: $('mailCode').value });
+    $('curMail').textContent = d.email; $('mailCode').value = ''; $('newMail').value = '';
+    $('mailStep2').classList.add('hidden'); $('mailStep1').classList.remove('hidden'); toast(d.message);
+  });
+  $('mailBack').onclick = function () { $('mailStep2').classList.add('hidden'); $('mailStep1').classList.remove('hidden'); };
+
+  $('pwSave').onclick = busy($('pwSave'), async function () {
+    var d = await post('/my/settings/password', { current: $('pwCur').value, password: $('pwNew').value, password2: $('pwNew2').value });
+    ['pwCur', 'pwNew', 'pwNew2'].forEach(function (i) { $(i).value = ''; }); toast(d.message);
+  });
+  if ($('gUnlink')) $('gUnlink').onclick = function () { ask('לנתק את חשבון Google?', 'אחרי הניתוק נכנסים רק בסיסמה (וקוד למייל ממכשיר חדש).', busy($('gUnlink'), async function () {
+    var d = await post('/my/settings/google/unlink'); toast(d.message); setTimeout(function () { location.reload(); }, 900); })); };
+  $('devList').addEventListener('click', function (e) {
+    var b = e.target.closest('[data-revoke]'); if (!b) return;
+    busy(b, async function () { var d = await post('/my/settings/devices/' + b.dataset.revoke + '/revoke'); b.closest('.dev').remove(); toast(d.message); })();
+  });
+  $('logoutAll').onclick = function () { ask('לנתק את כל שאר המכשירים?', 'כל מי שמחובר עכשיו ממכשיר אחר יתנתק מיד, וכל המכשירים יצטרכו שוב קוד למייל.', busy($('logoutAll'), async function () {
+    var d = await post('/my/settings/logout-all'); toast(d.message); document.querySelectorAll('#devList .dev').forEach(function (x) { if (x.querySelector('[data-revoke]')) x.remove(); }); })); };
+})();
+</script>
+{% endblock %}

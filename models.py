@@ -55,6 +55,19 @@ class Customer(db.Model):
     # דרך אותם מסכים/routes בדיוק של תלמיד רגיל (student_detail וכו').
     is_institution_self = db.Column(db.Boolean, nullable=True, default=False)
 
+    # כניסה לאזור הלקוח (routes/customer_portal.py) דרך Flask-Login - בלי UserMixin, שמשנה את
+    # השוואת האובייקטים (==) לפי מזהה ועלול לשבור קוד קיים שמשווה לקוחות
+    is_authenticated = True
+    is_anonymous = False
+
+    @property
+    def is_active(self):
+        return not self.is_blocked
+
+    def get_id(self):
+        # קידומת ייחודית - כמו 'inst-' של מוסדות
+        return f'cust-{self.id}'
+
     @property
     def display_name(self):
         """שם תצוגה בטוח לתבניות של הצוות (fallback מסודר) - לעולם לא
@@ -961,3 +974,54 @@ class AdminTask(db.Model):
     category = db.Column(db.String(20), default='general')      # צבע בלוח (admin_tasks.CATEGORIES)
     notified_at = db.Column(db.DateTime)                        # מתי נשלח צינתוק לטלפון המנהל
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class CustomerAccount(db.Model):
+    """פרטי הכניסה של לקוח פרטי לאזור הלקוח (/my). טבלה נפרדת מ-Customer בכוונה: אף מסך
+    או API אחר לא טוען/מחזיר את השדות האלה, והם לא ניתנים לעריכה מתוך טופס פרטי לקוח.
+    הסיסמה וקודי הכניסה נשמרים רק כגיבוב חד-כיווני."""
+    __tablename__ = 'customer_accounts'
+    id = db.Column(db.Integer, primary_key=True)
+    customer_id = db.Column(db.Integer, db.ForeignKey('customers.id', ondelete='CASCADE'), unique=True, nullable=False, index=True)
+    enabled = db.Column(db.Boolean, default=False)                 # סומן ע"י המנהל (במצב "רק מסומנים")
+    password_hash = db.Column(db.String(256), nullable=True)
+    google_id = db.Column(db.String(100), unique=True, nullable=True)
+    google_email = db.Column(db.String(200), nullable=True)
+    session_ver = db.Column(db.Integer, default=0)                 # העלאה = ניתוק כל המכשירים
+    failed = db.Column(db.Integer, default=0)
+    locked_until = db.Column(db.DateTime, nullable=True)
+    code_hash = db.Column(db.String(128), nullable=True)           # קוד חד-פעמי (גיבוב בלבד)
+    code_purpose = db.Column(db.String(20), nullable=True)         # login / device / email
+    code_target = db.Column(db.String(200), nullable=True)         # מייל חדש שמחכה לאימות
+    code_expires = db.Column(db.DateTime, nullable=True)
+    code_tries = db.Column(db.Integer, default=0)
+    last_login_at = db.Column(db.DateTime, nullable=True)
+    chat_seen_at = db.Column(db.DateTime, nullable=True)          # עד מתי הלקוח קרא הודעות מהצוות (לתג "צור קשר")
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    customer = db.relationship('Customer', backref=db.backref('account', uselist=False, lazy=True))
+
+
+class CustomerDevice(db.Model):
+    """מכשיר שאומת בקוד למייל - כניסה ממנו בסיסמה לא דורשת שוב קוד (90 יום). בדפדפן נשמר
+    רק אסימון אקראי; כאן נשמר רק הגיבוב שלו."""
+    __tablename__ = 'customer_devices'
+    id = db.Column(db.Integer, primary_key=True)
+    customer_id = db.Column(db.Integer, db.ForeignKey('customers.id', ondelete='CASCADE'), nullable=False, index=True)
+    token_hash = db.Column(db.String(64), unique=True, nullable=False)
+    label = db.Column(db.String(200))
+    ip = db.Column(db.String(64))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    last_seen = db.Column(db.DateTime, default=datetime.utcnow)
+    revoked = db.Column(db.Boolean, default=False)
+
+
+class CustomerLoginLog(db.Model):
+    __tablename__ = 'customer_login_logs'
+    id = db.Column(db.Integer, primary_key=True)
+    customer_id = db.Column(db.Integer, db.ForeignKey('customers.id', ondelete='CASCADE'), nullable=False, index=True)
+    method = db.Column(db.String(20))
+    success = db.Column(db.Boolean, default=False)
+    ip = db.Column(db.String(64))
+    user_agent = db.Column(db.String(200))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)

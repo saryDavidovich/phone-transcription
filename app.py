@@ -93,6 +93,17 @@ def create_app():
     app.register_blueprint(institution_students_bp)
     from routes.institution_portal import institution_portal_bp
     app.register_blueprint(institution_portal_bp)
+    from routes.customer_portal import customer_bp
+    app.register_blueprint(customer_bp)
+
+    @app.context_processor
+    def _portal_ctx():
+        # תבניות משותפות לאזור המוסד ולאזור הלקוח (תמלול, כל התמלולים, דוחות) - P = קידומת הכתובות
+        from flask import request as _rq
+        if (_rq.path or '').startswith('/my'):
+            from services.customer_auth import csrf_token
+            return {'P': '/my', 'portal_base': 'customer/base.html', 'is_cust': True, 'csrf_token': csrf_token}
+        return {'P': '/institution', 'portal_base': 'institution/base.html', 'is_cust': False}
     app.register_blueprint(download_bp)
     app.register_blueprint(dictate_bp, url_prefix='/admin/dictate')
 
