@@ -1,0 +1,131 @@
+<link href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@500;700;800&display=swap" rel="stylesheet">
+<style>
+/* ===================== שכבת העיצוב "מלכותי" של אזור הלקוחות =====================
+   אינדיגו עמוק + זהב, כותרות בגופן ספרותי, כרטיסים בגובה שווה. נטען אחרי סגנונות הבסיס. */
+:root {
+  --bg: #f5f4fa; --surface2: #f7f6fc; --surface3: #efedf8; --border: #e6e3f2;
+  --accent: #4c3fd6; --accent2: #3a2fb5; --accent-soft: #eeebff;
+  --royal: #1d1748; --royal2: #2b2373; --gold: #c9a24d; --gold2: #e8cf8a; --gold-soft: #fbf5e6;
+  --text: #191630; --text2: #625d7d; --text3: #9c97b5;
+  --shadow: 0 1px 2px rgba(29,23,72,.05), 0 10px 30px -14px rgba(29,23,72,.16);
+  --shadow-lg: 0 22px 50px -18px rgba(29,23,72,.32);
+  --radius: 20px;
+  --serif: 'Frank Ruhl Libre', 'Heebo', serif;
+}
+body { background:
+  radial-gradient(1100px 520px at 100% -10%, rgba(76,63,214,.08), transparent 60%),
+  radial-gradient(900px 480px at -10% 110%, rgba(201,162,77,.08), transparent 60%), var(--bg);
+  background-attachment: fixed; }
+
+/* ---- סרגל צד כהה ---- */
+.sidebar { background: linear-gradient(180deg, #221b55 0%, #1a1545 55%, #140f37 100%); border-left: 0;
+  box-shadow: -10px 0 40px -20px rgba(20,15,55,.6); }
+.sidebar-logo { border-bottom: 1px solid rgba(255,255,255,.08); padding-bottom: 20px; margin-bottom: 4px; }
+.sidebar .inst-name { color: #fff; font-family: var(--serif); font-size: 21px; letter-spacing: .2px; }
+.sidebar .inst-name .who { color: var(--gold2); font-family: 'Heebo', sans-serif; font-weight: 500; opacity: .9; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 150px; }
+.logo-ic { background: linear-gradient(135deg, var(--gold2), var(--gold)); color: var(--royal); box-shadow: 0 6px 18px -6px rgba(201,162,77,.7); width: 38px; height: 38px; border-radius: 12px; }
+.sidebar-nav { gap: 4px; }
+.sidebar-nav a { color: rgba(255,255,255,.72); font-weight: 500; position: relative; padding: 11px 14px; }
+.sidebar-nav a .ico { opacity: .85; }
+.sidebar-nav a:hover { background: rgba(255,255,255,.07); color: #fff; }
+.sidebar-nav a.active { background: linear-gradient(90deg, rgba(255,255,255,.06), rgba(255,255,255,.14)); color: #fff; font-weight: 700; box-shadow: inset 0 0 0 1px rgba(255,255,255,.08); }
+.sidebar-nav a.active::before { content: ''; position: absolute; right: -14px; top: 9px; bottom: 9px; width: 4px; border-radius: 4px 0 0 4px; background: linear-gradient(180deg, var(--gold2), var(--gold)); }
+.sidebar-nav a.active .ico { color: var(--gold2); }
+.sidebar-nav a.active .nav-badge { background: var(--gold); color: var(--royal); }
+.side-tools, .sidebar-footer { border-top: 1px solid rgba(255,255,255,.08); }
+.side-tool, .sidebar-footer a { color: rgba(255,255,255,.62); }
+.side-tool:hover { background: rgba(255,255,255,.07); color: #fff; }
+.sidebar-footer a:hover { color: #fca5a5; }
+
+/* ---- תוכן ---- */
+main { padding: 36px 44px 48px; max-width: 1200px; }
+.page { max-width: 1060px; margin: 0 auto; }
+h1 { font-family: var(--serif); font-size: 30px; font-weight: 800; color: var(--royal); margin-bottom: 26px; letter-spacing: .2px; position: relative; padding-bottom: 12px; }
+h1::after { content: ''; position: absolute; right: 0; bottom: 0; width: 56px; height: 3px; border-radius: 3px; background: linear-gradient(90deg, var(--gold), var(--gold2)); }
+h2, h3 { color: var(--royal); }
+.card { border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; box-shadow: var(--shadow); position: relative; }
+.card-head { margin-bottom: 8px; }
+.card-head h2, .card-head h3 { font-size: 16.5px; font-weight: 800; }
+.card-head .ic, .ic-box { background: linear-gradient(135deg, #5b4ee6, #3a2fb5); color: #fff; box-shadow: 0 6px 14px -6px rgba(58,47,181,.55); border-radius: 12px; }
+.card-sub { font-size: 13px; line-height: 1.75; }
+.grid { gap: 20px; align-items: stretch; }
+.grid > .card, .grid-2 > .card { height: 100%; }
+.mb-18 { margin-bottom: 20px; }
+
+/* כרטיסי נתונים */
+.stat-card .ic { background: linear-gradient(135deg, #5b4ee6, #3a2fb5) !important; color: #fff !important; box-shadow: 0 8px 18px -8px rgba(58,47,181,.6); }
+.stat-value { font-family: var(--serif); font-size: 30px; color: var(--royal); font-variant-numeric: tabular-nums; }
+.stat-label { color: var(--text2); font-weight: 500; }
+
+/* כפתורים */
+.btn { background: linear-gradient(135deg, #5446e4, #3a2fb5); border-radius: 12px; padding: 11px 22px; font-weight: 700; box-shadow: 0 8px 18px -10px rgba(58,47,181,.75); }
+.btn:hover { background: linear-gradient(135deg, #4a3cd8, #2f2596); }
+.btn-secondary { background: #fff; color: var(--royal); border: 1px solid var(--border); box-shadow: none; }
+.btn-secondary:hover { background: var(--surface2); border-color: #d3cdee; }
+.btn-danger { background: #fff; box-shadow: none; }
+.btn-gold { background: linear-gradient(135deg, var(--gold2), var(--gold)); color: var(--royal); box-shadow: 0 8px 18px -10px rgba(201,162,77,.9); }
+.icon-btn { background: #fff; border-radius: 10px; }
+.icon-btn:hover { border-color: #d3cdee; color: var(--accent2); background: var(--accent-soft); }
+
+/* שדות */
+.field label { color: var(--royal); font-weight: 600; font-size: 13px; }
+.field input, .field select, .field textarea, input.input, select.input, textarea.input { background: #fff; border-radius: 12px; padding: 11px 13px; border-color: var(--border); }
+.badge-green { background: var(--accent-soft); color: var(--accent2); }
+
+/* הודעות */
+.flash { background: var(--gold-soft); border-color: rgba(201,162,77,.35); color: #7a5b14; border-radius: 14px; }
+.ftoast { background: var(--royal); }
+
+/* מודל */
+.modal-box { border-radius: 22px; }
+.modal-backdrop { background: rgba(20,15,55,.5); backdrop-filter: blur(3px); }
+
+/* דפי כניסה */
+body.no-sidebar { background:
+  radial-gradient(800px 500px at 85% 0%, rgba(201,162,77,.18), transparent 60%),
+  radial-gradient(900px 600px at 0% 100%, rgba(76,63,214,.22), transparent 60%),
+  linear-gradient(160deg, #f6f4ff 0%, #efeafd 50%, #f8f5ec 100%); }
+.auth-card { border-radius: 24px; box-shadow: 0 30px 60px -28px rgba(29,23,72,.35); border-top: 3px solid var(--gold); }
+.auth-brand b { font-family: var(--serif); color: var(--royal); font-size: 24px; }
+.auth-head h1 { font-size: 24px; padding: 0; margin: 0 0 6px; }
+.auth-head h1::after { display: none; }
+
+/* דפים משותפים עם אזור המוסד - צבעי ירוק קבועים מוחלפים בסגול-זהב */
+.tabs { border-radius: 14px; }
+.tab.on { background: linear-gradient(135deg, #5446e4, #3a2fb5) !important; box-shadow: 0 6px 14px -6px rgba(58,47,181,.6) !important; }
+.cal .d .cnt.l1 { background: #ddd8ff !important; color: var(--accent2) !important; }
+.cal .d .cnt.l2 { background: #a79cf5 !important; color: #fff !important; }
+.cal .d .cnt { background: var(--accent2); }
+.cal .d.shabbat { background: #fbf8ef !important; }
+.fmt:hover { border-color: #cfc8f7 !important; }
+.pl-main { box-shadow: 0 8px 18px -6px rgba(58,47,181,.7) !important; background: linear-gradient(135deg, #5446e4, #3a2fb5) !important; }
+.seg.now { color: var(--royal) !important; }
+.chat { background-image: radial-gradient(rgba(76,63,214,.07) 1px, transparent 1px) !important; }
+.fchip.on { background: linear-gradient(135deg, #5446e4, #3a2fb5); }
+.tr-row:hover { background: var(--surface2); }
+
+/* גרפים בדוחות: סגול וזהב */
+body { --s1: #5446e4; --s2: #c9a24d; --blue: #5446e4; --blue-soft: #eeebff; }
+.mini-bars .mb span.b { background: linear-gradient(180deg, #7b6ff0, #4c3fd6) !important; }
+
+/* לשוניות פנימיות (הגדרות, תמלולים) */
+.set-nav, .tabs { background: #fff; border-radius: 14px; box-shadow: var(--shadow); }
+.set-nav a.on { background: linear-gradient(135deg, #5446e4, #3a2fb5); box-shadow: 0 6px 14px -6px rgba(58,47,181,.6); }
+.seg label.on { border-color: var(--accent); background: var(--accent-soft); box-shadow: 0 6px 14px -10px rgba(58,47,181,.5); }
+
+/* ---- מובייל ---- */
+@media (max-width: 900px) {
+  .topbar { background: linear-gradient(90deg, #221b55, #2b2373); border-bottom: 0; color: #fff; }
+  .topbar .inst-name { color: #fff !important; font-family: var(--serif); }
+  .topbar button { background: rgba(255,255,255,.1); border-color: rgba(255,255,255,.15); color: #fff; }
+  main { padding: 18px 12px 30px; }
+  h1 { font-size: 23px; margin-bottom: 18px; }
+  .card { padding: 18px; border-radius: 18px; }
+  .sidebar-nav a.active::before { right: -8px; }
+  body:not(.nav-open) .sidebar:not(:hover) .sidebar-logo .logo-ic { width: 34px; height: 34px; }
+}
+@media (max-width: 560px) {
+  .stat-value { font-size: 23px; }
+  .grid-4.stats .stat-value { font-size: 20px; }
+}
+</style>

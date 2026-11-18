@@ -875,7 +875,7 @@ def settings():
     acc = CA.account_for(c)
     db.session.commit()
     devices = CustomerDevice.query.filter_by(customer_id=c.id, revoked=False).order_by(CustomerDevice.last_seen.desc()).all()
-    logins = CustomerLoginLog.query.filter_by(customer_id=c.id).order_by(CustomerLoginLog.created_at.desc()).limit(15).all()
+    logins = CustomerLoginLog.query.filter_by(customer_id=c.id).order_by(CustomerLoginLog.created_at.desc()).limit(10).all()
     cur_dev = CA.device_trusted(c)
     from services.customer_phones import all_phones
     return render_template('customer/settings.html', c=c, acc=acc, d=_defaults(c), devices=devices, logins=logins,

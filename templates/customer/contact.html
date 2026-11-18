@@ -6,18 +6,18 @@
 .chat-wrap { max-width:1040px; margin:0 auto; }
 .chat { display:flex; flex-direction:column; height:calc(100vh - 150px); min-height:440px; padding:0; overflow:hidden; }
 .chat-head { display:flex; align-items:center; gap:12px; padding:14px 18px; border-bottom:1px solid var(--border); background:var(--surface); }
-.chat-head .ava { width:42px; height:42px; border-radius:50%; background:var(--accent); color:#fff; display:flex; align-items:center; justify-content:center; flex:none; }
+.chat-head .ava { width:42px; height:42px; border-radius:50%; background:linear-gradient(135deg,#e8cf8a,#c9a24d); color:#1d1748; display:flex; align-items:center; justify-content:center; flex:none; }
 .chat-head .t { font-weight:800; font-size:15px; }
 .chat-head .s { font-size:12px; color:var(--text2); margin-top:1px; }
 .chat-body { flex:1; overflow-y:auto; padding:18px 16px 10px; display:flex; flex-direction:column; gap:4px;
-  background-color:#eef3f0;
-  background-image:radial-gradient(rgba(16,185,129,.07) 1px, transparent 1px); background-size:18px 18px; }
+  background-color:#f4f2fb;
+  background-image:radial-gradient(rgba(76,63,214,.08) 1px, transparent 1px); background-size:18px 18px; }
 .day { align-self:center; font-size:11.5px; color:var(--text2); background:rgba(255,255,255,.85); padding:3px 12px; border-radius:8px; margin:10px 0 6px; box-shadow:0 1px 1px rgba(0,0,0,.04); }
 .msg { max-width:78%; padding:7px 10px 5px; border-radius:10px; font-size:14px; line-height:1.6; white-space:pre-wrap; word-wrap:break-word;
   box-shadow:0 1px 1px rgba(20,25,40,.08); position:relative; }
-.msg .meta { display:flex; align-items:center; justify-content:flex-end; gap:4px; font-size:10.5px; color:#6b7a73; margin-top:2px; white-space:nowrap; }
+.msg .meta { display:flex; align-items:center; justify-content:flex-end; gap:4px; font-size:10.5px; color:#7a7596; margin-top:2px; white-space:nowrap; }
 .msg .meta .ico { width:14px; height:14px; }
-.msg.me { align-self:flex-end; background:#d9fdd3; border-top-left-radius:3px; }   /* שלנו - בצד שמאל, כמו בווטסאפ בעברית */
+.msg.me { align-self:flex-end; background:#e7e3ff; border-top-left-radius:3px; }   /* שלנו - בצד שמאל, כמו בווטסאפ בעברית */
 .msg.them { align-self:flex-start; background:#fff; border-top-right-radius:3px; }
 .msg.me .meta .read { color:#34b7f1; }
 .msg .by { font-size:11.5px; font-weight:700; color:var(--accent2); margin-bottom:1px; }
