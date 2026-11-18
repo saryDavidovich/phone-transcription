@@ -1992,6 +1992,10 @@ def customer_portal_mode_save():
     mode = request.form.get('mode')
     set_setting('customer_portal_mode', mode if mode in ('off', 'marked', 'all') else 'off')
     set_setting('customer_signup_on', '1' if request.form.get('signup') == '1' else '0')
+    set_setting('phone_link_ivr_on', '1' if request.form.get('phone_link') == '1' else '0')
+    set_setting('auto_topup_on', '1' if request.form.get('auto_topup') == '1' else '0')
+    rt = request.form.get('receipt_type') or ''
+    set_setting('nedarim_receipt_type', rt if rt in ('', '400', '320', '405') else '')
     flash('✔ הגדרת האזור האישי ללקוחות נשמרה')
     return redirect(url_for('admin.settings') + '#customer-portal')
 
@@ -2168,6 +2172,9 @@ def settings():
     from services import customer_auth as _CA
     portal = {'engine': get_setting('transcribe_engine', 'v2') or 'v2',
               'signup': get_setting('customer_signup_on', '0') == '1',
+              'phone_link': get_setting('phone_link_ivr_on', '0') == '1',
+              'auto_topup': get_setting('auto_topup_on', '0') == '1',
+              'receipt_type': get_setting('nedarim_receipt_type', '') or '',
               'mode': _CA.portal_mode(),
               'marked': CustomerAccount.query.filter(CustomerAccount.enabled.is_(True)).count(),
               'active': CustomerAccount.query.filter(CustomerAccount.password_hash.isnot(None)).count()}

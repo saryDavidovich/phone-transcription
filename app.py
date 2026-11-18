@@ -625,6 +625,11 @@ def _migrate_db():
         # אזור המוסד: נגן עם טקסט, עריכת תמלול, מיתוג ה-Word
         "ALTER TABLE recordings ADD COLUMN IF NOT EXISTS play_url TEXT",
         "ALTER TABLE recordings ADD COLUMN IF NOT EXISTS transcript_original TEXT",
+        "ALTER TABLE recordings ADD COLUMN IF NOT EXISTS transcript_html TEXT",
+        "ALTER TABLE institution_uploads ADD COLUMN IF NOT EXISTS transcript_html TEXT",
+        "ALTER TABLE customer_charge_logs ADD COLUMN IF NOT EXISTS kind VARCHAR(10) DEFAULT 'iframe'",
+        "ALTER TABLE customer_charge_logs ADD COLUMN IF NOT EXISTS history_id VARCHAR(64)",
+        "ALTER TABLE customer_charge_logs ADD COLUMN IF NOT EXISTS receipt_url VARCHAR(500)",
         "ALTER TABLE recordings ADD COLUMN IF NOT EXISTS edited_at TIMESTAMP",
         "ALTER TABLE institution_uploads ADD COLUMN IF NOT EXISTS play_url TEXT",
         "ALTER TABLE institution_uploads ADD COLUMN IF NOT EXISTS transcript_original TEXT",

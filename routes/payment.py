@@ -176,6 +176,15 @@ def nedarim_webhook():
     if not confirmation:
         log.warning(f'Nedarim webhook: tx={tx_id} has no Confirmation (documented as a temporary transaction) - crediting anyway, please verify in Nedarim')
 
+    # טעינה של לקוח מהאזור האישי (אייפרם / טעינה אוטומטית): מסומנת בהערות TP-<מזהה רשומת חיוב>.
+    # מזכים דרך רשומת החיוב - נעילת שורה, זיכוי אחד גם כשגם ה-CallBack מגיע (בכל סדר).
+    from services.customer_billing import MARKER_RE, credit_charge
+    mk = MARKER_RE.search(str(data.get('Comments') or data.get('Comment') or ''))
+    if mk:
+        res = credit_charge(int(mk.group(1)), dict(data, Status='OK'), 'webhook')
+        log.info(f'Nedarim webhook: customer portal charge {mk.group(1)} -> {res} (tx {tx_id})')
+        return jsonify({'ok': True})
+
     # מניעת זיכוי כפול - בודקים אם ה-TransactionId הזה כבר נקלט אצלנו
     if InstitutionChargeLog.query.filter_by(provider_ref=tx_id).first():
         log.info(f'Nedarim webhook: transaction {tx_id} already processed (institution), skipping')

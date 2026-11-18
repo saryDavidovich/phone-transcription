@@ -14,6 +14,10 @@
 .seg input { margin-top:3px; accent-color:var(--accent); width:auto !important; flex:none; padding:0; }
 .seg label > div { flex:1; min-width:0; }
 .seg b { display:block; font-size:13.5px; } .seg span { font-size:12px; color:var(--text2); }
+.pl-steps { margin:4px 0 12px; padding-inline-start:20px; line-height:2; font-size:14px; }
+.pl-wait { display:flex; align-items:center; gap:10px; padding:11px 13px; border-radius:12px; background:var(--surface2); border:1px solid var(--border); font-size:13.5px; margin-bottom:10px; }
+.pl-wait.ok { background:var(--accent-soft); color:var(--accent2); font-weight:700; }
+.pl-wait.bad { background:#fef2f2; color:#b91c1c; }
 .phone-note { display:flex; gap:10px; align-items:flex-start; background:var(--blue-soft); color:#1e3a8a; border-radius:12px; padding:11px 13px; font-size:13px; line-height:1.6; margin-bottom:16px; }
 .kv { display:flex; justify-content:space-between; gap:10px; padding:10px 0; border-bottom:1px solid var(--border); font-size:13.5px; align-items:center; flex-wrap:wrap; }
 .kv:last-child { border-bottom:0; } .kv > span:first-child { color:var(--text2); }
@@ -71,8 +75,28 @@
       <div class="field"><label for="pname">שם</label><input class="input" id="pname" maxlength="100" value="{{ c.name or '' }}"></div>
       <div class="field"><label for="pfax">מספר פקס (לא חובה)</label><input class="input" id="pfax" inputmode="tel" dir="ltr" value="{{ c.fax or '' }}" placeholder="0XXXXXXXXX"></div>
       <button class="btn btn-block" id="saveProfile">{{ ic('check', 16, 2.2) }} שמירת פרטים</button>
-      <div class="kv" style="margin-top:14px;"><span>טלפונים בחשבון</span>{% if phones %}<b dir="ltr">{{ phones|join(', ') }}</b>{% else %}<b>עוד לא שויך טלפון · <a href="/my/contact" style="color:var(--accent2);">לבקשת שיוך</a></b>{% endif %}</div>
-      <p class="hint">לשינוי מספרי הטלפון - כתבו לנו בצור קשר (מטעמי אבטחה זה נעשה על ידי הצוות).</p>
+      <div class="kv" style="margin-top:14px;"><span>טלפונים בחשבון</span><b dir="ltr" id="phonesNow">{{ phones|join(', ') if phones else '—' }}</b></div>
+    </div>
+    <div class="card">
+      <div class="card-head"><span class="ic">{{ ic('phone') }}</span><h3>צירוף טלפון לחשבון</h3></div>
+      {% if phone_link_on %}
+      <div class="card-sub">לא חובה - הכל עובד גם בלי טלפון. עם טלפון מצורף אפשר גם להתקשר ולהקליט, וההקלטות מופיעות כאן.</div>
+      <div id="plStep1">
+        <div class="field"><label for="plPhone">מספר הטלפון</label><input class="input" id="plPhone" inputmode="tel" dir="ltr" placeholder="0501234567" maxlength="14"></div>
+        <button class="btn btn-secondary btn-block" id="plStart">{{ ic('phone', 16) }} אימות בשיחה</button>
+      </div>
+      <div id="plStep2" class="hidden">
+        <ol class="pl-steps">
+          <li>התקשרו עכשיו <b>מהמספר <span dir="ltr" id="plNum"></span></b> ל-<b dir="ltr">03-3131795</b></li>
+          <li>תשמעו "התקבלה בקשה לצרף את המספר לחשבון"</li>
+          <li>הקישו <b>1</b> לאישור</li>
+        </ol>
+        <div class="pl-wait" id="plWait"><span class="spinner-ring"></span> ממתינים לשיחה... (הבקשה בתוקף 30 דקות)</div>
+        <button class="btn btn-secondary btn-sm" id="plCancel" type="button">ביטול / מספר אחר</button>
+      </div>
+      {% else %}
+      <p class="hint">לצירוף מספר טלפון לחשבון - כתבו לנו בצור קשר.</p>
+      {% endif %}
     </div>
     <div class="card">
       <div class="card-head"><span class="ic">{{ ic('mail') }}</span><h3>כתובת מייל</h3></div>
@@ -96,11 +120,12 @@
 <section class="sec" data-sec="security">
   <div class="grid grid-2 mb-18" style="align-items:start;">
     <div class="card">
-      <div class="card-head"><span class="ic">{{ ic('lock') }}</span><h3>החלפת סיסמה</h3></div>
-      <div class="field"><label for="pwCur">הסיסמה הנוכחית</label><input class="input" type="password" id="pwCur" autocomplete="current-password"></div>
+      <div class="card-head"><span class="ic">{{ ic('lock') }}</span><h3>{{ 'החלפת סיסמה' if acc.password_hash else 'הגדרת סיסמה' }}</h3></div>
+      {% if acc.password_hash %}<div class="field"><label for="pwCur">הסיסמה הנוכחית</label><input class="input" type="password" id="pwCur" autocomplete="current-password"></div>
+      {% else %}<p class="hint" style="margin-top:0;">נרשמתם עם Google. אפשר להגדיר גם סיסמה, כדי להיכנס גם עם מייל וסיסמה.</p><input type="hidden" id="pwCur" value="">{% endif %}
       <div class="field"><label for="pwNew">סיסמה חדשה</label><input class="input" type="password" id="pwNew" autocomplete="new-password"></div>
       <div class="field"><label for="pwNew2">שוב, לאימות</label><input class="input" type="password" id="pwNew2" autocomplete="new-password"></div>
-      <button class="btn btn-block" id="pwSave">החלפת סיסמה</button>
+      <button class="btn btn-block" id="pwSave">{{ 'החלפת סיסמה' if acc.password_hash else 'שמירת סיסמה' }}</button>
       <p class="hint">8 תווים לפחות, אותיות וספרות. אחרי ההחלפה כל שאר המכשירים מתנתקים.</p>
     </div>
     <div class="card">
@@ -232,6 +257,30 @@
     $('mailStep2').classList.add('hidden'); $('mailStep1').classList.remove('hidden'); toast(d.message);
   });
   $('mailBack').onclick = function () { $('mailStep2').classList.add('hidden'); $('mailStep1').classList.remove('hidden'); };
+
+  if ($('plStart')) {
+    var plTimer = null, plId = null;
+    var plStop = function () { clearInterval(plTimer); plTimer = null; };
+    $('plStart').onclick = busy($('plStart'), async function () {
+      var d = await post('/my/settings/phone-link', { phone: $('plPhone').value });
+      plId = d.id; $('plNum').textContent = d.phone;
+      $('plStep1').classList.add('hidden'); $('plStep2').classList.remove('hidden');
+      var w = $('plWait'); w.className = 'pl-wait'; w.innerHTML = '<span class="spinner-ring"></span> ממתינים לשיחה... (הבקשה בתוקף ' + d.minutes + ' דקות)';
+      plStop();
+      plTimer = setInterval(async function () {
+        try {
+          var s = await (await fetch('/my/settings/phone-link/' + plId)).json();
+          if (s.status === 'pending') return;
+          plStop();
+          var msg = { done: 'המספר צורף לחשבון בהצלחה!', conflict: 'המספר הזה כבר רשום אצלנו לחשבון אחר, ולכן לא צורף. אם זה החשבון שלכם או שיש טעות - כתבו לנו בצור קשר ונסדר.',
+                      rejected: 'הבקשה נדחתה בשיחה (הוקש 2).', expired: 'עברו 30 דקות והבקשה פגה. אפשר לנסות שוב.' }[s.status] || 'הבקשה הסתיימה';
+          w.className = 'pl-wait ' + (s.status === 'done' ? 'ok' : 'bad'); w.textContent = msg;
+          if (s.status === 'done') $('phonesNow').textContent = s.phones.join(', ');
+        } catch (e) {}
+      }, 4000);
+    });
+    $('plCancel').onclick = function () { plStop(); $('plStep2').classList.add('hidden'); $('plStep1').classList.remove('hidden'); };
+  }
 
   $('pwSave').onclick = busy($('pwSave'), async function () {
     var d = await post('/my/settings/password', { current: $('pwCur').value, password: $('pwNew').value, password2: $('pwNew2').value });

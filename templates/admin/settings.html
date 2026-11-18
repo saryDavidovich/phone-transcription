@@ -305,9 +305,22 @@
       </select></div>
     <label style="display:flex;gap:8px;align-items:center;cursor:pointer;font-weight:600;padding-bottom:8px">
       <input type="checkbox" name="signup" value="1" {{ 'checked' if portal.signup }}> לקוחות חדשים יכולים להירשם בעצמם באתר</label>
+    <label style="display:flex;gap:8px;align-items:center;cursor:pointer;font-weight:600;padding-bottom:8px">
+      <input type="checkbox" name="phone_link" value="1" {{ 'checked' if portal.phone_link }}> אימות טלפון בשיחה (צירוף מספר לחשבון בהקשה על 1)</label>
+    <label style="display:flex;gap:8px;align-items:center;cursor:pointer;font-weight:600;padding-bottom:8px">
+      <input type="checkbox" name="auto_topup" value="1" {{ 'checked' if portal.auto_topup }}> טעינה אוטומטית (כרטיס שמור בנדרים)</label>
+    <div><label class="form-label">קבלה לטעינה שאין לה קבלה</label>
+      <select class="form-input" name="receipt_type" style="width:auto">
+        <option value="" {{ 'selected' if not portal.receipt_type }}>לא להפיק - רק להציג קבלה קיימת</option>
+        <option value="400" {{ 'selected' if portal.receipt_type == '400' }}>להפיק קבלה רגילה (400)</option>
+        <option value="320" {{ 'selected' if portal.receipt_type == '320' }}>להפיק חשבונית מס קבלה (320)</option>
+        <option value="405" {{ 'selected' if portal.receipt_type == '405' }}>להפיק קבלת תרומה (405)</option>
+      </select></div>
     <button class="btn btn-primary" type="submit">💾 שמירה</button>
   </form>
-  <div style="font-size:12.5px;margin-top:10px;color:var(--text2)">{{ portal.active }} לקוחות כבר הגדירו סיסמה. סימון לקוח - בכרטיס הלקוח, בחלק "האזור האישי".</div>
+  <div style="font-size:12.5px;margin-top:10px;color:var(--text2);line-height:1.7">{{ portal.active }} לקוחות כבר הגדירו סיסמה. סימון לקוח - בכרטיס הלקוח, בחלק "האזור האישי".<br>
+    אימות טלפון בשיחה דורש גם את העדכון של שרת הטלפוניה. הטלפון שלך (0527134491) תמיד יכול לנסות.
+    טעינה אוטומטית וקבלות משתמשות במפתח ה-API של נדרים (NEDARIM_API_KEY, מתחיל ב-npk_).</div>
 </div>
 
 <div class="card" style="margin-top:24px" id="slow-pages">

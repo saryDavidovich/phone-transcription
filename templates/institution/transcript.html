@@ -87,9 +87,10 @@ mark.hit.cur { background:#f59e0b; color:#fff; }
       </div>
     </div>
     <div class="tr-actions">
-      <button type="button" class="btn btn-secondary" id="editBtn" onclick="editStart()">{{ ic('edit', 16) }} עריכה</button>
+      <a class="btn" href="{{ P }}/t/{{ kind }}/{{ obj.id }}/editor" title="עורך מלא בסגנון Word: עיצוב, כותרות, טבלאות, הכתבה וחותמות זמן">{{ ic('file-text', 16) }} עורך Word</a>
+      <button type="button" class="btn btn-secondary" id="editBtn" onclick="editStart()">{{ ic('edit', 16) }} עריכה מהירה</button>
       <button type="button" class="btn btn-secondary" onclick="copyText(this)">{{ ic('copy', 16) }} העתקה</button>
-      <a class="btn" href="{{ P }}/t/{{ kind }}/{{ obj.id }}/download">{{ ic('download', 16) }} הורדת Word</a>
+      <a class="btn btn-secondary" href="{{ P }}/t/{{ kind }}/{{ obj.id }}/download">{{ ic('download', 16) }} הורדת Word</a>
     </div>
   </div>
 
@@ -128,6 +129,7 @@ mark.hit.cur { background:#f59e0b; color:#fff; }
     </div>
     <div class="tx" id="tx"></div>
     <div class="hidden" id="editWrap">
+      {% if obj.transcript_html %}<div class="hint" style="margin:0 0 8px; color:var(--amber, #b45309);">שימו לב: שמירה בעריכה המהירה תבטל את העיצוב שנעשה בעורך Word (כותרות, צבעים, טבלאות).</div>{% endif %}
       <textarea class="tx-edit" id="editArea" spellcheck="true"></textarea>
       <div class="edit-bar">
         <button type="button" class="btn" id="saveBtn" onclick="editSave()">{{ ic('save', 16) }} שמירה</button>

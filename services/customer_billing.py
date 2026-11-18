@@ -3,31 +3,51 @@
 נדרים שולחים שני עדכונים על אותה עסקה, בסדר לא מובטח: ה-CallBack של העסקה וה-Webhook של המוסד
 (routes/payment.py). שניהם מגיעים לכאן, ונעילת שורה על רשומת החיוב מבטיחה זיכוי אחד בלבד."""
 import logging
+import re
 import threading
 
 log = logging.getLogger(__name__)
 
 
+MARKER_RE = re.compile(r'TP-(\d{1,10})\b')
+
+
+def marker(charge_id):
+    """נכתב בהערות העסקה בנדרים - כך ה-Webhook של המוסד מזהה את רשומת החיוב (אין בו Param2)."""
+    return f'TP-{charge_id}'
+
+
 def credit_charge(charge_id, data, source):
-    """מזכה את הלקוח לפי רשומת החיוב (אם עוד לא זוכה). data = גוף העדכון מנדרים."""
+    """מזכה את הלקוח לפי רשומת החיוב (אם עוד לא זוכה). data = גוף העדכון מנדרים.
+    source: 'callback' (CallBack של העסקה: TransactionId = מזהה ההקמה, ID = מזהה ההסטוריה),
+            'webhook' (Webhook המוסד: TransactionId = מזהה ההסטוריה), 'auto' (תשובת חיוב בודד: TransactionId = הסטוריה)."""
     from app import db
     from models import CustomerChargeLog, Customer, Transaction
     charge = CustomerChargeLog.query.filter_by(id=charge_id).populate_existing().with_for_update().first()
     if not charge:
         return 'not_found'
+    receipt = str(data.get('ReceiptData') or '').strip()
     if charge.status == 'success':
-        db.session.rollback()
+        if receipt.startswith('https://') and not charge.receipt_url:
+            charge.receipt_url = receipt[:500]
+            db.session.commit()
+        else:
+            db.session.rollback()
         return 'already'
     if str(data.get('Status') or '').upper() != 'OK':
-        if charge.status == 'pending' and source == 'callback':
+        if charge.status == 'pending' and source in ('callback', 'auto'):
             charge.status = 'failed'
         db.session.commit()
         return 'not_ok'
-    tx_id = str(data.get('TransactionId') or data.get('ID') or '').strip()
-    if charge.provider_ref and tx_id and str(charge.provider_ref) != tx_id:
-        db.session.rollback()
-        log.warning(f'customer charge {charge_id}: TransactionId mismatch ({tx_id} != {charge.provider_ref})')
-        return 'mismatch'
+    if source == 'callback':
+        created = str(data.get('TransactionId') or '').strip()
+        hist = str(data.get('ID') or '').strip()
+        if charge.kind != 'auto' and charge.provider_ref and created and str(charge.provider_ref) != created:
+            db.session.rollback()
+            log.warning(f'customer charge {charge_id}: TransactionId mismatch ({created} != {charge.provider_ref})')
+            return 'mismatch'
+    else:
+        hist = str(data.get('TransactionId') or data.get('ID') or '').strip()
     try:
         amt = data.get('Amount')
         if amt not in (None, '') and abs(float(str(amt).replace(',', '')) - float(charge.amount)) > 0.01:
@@ -45,19 +65,82 @@ def credit_charge(charge_id, data, source):
     total = round(charge.amount + bonus, 2)
     c.balance = round((c.balance or 0) + total, 2)
     charge.status = 'success'
-    if tx_id and not charge.provider_ref:
-        charge.provider_ref = tx_id
-    desc = f'טעינת יתרה באשראי (האזור האישי) ₪{charge.amount:.2f}'
+    if hist:
+        charge.history_id = hist[:64]
+    if receipt.startswith('https://'):
+        charge.receipt_url = receipt[:500]
+    what = 'טעינה אוטומטית' if charge.kind == 'auto' else 'טעינת יתרה באשראי (האזור האישי)'
+    desc = f'{what} ₪{charge.amount:.2f}'
     if bonus > 0:
         desc += f' + בונוס ₪{bonus:.2f} = סה"כ ₪{total:.2f}'
     if data.get('Confirmation'):
         desc += f' | אישור: {data.get("Confirmation")}'
-    desc += f' [נדרים:{tx_id or charge.provider_ref}]'
+    # [נדרים:<הסטוריה>] - אותו תיוג שה-Webhook בודק למניעת זיכוי כפול
+    desc += f' [נדרים:{hist or charge.provider_ref}]'
+    if charge.provider_ref and hist and str(charge.provider_ref) != hist:
+        desc += f' [הקמה:{charge.provider_ref}]'
     db.session.add(Transaction(customer_id=c.id, amount=total, type='charge', description=desc))
     db.session.commit()
     log.info(f'customer {c.id} topped up +{total} (charge {charge_id}, via {source})')
     _release_pending(c.id)
     return 'credited'
+
+
+# --------------------------------------------------------------------------- קבלות
+TAMAL_URL = 'https://matara.pro/nedarimplus/Reports/Tamal3.aspx'
+_TAG_RE = re.compile(r'\[נדרים:([^\]]+)\]')
+
+
+def receipt_url(tx):
+    """קישור לקבלה של טעינה (Transaction של הלקוח). (url, None) או (None, הסבר)."""
+    import requests
+    from app import db
+    from models import CustomerChargeLog, Settings
+    from services.nedarim_messages import _credentials
+    m = _TAG_RE.search(tx.description or '')
+    if not m or (tx.amount or 0) <= 0:
+        return None, 'לטעינה הזו אין קבלה במערכת (למשל זיכוי ידני או בונוס)'
+    ref = m.group(1).strip()
+    charge = (CustomerChargeLog.query.filter_by(customer_id=tx.customer_id, history_id=ref).first()
+              or CustomerChargeLog.query.filter_by(customer_id=tx.customer_id, provider_ref=ref).first())
+    if charge and charge.receipt_url:
+        return charge.receipt_url, None
+    hist = (charge.history_id if charge and charge.history_id else ref)
+    mosad, key = _credentials()
+    if not mosad or not key:
+        return None, 'הפקת קבלות עוד לא הוגדרה. כתבו לנו ונשלח את הקבלה'
+
+    def show():
+        r = requests.get(TAMAL_URL, params={'Action': 'ShowInvoice', 'MosadId': mosad, 'ApiPassword': key,
+                                            'TransactionId': hist}, timeout=20)
+        try:
+            d = r.json()
+        except ValueError:
+            return None, (r.text or '')[:200]
+        if str(d.get('Result')) == 'OK' and str(d.get('Message') or '').startswith('http'):
+            return d['Message'], None
+        return None, str(d.get('Message') or '')[:200]
+
+    try:
+        url, err = show()
+        if not url:
+            row = Settings.query.filter_by(key='nedarim_receipt_type').first()
+            kind = row.value if row and row.value in ('400', '320', '405') else ''
+            if kind:
+                r = requests.get(TAMAL_URL, params={'Action': 'TamalCreate', 'MosadId': mosad, 'ApiPassword': key,
+                                                    'TransactionId': hist, 'TamalType': kind}, timeout=30)
+                log.info(f'receipt create for {hist}: {(r.text or "")[:120]}')
+                url, err = show()
+    except Exception as e:
+        log.warning(f'receipt for {hist} failed: {e}')
+        return None, 'לא הצלחנו להגיע לשרת הקבלות כרגע. נסו שוב בעוד כמה דקות'
+    if not url:
+        log.info(f'receipt for {hist}: {err}')
+        return None, 'הקבלה לטעינה הזו עוד לא הופקה. כתבו לנו ונשלח אותה'
+    if charge:
+        charge.receipt_url = url[:500]
+        db.session.commit()
+    return url, None
 
 
 def _release_pending(customer_id):

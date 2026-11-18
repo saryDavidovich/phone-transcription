@@ -71,7 +71,32 @@ def get_customer(phone):
         # מבצע דקות חינם: כמה שניות תמלול רגיל חינם נשארו היום (0 = אין מבצע עבורו)
         'promo_free_left': _promo_left(customer),
         'promo_needs_balance': __import__('services.pricing', fromlist=['x']).promo_settings()['needs_balance'],
+        # בקשה מהאזור האישי לצרף את המספר הזה לחשבון - ה-IVR מכריז ומבקש הקשה על 1 (services/phone_link.py)
+        'phone_link': _phone_link_info(phone),
     })
+
+
+def _phone_link_info(phone):
+    try:
+        from services import phone_link as PL
+        req = PL.pending_for_phone(phone)
+        return {'id': req.id} if req else None
+    except Exception:
+        db.session.rollback()
+        return None
+
+
+@api_bp.route('/phone-link/confirm', methods=['POST'])
+def phone_link_confirm():
+    """מה-IVR: המתקשר הקיש 1 (אישור) או 2 (דחייה) על בקשת צירוף המספר לחשבון באתר."""
+    from services import phone_link as PL
+    data = request.get_json(silent=True) or request.form or {}
+    try:
+        req_id = int(data.get('id') or 0)
+    except (TypeError, ValueError):
+        req_id = 0
+    res = PL.confirm(data.get('phone') or '', req_id, accept=str(data.get('accept', '1')) == '1')
+    return jsonify({'result': res})
 
 
 def _promo_left(customer):

@@ -313,7 +313,7 @@ def _same_origin():
 # נקודות /api שיש להן אימות משלהן / ציבוריות בכוונה (לא נעולות במפתח ה-IVR)
 API_KEY_EXEMPT_PREFIXES = (
     '/api/alefbot-webhook', '/api/fax-delivery-webhook', '/api/email-inbound',
-    '/api/recordings-email/', '/api/email-choice/', '/api/nedarim/callback/', '/api/nedarim/customer-callback/',
+    '/api/recordings-email/', '/api/email-choice/', '/api/nedarim/callback/', '/api/nedarim/customer-callback/', '/api/nedarim/autotopup-callback/',
     '/api/github-push',          # חתום בנפרד (GITHUB_WEBHOOK_SECRET)
 )
 

@@ -245,6 +245,20 @@ def nedarim_callback(charge_id):
 
 
 # ----------------------------------------------------------------------------- לקוח פרטי (האזור האישי)
+@institution_billing_bp.route('/api/nedarim/autotopup-callback/<token>', methods=['POST'])
+def nedarim_autotopup_callback(token):
+    """CallBack של הקמת "כרטיס שמור" לטעינה אוטומטית (services/auto_topup). רק מכתובות נדרים."""
+    from services.security import nedarim_request_ok
+    if not nedarim_request_ok(NEDARIM_CALLBACK_IPS, _client_ip()):
+        log.warning(f'Nedarim autotopup callback REJECTED - unexpected IP: {_client_ip()}')
+        return jsonify({'ok': False, 'error': 'forbidden'}), 403
+    data = request.get_json(force=True, silent=True) or request.form.to_dict() or {}
+    from services import auto_topup as ATU
+    res = ATU.setup_callback(token[:64], data)
+    log.info(f'Nedarim autotopup callback -> {res}')
+    return jsonify({'ok': True})
+
+
 @institution_billing_bp.route('/api/nedarim/customer-callback/<int:charge_id>', methods=['POST'])
 def nedarim_customer_callback(charge_id):
     """CallBack של עסקת אייפרם שלקוח פרטי פתח באזור האישי (routes/customer_portal.billing_topup).

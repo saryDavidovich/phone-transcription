@@ -57,7 +57,7 @@
     </a>
     <p class="hint" style="text-align:center;">Google עובד אחרי שקישרתם אותו בהגדרות ← אבטחה</p>
     {% endif %}
-    {% if signup_on %}<div class="auth-alt">עוד אין לכם חשבון? <a href="{{ url_for('customer.signup') }}">הרשמה חינם</a></div>{% endif %}
+    {% if signup_on %}<div class="auth-alt"><a class="btn btn-secondary btn-block" href="{{ url_for('customer.signup') }}">הרשמה</a></div>{% endif %}
     {% endif %}
   </div>
   <p class="auth-note">{{ ic('lock', 13) }} חיבור מוצפן. ממכשיר חדש תמיד נדרש גם קוד למייל.</p>

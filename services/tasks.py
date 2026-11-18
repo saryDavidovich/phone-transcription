@@ -416,11 +416,14 @@ def run_due(now=None):
 def _loop(app):
     time.sleep(45)
     while True:
-        for job in ('tasks', 'admin', 'institutions'):
+        for job in ('tasks', 'admin', 'institutions', 'autotopup'):
             try:
                 with app.app_context():
                     if job == 'tasks':
                         run_due()
+                    elif job == 'autotopup':                # טעינה אוטומטית ללקוחות פרטיים (services/auto_topup)
+                        from services import auto_topup as ATU
+                        ATU.run_due()
                     elif job == 'admin':                    # משימות המנהל: צינתוק + דוח שבועי
                         from services import admin_tasks as AT
                         AT.run_notify()

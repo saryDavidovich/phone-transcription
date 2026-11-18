@@ -164,8 +164,8 @@ def _ser(kind, obj, student=None, groups=None, snippet=None):
         'src': (obj.source or 'file') if kind == 'u' else ('phone' if not obj.source_filename else 'file'),
     }
     if state == 'done':
-        item['view'] = f'/institution/t/{kind}/{obj.id}'
-        item['word'] = f'/institution/t/{kind}/{obj.id}/download'
+        item['view'] = f'{_P()}/t/{kind}/{obj.id}'
+        item['word'] = f'{_P()}/t/{kind}/{obj.id}/download'
     if snippet:
         item['snip'] = snippet
     return item
@@ -190,6 +190,8 @@ def _collect(args, with_text=False, limit=500):
     scope = args.get('scope') or 'all'          # all / students / inst
     only_done = args.get('done') == '1'
     ids = set(x for x in (args.get('ids') or '').split(',') if x)
+    meta_keys = _meta_filter_ids(args.get('folder') or '', (args.get('tag') or '').strip())
+    no_folder = args.get('folder') == 'none'
 
     groups = {g.id: g.name for g in _groups_q()}
     out = []
@@ -201,7 +203,8 @@ def _collect(args, with_text=False, limit=500):
               .filter(_own())
               .options(defer(Recording.file_data), defer(Recording.excel_file)))
         if not with_text and not q:
-            rq = rq.options(defer(Recording.transcript), defer(Recording.transcript_original), defer(Recording.summary))
+            rq = rq.options(defer(Recording.transcript), defer(Recording.transcript_original), defer(Recording.summary),
+                           defer(Recording.transcript_html))
         if d_from:
             rq = rq.filter(Recording.created_at >= _utc(d_from))
         if d_to:
@@ -218,6 +221,8 @@ def _collect(args, with_text=False, limit=500):
             like = f'%{q}%'
             rq = rq.filter(or_(Customer.name.ilike(like), Recording.source_filename.ilike(like),
                                Recording.transcript.ilike(like)))
+        if meta_keys is not None and not no_folder:
+            rq = rq.filter(Recording.id.in_([i for k, i in meta_keys if k == 'r'] or [-1]))
         rq = rq.filter(Recording.status.notin_(('cancelled', 'too_short', 'recording')))
         for r, c in rq.order_by(Recording.created_at.desc()).limit(limit).all():
             if ids and f'r{r.id}' not in ids:
@@ -237,16 +242,192 @@ def _collect(args, with_text=False, limit=500):
         if q:
             like = f'%{q}%'
             uq = uq.filter(or_(InstitutionUpload.original_filename.ilike(like), InstitutionUpload.transcript.ilike(like)))
+        if meta_keys is not None and not no_folder:
+            uq = uq.filter(InstitutionUpload.id.in_([i for k, i in meta_keys if k == 'u'] or [-1]))
         for u in uq.order_by(InstitutionUpload.created_at.desc()).limit(limit).all():
             if ids and f'u{u.id}' not in ids:
                 continue
             out.append(('u', u, None))
 
     out.sort(key=lambda t: t[1].created_at or datetime.min, reverse=True)
+    metas = _metas_for([(k, o.id) for k, o, _s in out])
+    if no_folder:      # "בלי תיקייה" (אפשר יחד עם תגית)
+        tag = (args.get('tag') or '').strip()
+        out = [t for t in out if not (metas.get((t[0], t[1].id)) and metas[(t[0], t[1].id)].folder_id)
+               and (not tag or tag in ((metas.get((t[0], t[1].id)).tags or []) if metas.get((t[0], t[1].id)) else []))]
     total = len(out)
     out = out[:limit]
-    items = [_ser(k, o, s, groups, _snippet(o.transcript, q) if q else None) for k, o, s in out]
+    items = []
+    for k, o, s in out:
+        it = _ser(k, o, s, groups, _snippet(o.transcript, q) if q else None)
+        m = metas.get((k, o.id))
+        if m:
+            it['folder'] = m.folder_id
+            it['tags'] = m.tags or []
+        items.append(it)
     return items, total, out
+
+
+# ------------------------------------------------------------------ תיקיות ותגיות
+def _owner():
+    return ('c' if _is_cust() else 'i', current_user.id)
+
+
+def _metas_for(keys):
+    """{(kind, id): TranscriptMeta} לרשימת פריטים."""
+    from models import TranscriptMeta
+    ot, oid = _owner()
+    if not keys:
+        return {}
+    out = {}
+    for kind in ('r', 'u'):
+        ids = [i for k, i in keys if k == kind]
+        for i in range(0, len(ids), 900):
+            for m in TranscriptMeta.query.filter(TranscriptMeta.owner_type == ot, TranscriptMeta.owner_id == oid,
+                                                 TranscriptMeta.kind == kind,
+                                                 TranscriptMeta.item_id.in_(ids[i:i + 900])).all():
+                out[(m.kind, m.item_id)] = m
+    return out
+
+
+def _meta_filter_ids(folder, tag):
+    """קבוצת (kind, id) שמתאימה לתיקייה / תגית, או None אם אין סינון."""
+    from models import TranscriptMeta
+    if not folder and not tag:
+        return None
+    ot, oid = _owner()
+    q = TranscriptMeta.query.filter_by(owner_type=ot, owner_id=oid)
+    if folder and folder != 'none':
+        try:
+            q = q.filter(TranscriptMeta.folder_id == int(folder))
+        except ValueError:
+            return set()
+    rows = q.all()
+    keys = set()
+    for m in rows:
+        if tag and tag not in (m.tags or []):
+            continue
+        keys.add((m.kind, m.item_id))
+    return keys
+
+
+def _clean_tags(raw):
+    out = []
+    for t in (raw or []):
+        t = ' '.join(str(t).replace(',', ' ').split())[:30].strip('#').strip()
+        t = ''.join(ch for ch in t if ch not in '<>"\'`')
+        if t and t not in out:
+            out.append(t)
+    return out[:12]
+
+
+@institution_portal_bp.route('/institution/folders')
+@institution_login_required
+def folders_list():
+    from models import TranscriptFolder, TranscriptMeta
+    ot, oid = _owner()
+    folders = TranscriptFolder.query.filter_by(owner_type=ot, owner_id=oid).order_by(TranscriptFolder.name).all()
+    counts = dict(db.session.query(TranscriptMeta.folder_id, func.count(TranscriptMeta.id))
+                  .filter(TranscriptMeta.owner_type == ot, TranscriptMeta.owner_id == oid,
+                          TranscriptMeta.folder_id.isnot(None)).group_by(TranscriptMeta.folder_id).all())
+    tags = {}
+    for (tg,) in db.session.query(TranscriptMeta.tags).filter(TranscriptMeta.owner_type == ot,
+                                                              TranscriptMeta.owner_id == oid).all():
+        for t in (tg or []):
+            tags[t] = tags.get(t, 0) + 1
+    return jsonify({'folders': [{'id': f.id, 'name': f.name, 'color': f.color or '', 'n': counts.get(f.id, 0)} for f in folders],
+                    'tags': sorted(({'name': k, 'n': v} for k, v in tags.items()), key=lambda x: (-x['n'], x['name']))})
+
+
+FOLDER_COLORS = ('#6366f1', '#10b981', '#f59e0b', '#ef4444', '#0ea5e9', '#8b5cf6', '#ec4899', '#64748b')
+
+
+@institution_portal_bp.route('/institution/folders', methods=['POST'])
+@institution_login_required
+def folders_save():
+    """יצירה / שינוי שם / מחיקה. מחיקה לא מוחקת תמלולים - רק מוציאה אותם מהתיקייה."""
+    from models import TranscriptFolder, TranscriptMeta
+    ot, oid = _owner()
+    d = request.get_json(silent=True) or {}
+    action = d.get('action')
+    name = ' '.join(str(d.get('name') or '').split())[:80]
+    name = ''.join(ch for ch in name if ch not in '<>"`')
+    if action == 'create':
+        if not name:
+            return jsonify({'error': 'יש לכתוב שם לתיקייה'}), 400
+        if TranscriptFolder.query.filter_by(owner_type=ot, owner_id=oid).count() >= 200:
+            return jsonify({'error': 'אפשר עד 200 תיקיות'}), 400
+        if TranscriptFolder.query.filter(TranscriptFolder.owner_type == ot, TranscriptFolder.owner_id == oid,
+                                         func.lower(TranscriptFolder.name) == name.lower()).first():
+            return jsonify({'error': 'כבר יש תיקייה בשם הזה'}), 400
+        color = d.get('color') if d.get('color') in FOLDER_COLORS else \
+            FOLDER_COLORS[TranscriptFolder.query.filter_by(owner_type=ot, owner_id=oid).count() % len(FOLDER_COLORS)]
+        f = TranscriptFolder(owner_type=ot, owner_id=oid, name=name, color=color)
+        db.session.add(f)
+        db.session.commit()
+        return jsonify({'ok': True, 'id': f.id, 'name': f.name, 'color': f.color})
+    f = TranscriptFolder.query.filter_by(id=d.get('id') or 0, owner_type=ot, owner_id=oid).first()
+    if not f:
+        return jsonify({'error': 'התיקייה לא נמצאה'}), 404
+    if action == 'rename':
+        if not name:
+            return jsonify({'error': 'יש לכתוב שם לתיקייה'}), 400
+        f.name = name
+        if d.get('color') in FOLDER_COLORS:
+            f.color = d['color']
+        db.session.commit()
+        return jsonify({'ok': True})
+    if action == 'delete':
+        TranscriptMeta.query.filter_by(owner_type=ot, owner_id=oid, folder_id=f.id).update({'folder_id': None})
+        db.session.delete(f)
+        db.session.commit()
+        return jsonify({'ok': True})
+    return jsonify({'error': 'פעולה לא מוכרת'}), 400
+
+
+@institution_portal_bp.route('/institution/transcripts/organize', methods=['POST'])
+@institution_login_required
+def transcripts_organize():
+    """העברה לתיקייה ו/או תגיות - לתמלול אחד או לכמה מסומנים.
+    {keys:['r12','u3'], folder: <id>|'none'|null(=בלי שינוי), set_tags:[...]|null, add_tags:[...], remove_tags:[...]}"""
+    from models import TranscriptFolder, TranscriptMeta
+    ot, oid = _owner()
+    d = request.get_json(silent=True) or {}
+    keys = []
+    for k in (d.get('keys') or [])[:MAX_EXPORT]:
+        k = str(k)
+        if len(k) > 1 and k[0] in 'ru' and k[1:].isdigit():
+            keys.append((k[0], int(k[1:])))
+    if not keys:
+        return jsonify({'error': 'לא נבחרו תמלולים'}), 400
+    for kind, iid in keys:           # בעלות - כל פריט חייב להיות של המחובר (אחרת 404)
+        _get(kind, iid)
+    folder = d.get('folder')
+    folder_id = 'keep'
+    if folder == 'none':
+        folder_id = None
+    elif folder not in (None, '', 'keep'):
+        f = TranscriptFolder.query.filter_by(id=int(folder) if str(folder).isdigit() else 0, owner_type=ot, owner_id=oid).first()
+        if not f:
+            return jsonify({'error': 'התיקייה לא נמצאה'}), 404
+        folder_id = f.id
+    set_tags = _clean_tags(d.get('set_tags')) if d.get('set_tags') is not None else None
+    add, rem = _clean_tags(d.get('add_tags')), set(_clean_tags(d.get('remove_tags')))
+    metas = _metas_for(keys)
+    for key in keys:
+        m = metas.get(key)
+        if not m:
+            m = TranscriptMeta(owner_type=ot, owner_id=oid, kind=key[0], item_id=key[1], tags=[])
+            db.session.add(m)
+        if folder_id != 'keep':
+            m.folder_id = folder_id
+        tags = list(set_tags) if set_tags is not None else list(m.tags or [])
+        for t in add:
+            if t not in tags:
+                tags.append(t)
+        m.tags = [t for t in tags if t not in rem][:12]
+    db.session.commit()
+    return jsonify({'ok': True, 'n': len(keys)})
 
 
 # ------------------------------------------------------------------ דף תמלול + נגן
@@ -285,6 +466,7 @@ def transcript_save(kind, item_id):
     if not obj.transcript_original:
         obj.transcript_original = obj.transcript
     obj.transcript = text
+    obj.transcript_html = None          # עריכה בטקסט פשוט מבטלת את העיצוב מעורך ה-Word
     obj.edited_at = datetime.utcnow()
     db.session.commit()
     return jsonify({'ok': True, 'canRevert': True, 'savedAt': _loc(obj.edited_at).strftime('%H:%M')})
@@ -313,6 +495,7 @@ def transcript_revert(kind, item_id):
         return jsonify({'error': 'אין גרסה מקורית לשחזור'}), 400
     obj.transcript = obj.transcript_original
     obj.transcript_original = None
+    obj.transcript_html = None
     obj.edited_at = None
     db.session.commit()
     return jsonify({'ok': True, 'text': obj.transcript})
@@ -328,10 +511,111 @@ def transcript_download(kind, item_id):
     from services import portal_docx as PD
     from routes.download_utils import render_data_uri_download_page
     title = _title(kind, obj, student)
-    data = PD.single(_brand_owner(), title, obj.transcript, _meta(kind, obj, student))
+    data = _docx_of(kind, obj, student)
     return render_data_uri_download_page(
         data, f'תמלול - {PD.safe_name(title)}.docx',
         mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document')
+
+
+def _docx_of(kind, obj, student):
+    """Word של תמלול אחד - מעוצב (מעורך ה-Word באתר) אם יש, אחרת הטקסט."""
+    from services import portal_docx as PD
+    title = _title(kind, obj, student)
+    meta = _meta(kind, obj, student)
+    if getattr(obj, 'transcript_html', None):
+        from services import html_docx as HD
+        try:
+            base = PD.single(_brand_owner(), title, HD_MARK, meta)
+            return HD.build_docx(base, obj.transcript_html, HD_MARK)
+        except Exception:
+            log.exception('editor docx failed - falling back to text')
+    return PD.single(_brand_owner(), title, obj.transcript, meta)
+
+
+HD_MARK = '@@HTMLBODY@@'
+
+
+# ------------------------------------------------------------------ עורך Word
+@institution_portal_bp.route('/institution/t/<kind>/<int:item_id>/editor')
+@institution_login_required
+def transcript_editor(kind, item_id):
+    from services import html_docx as HD
+    obj, student = _get(kind, item_id)
+    state = _up_state(obj) if kind == 'u' else _rec_state(obj)
+    if state != 'done' or not obj.transcript:
+        flash('התמלול עדיין לא מוכן')
+        return redirect(_P() + '/transcripts')
+    return render_template('institution/editor.html', kind=kind, obj=obj, title=_title(kind, obj, student),
+                           meta=_meta(kind, obj, student), html=obj.transcript_html or HD.text_to_html(obj.transcript),
+                           back=f'{_P()}/t/{kind}/{obj.id}', duration=obj.duration_seconds or 0,
+                           can_revert=bool(obj.transcript_original), P=_P())
+
+
+@institution_portal_bp.route('/institution/t/<kind>/<int:item_id>/editor/save', methods=['POST'])
+@institution_login_required
+def transcript_editor_save(kind, item_id):
+    from services import html_docx as HD
+    obj, _student = _get(kind, item_id)
+    raw = (request.get_json(silent=True) or {}).get('html') or ''
+    if len(raw) > HD.MAX_HTML:
+        return jsonify({'error': 'המסמך גדול מדי'}), 400
+    clean = HD.sanitize(raw)
+    text = HD.to_text(clean)
+    if not text.strip():
+        return jsonify({'error': 'אי אפשר לשמור מסמך ריק'}), 400
+    if clean == (obj.transcript_html or '') and text == (obj.transcript or '').strip():
+        return jsonify({'ok': True, 'unchanged': True})
+    if not obj.transcript_original:
+        obj.transcript_original = obj.transcript
+    obj.transcript = text
+    obj.transcript_html = clean
+    obj.edited_at = datetime.utcnow()
+    db.session.commit()
+    return jsonify({'ok': True, 'savedAt': _loc(obj.edited_at).strftime('%H:%M'), 'words': len(text.split())})
+
+
+@institution_portal_bp.route('/institution/dictate', methods=['POST'])
+@institution_login_required
+def dictate():
+    """הכתבה בעורך: הקלטה קצרה מהמיקרופון -> טקסט (Gemini). עד דקה וחצי, 60 בשעה."""
+    from services import security as sec
+    rk = f'dictate:{current_user.get_id()}'
+    if sec.hits_blocked(rk, 60, 3600):
+        return jsonify({'error': 'הגעתם למגבלת ההכתבות לשעה. נסו שוב מאוחר יותר'}), 429
+    f = request.files.get('audio')
+    if not f:
+        return jsonify({'error': 'לא התקבלה הקלטה'}), 400
+    data = f.read(6 * 1024 * 1024 + 1)
+    if len(data) > 6 * 1024 * 1024:
+        return jsonify({'error': 'ההקלטה ארוכה מדי - עד דקה וחצי בכל פעם'}), 400
+    if len(data) < 800:
+        return jsonify({'text': ''})
+    sec.hits_add(rk)
+    mime = (f.mimetype or 'audio/webm').split(';')[0]
+    if mime not in ('audio/webm', 'audio/ogg', 'audio/mp4', 'audio/mpeg', 'audio/wav', 'audio/x-wav', 'audio/aac'):
+        mime = 'audio/webm'
+    try:
+        from google import genai
+        from google.genai import types as gtypes
+        client = genai.Client(api_key=os.environ.get('GOOGLE_API_KEY'))
+        resp = client.models.generate_content(
+            model='gemini-3.5-flash',
+            contents=[gtypes.Part.from_bytes(data=data, mime_type=mime)],
+            config=gtypes.GenerateContentConfig(
+                system_instruction=('You transcribe short dictation for a Hebrew document editor. Output ONLY the words '
+                                    'that were spoken, verbatim, in Hebrew script with normal punctuation. Spoken '
+                                    'punctuation commands ("נקודה", "פסיק", "סימן שאלה", "שורה חדשה") become the '
+                                    'punctuation mark / a line break. No commentary, no quotes, no English. '
+                                    'If nothing was said, output nothing.'),
+                temperature=0, thinking_config=gtypes.ThinkingConfig(thinking_budget=0)))
+        text = (resp.text or '').strip().strip('"').strip()
+    except Exception:
+        log.exception('dictate failed')
+        return jsonify({'error': 'ההכתבה לא הצליחה כרגע. נסו שוב'}), 502
+    from services.transcribe_v2 import latin_ratio
+    if latin_ratio(text) > 0.3:
+        text = ''
+    return jsonify({'text': text[:5000]})
 
 
 # ------------------------------------------------------------------ שמע (מימות)

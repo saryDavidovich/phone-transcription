@@ -128,7 +128,7 @@ def _finish_login(c, method, trust=True):
     CA.clear_fails(acc)
     acc.last_login_at = datetime.utcnow()
     new_device = CA.device_trusted(c) is None
-    must_pw = not acc.password_hash
+    must_pw = not acc.password_hash and not acc.google_id     # נרשם עם Google - נכנס עם Google, בלי סיסמה
     db.session.commit()
     session.clear()
     login_user(c)
@@ -286,19 +286,72 @@ def _signup_on():
 def _signup_hash(email, code):
     import hmac as _h
     import hashlib as _hl
-    key = (os.environ.get('SECRET_KEY') or '') + '|' + str(customer_bp.root_path)
     from flask import current_app
-    return _h.new((current_app.secret_key or key).encode(), f'cust-signup|{email}|{code}'.encode(), _hl.sha256).hexdigest()
+    return _h.new((current_app.secret_key or '').encode(), f'cust-signup|{email}|{code}'.encode(), _hl.sha256).hexdigest()
 
 
 _EMAIL_RE = re.compile(r'^[^@\s<>"\'`]{1,64}@[A-Za-z0-9.-]{1,180}\.[A-Za-z]{2,24}$')
 
+MSG_EMAIL_HAS_ACCOUNT = ('כתובת המייל הזו כבר רשומה אצלנו, יש לה חשבון קיים. אין צורך להירשם שוב: '
+                         'בדף הכניסה בחרו "כניסה ראשונה / שכחתי סיסמה" ונשלח לכם קוד למייל הזה.')
+MSG_EMAIL_TAKEN = ('כתובת המייל הזו כבר רשומה אצלנו על שם משתמש אחר (למשל תלמיד של מוסד), ולכן אי אפשר '
+                   'לפתוח איתה חשבון חדש. אפשר להירשם עם כתובת מייל אחרת, או לכתוב לנו ונסדר את זה.')
+
+
+def _email_status(email):
+    """None - פנוי; אחרת הסבר ברור למה אי אפשר להירשם איתו."""
+    from sqlalchemy import func
+    rows = Customer.query.filter(func.lower(func.trim(Customer.email)) == email).limit(3).all()
+    if not rows:
+        return None
+    if len(rows) == 1 and CA.is_private_customer(rows[0]) and not rows[0].is_blocked:
+        return MSG_EMAIL_HAS_ACCOUNT
+    return MSG_EMAIL_TAKEN
+
+
+def _create_signup_customer(email, pw_hash=None, google_id=None, google_email=None):
+    c = Customer(name=email, email=email, balance=0.0, delivery_method='email', transcription_tier='basic')
+    db.session.add(c)
+    db.session.flush()
+    acc = CA.account_for(c)
+    acc.enabled = True
+    acc.password_hash = pw_hash
+    acc.google_id = google_id
+    acc.google_email = google_email
+    try:
+        from models import ManagerMessage
+        how = 'עם Google' if google_id else 'עם מייל וסיסמה'
+        db.session.add(ManagerMessage(phone='אתר', name=email, email=email, delivery_method='email', status='new',
+                                      source='customer_signup',
+                                      transcript=f'לקוח חדש נרשם באזור האישי באתר {how} (#{c.id}). '
+                                                 'אם ירצה לקשר טלפון - הוא יכול לאמת אותו בעצמו בשיחה למערכת.'))
+    except Exception:
+        log.exception('signup manager message failed')
+    db.session.commit()
+    return c
+
+
+def _google_signup(gid, info):
+    email = (info.get('email') or '').strip().lower()[:200]
+    if not email or not info.get('email_verified', True) or not _EMAIL_RE.match(email):
+        flash('לא קיבלנו מ-Google כתובת מייל מאומתת. אפשר להירשם עם מייל וסיסמה.')
+        return redirect(url_for('customer.signup'))
+    msg = _email_status(email)
+    if msg:
+        flash(msg)
+        return redirect(url_for('customer.signup'))
+    c = _create_signup_customer(email, google_id=gid, google_email=email)
+    if not CA.portal_allowed(c):
+        flash('החשבון נפתח, אבל האזור האישי עוד לא פתוח עבורו. ניצור קשר בהקדם.')
+        return redirect(url_for('customer.login'))
+    flash('ברוכים הבאים! החשבון נפתח.')
+    return _finish_login(c, 'google')
+
 
 @customer_bp.route('/signup', methods=['GET', 'POST'])
 def signup():
-    """לקוח חדש שעוד לא היה רשום: שם + מייל + סיסמה, אימות קוד למייל - וזהו.
-    החשבון נפתח בלי טלפון: לא מקשרים מספר טלפון שלא אומת (אחרת אפשר היה לראות שיחות של אחר).
-    מייל שכבר שייך ללקוח פרטי - האימות פשוט מכניס לחשבון הקיים וקובע לו סיסמה."""
+    """לקוח חדש: מייל + סיסמה (או Google), אימות קוד למייל - וזהו. שם הלקוח = כתובת המייל.
+    החשבון נפתח בלי טלפון; את הטלפון הלקוח מאמת בעצמו בשיחה למערכת (הגדרות ← טלפון)."""
     import secrets
     import time
     from services import security as sec
@@ -308,6 +361,7 @@ def signup():
         flash('ההרשמה דרך האתר סגורה כרגע. לפתיחת חשבון התקשרו או כתבו לנו.')
         return redirect(url_for('customer.login'))
     ip = sec.client_ip()
+    google_on = bool(os.environ.get('GOOGLE_OAUTH_CLIENT_ID'))
     st = session.get('cust_signup') or {}
     if st and time.time() - st.get('ts', 0) > CA.CODE_MINUTES * 60:
         session.pop('cust_signup', None)
@@ -316,13 +370,15 @@ def signup():
         session.pop('cust_signup', None)
         st = {}
 
+    def form_page(form):
+        return render_template('customer/signup.html', stage='form', form=form, t0=time.time(), google_on=google_on)
+
     if request.method == 'POST':
         action = request.form.get('action')
         if action == 'start':
-            name = re.sub(r'[<>"`\\]', '', (request.form.get('name') or '')).strip()[:80]
             email = (request.form.get('email') or '').strip().lower()[:200]
             pw1, pw2 = request.form.get('password') or '', request.form.get('password2') or ''
-            form = {'name': name, 'email': email}
+            form = {'email': email}
             # מלכודת לבוטים: שדה נסתר שבני אדם לא ממלאים, וטופס שנשלח תוך פחות מ-3 שניות
             try:
                 quick = time.time() - float(request.form.get('t0') or 0) < 3
@@ -330,34 +386,21 @@ def signup():
                 quick = True
             if request.form.get('website') or quick:
                 flash('משהו השתבש. נסו שוב.')
-                return render_template('customer/signup.html', stage='form', form=form, t0=time.time())
+                return form_page(form)
             if not _rate('cs-ip:' + ip, 6, 60 * 60):
                 flash('יותר מדי ניסיונות הרשמה. נסו שוב בעוד שעה.')
-                return render_template('customer/signup.html', stage='form', form=form, t0=time.time())
-            err = None
-            if len(name) < 2:
-                err = 'נא לכתוב שם'
-            elif not _EMAIL_RE.match(email):
-                err = 'כתובת המייל לא תקינה'
-            else:
-                err = CA.password_error(pw1, pw2)
+                return form_page(form)
+            err = 'כתובת המייל לא תקינה' if not _EMAIL_RE.match(email) else (_email_status(email) or CA.password_error(pw1, pw2))
             if err:
                 flash(err)
-                return render_template('customer/signup.html', stage='form', form=form, t0=time.time())
-            from sqlalchemy import func
-            rows = Customer.query.filter(func.lower(func.trim(Customer.email)) == email).limit(3).all()
-            privates = [r for r in rows if CA.is_private_customer(r)]
-            if any(not CA.is_private_customer(r) for r in rows) or len(privates) > 1 \
-                    or any(r.is_blocked for r in privates):
-                flash('לא ניתן לפתוח חשבון עם המייל הזה. לעזרה - כתבו לנו או התקשרו.')
-                return render_template('customer/signup.html', stage='form', form=form, t0=time.time())
+                return form_page(form)
             if not _rate('cs-mail:' + email, 3, 60 * 60):
                 flash('נשלחו כבר כמה קודים למייל הזה. נסו שוב בעוד שעה.')
-                return render_template('customer/signup.html', stage='form', form=form, t0=time.time())
+                return form_page(form)
             code = ''.join(secrets.choice('0123456789') for _ in range(6))
-            session['cust_signup'] = {'name': name, 'email': email, 'pw': generate_password_hash(pw1),
+            session['cust_signup'] = {'email': email, 'pw': generate_password_hash(pw1),
                                       'h': _signup_hash(email, code), 'tries': 0, 'ts': time.time()}
-            body = (f'<p style="line-height:1.8">שלום {name},</p>'
+            body = ('<p style="line-height:1.8">שלום,</p>'
                     '<p style="line-height:1.8">כדי לסיים את פתיחת החשבון בתמלול פון, הזינו את הקוד:</p>'
                     + CA.code_block(code) +
                     f'<p style="line-height:1.8">הקוד תקף ל-{CA.CODE_MINUTES} דקות. אם לא נרשמתם - התעלמו מההודעה.</p>')
@@ -382,47 +425,21 @@ def signup():
                 flash('הקוד שגוי')
                 return render_template('customer/signup.html', stage='code', email=_mask_email(st['email']))
             session.pop('cust_signup', None)
-            from sqlalchemy import func
-            rows = Customer.query.filter(func.lower(func.trim(Customer.email)) == st['email']).limit(3).all()
-            privates = [r for r in rows if CA.is_private_customer(r)]
-            if any(not CA.is_private_customer(r) for r in rows) or len(privates) > 1 \
-                    or any(r.is_blocked for r in privates):
-                flash('לא ניתן לפתוח חשבון עם המייל הזה. לעזרה - כתבו לנו או התקשרו.')
+            msg = _email_status(st['email'])
+            if msg:
+                flash(msg)
                 return redirect(url_for('customer.signup'))
-            is_new = not privates
-            c = privates[0] if privates else Customer(name=st['name'], email=st['email'], balance=0.0,
-                                                    delivery_method='email', transcription_tier='basic')
-            if is_new:
-                db.session.add(c)
-                db.session.flush()
-            acc = CA.account_for(c)
-            acc.enabled = True
-            acc.password_hash = st['pw']
-            acc.session_ver = (acc.session_ver or 0) + 1
-            if is_new:
-                try:
-                    from models import ManagerMessage
-                    db.session.add(ManagerMessage(phone='אתר', name=c.name, email=c.email, delivery_method='email',
-                                                  status='new', source='customer_signup', transcript=f'לקוח חדש נרשם דרך האזור האישי באתר (#{c.id}), '
-                                                  'בלי מספר טלפון. לשיוך טלפון - בכרטיס הלקוח.'))
-                except Exception:
-                    log.exception('signup manager message failed')
-            db.session.commit()
+            c = _create_signup_customer(st['email'], pw_hash=st['pw'])
             if not CA.portal_allowed(c):
                 flash('החשבון נפתח, אבל האזור האישי עוד לא פתוח עבורו. ניצור קשר בהקדם.')
                 return redirect(url_for('customer.login'))
             CA.log_login(c, 'signup', True)
-            flash('ברוכים הבאים! החשבון נפתח.' if is_new else 'המייל אומת והסיסמה נקבעה - נכנסתם לחשבון הקיים שלכם.')
+            flash('ברוכים הבאים! החשבון נפתח.')
             return _finish_login(c, 'code')
 
     if st:
         return render_template('customer/signup.html', stage='code', email=_mask_email(st['email']))
-    return render_template('customer/signup.html', stage='form', form={}, t0=time_now())
-
-
-def time_now():
-    import time
-    return time.time()
+    return form_page({})
 
 
 @customer_bp.route('/logout')
@@ -444,7 +461,10 @@ def google_start():
     import secrets
     import urllib.parse
     client_id = os.environ.get('GOOGLE_OAUTH_CLIENT_ID')
-    mode = 'link' if request.args.get('mode') == 'link' else 'login'
+    mode = request.args.get('mode') if request.args.get('mode') in ('link', 'signup') else 'login'
+    if mode == 'signup' and not _signup_on():
+        flash('ההרשמה דרך האתר סגורה כרגע')
+        return redirect(url_for('customer.login'))
     if not client_id:
         flash('כניסה עם Google לא הוגדרה בשרת')
         return redirect(url_for('customer.settings' if mode == 'link' else 'customer.login'))
@@ -502,10 +522,12 @@ def google_callback():
         db.session.commit()
         flash('חשבון Google קושר - מעכשיו אפשר להיכנס גם איתו')
         return redirect(url_for('customer.settings') + '#security')
-    # כניסה: רק לחשבון שקושר מראש מתוך האזור האישי (לא לפי מייל - מונע השתלטות)
+    # כניסה: רק לחשבון שקושר מראש מתוך האזור האישי, או שנפתח בהרשמה עם Google (לא לפי מייל - מונע השתלטות)
     acc = CustomerAccount.query.filter_by(google_id=gid).first() if gid else None
+    if not acc and mode == 'signup' and gid:
+        return _google_signup(gid, info)
     c = Customer.query.get(acc.customer_id) if acc else None
-    if not c or not CA.portal_allowed(c) or not acc.password_hash:
+    if not c or not CA.portal_allowed(c):
         flash('חשבון ה-Google הזה לא מקושר לאזור אישי. היכנסו בסיסמה וקשרו אותו בהגדרות ← אבטחה')
         return redirect(url_for('customer.login'))
     if CA.locked(acc):
@@ -638,6 +660,7 @@ def transcribe_status(rec_id):
 @customer_login_required
 def billing():
     from services import pricing as P
+    from services import auto_topup as ATU
     c = current_user
     tx = Transaction.query.filter_by(customer_id=c.id).order_by(Transaction.created_at.desc()).limit(100).all()
     pend = Recording.query.filter_by(customer_id=c.id, status='pending_payment').all()
@@ -647,7 +670,87 @@ def billing():
                            pending_sum=round(sum((r.cost or 0) for r in pend), 2),
                            unit=P.unit_minutes(c), prices=prices, names=P.KIND_NAMES,
                            nedarim_on=bool(os.environ.get('NEDARIM_MOSAD') and os.environ.get('NEDARIM_API_VALID')),
+                           auto=ATU.get(c), auto_on=ATU.enabled_for(c) and ATU.configured(),
+                           has_receipt=lambda t: (t.amount or 0) > 0 and '[נדרים:' in (t.description or ''),
                            loc=_loc)
+
+
+@customer_bp.route('/billing/receipt/<int:tx_id>')
+@customer_login_required
+def billing_receipt(tx_id):
+    from services import customer_billing as CB
+    tx = Transaction.query.filter_by(id=tx_id, customer_id=current_user.id).first()
+    if not tx:
+        abort(404)
+    if not _rate(f'cu-rcpt:{current_user.id}', 30, 3600):
+        flash('יותר מדי בקשות קבלה בשעה האחרונה. נסו שוב מאוחר יותר')
+        return redirect(url_for('customer.billing'))
+    url, err = CB.receipt_url(tx)
+    if not url:
+        flash(err)
+        return redirect(url_for('customer.billing'))
+    return redirect(url)
+
+
+def _auto_vals(f):
+    import math
+    try:
+        amount, threshold = float(f.get('amount')), float(f.get('threshold'))
+    except (TypeError, ValueError):
+        return None, None, 'ערכים לא תקינים'
+    if not (math.isfinite(amount) and math.isfinite(threshold)) or not 20 <= amount <= 500 or not 0 <= threshold <= 200:
+        return None, None, 'סכום הטעינה: 20 עד 500 ₪. הסף: 0 עד 200 ₪'
+    return round(amount), round(threshold), None
+
+
+@customer_bp.route('/billing/auto/setup', methods=['POST'])
+@customer_login_required
+def billing_auto_setup():
+    """מכין שמירת כרטיס באייפרם (הוראת קבע מוקפאת אצל נדרים). הכרטיס לא מגיע אלינו."""
+    from services import auto_topup as ATU
+    c = current_user
+    if not (ATU.enabled_for(c) and ATU.configured()):
+        return _err('טעינה אוטומטית עוד לא זמינה', 503)
+    if not _rate(f'cu-auto:{c.id}', 6, 3600):
+        return _err('יותר מדי ניסיונות. נסו שוב בעוד שעה', 429)
+    amount, threshold, err = _auto_vals(request.get_json(silent=True) or {})
+    if err:
+        return _err(err)
+    return jsonify({'ok': True, 'tx': ATU.start_setup(c, amount, threshold)})
+
+
+@customer_bp.route('/billing/auto/status')
+@customer_login_required
+def billing_auto_status():
+    from services import auto_topup as ATU
+    a = ATU.get(current_user)
+    return jsonify({'status': a.status if a else 'off', 'last4': a.last4 if a else None})
+
+
+@customer_bp.route('/billing/auto/save', methods=['POST'])
+@customer_login_required
+def billing_auto_save():
+    from services import auto_topup as ATU
+    a = ATU.get(current_user)
+    if not a or not a.keva_id:
+        return _err('אין כרטיס שמור')
+    amount, threshold, err = _auto_vals(request.get_json(silent=True) or {})
+    if err:
+        return _err(err)
+    a.amount, a.threshold = amount, threshold
+    a.enabled = True
+    a.status = 'active'
+    a.fails = 0
+    db.session.commit()
+    return _ok('נשמר')
+
+
+@customer_bp.route('/billing/auto/off', methods=['POST'])
+@customer_login_required
+def billing_auto_off():
+    from services import auto_topup as ATU
+    ATU.disable(current_user)
+    return _ok('הטעינה האוטומטית בוטלה והכרטיס נמחק מנדרים')
 
 
 @customer_bp.route('/billing/topup', methods=['POST'])
@@ -660,6 +763,7 @@ def billing_topup():
     import requests
     from models import CustomerChargeLog
     from routes.institution_billing import NEDARIM_CREATE_URL, NEDARIM_CATEGORY
+    from services import customer_billing as CB
     c = current_user
     mosad, api_valid = os.environ.get('NEDARIM_MOSAD', ''), os.environ.get('NEDARIM_API_VALID', '')
     if not mosad or not api_valid:
@@ -684,9 +788,9 @@ def billing_topup():
     try:
         resp = requests.post(NEDARIM_CREATE_URL, data={
             'Mosad': mosad, 'ApiValid': api_valid, 'PaymentType': 'Ragil', 'Amount': str(amount), 'Currency': '1',
-            'Tashlumim': '1', 'FirstName': clean(c.name) or 'לקוח', 'Mail': clean(c.email),
+            'Tashlumim': '1', 'FirstName': clean(c.name)[:50] or 'לקוח', 'Mail': clean(c.email)[:50],
             'Phone': c.phone if (c.phone or '').isdigit() else '', 'Groupe': NEDARIM_CATEGORY,
-            'Comment': f'טעינת יתרה - האזור האישי, לקוח {c.id}', 'Param2': str(charge.id),
+            'Comment': f'טעינת יתרה - האזור האישי, לקוח {c.id} {CB.marker(charge.id)}', 'Param2': str(charge.id),
             'AjaxId': f'c{charge.id}-{int(time.time())}', 'CallBack': cb,
         }, timeout=15)
         data = resp.json()
@@ -740,6 +844,7 @@ def settings():
     from services.customer_phones import all_phones
     return render_template('customer/settings.html', c=c, acc=acc, d=_defaults(c), devices=devices, logins=logins,
                            cur_dev=cur_dev.id if cur_dev else None, phones=all_phones(c), loc=_loc,
+                           phone_link_on=__import__('services.phone_link', fromlist=['x']).enabled_for(c.phone),
                            google_on=bool(os.environ.get('GOOGLE_OAUTH_CLIENT_ID')),
                            pending_email=acc.code_target if acc.code_purpose == 'email' and acc.code_expires
                            and acc.code_expires > datetime.utcnow() else None)
@@ -854,21 +959,48 @@ def settings_password():
     f = request.get_json(silent=True) or {}
     if CA.locked(acc):
         return _err('החשבון ננעל זמנית. נסו שוב בעוד רבע שעה', 423)
-    if not acc.password_hash or not check_password_hash(acc.password_hash, f.get('current') or ''):
+    first = not acc.password_hash        # נרשם עם Google ועוד לא הגדיר סיסמה - המחובר עצמו קובע
+    if not first and not check_password_hash(acc.password_hash, f.get('current') or ''):
         CA.register_fail(acc)
         db.session.commit()
         return _err('הסיסמה הנוכחית שגויה', 403)
     err = CA.password_error(f.get('password') or '', f.get('password2') or '', c)
     if err:
         return _err(err)
-    if check_password_hash(acc.password_hash, f.get('password') or ''):
+    if not first and check_password_hash(acc.password_hash, f.get('password') or ''):
         return _err('הסיסמה החדשה זהה לנוכחית')
     acc.password_hash = generate_password_hash(f['password'])
     acc.session_ver = (acc.session_ver or 0) + 1
     CA.clear_fails(acc)
     db.session.commit()
     CA.mark_session(c, rotate=False)        # המכשיר הזה נשאר מחובר; כל השאר מתנתקים
-    return _ok('הסיסמה הוחלפה. שאר המכשירים נותקו')
+    return _ok('הסיסמה נשמרה. מעכשיו אפשר להיכנס גם במייל וסיסמה' if first else 'הסיסמה הוחלפה. שאר המכשירים נותקו')
+
+
+@customer_bp.route('/settings/phone-link', methods=['POST'])
+@customer_login_required
+def settings_phone_link():
+    from services import phone_link as PL
+    if not _rate(f'cu-plink:{current_user.id}', 8, 3600):
+        return _err('יותר מדי בקשות. נסו שוב בעוד שעה', 429)
+    req, err = PL.create(current_user, (request.get_json(silent=True) or {}).get('phone'))
+    if err:
+        return _err(err)
+    return _ok('הבקשה נפתחה', id=req.id, phone=req.phone, minutes=PL.MINUTES)
+
+
+@customer_bp.route('/settings/phone-link/<int:req_id>')
+@customer_login_required
+def settings_phone_link_status(req_id):
+    from models import PhoneLinkRequest
+    from services.customer_phones import all_phones
+    req = PhoneLinkRequest.query.filter_by(id=req_id, customer_id=current_user.id).first()
+    if not req:
+        return _err('לא נמצא', 404)
+    status = req.status
+    if status == 'pending' and req.expires_at < datetime.utcnow():
+        status = 'expired'
+    return jsonify({'status': status, 'phones': all_phones(current_user)})
 
 
 @customer_bp.route('/settings/devices/<int:dev_id>/revoke', methods=['POST'])
@@ -901,6 +1033,8 @@ def settings_logout_all():
 @customer_login_required
 def settings_google_unlink():
     acc = CA.account_for(current_user)
+    if not acc.password_hash:
+        return _err('לפני ניתוק Google צריך להגדיר סיסמה - אחרת לא תוכלו להיכנס')
     acc.google_id = None
     acc.google_email = None
     db.session.commit()
@@ -965,11 +1099,17 @@ def _register_shared():
         ('/t/<kind>/<int:item_id>/rename', 'transcript_rename', IP.transcript_rename, ['POST']),
         ('/t/<kind>/<int:item_id>/revert', 'transcript_revert', IP.transcript_revert, ['POST']),
         ('/t/<kind>/<int:item_id>/download', 'transcript_download', IP.transcript_download, ['GET']),
+        ('/t/<kind>/<int:item_id>/editor', 'transcript_editor', IP.transcript_editor, ['GET']),
+        ('/t/<kind>/<int:item_id>/editor/save', 'transcript_editor_save', IP.transcript_editor_save, ['POST']),
+        ('/dictate', 'dictate', IP.dictate, ['POST']),
         ('/t/<kind>/<int:item_id>/audio-state', 'audio_state', IP.audio_state, ['GET']),
         ('/t/<kind>/<int:item_id>/audio-chunk/<int:n>', 'audio_chunk', IP.audio_chunk, ['GET']),
         ('/transcripts', 'transcripts', IP.transcripts, ['GET']),
         ('/transcripts/data', 'transcripts_data', IP.transcripts_data, ['GET']),
         ('/transcripts/export', 'transcripts_export', IP.transcripts_export, ['POST']),
+        ('/transcripts/organize', 'transcripts_organize', IP.transcripts_organize, ['POST']),
+        ('/folders', 'folders_list', IP.folders_list, ['GET']),
+        ('/folders', 'folders_save', IP.folders_save, ['POST']),
         ('/reports', 'reports', IP.reports, ['GET']),
         ('/reports/data', 'reports_data', IP.reports_data, ['GET']),
         ('/pulse', 'pulse', IP.pulse, ['GET']),

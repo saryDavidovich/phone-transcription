@@ -182,6 +182,7 @@ class InstitutionUpload(db.Model):
     play_url = db.Column(db.Text, nullable=True)          # השמע בימות (DownloadFile) - לנגן באזור המוסד
     transcript_original = db.Column(db.Text, nullable=True)  # התמלול לפני עריכה ידנית (לשחזור)
     edited_at = db.Column(db.DateTime, nullable=True)
+    transcript_html = db.Column(db.Text, nullable=True)      # גרסה מעוצבת מעורך ה-Word באתר
     source = db.Column(db.String(10), nullable=True)      # file / record / link
     status_at = db.Column(db.DateTime, nullable=True)     # מתי הסטטוס השתנה (לפיד "עכשיו במוסד" ולהתראות)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -231,6 +232,7 @@ class Recording(db.Model):
     play_url = db.Column(db.Text, nullable=True)             # השמע בימות לנגן באזור המוסד (כשהמקור לא מימות)
     transcript_original = db.Column(db.Text, nullable=True)  # התמלול לפני עריכה ידנית באזור המוסד (לשחזור)
     edited_at = db.Column(db.DateTime, nullable=True)
+    transcript_html = db.Column(db.Text, nullable=True)      # גרסה מעוצבת מעורך ה-Word באתר (transcript נשאר הטקסט)
     customer_id = db.Column(db.Integer, db.ForeignKey('customers.id'), nullable=False, index=True)
     call_id = db.Column(db.String(100), unique=True)
     duration_seconds = db.Column(db.Integer, default=0)
@@ -1037,3 +1039,65 @@ class CustomerChargeLog(db.Model):
     status = db.Column(db.String(20), default='pending')      # pending / success / failed
     provider_ref = db.Column(db.String(200), nullable=True, index=True)   # מזהה העסקה בנדרים
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    # 'iframe' (טעינה ידנית באייפרם) / 'auto' (טעינה אוטומטית מהכרטיס השמור בנדרים)
+    kind = db.Column(db.String(10), default='iframe')
+    history_id = db.Column(db.String(64), nullable=True, index=True)     # מזהה העסקה בהסטוריה של נדרים (לקבלה)
+    receipt_url = db.Column(db.String(500), nullable=True)
+
+
+class PhoneLinkRequest(db.Model):
+    """בקשה מהאזור האישי לצרף מספר טלפון לחשבון. מאושרת רק בשיחה מאותו מספר למערכת הטלפונית
+    (המערכת מכריזה על הבקשה, והמתקשר מקיש 1). services/phone_link.py"""
+    __tablename__ = 'phone_link_requests'
+    id = db.Column(db.Integer, primary_key=True)
+    customer_id = db.Column(db.Integer, db.ForeignKey('customers.id', ondelete='CASCADE'), nullable=False, index=True)
+    phone = db.Column(db.String(20), nullable=False, index=True)
+    status = db.Column(db.String(20), default='pending')     # pending / done / rejected / conflict / expired
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    expires_at = db.Column(db.DateTime, nullable=False)
+    done_at = db.Column(db.DateTime, nullable=True)
+
+
+class TranscriptFolder(db.Model):
+    """תיקייה לסידור תמלולים. owner_type: 'c' לקוח פרטי / 'i' מוסד."""
+    __tablename__ = 'transcript_folders'
+    id = db.Column(db.Integer, primary_key=True)
+    owner_type = db.Column(db.String(1), nullable=False)
+    owner_id = db.Column(db.Integer, nullable=False, index=True)
+    name = db.Column(db.String(80), nullable=False)
+    color = db.Column(db.String(12), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class TranscriptMeta(db.Model):
+    """שיוך תמלול (הקלטה 'r' / העלאת מוסד 'u') לתיקייה ולתגיות."""
+    __tablename__ = 'transcript_meta'
+    __table_args__ = (db.UniqueConstraint('owner_type', 'owner_id', 'kind', 'item_id', name='uq_transcript_meta_item'),)
+    id = db.Column(db.Integer, primary_key=True)
+    owner_type = db.Column(db.String(1), nullable=False)
+    owner_id = db.Column(db.Integer, nullable=False, index=True)
+    kind = db.Column(db.String(1), nullable=False)
+    item_id = db.Column(db.Integer, nullable=False)
+    folder_id = db.Column(db.Integer, db.ForeignKey('transcript_folders.id', ondelete='SET NULL'), nullable=True, index=True)
+    tags = db.Column(db.JSON, nullable=True)
+
+
+class AutoTopup(db.Model):
+    """טעינה אוטומטית של לקוח פרטי: הכרטיס נשמר רק אצל נדרים פלוס (הוראת קבע מוקפאת), אצלנו רק
+    מזהה ההוראה ו-4 ספרות. כשהיתרה יורדת מתחת לסף - חיוב בודד מההוראה (services/auto_topup.py)."""
+    __tablename__ = 'auto_topups'
+    id = db.Column(db.Integer, primary_key=True)
+    customer_id = db.Column(db.Integer, db.ForeignKey('customers.id', ondelete='CASCADE'), nullable=False, unique=True)
+    enabled = db.Column(db.Boolean, default=False)
+    status = db.Column(db.String(20), default='setup')    # setup / active / failed / off
+    keva_id = db.Column(db.String(32), nullable=True)
+    last4 = db.Column(db.String(4), nullable=True)
+    amount = db.Column(db.Float, default=50)
+    threshold = db.Column(db.Float, default=10)
+    monthly_cap = db.Column(db.Float, default=300)
+    setup_token = db.Column(db.String(64), nullable=True, index=True)
+    last_charge_at = db.Column(db.DateTime, nullable=True)
+    last_error = db.Column(db.String(300), nullable=True)
+    fails = db.Column(db.Integer, default=0)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
