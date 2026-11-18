@@ -453,6 +453,11 @@ body { font-family:'Heebo',sans-serif; background:var(--bg); color:var(--text); 
 .nav-sub a:hover { background:var(--surface2); color:var(--text); }
 .nav-sub b { background:rgba(124,58,237,0.18); color:var(--accent2); border-radius:10px; padding:0 7px; font-size:11px; }
 .sidebar-bottom { padding:6px 17px 0; border-top:1px solid var(--border); }
+.portal-links { display:flex; align-items:center; gap:6px; }
+.portal-links .logout-btn { flex:1; min-width:0; }
+.portal-links .logout-btn:hover { color:var(--accent); }
+.pl-copy { background:var(--surface2); border:1px solid var(--border); color:var(--text2); border-radius:7px; font-family:inherit; font-size:11px; padding:2px 7px; cursor:pointer; }
+.pl-copy:hover { color:var(--text); }
 .logout-btn {
   display:flex; align-items:center; gap:10px; color:var(--text2);
   text-decoration:none; font-size:13px; padding:5px 0;
@@ -706,12 +711,30 @@ table.as-cards textarea,table.as-cards input,table.as-cards select{min-width:0 !
     {{ nav('/admin/dev-requests', 'dev', 'בקשות פיתוח', request.endpoint and request.endpoint.startswith('admin.dev_')) }}
   </nav>
   <div class="sidebar-bottom">
+    {# קישורי הכניסה של המוסדות והלקוחות - נפתחים בלשונית חדשה; העתקה בלחיצה על סמל ההעתקה #}
+    <div class="portal-links">
+      <a href="/institution/login" target="_blank" rel="noopener" class="logout-btn" title="דף הכניסה של המוסדות - נפתח בלשונית חדשה">
+        <span class="nav-icon">{{ ic('institutions', 17) }}</span><span class="nav-label">כניסת מוסדות ↗</span></a>
+      <button type="button" class="pl-copy nav-label" data-path="/institution/login" title="העתקת הקישור">העתקה</button>
+    </div>
+    <div class="portal-links">
+      <a href="/my/login" target="_blank" rel="noopener" class="logout-btn" title="האזור האישי ללקוחות פרטיים - נפתח בלשונית חדשה">
+        <span class="nav-icon">{{ ic('customers', 17) }}</span><span class="nav-label">אזור לקוחות ↗</span></a>
+      <button type="button" class="pl-copy nav-label" data-path="/my/login" title="העתקת הקישור">העתקה</button>
+    </div>
     <a href="/admin/logout" class="logout-btn" title="התנתקות">
       <span class="nav-icon">{{ ic('logout', 17) }}</span><span class="nav-label">התנתקות</span>
     </a>
   </div>
 </aside>
 <script>
+document.querySelectorAll('.pl-copy').forEach(function (b) {
+  b.addEventListener('click', function () {
+    var url = location.origin + b.dataset.path, done = function () { var t = b.textContent; b.textContent = 'הועתק ✓'; setTimeout(function () { b.textContent = t; }, 1500); };
+    if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(url).then(done, fb); else fb();
+    function fb() { var x = document.createElement('textarea'); x.value = url; document.body.appendChild(x); x.select(); try { document.execCommand('copy'); done(); } catch (e) {} x.remove(); }
+  });
+});
 /* תפריט מכווץ: נשארים רק השרטוטים, וריחוף פותח את כל הרשימה. נשמר לכל מחשב. */
 (function () {
   function mini() { try { return localStorage.getItem('navMini') === '1'; } catch (e) { return false; } }
