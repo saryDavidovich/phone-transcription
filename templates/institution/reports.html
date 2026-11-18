@@ -63,7 +63,7 @@ a.hb:hover .hb-name { color:var(--accent2); }
 <div class="grid grid-4 stats mb-18">
   <div class="card stat-card kpi"><span class="ic" style="background:var(--accent-soft); color:var(--accent2);">{{ ic('clock', 22) }}</span><div><div class="stat-value" id="kMin">—</div><div class="stat-label">דקות תמלול</div></div></div>
   <div class="card stat-card kpi"><span class="ic" style="background:var(--blue-soft); color:var(--blue);">{{ ic('file-text', 22) }}</span><div><div class="stat-value" id="kCount">—</div><div class="stat-label">תמלולים</div></div></div>
-  <div class="card stat-card kpi"><span class="ic" style="background:#f3edfe; color:#7c3aed;">{{ ic('users', 22) }}</span><div><div class="stat-value" id="kActive">—</div><div class="stat-label">{{ 'דקות בממוצע לתמלול' if is_cust else 'תלמידים פעילים' }}</div></div></div>
+  <div class="card stat-card kpi"><span class="ic" style="background:#f3edfe; color:#7c3aed;">{{ ic('clock' if is_cust else 'users', 22) }}</span><div><div class="stat-value" id="kActive">—</div><div class="stat-label">{{ 'דקות בממוצע לתמלול' if is_cust else 'תלמידים פעילים' }}</div></div></div>
   <div class="card stat-card kpi"><span class="ic" style="background:var(--surface3); color:var(--text2);">{{ ic('shekel', 22) }}</span><div><div class="stat-value" id="kCost">—</div><div class="stat-label">עלות התמלולים</div></div></div>
 </div>
 
@@ -123,7 +123,7 @@ a.hb:hover .hb-name { color:var(--accent2); }
   function trend(series, monthly) {
     var svg = $('trend'), W = svg.clientWidth || 800, H = 240, padL = 8, padR = 40, padT = 10, padB = 26;
     svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H); svg.innerHTML = '';
-    var max = Math.max(1, Math.max.apply(null, series.map(function (s) { return s.students + s.inst; })));
+    var max = Math.max(5, Math.max.apply(null, series.map(function (s) { return s.students + s.inst; })));
     var step = Math.pow(10, Math.floor(Math.log10(max))), nice = Math.ceil(max / step) * step; if (nice / step <= 2) step /= 2; nice = Math.ceil(max / step) * step;
     var g = el('g', { class: 'grid' }); svg.appendChild(g);
     for (var v = 0; v <= nice + 1e-9; v += step) {

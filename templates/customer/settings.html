@@ -31,7 +31,7 @@
 <div class="page">
 <h1>הגדרות</h1>
 <nav class="set-nav">
-  <a href="#phone" data-s="phone">{{ ic('phone', 15) }} הטלפון</a>
+  <a href="#phone" data-s="phone">{{ ic('phone', 15) }} טלפון</a>
   <a href="#profile" data-s="profile">{{ ic('user', 15) }} פרטים</a>
   <a href="#security" data-s="security">{{ ic('lock', 15) }} אבטחה</a>
 </nav>
@@ -71,7 +71,7 @@
       <div class="field"><label for="pname">שם</label><input class="input" id="pname" maxlength="100" value="{{ c.name or '' }}"></div>
       <div class="field"><label for="pfax">מספר פקס (לא חובה)</label><input class="input" id="pfax" inputmode="tel" dir="ltr" value="{{ c.fax or '' }}" placeholder="0XXXXXXXXX"></div>
       <button class="btn btn-block" id="saveProfile">{{ ic('check', 16, 2.2) }} שמירת פרטים</button>
-      <div class="kv" style="margin-top:14px;"><span>טלפונים בחשבון</span><b dir="ltr">{{ phones|join(', ') or '—' }}</b></div>
+      <div class="kv" style="margin-top:14px;"><span>טלפונים בחשבון</span>{% if phones %}<b dir="ltr">{{ phones|join(', ') }}</b>{% else %}<b>עוד לא שויך טלפון · <a href="/my/contact" style="color:var(--accent2);">לבקשת שיוך</a></b>{% endif %}</div>
       <p class="hint">לשינוי מספרי הטלפון - כתבו לנו בצור קשר (מטעמי אבטחה זה נעשה על ידי הצוות).</p>
     </div>
     <div class="card">

@@ -1977,11 +1977,21 @@ def _portal_info(customer):
             'locked': CA.locked(acc), 'has_email': bool((customer.email or '').strip())}
 
 
+@admin_bp.route('/settings/transcribe-engine', methods=['POST'])
+@login_required
+def transcribe_engine_save():
+    eng = request.form.get('engine')
+    set_setting('transcribe_engine', eng if eng in ('v1', 'v2', 'transcribe') else 'v2')
+    flash('✔ מנוע התמלול הרגיל נשמר - חל מהתמלול הבא')
+    return redirect(url_for('admin.settings') + '#engine')
+
+
 @admin_bp.route('/settings/customer-portal', methods=['POST'])
 @login_required
 def customer_portal_mode_save():
     mode = request.form.get('mode')
     set_setting('customer_portal_mode', mode if mode in ('off', 'marked', 'all') else 'off')
+    set_setting('customer_signup_on', '1' if request.form.get('signup') == '1' else '0')
     flash('✔ הגדרת האזור האישי ללקוחות נשמרה')
     return redirect(url_for('admin.settings') + '#customer-portal')
 
@@ -2156,7 +2166,9 @@ def settings():
     }
     from models import CustomerAccount
     from services import customer_auth as _CA
-    portal = {'mode': _CA.portal_mode(),
+    portal = {'engine': get_setting('transcribe_engine', 'v2') or 'v2',
+              'signup': get_setting('customer_signup_on', '0') == '1',
+              'mode': _CA.portal_mode(),
               'marked': CustomerAccount.query.filter(CustomerAccount.enabled.is_(True)).count(),
               'active': CustomerAccount.query.filter(CustomerAccount.password_hash.isnot(None)).count()}
     return render_template('admin/settings.html', settings=current_settings, slow_pages=slow_pages,

@@ -6,12 +6,12 @@
 {% set _c_logged = current_user.is_authenticated and current_user.__class__.__name__ == 'Customer' %}
 {% set _c_name = (current_user.name or current_user.phone or 'האזור האישי') if _c_logged else '' %}
 <title>{% if _c_logged %}{{ _c_name }} - האזור האישי{% else %}כניסה לאזור האישי{% endif %} - תמלול פון</title>
-<link rel="manifest" href="/my/manifest.webmanifest?v=1" crossorigin="use-credentials">
+<link rel="manifest" href="/my/manifest.webmanifest?v=2" crossorigin="use-credentials">
 <meta name="theme-color" content="#4f46e5">
 <meta name="csrf-token" content="{{ csrf_token() }}">
 <meta name="referrer" content="same-origin">
-<link rel="icon" type="image/png" sizes="192x192" href="https://raw.githubusercontent.com/saryDavidovich/phone-transcription/main/static/pwa/inst-icon-192.png">
-<link rel="apple-touch-icon" href="https://raw.githubusercontent.com/saryDavidovich/phone-transcription/main/static/pwa/inst-icon-192.png">
+<link rel="icon" type="image/png" sizes="192x192" href="https://raw.githubusercontent.com/saryDavidovich/phone-transcription/main/static/pwa/cust-icon-192.png">
+<link rel="apple-touch-icon" href="https://raw.githubusercontent.com/saryDavidovich/phone-transcription/main/static/pwa/cust-icon-192.png">
 <script>
 /* הגנת CSRF: כל בקשה משנה-מידע לאתר שלנו נושאת את אסימון הסשן (כותרת לבקשות fetch, שדה נסתר לטפסים) */
 (function () {
@@ -73,6 +73,7 @@ a { color:inherit; }
 }
 .sidebar-logo { padding:0 18px 18px; margin-bottom:6px; border-bottom:1px solid var(--border); display:flex; align-items:center; gap:10px; }
 .inst-name { font-weight:800; font-size:19px; line-height:1.25; color:var(--accent2); overflow-wrap:anywhere; }
+.inst-name .who { display:block; font-size:12.5px; font-weight:600; color:var(--text2); margin-top:1px; }
 .logo-ic { width:30px; height:30px; border-radius:9px; background:var(--accent); color:#fff; display:inline-flex; align-items:center; justify-content:center; box-shadow:0 4px 12px -4px rgba(79,70,229,.55); flex:none; }
 .ico { display:block; flex-shrink:0; }
 .sidebar-nav a .ico { opacity:.8; }
@@ -106,7 +107,7 @@ main { flex:1; margin-right:240px; padding:32px 40px; max-width:1180px; min-widt
 .card-flex { display:flex; flex-direction:column; }
 .card-flex > form, .card-flex > .card-body { flex:1; display:flex; flex-direction:column; }
 .card-flex .card-actions { margin-top:auto; padding-top:6px; }
-.card-head { display:flex; align-items:center; gap:10px; margin-bottom:6px; }
+.card-head { display:flex; align-items:center; gap:10px; margin-bottom:6px; flex-wrap:wrap; row-gap:10px; }
 .card-head .ic, .ic-box { width:34px; height:34px; border-radius:10px; background:var(--accent-soft); color:var(--accent2); display:flex; align-items:center; justify-content:center; flex:none; }
 .btn .ico { width:16px; height:16px; }
 .icon-btn { width:32px; height:32px; padding:0; border-radius:9px; background:var(--surface2); border:1px solid var(--border); color:var(--text2); display:inline-flex; align-items:center; justify-content:center; cursor:pointer; transition:.15s; flex:none; }
@@ -291,7 +292,7 @@ window.IC = {
 </div>
 <div class="nav-backdrop" onclick="document.body.classList.remove('nav-open')"></div>
 <aside class="sidebar">
-  <div class="sidebar-logo" onclick="if (window.innerWidth <= 900) document.body.classList.toggle('nav-open')"><span class="logo-ic">{{ ic('logo', 16, 2) }}</span> <span class="inst-name">{{ _c_name }}</span></div>
+  <div class="sidebar-logo" onclick="if (window.innerWidth <= 900) document.body.classList.toggle('nav-open')"><span class="logo-ic">{{ ic('logo', 16, 2) }}</span> <span class="inst-name">תמלול פון<small class="who">{{ _c_name }}</small></span></div>
   {% set ep = request.endpoint or '' %}
   <nav class="sidebar-nav">
     <a href="/my/" class="{{ 'active' if ep == 'customer.dashboard' }}">{{ ic('dashboard') }}<span>ראשי</span></a>
@@ -456,7 +457,7 @@ window.IC = {
     b.title = on ? 'התראות פעילות - לחיצה לכיבוי' : 'הפעלת התראות בשולחן העבודה';
   }
   function show(title, body, url, tag) {
-    var opts = { body: body || '', tag: tag, dir: 'rtl', lang: 'he', icon: 'https://raw.githubusercontent.com/saryDavidovich/phone-transcription/main/static/pwa/inst-icon-192.png', data: { url: url || '/my/' } };
+    var opts = { body: body || '', tag: tag, dir: 'rtl', lang: 'he', icon: 'https://raw.githubusercontent.com/saryDavidovich/phone-transcription/main/static/pwa/cust-icon-192.png', data: { url: url || '/my/' } };
     if (navigator.serviceWorker && navigator.serviceWorker.getRegistration) {
       navigator.serviceWorker.getRegistration('/my/').then(function (reg) {
         if (reg && reg.showNotification) reg.showNotification(title, opts); else fallback();

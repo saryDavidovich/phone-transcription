@@ -184,6 +184,15 @@ def nedarim_webhook():
         log.info(f'Nedarim webhook: transaction {tx_id} already processed (customer), skipping')
         return jsonify({'ok': True})
 
+    # טעינה מהאייפרם באזור האישי של לקוח: מזכים דרך רשומת החיוב (נעילה - זיכוי אחד גם אם גם ה-CallBack מגיע)
+    from models import CustomerChargeLog
+    cc = CustomerChargeLog.query.filter_by(provider_ref=tx_id).first()
+    if cc:
+        from services.customer_billing import credit_charge
+        res = credit_charge(cc.id, dict(data, Status='OK'), 'webhook')
+        log.info(f'Nedarim webhook: customer portal charge {cc.id} -> {res} (tx {tx_id})')
+        return jsonify({'ok': True})
+
     # מגוון צורות כתיב אפשריות לאותו מספר (עם/בלי 0 מוביל, עם/בלי קידומת
     # מדינה) - כדי לא לפספס התאמה למספר שכבר קיים אצלנו בפורמט מעט שונה
     # מזה שנדרים פלוס מחזירים בשדה Phone.

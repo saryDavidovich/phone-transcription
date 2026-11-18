@@ -1025,3 +1025,15 @@ class CustomerLoginLog(db.Model):
     ip = db.Column(db.String(64))
     user_agent = db.Column(db.String(200))
     created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
+
+class CustomerChargeLog(db.Model):
+    """טעינת יתרה באשראי של לקוח פרטי מתוך האזור האישי (אייפרם נדרים פלוס). הזיכוי עצמו - רק
+    מעדכון השרת של נדרים (CallBack של העסקה או ה-Webhook של המוסד), פעם אחת בלבד."""
+    __tablename__ = 'customer_charge_logs'
+    id = db.Column(db.Integer, primary_key=True)
+    customer_id = db.Column(db.Integer, db.ForeignKey('customers.id', ondelete='CASCADE'), nullable=False, index=True)
+    amount = db.Column(db.Float, nullable=False)
+    status = db.Column(db.String(20), default='pending')      # pending / success / failed
+    provider_ref = db.Column(db.String(200), nullable=True, index=True)   # מזהה העסקה בנדרים
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)

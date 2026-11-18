@@ -103,7 +103,7 @@ a.t:hover { color:var(--accent2); }
 
 <div class="card mb-18" style="padding:14px 16px;">
   <div class="filters" style="margin:0;">
-    <div class="q">{{ ic('search', 16) }}<input class="input" id="fQ" placeholder="חיפוש לפי שם, תלמיד או מילה מתוך התמלול"></div>
+    <div class="q">{{ ic('search', 16) }}<input class="input" id="fQ" placeholder="{{ 'חיפוש לפי שם או מילה מתוך התמלול' if is_cust else 'חיפוש לפי שם, תלמיד או מילה מתוך התמלול' }}"></div>
     <select class="input" id="fPeriod" aria-label="תקופה">
       <option value="">כל הזמנים</option><option value="7">7 הימים האחרונים</option><option value="30">30 הימים האחרונים</option>
       <option value="month">החודש</option><option value="prev">החודש הקודם</option><option value="90">3 חודשים</option><option value="custom">טווח תאריכים...</option>
@@ -139,7 +139,7 @@ a.t:hover { color:var(--accent2); }
 </div>
 
 <div class="pane" data-pane="export">
-  <div class="card page-narrow" style="max-width:720px; margin:0;">
+  <div class="card">
     <div class="card-head"><span class="ic">{{ ic('archive') }}</span><h2>הורדה מרוכזת</h2></div>
     <div class="card-sub">{% if is_cust %}כל התמלולים המוכנים לפי הסינון שלמעלה (תקופה או חיפוש) - בבת אחת.{% else %}כל התמלולים המוכנים לפי הסינון שלמעלה (תקופה, קבוצה, תלמיד או חיפוש) - בבת אחת, עם הלוגו והשם של המוסד.{% endif %}</div>
     <div class="fmt-cards">

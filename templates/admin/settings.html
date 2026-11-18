@@ -272,6 +272,23 @@
   </div>
 </div>
 
+<div class="card" style="margin-top:24px" id="engine">
+  <div style="font-size:16px;font-weight:700;margin-bottom:6px">🎙️ מנוע התמלול הרגיל</div>
+  <div style="font-size:13px;color:var(--text2);margin-bottom:12px;line-height:1.7">
+    <b>משופר (מומלץ)</b> - הוראות מפורטות באנגלית, פלט מובנה בלי "הסברים" של המודל, בדיקת כל חלק (מעבר לאנגלית, חותמות זמן, כפילות, ירידות שורה) וניסיון חוזר, ופסקאות מסודרות.
+    <b>מודל התמלול הייעודי של Google</b> (gemini-3.5-transcribe) - מודל דיבור-לטקסט עם מילון מונחים תורניים; אם נכשל - עובר אוטומטית למשופר. מומלץ לנסות על כמה הקלטות ולהשוות.
+    <b>הישן</b> - הפרומפט הקודם, לחזרה מהירה אם צריך.
+  </div>
+  <form method="post" action="{{ url_for('admin.transcribe_engine_save') }}" style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end">
+    <select class="form-input" name="engine" style="width:auto">
+      <option value="v2" {{ 'selected' if portal.engine == 'v2' }}>משופר (מומלץ)</option>
+      <option value="transcribe" {{ 'selected' if portal.engine == 'transcribe' }}>מודל התמלול הייעודי של Google</option>
+      <option value="v1" {{ 'selected' if portal.engine == 'v1' }}>הישן</option>
+    </select>
+    <button class="btn btn-primary" type="submit">💾 שמירה</button>
+  </form>
+</div>
+
 <div class="card" style="margin-top:24px" id="customer-portal">
   <div style="font-size:16px;font-weight:700;margin-bottom:6px">🔐 האזור האישי ללקוחות פרטיים</div>
   <div style="font-size:13px;color:var(--text2);margin-bottom:12px;line-height:1.7">
@@ -286,6 +303,8 @@
         <option value="marked" {{ 'selected' if portal.mode == 'marked' }}>רק לקוחות שסומנו ({{ portal.marked }})</option>
         <option value="all" {{ 'selected' if portal.mode == 'all' }}>כל הלקוחות הפרטיים</option>
       </select></div>
+    <label style="display:flex;gap:8px;align-items:center;cursor:pointer;font-weight:600;padding-bottom:8px">
+      <input type="checkbox" name="signup" value="1" {{ 'checked' if portal.signup }}> לקוחות חדשים יכולים להירשם בעצמם באתר</label>
     <button class="btn btn-primary" type="submit">💾 שמירה</button>
   </form>
   <div style="font-size:12.5px;margin-top:10px;color:var(--text2)">{{ portal.active }} לקוחות כבר הגדירו סיסמה. סימון לקוח - בכרטיס הלקוח, בחלק "האזור האישי".</div>

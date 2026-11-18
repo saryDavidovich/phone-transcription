@@ -2,10 +2,21 @@
 {% from "institution/_icons.html" import ic %}
 {% block head %}
 <style>
+.bill-top { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1.4fr); gap:18px; align-items:stretch; }
+@media (max-width:900px) { .bill-top { grid-template-columns:1fr; } }
 .bal-card { display:flex; align-items:center; gap:18px; flex-wrap:wrap; }
+.amounts { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px; }
+.amt-chip { border:2px solid var(--border); background:var(--surface); border-radius:12px; padding:9px 16px; font-family:inherit; font-size:15px; font-weight:700; cursor:pointer; color:var(--text); font-variant-numeric:tabular-nums; transition:.15s; }
+.amt-chip:hover { border-color:#c7c9fb; }
+.amt-chip.on { border-color:var(--accent); background:var(--accent-soft); color:var(--accent2); }
+.amt-other { display:flex; align-items:center; gap:6px; border:2px solid var(--border); border-radius:12px; padding:3px 10px; font-weight:700; color:var(--text2); }
+.amt-other input { border:0; background:none; width:90px; font-family:inherit; font-size:15px; font-weight:700; padding:6px 0; color:var(--text); }
+.amt-other input:focus { outline:none; }
+.amt-other:focus-within { border-color:var(--accent); }
+.pay-frame iframe { width:100%; border:0; height:0; min-height:0; display:block; margin-bottom:10px; }
+.pay-msg { font-size:13.5px; margin-top:10px; line-height:1.6; }
 .bal-card .big { font-size:34px; font-weight:800; font-variant-numeric:tabular-nums; }
 .bal-card .lbl { font-size:13px; color:var(--text2); }
-.bal-card .act { margin-inline-start:auto; display:flex; flex-direction:column; gap:6px; align-items:flex-end; }
 .price-list { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
 .price-list div { background:var(--surface2); border:1px solid var(--border); border-radius:12px; padding:12px; text-align:center; }
 .price-list b { display:block; font-size:20px; font-variant-numeric:tabular-nums; }
@@ -19,7 +30,6 @@
 .tx-filter button { border:1px solid var(--border); background:var(--surface); border-radius:20px; padding:4px 12px; font-family:inherit; font-size:12.5px; cursor:pointer; color:var(--text2); }
 .tx-filter button.on { background:var(--accent); color:#fff; border-color:var(--accent); }
 @media (max-width:560px) {
-  .bal-card .act { margin:0; width:100%; align-items:stretch; }
   .price-list { grid-template-columns:1fr; }
   .tx-row { grid-template-columns:1fr auto; } .tx-row time { grid-column:1 / -1; }
 }
@@ -29,15 +39,28 @@
 <div class="page">
 <h1>יתרה וחיובים</h1>
 
-<div class="card bal-card mb-18">
-  <span class="ic-box" style="width:52px;height:52px;border-radius:14px;">{{ ic('wallet', 26) }}</span>
-  <div><div class="big" id="balVal">{{ '%.2f'|format(c.balance or 0) }} ₪</div><div class="lbl">היתרה הנוכחית</div></div>
-  <div class="act">
-    {% if nedarim_on and c.phone and c.phone.isdigit() %}
-    <a class="btn" href="/my/billing/topup" target="_blank" rel="noopener noreferrer">{{ ic('card', 16) }} טעינת יתרה באשראי</a>
-    <span class="hint" style="margin:0;">נפתח בדף התשלום המאובטח של נדרים פלוס. היתרה כאן מתעדכנת לבד תוך כדקה.</span>
+<div class="bill-top mb-18">
+  <div class="card bal-card">
+    <span class="ic-box" style="width:52px;height:52px;border-radius:14px;">{{ ic('wallet', 26) }}</span>
+    <div><div class="big" id="balVal">{{ '%.2f'|format(c.balance or 0) }} ₪</div><div class="lbl">היתרה הנוכחית</div></div>
+  </div>
+  <div class="card pay-card">
+    <div class="card-head"><span class="ic">{{ ic('card') }}</span><h2>טעינת יתרה באשראי</h2></div>
+    {% if nedarim_on %}
+    <div class="card-sub">התשלום מאובטח ומתבצע בחלון של נדרים פלוס - פרטי הכרטיס לא מגיעים אלינו.</div>
+    <div class="amounts" id="amounts">
+      {% for a in [20, 50, 100, 200] %}<button type="button" class="amt-chip{{ ' on' if a == 50 }}" data-a="{{ a }}">{{ a }} ₪</button>{% endfor %}
+      <label class="amt-other"><input type="number" id="amtOther" min="5" max="3000" step="1" placeholder="סכום אחר" inputmode="numeric"> ₪</label>
+    </div>
+    <button type="button" class="btn btn-block" id="payStart">{{ ic('lock', 16) }} המשך לתשלום <span id="payAmt">50</span> ₪</button>
+    <div class="pay-frame hidden" id="payBox">
+      <iframe id="NedarimFrame" title="תשלום מאובטח - נדרים פלוס" scrolling="no"></iframe>
+      <button type="button" class="btn btn-block" id="payBtn">{{ ic('check', 16, 2.2) }} תשלום</button>
+      <button type="button" class="btn btn-secondary btn-block btn-sm" id="payCancel" style="margin-top:6px;">שינוי סכום</button>
+    </div>
+    <div id="payMsg" class="pay-msg"></div>
     {% else %}
-    <span class="hint">לטעינת יתרה התקשרו ל-<span dir="ltr">03-3131795</span> (שלוחת טעינה), או כתבו לנו בצור קשר.</span>
+    <div class="card-sub">לטעינת יתרה התקשרו ל-<span dir="ltr">03-3131795</span> (שלוחת טעינה), או כתבו לנו בצור קשר.</div>
     {% endif %}
   </div>
 </div>
@@ -74,6 +97,68 @@
   </div>
 </div>
 </div>
+<script>
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  if (!$('payStart')) return;
+  var amount = 50, frame = $('NedarimFrame'), busy = false, loaded = false, chargeId = null, poll = null;
+  function msg(t, kind) { var m = $('payMsg'); m.textContent = t || ''; m.style.color = kind === 'bad' ? 'var(--red)' : kind === 'ok' ? 'var(--accent2)' : 'var(--text2)'; }
+  function setAmt(a) { amount = a; $('payAmt').textContent = a; }
+  document.querySelectorAll('.amt-chip').forEach(function (b) {
+    b.addEventListener('click', function () { document.querySelectorAll('.amt-chip').forEach(function (x) { x.classList.toggle('on', x === b); }); $('amtOther').value = ''; setAmt(+b.dataset.a); });
+  });
+  $('amtOther').addEventListener('input', function () {
+    var v = Math.round(+this.value || 0); document.querySelectorAll('.amt-chip').forEach(function (x) { x.classList.remove('on'); }); setAmt(v || 0);
+  });
+  // נדרים פלוס: את המאזין ואת כתובת האייפרם רושמים פעם אחת בלבד בחיי הדף (רישום כפול = חיוב כפול)
+  window.addEventListener('message', function (e) {
+    if (!/matara\.pro$/.test((new URL(e.origin || 'https://x')).hostname)) return;
+    var d = e.data || {};
+    if (d.Name === 'Height') frame.style.height = (parseInt(d.Value, 10) + 15) + 'px';
+    else if (d.Name === 'TransactionResponse') {
+      busy = false; $('payBtn').disabled = false;
+      if (d.Value && d.Value.Status === 'OK') { msg('התשלום התקבל! מעדכנים את היתרה...', 'ok'); waitCredit(); }
+      else msg((d.Value && d.Value.Message) || 'התשלום לא בוצע - בדקו את הפרטים ונסו שוב', 'bad');
+    }
+  });
+  function post(data) { frame.contentWindow.postMessage(data, '*'); }
+  $('payStart').addEventListener('click', function () {
+    if (!amount || amount < 5 || amount > 3000) { msg('אפשר לטעון בין 5 ל-3,000 ₪', 'bad'); return; }
+    $('payBox').classList.remove('hidden'); $('payStart').classList.add('hidden'); $('amounts').classList.add('hidden');
+    $('payBtn').innerHTML = $('payBtn').innerHTML.replace(/תשלום.*/, 'תשלום ' + amount + ' ₪');
+    if (!loaded) { loaded = true; frame.onload = function () { post({ Name: 'GetHeight' }); }; frame.src = 'https://www.matara.pro/nedarimplus/iframe/?Picture=Hide'; }
+    msg('');
+  });
+  $('payCancel').addEventListener('click', function () {
+    if (busy) return; $('payBox').classList.add('hidden'); $('payStart').classList.remove('hidden'); $('amounts').classList.remove('hidden'); msg('');
+  });
+  $('payBtn').addEventListener('click', async function () {
+    if (busy) return; busy = true; this.disabled = true; msg('פותחים עסקה מאובטחת...');
+    try {
+      var r = await fetch('/my/billing/topup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ amount: amount }) });
+      var d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'שגיאה');
+      chargeId = d.chargeId; msg('מאשרים את התשלום...');
+      post({ Name: 'FinishTransaction', Value: d.nedarimId });
+    } catch (e) { busy = false; this.disabled = false; msg(e.message, 'bad'); }
+  });
+  function waitCredit() {
+    var n = 0; clearInterval(poll);
+    poll = setInterval(async function () {
+      n++;
+      try {
+        var d = await (await fetch('/my/billing/topup/' + chargeId)).json();
+        if (d.status === 'success') {
+          clearInterval(poll); $('balVal').textContent = d.balance.toFixed(2) + ' ₪';
+          msg('היתרה עודכנה - תודה! תמלולים שחיכו לתשלום נשלחים עכשיו.', 'ok');
+          setTimeout(function () { location.reload(); }, 2500);
+        }
+      } catch (e) {}
+      if (n > 40) { clearInterval(poll); msg('התשלום התקבל, והיתרה תתעדכן תוך כמה דקות.', 'ok'); }
+    }, 3000);
+  }
+})();
+</script>
 <script>
 document.querySelectorAll('.tx-filter button').forEach(function (b) {
   b.addEventListener('click', function () {

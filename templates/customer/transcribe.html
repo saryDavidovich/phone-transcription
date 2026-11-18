@@ -63,7 +63,8 @@
       <span>לשלוח את התמלול גם במייל ({{ current_user.email }})</span>
     </label>
 
-    <div class="hint" style="margin-bottom:12px;">היתרה שלך: {{ '%.2f'|format(current_user.balance or 0) }} ₪. אם היתרה לא תספיק - התמלול יישמר כ"ממתין לטעינת יתרה" ויישלח אוטומטית מיד אחרי הטעינה. ברירות המחדל כאן - לפי ההגדרות שלך בטלפון.</div>
+    {% if (current_user.balance or 0) <= 0 %}<div class="hint" style="margin-bottom:12px; color:var(--amber, #b45309); font-weight:600;">כדי לתמלל צריך יתרה בחשבון. <a href="/my/billing" style="color:var(--accent2);">לטעינת יתרה ←</a></div>
+    {% else %}<div class="hint" style="margin-bottom:12px;">היתרה שלך: {{ '%.2f'|format(current_user.balance or 0) }} ₪. אם היתרה לא תספיק לכל ההקלטה - התמלול יישמר כ"ממתין לטעינת יתרה" ויישלח אוטומטית מיד אחרי הטעינה.</div>{% endif %}
     <button type="submit" class="btn btn-block" id="uploadBtn">{{ ic('upload', 16) }} לתמלול</button>
   </form>
 </div>

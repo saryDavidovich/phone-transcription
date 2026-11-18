@@ -1161,23 +1161,48 @@ def _gemini_from_url(url, language='he', output_language='he'):
         log.info(f"Split into {n_chunks} chunks of up to {CHUNK_SECONDS}s each")
         _report_progress(10)
 
+        # מנוע התמלול (הגדרה במנהל - transcribe_engine): v2 = הפרומפט החדש (ברירת מחדל), v1 = הישן,
+        # transcribe = המודל הייעודי של Google לתמלול. ראו services/transcribe_v2.py
+        from services import transcribe_v2 as TV2
+        try:
+            from models import Settings as _S
+            _row = _S.query.filter_by(key='transcribe_engine').first()
+            engine = (_row.value if _row else '') or 'v2'
+        except Exception:
+            engine = 'v2'
+        if engine == 'transcribe' and language == 'en' and output_language == 'he':
+            engine = 'v2'             # המודל הייעודי לא מתרגם מאנגלית
+        log.info(f"Transcription engine: {engine}")
+
         transcript_parts = []
+        prev_tail = ''
         for i, chunk_bytes in enumerate(chunks):
             chunk_num = i + 1
+            seconds = max(1, min(CHUNK_SECONDS, (actual_duration or CHUNK_SECONDS * n_chunks) - i * CHUNK_SECONDS))
             log.info(f"Transcribing chunk {chunk_num}/{n_chunks} ({len(chunk_bytes)} bytes)")
             chunk_transcript = None
             for attempt in range(5):
                 try:
-                    response = client.models.generate_content(
-                        model='gemini-3.5-flash',
-                        contents=[
-                            prompt,
-                            gtypes.Part.from_bytes(data=chunk_bytes, mime_type=mime_type),
-                        ],
-                        # בלי "חשיבה": תמלול לא צריך אותה, והיא מחויבת כמו טקסט יוצא ($9 למיליון)
-                        config=gtypes.GenerateContentConfig(thinking_config=gtypes.ThinkingConfig(thinking_budget=0)),
-                    )
-                    chunk_transcript = clean_model_transcript(response.text.strip(), output_language)
+                    if engine == 'transcribe':
+                        try:
+                            chunk_transcript = TV2.transcribe_dedicated(client, chunk_bytes, mime_type, language,
+                                                                        output_language)
+                        except Exception as te:
+                            log.warning(f"Chunk {chunk_num}: dedicated transcribe model failed ({te}) - using v2")
+                            chunk_transcript = TV2.transcribe_chunk(client, gtypes, chunk_bytes, mime_type, language,
+                                                                    output_language, prev_tail, chunk_num, n_chunks, seconds)
+                    elif engine == 'v1':
+                        response = client.models.generate_content(
+                            model='gemini-3.5-flash',
+                            contents=[prompt, gtypes.Part.from_bytes(data=chunk_bytes, mime_type=mime_type)],
+                            # בלי "חשיבה": תמלול לא צריך אותה, והיא מחויבת כמו טקסט יוצא ($9 למיליון)
+                            config=gtypes.GenerateContentConfig(thinking_config=gtypes.ThinkingConfig(thinking_budget=0)),
+                        )
+                        chunk_transcript = response.text.strip()
+                    else:
+                        chunk_transcript = TV2.transcribe_chunk(client, gtypes, chunk_bytes, mime_type, language,
+                                                                output_language, prev_tail, chunk_num, n_chunks, seconds)
+                    chunk_transcript = clean_model_transcript(chunk_transcript or '', output_language)
                     log.info(f"Chunk {chunk_num} done, {len(chunk_transcript)} chars")
                     break
                 except Exception as ge:
@@ -1188,6 +1213,7 @@ def _gemini_from_url(url, language='he', output_language='he'):
                         log.error(f"Chunk {chunk_num} failed after 5 attempts, skipping")
             if chunk_transcript:
                 transcript_parts.append(chunk_transcript)
+                prev_tail = chunk_transcript[-300:]
             _report_progress(10 + 80 * chunk_num / max(1, n_chunks))
 
         transcript = '\n\n'.join(transcript_parts) if transcript_parts else None

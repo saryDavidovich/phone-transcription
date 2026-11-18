@@ -242,3 +242,22 @@ def nedarim_callback(charge_id):
         db.session.commit()
 
     return jsonify({'ok': True})
+
+
+# ----------------------------------------------------------------------------- לקוח פרטי (האזור האישי)
+@institution_billing_bp.route('/api/nedarim/customer-callback/<int:charge_id>', methods=['POST'])
+def nedarim_customer_callback(charge_id):
+    """CallBack של עסקת אייפרם שלקוח פרטי פתח באזור האישי (routes/customer_portal.billing_topup).
+    רק מכתובות נדרים / חתימה; הזיכוי - services/customer_billing.credit_charge (פעם אחת)."""
+    from services.security import nedarim_request_ok
+    if not nedarim_request_ok(NEDARIM_CALLBACK_IPS, _client_ip()):
+        log.warning(f'Nedarim customer callback REJECTED - unexpected IP: {_client_ip()} (charge {charge_id})')
+        return jsonify({'ok': False, 'error': 'forbidden'}), 403
+    data = request.get_json(force=True, silent=True) or request.form.to_dict() or {}
+    if str(data.get('Param2') or charge_id) != str(charge_id):
+        log.warning(f'Nedarim customer callback: Param2 mismatch for charge {charge_id}: {data.get("Param2")!r}')
+        return jsonify({'ok': True, 'review': True})
+    from services.customer_billing import credit_charge
+    res = credit_charge(charge_id, data, 'callback')
+    log.info(f'Nedarim customer callback: charge {charge_id} -> {res}')
+    return jsonify({'ok': True})

@@ -1,0 +1,56 @@
+{% extends "customer/base.html" %}
+{% from "institution/_icons.html" import ic %}
+{% block content %}
+<div class="auth-wrap">
+  <div class="auth-brand">
+    <span class="logo-ic" style="width:42px;height:42px;border-radius:12px;">{{ ic('logo', 22, 2) }}</span>
+    <div><b>תמלול פון</b><span>האזור האישי</span></div>
+  </div>
+  <div class="card auth-card">
+    {% if stage == 'code' %}
+    <div class="auth-head">
+      <span class="ic-box">{{ ic('mail', 20) }}</span>
+      <h1>אימות המייל</h1>
+      <p>שלחנו קוד בן 6 ספרות ל-<b dir="ltr">{{ email }}</b>.<br>לא הגיע? בדקו גם בתיקיית הספאם.</p>
+    </div>
+    <form method="post" autocomplete="off">
+      <input type="hidden" name="action" value="verify">
+      <div class="field">
+        <label for="code">הקוד מהמייל</label>
+        <input class="input code-in" id="code" name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}" required autofocus placeholder="••••••" dir="ltr">
+      </div>
+      <button type="submit" class="btn btn-block">{{ ic('check', 16, 2.2) }} פתיחת החשבון</button>
+    </form>
+    <div class="auth-foot"><a href="{{ url_for('customer.signup') }}?step=start">חזרה / מייל אחר</a><span>הקוד תקף ל-10 דקות</span></div>
+    {% else %}
+    <div class="auth-head">
+      <span class="ic-box">{{ ic('user', 20) }}</span>
+      <h1>פתיחת חשבון חדש</h1>
+      <p>מעלים הקלטה או קישור ומקבלים תמלול מדויק למייל.<br>משלמים רק על מה שמתמללים.</p>
+    </div>
+    <form method="post" autocomplete="on">
+      <input type="hidden" name="action" value="start">
+      <input type="hidden" name="t0" value="{{ t0 }}">
+      <div class="hp" aria-hidden="true"><label>אתר <input name="website" tabindex="-1" autocomplete="off"></label></div>
+      <div class="field"><label for="nm">שם מלא</label>
+        <input class="input" id="nm" name="name" required maxlength="80" autocomplete="name" value="{{ form.name or '' }}"></div>
+      <div class="field"><label for="em">מייל</label>
+        <input class="input" type="email" id="em" name="email" required maxlength="200" autocomplete="email" dir="ltr" value="{{ form.email or '' }}"></div>
+      <div class="field"><label for="p1">סיסמה</label>
+        <input class="input" type="password" id="p1" name="password" required minlength="8" autocomplete="new-password">
+        <div class="hint">לפחות 8 תווים, עם ספרה ואות</div></div>
+      <div class="field"><label for="p2">הסיסמה שוב</label>
+        <input class="input" type="password" id="p2" name="password2" required minlength="8" autocomplete="new-password"></div>
+      <button type="submit" class="btn btn-block">{{ ic('send', 16) }} שליחת קוד אימות למייל</button>
+    </form>
+    <div class="auth-alt">כבר יש לכם חשבון? <a href="{{ url_for('customer.login') }}">כניסה</a></div>
+    {% endif %}
+  </div>
+  <p class="auth-note">{{ ic('lock', 13) }} הפרטים נשמרים מוצפנים ולא מועברים לאף אחד.</p>
+</div>
+{% include "customer/_auth_style.html" %}
+<script>
+var ci = document.getElementById('code');
+if (ci) ci.addEventListener('input', function () { this.value = this.value.replace(/\D/g, '').slice(0, 6); if (this.value.length === 6) this.form.requestSubmit ? this.form.requestSubmit() : this.form.submit(); });
+</script>
+{% endblock %}
