@@ -106,24 +106,26 @@ def to_bytes(doc):
     return out.getvalue()
 
 
+def brand_of(inst):
+    """כותרת המוסד לקובץ (לוגו + שם + שורה שנייה)."""
+    if inst is None:
+        return None
+    return {'logo': _logo_bytes(inst), 'title': (getattr(inst, 'brand_title', None) or inst.name or '').strip(),
+            'subtitle': (getattr(inst, 'brand_subtitle', None) or '').strip()}
+
+
 def single(inst, title, transcript, meta=None):
-    doc = new_document(inst)
-    add_transcript(doc, title, transcript, meta)
-    return to_bytes(doc)
+    """אותו קובץ Word כמו בכל המערכת (services/transcribe._build_word_doc), עם כותרת המוסד."""
+    from services.transcribe import _build_word_doc
+    return _build_word_doc('', '', transcript, title=title or 'תמלול', brand=brand_of(inst),
+                           items=[(title or 'תמלול', meta or '', transcript or '', 'פרטים')])
 
 
 def merged(inst, items, heading=None):
     """items: [(title, meta, transcript)] - קובץ אחד, כל תמלול בעמוד חדש."""
-    doc = new_document(inst)
-    first = True
-    if heading:
-        _run(_rtl(doc.add_paragraph()), heading, size=18, bold=True, color='0E7A55')
-        _run(_rtl(doc.add_paragraph()), f'{len(items)} תמלולים · הופק {datetime.now().strftime("%d/%m/%Y")}', size=10, color='64708A')
-        first = True
-    for title, meta, transcript in items:
-        add_transcript(doc, title, transcript, meta, page_break=not first or bool(heading))
-        first = False
-    return to_bytes(doc)
+    from services.transcribe import _build_word_doc
+    return _build_word_doc('', '', '', brand=brand_of(inst), cover_title=heading or 'תמלולים',
+                           items=[(t or 'תמלול', m or '', tx or '', 'פרטים') for t, m, tx in items])
 
 
 def minutes_label(seconds):

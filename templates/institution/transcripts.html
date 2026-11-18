@@ -60,17 +60,18 @@ a.t:hover { color:var(--accent2); }
 .cal .d.shabbat { background:#fbfaf5; }
 .cal .d .hd { font-weight:800; font-size:15px; }
 .cal .d .gd { font-size:11px; color:var(--text3); position:absolute; top:7px; left:8px; }
-.cal .d .rh { font-size:10.5px; color:var(--accent2); font-weight:700; }
 .cal .d .cnt { margin-top:auto; align-self:flex-start; font-size:11.5px; font-weight:700; padding:2px 8px; border-radius:10px; background:var(--accent); color:#fff; }
 .cal .d .cnt.l1 { background:#a7f3d0; color:#065f46; } .cal .d .cnt.l2 { background:#34d399; color:#064e3b; }
 .day-list { margin-top:16px; }
+.day-list.pulse { animation:dayPulse 1s ease-out; }
+@keyframes dayPulse { 0% { box-shadow:0 0 0 0 rgba(16,185,129,.45); } 100% { box-shadow:0 0 0 14px rgba(16,185,129,0); } }
 .day-list h3 { margin-bottom:6px; }
 @media (max-width:640px) {
   .cal { gap:3px; }
   .cal .d { min-height:58px; padding:5px; border-radius:8px; }
   .cal .d .hd { font-size:13px; }
-  .cal .d .gd { font-size:9.5px; top:5px; left:5px; }
-  .cal .d .rh { display:none; }
+  .cal .d .gd { font-size:9.5px; position:static; line-height:1; }
+  .cal .d { gap:1px; }
   .cal .d .cnt { font-size:10px; padding:1px 6px; }
   .tabs { width:100%; } .tab { flex:1; justify-content:center; padding:8px 6px; }
   .tr-row { flex-wrap:wrap; }
@@ -341,7 +342,7 @@ a.t:hover { color:var(--accent2); }
       if (i >= 35 && d.getMonth() !== cm.getMonth()) break;
       var key = ymd(d), h = heb(d), n = (calData[key] || []).length, lvl = n / max < .34 ? 'l1' : (n / max < .67 ? 'l2' : '');
       html += '<div class="d' + (d.getMonth() !== cm.getMonth() ? ' out' : '') + (key === today ? ' today' : '') + (d.getDay() === 6 ? ' shabbat' : '') + (key === pickDay ? ' pick' : '') + '" data-day="' + key + '">' +
-        '<span class="hd">' + h.dayH + '</span><span class="gd">' + d.getDate() + '</span>' + (h.day === 1 ? '<span class="rh">ר״ח ' + escHtml(h.month) + '</span>' : '') +
+        '<span class="hd">' + h.dayH + '</span><span class="gd">' + d.getDate() + '</span>' +
         (n ? '<span class="cnt ' + lvl + '">' + n + '</span>' : '') + '</div>';
     }
     $('cal').innerHTML = html;
@@ -358,7 +359,11 @@ a.t:hover { color:var(--accent2); }
   $('cal').addEventListener('click', function (e) {
     var c = e.target.closest('.d'); if (!c) return;
     showDay(c.dataset.day);
-    if (window.innerWidth < 900) $('dayCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    setTimeout(function () {                         // קפיצה קטנה למטה - שיראו שהתמלולים של היום מופיעים מתחת
+      var r = $('dayCard').getBoundingClientRect(), want = Math.min(r.height, 260);
+      if (r.top + want > window.innerHeight - 20) window.scrollBy({ top: r.top + want - window.innerHeight + 40, behavior: 'smooth' });
+      $('dayCard').classList.remove('pulse'); void $('dayCard').offsetWidth; $('dayCard').classList.add('pulse');
+    }, 30);
   });
   async function loadCal() {
     var my = ++req;

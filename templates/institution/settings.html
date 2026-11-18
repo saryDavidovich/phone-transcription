@@ -153,9 +153,16 @@
   var defName = {{ inst.name|tojson }};
   f.brand_title.addEventListener('input', function () { document.getElementById('pvTitle').textContent = this.value.trim() || defName; });
   f.brand_subtitle.addEventListener('input', function () { document.getElementById('pvSub').textContent = this.value.trim(); });
-  logoIn.addEventListener('change', function () {
+  // הלוגו נשמר מיד כשבוחרים אותו (לא צריך ללחוץ "שמירה")
+  logoIn.addEventListener('change', async function () {
     var file = logoIn.files[0]; if (!file) return;
-    var r = new FileReader(); r.onload = function () { prev.src = r.result; prev.classList.remove('hidden'); }; r.readAsDataURL(file);
+    var fd = new FormData(f);
+    try {
+      instToast('מעלים את הלוגו...');
+      var d = await send(fd); logoIn.value = '';
+      if (d.logo) { prev.src = d.logo; prev.classList.remove('hidden'); document.getElementById('logoDel').classList.remove('hidden'); }
+      instToast('הלוגו נשמר - יופיע בכל קובצי ה-Word');
+    } catch (x) { logoIn.value = ''; instToast(escHtml(x.message), true); }
   });
   async function send(fd) {
     var res = await fetch('{{ url_for("institution_portal.branding") }}', { method: 'POST', body: fd, credentials: 'same-origin' });

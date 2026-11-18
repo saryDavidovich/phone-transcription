@@ -10,6 +10,10 @@
 * /institution/settings/branding   לוגו ושם לכותרת קובצי ה-Word.
 """
 import io
+import os
+import time
+import hashlib
+import tempfile
 import logging
 import threading
 import uuid
@@ -366,6 +370,86 @@ def audio(kind, item_id):
     if not target:
         return 'אין קובץ שמע זמין', 404
     return redirect(target, code=302)
+
+
+# קפיצה בנגן: ימות לא תומכים בהורדה חלקית (Range), ולכן דפדפן שמנגן ישר משם לא יכול לקפוץ
+# באמצע - כל הזזה מחזירה להתחלה. לכן הנגן מתחיל לנגן מימות מיד, ובמקביל מושך את הקובץ המלא
+# דרכנו בחתיכות JSON (כמו ההורדות - נטפרי חוסמת קובצי שמע מהאתר שלנו אבל לא JSON), ומחליף
+# לעותק המקומי בדפדפן - שם אפשר לקפוץ לכל מקום. אצלנו נשמר רק עותק MP3 זמני (נמחק אחרי כמה שעות).
+AUDIO_CACHE = os.path.join(tempfile.gettempdir(), 'portal_audio_cache')
+AUDIO_CHUNK = 1_500_000
+_cache_locks = {}
+
+
+def _cached_mp3(kind, obj):
+    from services import portal_media as PM
+    import requests
+    target = _audio_target(kind, obj)
+    if not target:
+        return None
+    os.makedirs(AUDIO_CACHE, exist_ok=True)
+    tag = hashlib.sha1(target.split('token=')[-1].encode()).hexdigest()[:10]
+    path = os.path.join(AUDIO_CACHE, f'{kind}{obj.id}_{tag}.mp3')
+    if os.path.exists(path):
+        os.utime(path)
+        return path
+    with _push_lock:
+        lock = _cache_locks.setdefault(path, threading.Lock())
+    with lock:
+        if os.path.exists(path):
+            return path
+        now = time.time()
+        for f in os.listdir(AUDIO_CACHE):          # ניקוי עותקים ישנים
+            fp = os.path.join(AUDIO_CACHE, f)
+            try:
+                if now - os.path.getmtime(fp) > 6 * 3600:
+                    os.remove(fp)
+            except OSError:
+                pass
+        fd, raw = tempfile.mkstemp(dir=AUDIO_CACHE, suffix='.src')
+        os.close(fd)
+        try:
+            with requests.get(target, stream=True, timeout=300, headers={'User-Agent': 'Mozilla/5.0'}) as r:
+                r.raise_for_status()
+                with open(raw, 'wb') as fh:
+                    for chunk in r.iter_content(1024 * 1024):
+                        fh.write(chunk)
+            with open(raw, 'rb') as fh:
+                head = fh.read(3)
+            is_mp3 = head[:3] == b'ID3' or (len(head) >= 2 and head[0] == 0xFF and (head[1] & 0xE0) == 0xE0)
+            if is_mp3:
+                os.replace(raw, path)
+            else:
+                mp3 = PM.to_mp3(raw, bitrate='32k')
+                if not mp3:
+                    return None
+                os.replace(mp3, path)
+            return path
+        except Exception as e:
+            log.warning(f'portal audio cache {kind}{obj.id} failed: {type(e).__name__}: {e}')
+            return None
+        finally:
+            PM.remove_quietly(raw)
+
+
+@institution_portal_bp.route('/institution/t/<kind>/<int:item_id>/audio-chunk/<int:n>')
+@institution_login_required
+def audio_chunk(kind, item_id, n):
+    import base64
+    obj, _student = _get(kind, item_id)
+    path = _cached_mp3(kind, obj)
+    if not path:
+        return jsonify({'error': 'השמע לא זמין כרגע'}), 404
+    size = os.path.getsize(path)
+    total = max(1, -(-size // AUDIO_CHUNK))
+    if n < 0 or n >= total:
+        return jsonify({'error': 'אין חתיכה כזו'}), 404
+    with open(path, 'rb') as fh:
+        fh.seek(n * AUDIO_CHUNK)
+        data = fh.read(AUDIO_CHUNK)
+    resp = jsonify({'b64': base64.b64encode(data).decode(), 'n': n, 'total': total, 'size': size, 'mime': 'audio/mpeg'})
+    resp.headers['Cache-Control'] = 'private, max-age=3600'
+    return resp
 
 
 # ------------------------------------------------------------------ כל התמלולים

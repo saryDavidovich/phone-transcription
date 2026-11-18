@@ -106,6 +106,7 @@ body.no-sidebar main .flash { max-width:380px; width:100%; }
 
 .card { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:22px; box-shadow:var(--shadow); }
 .grid { display:grid; gap:18px; }
+.grid > * { min-width:0; }
 .grid-4 { grid-template-columns:repeat(4,1fr); }
 .grid-3 { grid-template-columns:repeat(3,1fr); }
 .grid-2 { grid-template-columns:repeat(2,1fr); }
@@ -202,10 +203,25 @@ table tr { border-bottom:1px solid var(--border); }
   .topbar .t-title { font-weight:800; font-size:16px; display:flex; align-items:center; gap:8px; }
   .topbar .logo-ic { width:26px; height:26px; }
   .topbar button { background:var(--surface2); border:1px solid var(--border); border-radius:10px; width:40px; height:40px; cursor:pointer; color:var(--text); display:flex; align-items:center; justify-content:center; }
-  .sidebar { transform:translateX(100%); transition:transform .2s; box-shadow:var(--shadow-lg); width:260px; }
-  body.nav-open .sidebar { transform:none; }
+  /* כמו בממשק הניהול: סרגל סמלים צר שתמיד קיים; לחיצה על התפריט / על הסרגל פותחת אותו עם השמות */
+  .sidebar { width:64px; transition:width .2s, box-shadow .2s; overflow:hidden auto; padding-top:12px; }
+  body.nav-open .sidebar { width:250px; box-shadow:var(--shadow-lg); }
   body.nav-open .nav-backdrop { display:block; position:fixed; inset:0; background:rgba(20,25,40,.35); z-index:95; }
-  main { margin-right:0; padding:18px 14px 28px; max-width:100%; }
+  .topbar { margin-right:64px; }
+  main { margin-right:64px; padding:16px 12px 28px; max-width:100%; }
+  .sidebar-logo { padding:0 0 12px; justify-content:center; cursor:pointer; }
+  .sidebar-nav { padding:10px 8px; }
+  .sidebar-nav a { position:relative; }
+  body:not(.nav-open) .sidebar-nav a { justify-content:center; padding:11px 0; }
+  body:not(.nav-open) .sidebar .inst-name,
+  body:not(.nav-open) .sidebar-nav a span,
+  body:not(.nav-open) .side-tool span,
+  body:not(.nav-open) .sidebar-footer span,
+  body:not(.nav-open) #pwaInstall { display:none !important; }
+  body:not(.nav-open) .sidebar-nav .nav-badge { position:absolute; top:3px; left:6px; min-width:17px; height:17px; font-size:10px; padding:0 4px; box-shadow:0 0 0 2px var(--surface); }
+  body:not(.nav-open) .side-tools { padding:8px 4px; }
+  body:not(.nav-open) .sidebar-footer { padding:12px 0; text-align:center; }
+  body.nav-open .sidebar-logo { justify-content:flex-start; padding:0 16px 12px; }
   h1 { font-size:19px; margin-bottom:16px; }
   .card { padding:18px; }
   table { font-size:13px; }
@@ -248,7 +264,7 @@ window.IC = {
 </div>
 <div class="nav-backdrop" onclick="document.body.classList.remove('nav-open')"></div>
 <aside class="sidebar">
-  <div class="sidebar-logo"><span class="logo-ic">{{ ic('logo', 16, 2) }}</span> <span class="inst-name">{{ current_user.name }}</span></div>
+  <div class="sidebar-logo" onclick="if (window.innerWidth <= 900) document.body.classList.toggle('nav-open')"><span class="logo-ic">{{ ic('logo', 16, 2) }}</span> <span class="inst-name">{{ current_user.name }}</span></div>
   {% set ep = request.endpoint or '' %}
   {% set self_page = student is defined and student.is_institution_self %}
   <nav class="sidebar-nav">
@@ -456,10 +472,15 @@ window.IC = {
         var fresh = [];
         d.events.forEach(function (ev) { if (!seen[ev.id]) { if (!first) fresh.push(ev); remember(ev.id); } });
         if (notifyOn()) {
-          fresh.filter(function (e) { return /ready|chat|error|pending/.test(e.type); }).slice(0, 3).forEach(function (e) { show(e.title, e.sub, e.url, e.id); });
+          var toShow = fresh.filter(function (e) { return /ready|chat|error|pending/.test(e.type); }).slice(0, 3);
+          // גיבוי: מספר ההודעות שלא נקראו עלה, אבל ההודעה עצמה לא הגיעה כאירוע - בכל זאת מודיעים
+          if (!first && d.chat > (P.lastChat || 0) && !toShow.some(function (e) { return e.type === 'chat'; }))
+            toShow.push({ title: 'הודעה חדשה מהצוות', sub: 'לקריאה בלשונית צור קשר', url: '/institution/contact', id: 'chat-' + d.chat + '-' + Math.round(d.now) });
+          toShow.forEach(function (e) { show(e.title, e.sub, e.url, e.id); });
           var day = new Date().toISOString().slice(0, 10);
           if (d.low && ls('instLowDay') !== day) { ls('instLowDay', day); show('יתרת המוסד נמוכה', 'היתרה כעת ₪' + d.balance.toFixed(2) + ' - לטעינה בלשונית הגדרות חיוב', '/institution/billing', 'inst-low'); }
         }
+        P.lastChat = d.chat;
         P.listeners.forEach(function (fn) { try { fn(d, first, fresh); } catch (e) {} });
         P.busyCount = d.busy;
       })
@@ -468,8 +489,8 @@ window.IC = {
   }
   function schedule() {
     clearTimeout(timer);
-    var ms = P.fast || P.busyCount ? 15000 : (notifyOn() ? 45000 : 90000);
-    if (document.hidden && !notifyOn()) ms = Math.max(ms, 180000);
+    var ms = P.fast || P.busyCount ? 15000 : 30000;
+    if (document.hidden) ms = notifyOn() ? 45000 : 180000;
     timer = setTimeout(tick, ms);
   }
   P.refresh = function () { clearTimeout(timer); tick(); };

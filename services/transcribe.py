@@ -1676,7 +1676,10 @@ def add_no_expand_shift_return(doc):
         compat.insert(0, OxmlElement('w:doNotExpandShiftReturn'))
 
 
-def _build_word_doc(name, duration_str, transcript_fixed, transcript_raw=None, title='תמלול שיחה', call_time=None):
+def _build_word_doc(name, duration_str, transcript_fixed, transcript_raw=None, title='תמלול שיחה', call_time=None,
+                    brand=None, items=None, cover_title=None):
+    """brand (אזור המוסד): {'logo': bytes|None, 'title': str, 'subtitle': str} - כותרת עליונה עם לוגו ושם המוסד.
+    items: [(כותרת, שורת פרטים, תמלול)] - כמה תמלולים במסמך אחד, כל אחד מעמוד חדש (הורדה מרוכזת)."""
     from docx import Document
     from docx.enum.text import WD_ALIGN_PARAGRAPH
     from docx.oxml import OxmlElement
@@ -1890,34 +1893,69 @@ def _build_word_doc(name, duration_str, transcript_fixed, transcript_raw=None, t
 
     add_footer(doc)
 
-    title_heading = doc.add_heading(title, 0)
-    set_rtl(title_heading)
-    clear_indent(title_heading)
-    for run in title_heading.runs:
-        set_hebrew_font(run)
+    if brand:
+        hp = section.header.paragraphs[0]
+        set_rtl(hp)
+        if brand.get('logo'):
+            try:
+                from docx.shared import Cm
+                hp.add_run().add_picture(io.BytesIO(brand['logo']), height=Cm(1.6))
+                hp.add_run('   ')
+            except Exception as e:
+                log.warning(f'Word: הלוגו לא נוסף ({e})')
+        r_brand = hp.add_run(brand.get('title') or '')
+        set_hebrew_font(r_brand, size=Pt(15))
+        r_brand.bold = True
+        r_brand.font.color.rgb = RGBColor(0x0E, 0x7A, 0x55)
+        if brand.get('subtitle'):
+            hp.add_run('\n')
+            r_sub = hp.add_run(brand['subtitle'])
+            set_hebrew_font(r_sub, size=Pt(10))
+            r_sub.font.color.rgb = RGBColor(0x64, 0x70, 0x8A)
+        add_bottom_border(hp)
 
-    h_details = doc.add_heading('פרטי לקוח', level=1)
-    set_rtl(h_details)
-    clear_indent(h_details)
-    for run in h_details.runs:
-        set_hebrew_font(run)
+    if items is None:
+        items = [(title, f'לקוח: {name}   |   תאריך ושעה: {time_str}   |   משך: {duration_str}', transcript_fixed, 'פרטי לקוח')]
+    if cover_title:
+        cover = doc.add_heading(cover_title, 0)
+        set_rtl(cover)
+        clear_indent(cover)
+        for run in cover.runs:
+            set_hebrew_font(run)
+    for idx, item in enumerate(items):
+        it_title, it_info, it_text = item[0], item[1], item[2]
+        it_details = item[3] if len(item) > 3 else 'פרטים'
+        title_heading = doc.add_heading(it_title, 0 if not cover_title else 1)
+        if idx > 0 or cover_title:
+            title_heading.paragraph_format.page_break_before = True
+        set_rtl(title_heading)
+        clear_indent(title_heading)
+        for run in title_heading.runs:
+            set_hebrew_font(run)
 
-    p_info = doc.add_paragraph(f'לקוח: {name}   |   תאריך ושעה: {time_str}   |   משך: {duration_str}')
-    set_rtl(p_info)
-    add_bottom_border(p_info)
-    for run in p_info.runs:
-        set_hebrew_font(run, size=Pt(11))
+        if it_info:
+            h_details = doc.add_heading(it_details, level=1 if not cover_title else 2)
+            set_rtl(h_details)
+            clear_indent(h_details)
+            for run in h_details.runs:
+                set_hebrew_font(run)
 
-    h1 = doc.add_heading('תמלול', level=1)
-    set_rtl(h1)
-    clear_indent(h1)
-    for run in h1.runs:
-        set_hebrew_font(run)
+            p_info = doc.add_paragraph(it_info)
+            set_rtl(p_info)
+            add_bottom_border(p_info)
+            for run in p_info.runs:
+                set_hebrew_font(run, size=Pt(11))
 
-    p = doc.add_paragraph()
-    set_rtl(p, justify=True)
-    run_body = p.add_run(transcript_fixed or '')
-    set_hebrew_font(run_body, size=Pt(13))
+        h1 = doc.add_heading('תמלול', level=1 if not cover_title else 2)
+        set_rtl(h1)
+        clear_indent(h1)
+        for run in h1.runs:
+            set_hebrew_font(run)
+
+        p = doc.add_paragraph()
+        set_rtl(p, justify=True)
+        run_body = p.add_run(it_text or '')
+        set_hebrew_font(run_body, size=Pt(13))
 
     buf = io.BytesIO()
     doc.save(buf)

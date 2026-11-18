@@ -201,6 +201,34 @@ def phone_edit_instructions_email():
         return jsonify({'ok': False, 'error': str(e)[:200]})
 
 
+@api_bp.route('/customer/by-student/<student_number>', methods=['GET'])
+def get_customer_by_student(student_number):
+    """שלוחה 7 ב-IVR (ivr.js, handleStudentLogin) - כניסה עם מספר תלמיד, לתלמידים בלי טלפון
+    אישי. מחזיר את מזהה ה"טלפון" שהתלמיד רשום תחתיו (שאר המערכת מזהה לפי phone); לתלמיד בלי
+    טלפון נוצר בפעם הראשונה מזהה קבוע "stu<מספר תלמיד>". אוכף את שעות השימוש של המוסד.
+    (הנתיב נמחק בטעות בהעלאה של 20/8/2026 - ומאז שלוחה 7 תמיד ענתה "מספר תלמיד לא נמצא".)"""
+    customer = Customer.query.filter_by(student_number=str(student_number).strip()).first()
+    if not customer or not customer.institution_id or customer.is_blocked:
+        return jsonify({'error': 'not_found'}), 404
+
+    if not customer.phone:
+        customer.phone = f"stu{customer.student_number}"
+        db.session.commit()
+
+    institution = customer.institution
+    if institution and institution.allowed_hours_start and institution.allowed_hours_end:
+        from datetime import datetime as _dt
+        from zoneinfo import ZoneInfo
+        now_local = _dt.now(ZoneInfo('Asia/Jerusalem')).strftime('%H:%M')
+        start, end = institution.allowed_hours_start, institution.allowed_hours_end
+        in_range = (start <= now_local <= end) if start <= end else (now_local >= start or now_local <= end)
+        if not in_range:
+            return jsonify({'error': 'outside_allowed_hours', 'allowed_hours_start': start,
+                            'allowed_hours_end': end}), 403
+
+    return jsonify({'phone': customer.phone})
+
+
 @api_bp.route('/customer/pending-recordings', methods=['GET'])
 def get_pending_recordings():
     """

@@ -29,6 +29,7 @@
 .pl-opts { display:flex; align-items:center; gap:14px; margin-top:10px; font-size:12.5px; color:var(--text2); flex-wrap:wrap; }
 .pl-opts label { display:inline-flex; align-items:center; gap:6px; cursor:pointer; }
 .pl-opts input { accent-color:var(--accent); }
+.pl-load { font-size:12.5px; color:var(--blue); margin-top:8px; }
 .pl-state { display:flex; align-items:center; gap:10px; font-size:13.5px; color:var(--text2); }
 
 .tx-tools { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:14px; }
@@ -108,6 +109,7 @@ mark.hit.cur { background:#f59e0b; color:#fff; }
           <option value="1.5">1.5×</option><option value="1.75">1.75×</option><option value="2">2×</option>
         </select>
       </div>
+      <div class="pl-load hidden" id="plLoad"></div>
       <div class="pl-opts">
         <label><input type="checkbox" id="optFollow" checked> גלילה אוטומטית עם הטקסט</label>
         <span class="sync-note">{{ ic('info', 13) }} הסנכרון משוער. אם ההדגשה לא מדויקת: בזמן ניגון, Shift + לחיצה על המשפט שנשמע עכשיו</span>
@@ -260,8 +262,7 @@ mark.hit.cur { background:#f59e0b; color:#fff; }
       return;
     }
     if (window.getSelection && String(window.getSelection())) return;     // סימון טקסט להעתקה
-    audio.currentTime = starts[i] || 0; active = -1; highlight(i, false);
-    if (audio.paused) audio.play().catch(function () {});
+    seekTo(starts[i] || 0, true); active = -1; highlight(i, false);
   });
 
   /* ---------- נגן ---------- */
@@ -270,30 +271,34 @@ mark.hit.cur { background:#f59e0b; color:#fff; }
   function fmt(s) { s = Math.max(0, Math.floor(s || 0)); var h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = s % 60;
     return (h ? h + ':' + String(m).padStart(2, '0') : m) + ':' + String(x).padStart(2, '0'); }
   function paint() {
-    var D = duration() || 1, p = Math.min(1, (audio.currentTime || 0) / D) * 100;
+    var D = duration() || 1, p = Math.min(1, curTime() / D) * 100;
     document.getElementById('plFill').style.width = p + '%';
     document.getElementById('plKnob').style.left = p + '%';
-    document.getElementById('plCur').textContent = fmt(audio.currentTime);
+    document.getElementById('plCur').textContent = fmt(curTime());
+    if (!local) { document.getElementById('plBuf').style.width = (loadPct * 100) + '%'; return; }
     try { if (audio.buffered.length) document.getElementById('plBuf').style.width = Math.min(100, audio.buffered.end(audio.buffered.length - 1) / D * 100) + '%'; } catch (e) {}
   }
   audio.addEventListener('loadedmetadata', function () { document.getElementById('plDur').textContent = fmt(duration()); computeStarts(); paint(); });
-  audio.addEventListener('timeupdate', function () { paint(); if (segs.length) highlight(segAt(audio.currentTime), true); });
+  audio.addEventListener('timeupdate', function () { paint(); if (segs.length) highlight(segAt(curTime()), true); });
   audio.addEventListener('progress', paint);
   audio.addEventListener('play', function () { plPlay.innerHTML = ICP.pause; plPlay.setAttribute('aria-label', 'השהיה'); });
   audio.addEventListener('pause', function () { plPlay.innerHTML = ICP.play; plPlay.setAttribute('aria-label', 'ניגון'); savePos(); });
   audio.addEventListener('error', function () { if (hasAudio) showState('{{ ic("alert", 16)|replace("\n", "")|replace("'", "\\'") }} לא הצלחנו לנגן את השמע כרגע. נסו לרענן בעוד רגע'); });
-  plPlay.onclick = function () { audio.paused ? audio.play().catch(function () {}) : audio.pause(); };
-  document.getElementById('plBack').onclick = function () { audio.currentTime = Math.max(0, audio.currentTime - 10); };
-  document.getElementById('plFwd').onclick = function () { audio.currentTime = Math.min(duration(), audio.currentTime + 10); };
+  plPlay.onclick = function () {
+    if (!local && pendingSeek != null) { wantPlay = !wantPlay; plPlay.innerHTML = wantPlay ? ICP.pause : ICP.play; return; }
+    audio.paused ? audio.play().catch(function () {}) : audio.pause();
+  };
+  document.getElementById('plBack').onclick = function () { seekTo(curTime() - 10); };
+  document.getElementById('plFwd').onclick = function () { seekTo(curTime() + 10); };
   document.getElementById('plSpeed').onchange = function () { audio.playbackRate = +this.value; try { localStorage.setItem('instSpeed', this.value); } catch (e) {} };
   try { var sp = localStorage.getItem('instSpeed'); if (sp) { document.getElementById('plSpeed').value = sp; audio.playbackRate = +sp; } } catch (e) {}
   function seekFrom(ev) {
     var r = bar.getBoundingClientRect(), x = (ev.touches ? ev.touches[0].clientX : ev.clientX);
-    audio.currentTime = Math.max(0, Math.min(1, (x - r.left) / r.width)) * duration(); paint();
+    seekTo(Math.max(0, Math.min(1, (x - r.left) / r.width)) * duration());
   }
   var dragging = false;
   bar.addEventListener('pointerdown', function (e) { dragging = true; bar.setPointerCapture(e.pointerId); seekFrom(e); });
-  bar.addEventListener('pointermove', function (e) { if (dragging) seekFrom(e); });
+  bar.addEventListener('pointermove', function (e) { if (dragging && local) seekFrom(e); });
   bar.addEventListener('pointerup', function () { dragging = false; });
   function savePos() { try { if (audio.currentTime > 5) localStorage.setItem('instPos:' + KIND + ID, String(audio.currentTime)); } catch (e) {} }
   window.addEventListener('beforeunload', savePos);
@@ -302,9 +307,64 @@ mark.hit.cur { background:#f59e0b; color:#fff; }
   document.addEventListener('keydown', function (e) {
     if (!hasAudio || /INPUT|TEXTAREA|SELECT/.test((e.target.tagName || '')) || e.target.isContentEditable) return;
     if (e.code === 'Space') { e.preventDefault(); plPlay.click(); }
-    else if (e.key === 'ArrowLeft') { audio.currentTime = Math.min(duration(), audio.currentTime + 5); }
-    else if (e.key === 'ArrowRight') { audio.currentTime = Math.max(0, audio.currentTime - 5); }
+    else if (e.key === 'ArrowLeft') { e.preventDefault(); seekTo(curTime() + 5); }
+    else if (e.key === 'ArrowRight') { e.preventDefault(); seekTo(curTime() - 5); }
   });
+
+  /* ימות לא מאפשרים לקפוץ באמצע קובץ שמנגנים ישר משם. לכן מנגנים משם מיד, ובמקביל מושכים
+     את ההקלטה המלאה (בחתיכות) לעותק בתוך הדפדפן - ממנו אפשר לקפוץ לכל מקום. קפיצה שמתבקשת
+     לפני שהעותק מוכן - נשמרת ומתבצעת ברגע שהוא מוכן. */
+  var local = false, pendingSeek = null, loadPct = 0;
+  function curTime() { return pendingSeek != null ? pendingSeek : (audio.currentTime || 0); }
+  function seekTo(t, play) {
+    t = Math.max(0, Math.min(duration() || t, t));
+    if (local) { audio.currentTime = t; }
+    else {
+      if (!audio.paused) { wantPlay = true; audio.pause(); }
+      pendingSeek = t;
+      showLoadNote(true);
+    }
+    paint(); if (segs.length) { active = -1; highlight(segAt(t), false); }
+    if (play && audio.paused && local) audio.play().catch(function () {});
+    if (play && !local) wantPlay = true;
+  }
+  var wantPlay = false;
+  function showLoadNote(on) {
+    var n = document.getElementById('plLoad');
+    if (!n) return;
+    n.classList.toggle('hidden', !on || local);
+    n.textContent = 'מכינים את ההקלטה לקפיצה... ' + Math.round(loadPct * 100) + '%';
+  }
+  async function loadLocal() {
+    var parts = [], total = 1, mime = 'audio/mpeg';
+    try {
+      for (var n = 0; n < total; n++) {
+        var r = await fetch(BASE + '/audio-chunk/' + n, { credentials: 'same-origin' });
+        if (!r.ok) throw new Error(r.status);
+        var d = await r.json();
+        total = d.total; mime = d.mime || mime;
+        var bin = atob(d.b64), bytes = new Uint8Array(bin.length);
+        for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        parts.push(bytes);
+        loadPct = (n + 1) / total; paint(); if (pendingSeek != null) showLoadNote(true);
+      }
+    } catch (e) {
+      var n2 = document.getElementById('plLoad');
+      if (n2 && pendingSeek != null) { n2.textContent = 'לא הצלחנו להכין את ההקלטה לקפיצה - אפשר להמשיך לשמוע מההתחלה'; n2.classList.remove('hidden'); }
+      pendingSeek = null;
+      return;
+    }
+    var playing = !audio.paused || wantPlay, t = pendingSeek != null ? pendingSeek : audio.currentTime, rate = audio.playbackRate;
+    audio.src = URL.createObjectURL(new Blob(parts, { type: mime }));
+    audio.addEventListener('loadedmetadata', function once() {
+      audio.removeEventListener('loadedmetadata', once);
+      local = true; pendingSeek = null; wantPlay = false;
+      audio.playbackRate = rate; audio.currentTime = t || 0;
+      showLoadNote(false); paint();
+      if (playing) audio.play().catch(function () {});
+    });
+    audio.load();
+  }
 
   var tries = 0;
   function loadAudio() {
@@ -315,7 +375,8 @@ mark.hit.cur { background:#f59e0b; color:#fff; }
         document.getElementById('plState').classList.add('hidden');
         document.getElementById('plUi').classList.remove('hidden');
         document.getElementById('plDur').textContent = fmt(DUR_HINT);
-        try { var pos = +localStorage.getItem('instPos:' + KIND + ID); if (pos > 5) audio.addEventListener('loadedmetadata', function once() { audio.currentTime = pos; audio.removeEventListener('loadedmetadata', once); }); } catch (e) {}
+        try { var pos = +localStorage.getItem('instPos:' + KIND + ID); if (pos > 5) pendingSeek = pos; } catch (e) {}
+        loadLocal();
       } else if (d.state === 'preparing' && tries++ < 40) {
         showState('<span class="spinner-ring"></span> מכינים את השמע לניגון - עוד כמה שניות...');
         setTimeout(loadAudio, 4000);
