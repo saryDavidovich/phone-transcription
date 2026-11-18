@@ -28,7 +28,7 @@ def credit_charge(charge_id, data, source):
         return 'not_found'
     receipt = str(data.get('ReceiptData') or '').strip()
     if charge.status == 'success':
-        if receipt.startswith('https://') and not charge.receipt_url:
+        if receipt.startswith('http') and not charge.receipt_url:
             charge.receipt_url = receipt[:500]
             db.session.commit()
         else:
@@ -67,7 +67,7 @@ def credit_charge(charge_id, data, source):
     charge.status = 'success'
     if hist:
         charge.history_id = hist[:64]
-    if receipt.startswith('https://'):
+    if receipt.startswith('http'):
         charge.receipt_url = receipt[:500]
     what = 'טעינה אוטומטית' if charge.kind == 'auto' else 'טעינת יתרה באשראי (האזור האישי)'
     desc = f'{what} ₪{charge.amount:.2f}'
@@ -91,6 +91,48 @@ TAMAL_URL = 'https://matara.pro/nedarimplus/Reports/Tamal3.aspx'
 _TAG_RE = re.compile(r'\[נדרים:([^\]]+)\]')
 
 
+def _receipt_api(mosad, key, tx_id):
+    """(קישור, הודעת נדרים). ShowInvoice, ואם לא - הסטוריית העסקאות (InvoiceData2)."""
+    import requests
+    msg = ''
+    try:
+        r = requests.get(TAMAL_URL, params={'Action': 'ShowInvoice', 'MosadId': mosad, 'ApiPassword': key,
+                                            'TransactionId': tx_id}, timeout=20)
+        try:
+            d = r.json()
+        except ValueError:
+            d = {'Message': (r.text or '')[:200]}
+        m = str(d.get('Message') or '').strip()
+        if str(d.get('Result') or d.get('Status') or '').upper() == 'OK' and m.startswith('http'):
+            return m, ''
+        msg = m[:200]
+    except Exception as e:
+        msg = f'ShowInvoice: {e}'[:200]
+    if tx_id.isdigit():
+        try:
+            r = requests.get(MANAGE_URL, params={'Action': 'GetHistoryJson', 'MosadId': mosad, 'ApiPassword': key,
+                                                 'LastId': str(int(tx_id) - 1), 'MaxId': '1'}, timeout=20)
+            rows = r.json()
+            rows = rows if isinstance(rows, list) else (rows.get('data') or rows.get('Data') or [])
+            for row in rows:
+                if str(row.get('TransactionId')) != tx_id:
+                    continue
+                for k in ('ReceiptData', 'InvoiceLink', 'KabalaLink'):
+                    v = str(row.get(k) or '')
+                    if v.startswith('http'):
+                        return v, ''
+                uuid = str(row.get('InvoiceData2') or '').strip()
+                if uuid:
+                    return f'https://docs.matara.pro/r/{uuid}', ''
+                msg = msg or 'אין קבלה לעסקה בנדרים'
+        except Exception as e:
+            log.info(f'receipt history lookup {tx_id}: {e}')
+    return None, msg
+
+
+MANAGE_URL = 'https://matara.pro/nedarimplus/Reports/Manage3.aspx'
+
+
 def receipt_url(tx):
     """קישור לקבלה של טעינה (Transaction של הלקוח). (url, None) או (None, הסבר)."""
     import requests
@@ -105,38 +147,39 @@ def receipt_url(tx):
               or CustomerChargeLog.query.filter_by(customer_id=tx.customer_id, provider_ref=ref).first())
     if charge and charge.receipt_url:
         return charge.receipt_url, None
-    hist = (charge.history_id if charge and charge.history_id else ref)
     mosad, key = _credentials()
     if not mosad or not key:
         return None, 'הפקת קבלות עוד לא הוגדרה. כתבו לנו ונשלח את הקבלה'
-
-    def show():
-        r = requests.get(TAMAL_URL, params={'Action': 'ShowInvoice', 'MosadId': mosad, 'ApiPassword': key,
-                                            'TransactionId': hist}, timeout=20)
-        try:
-            d = r.json()
-        except ValueError:
-            return None, (r.text or '')[:200]
-        if str(d.get('Result')) == 'OK' and str(d.get('Message') or '').startswith('http'):
-            return d['Message'], None
-        return None, str(d.get('Message') or '')[:200]
-
-    try:
-        url, err = show()
-        if not url:
-            row = Settings.query.filter_by(key='nedarim_receipt_type').first()
-            kind = row.value if row and row.value in ('400', '320', '405') else ''
-            if kind:
-                r = requests.get(TAMAL_URL, params={'Action': 'TamalCreate', 'MosadId': mosad, 'ApiPassword': key,
-                                                    'TransactionId': hist, 'TamalType': kind}, timeout=30)
-                log.info(f'receipt create for {hist}: {(r.text or "")[:120]}')
-                url, err = show()
-    except Exception as e:
-        log.warning(f'receipt for {hist} failed: {e}')
-        return None, 'לא הצלחנו להגיע לשרת הקבלות כרגע. נסו שוב בעוד כמה דקות'
+    # כל המזהים האפשריים של העסקה: הסטוריה (מה-CallBack / Webhook), מזהה ההקמה, והתיוג בתנועה
+    ids = []
+    for v in ((charge.history_id if charge else None), ref, (charge.provider_ref if charge else None)):
+        v = str(v or '').strip()
+        if v and v not in ids and not v.startswith('keva:'):
+            ids.append(v)
+    hm = re.search(r'\[הקמה:([^\]]+)\]', tx.description or '')
+    if hm and hm.group(1) not in ids:
+        ids.append(hm.group(1))
+    url, last = None, ''
+    for tid in ids:
+        url, msg = _receipt_api(mosad, key, tid)
+        if url:
+            break
+        last = msg or last
     if not url:
-        log.info(f'receipt for {hist}: {err}')
-        return None, 'הקבלה לטעינה הזו עוד לא הופקה. כתבו לנו ונשלח אותה'
+        row = Settings.query.filter_by(key='nedarim_receipt_type').first()
+        kind = row.value if row and row.value in ('400', '320', '405') else ''
+        if kind and ids:
+            try:
+                r = requests.get(TAMAL_URL, params={'Action': 'TamalCreate', 'MosadId': mosad, 'ApiPassword': key,
+                                                    'TransactionId': ids[0], 'TamalType': kind}, timeout=30)
+                log.info(f'receipt create for {ids[0]}: {(r.text or "")[:120]}')
+                url, last = _receipt_api(mosad, key, ids[0])
+            except Exception as e:
+                last = str(e)[:200]
+    if not url:
+        log.warning(f'receipt for tx {tx.id} (ids {ids}): {last}')
+        return None, ('לא הצלחנו למשוך את הקבלה מנדרים' + (f' (נדרים השיבו: {last})' if last else '') +
+                      '. נסו שוב בעוד דקה, או כתבו לנו ונשלח אותה')
     if charge:
         charge.receipt_url = url[:500]
         db.session.commit()

@@ -268,6 +268,15 @@ def nedarim_webhook():
         desc += f' [נדרים:{tx_id}]'
         txn = Transaction(customer_id=customer.id, amount=total_credit, type='charge', description=desc)
         db.session.add(txn)
+        # קבלה: נדרים מפיקים מיד ושולחים את הקישור כאן (ReceiptData) - שומרים לקישור "קבלה" בתנועות
+        try:
+            from models import CustomerChargeLog
+            rd = str(data.get('ReceiptData') or '').strip()
+            db.session.add(CustomerChargeLog(customer_id=customer.id, amount=amount, status='success', kind='phone',
+                                             provider_ref=tx_id[:200], history_id=tx_id[:64],
+                                             receipt_url=rd[:500] if rd.startswith('http') else None))
+        except Exception:
+            log.exception('receipt link save failed')
         db.session.commit()
         log.info(f'Nedarim webhook: credited customer {customer.id} +{total_credit} (tx {tx_id})')
 
