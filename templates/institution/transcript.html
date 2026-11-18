@@ -285,7 +285,7 @@ mark.hit.cur { background:#f59e0b; color:#fff; }
   audio.addEventListener('pause', function () { plPlay.innerHTML = ICP.play; plPlay.setAttribute('aria-label', 'ניגון'); savePos(); });
   audio.addEventListener('error', function () { if (hasAudio) showState('{{ ic("alert", 16)|replace("\n", "")|replace("'", "\\'") }} לא הצלחנו לנגן את השמע כרגע. נסו לרענן בעוד רגע'); });
   plPlay.onclick = function () {
-    if (!local && pendingSeek != null) { wantPlay = !wantPlay; plPlay.innerHTML = wantPlay ? ICP.pause : ICP.play; return; }
+    if (!local && pendingSeek != null) { ensureLocal(); showLoadNote(true); wantPlay = !wantPlay; plPlay.innerHTML = wantPlay ? ICP.pause : ICP.play; return; }
     audio.paused ? audio.play().catch(function () {}) : audio.pause();
   };
   document.getElementById('plBack').onclick = function () { seekTo(curTime() - 10); };
@@ -314,9 +314,12 @@ mark.hit.cur { background:#f59e0b; color:#fff; }
   /* ימות לא מאפשרים לקפוץ באמצע קובץ שמנגנים ישר משם. לכן מנגנים משם מיד, ובמקביל מושכים
      את ההקלטה המלאה (בחתיכות) לעותק בתוך הדפדפן - ממנו אפשר לקפוץ לכל מקום. קפיצה שמתבקשת
      לפני שהעותק מוכן - נשמרת ומתבצעת ברגע שהוא מוכן. */
-  var local = false, pendingSeek = null, loadPct = 0;
+  var local = false, pendingSeek = null, loadPct = 0, loading = false;
+  function ensureLocal() { if (!loading && hasAudio) { loading = true; loadLocal(); } }
+  audio.addEventListener('play', ensureLocal);
   function curTime() { return pendingSeek != null ? pendingSeek : (audio.currentTime || 0); }
   function seekTo(t, play) {
+    ensureLocal();
     t = Math.max(0, Math.min(duration() || t, t));
     if (local) { audio.currentTime = t; }
     else {
@@ -376,7 +379,7 @@ mark.hit.cur { background:#f59e0b; color:#fff; }
         document.getElementById('plUi').classList.remove('hidden');
         document.getElementById('plDur').textContent = fmt(DUR_HINT);
         try { var pos = +localStorage.getItem('instPos:' + KIND + ID); if (pos > 5) pendingSeek = pos; } catch (e) {}
-        loadLocal();
+        // העותק המלא (בשביל קפיצה) נטען רק כשמתחילים לנגן או לקפוץ - מי שרק קורא לא מוריד כלום
       } else if (d.state === 'preparing' && tries++ < 40) {
         showState('<span class="spinner-ring"></span> מכינים את השמע לניגון - עוד כמה שניות...');
         setTimeout(loadAudio, 4000);
