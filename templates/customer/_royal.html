@@ -3,10 +3,30 @@
    הצבעים המקוריים (לבן + סגול), עם סידור אחיד: כרטיסים בגובה שווה, כותרות ברורות, מרווחים נדיבים. */
 :root { --radius: 18px; --shadow: 0 1px 2px rgba(20,25,40,.04), 0 10px 28px -14px rgba(20,25,40,.14); }
 
-/* סרגל צד - לבן, הדף הפעיל בסגול */
+/* סרגל צד וסרגל עליון - בצבעי האייקון של האפליקציה (#7c6cf6 -> #4338ca) */
+:root { --accent: #5b4ff0; --accent2: #4338ca; --accent-soft: #eeecfe; }
+.sidebar { background: linear-gradient(180deg, #7c6cf6 0%, #5b4ff0 45%, #4338ca 100%); border-left: 0; box-shadow: -8px 0 30px -18px rgba(67,56,202,.6); }
+.sidebar-logo { border-bottom: 1px solid rgba(255,255,255,.18); }
+.sidebar .inst-name { color: #fff; }
+.sidebar .inst-name .who { color: rgba(255,255,255,.8); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 150px; }
+.logo-ic { background: #fff; color: #5b4ff0; box-shadow: 0 4px 14px -4px rgba(30,20,120,.45); }
 .sidebar-nav { gap: 4px; }
-.sidebar-nav a { padding: 11px 14px; }
-.sidebar .inst-name .who { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 150px; }
+.sidebar-nav a { padding: 11px 14px; color: rgba(255,255,255,.85); }
+.sidebar-nav a .ico { opacity: .9; }
+.sidebar-nav a:hover { background: rgba(255,255,255,.14); color: #fff; }
+.sidebar-nav a.active { background: #fff; color: #4338ca; font-weight: 700; box-shadow: 0 6px 16px -8px rgba(30,20,120,.55); }
+.sidebar-nav a.active .nav-badge { background: #ef4444; color: #fff; }
+.side-tools, .sidebar-footer { border-top: 1px solid rgba(255,255,255,.18); }
+.side-tool, .sidebar-footer a { color: rgba(255,255,255,.8); }
+.side-tool:hover { background: rgba(255,255,255,.14); color: #fff; }
+.side-tool.on { color: #fff; }
+.sidebar-footer a:hover { color: #fff; }
+.btn { background: linear-gradient(135deg, #7c6cf6, #4338ca); }
+.btn:hover { background: linear-gradient(135deg, #6f5ff0, #3a30b5); }
+.btn-secondary { background: var(--surface2); }
+.btn-secondary:hover { background: var(--surface3); }
+.btn-danger { background: var(--red-soft); }
+.card-head .ic, .ic-box { background: var(--accent-soft); color: var(--accent2); }
 
 /* תוכן */
 main { padding: 34px 44px 48px; max-width: 1200px; }
@@ -26,7 +46,7 @@ h1::after { content: ''; position: absolute; right: 0; bottom: 0; width: 48px; h
 .field input, .field select, .field textarea, input.input, select.input, textarea.input { border-radius: 11px; }
 
 /* דפים משותפים עם אזור המוסד - צבעי הירוק הקבועים מוחלפים בסגול */
-body { --s1: #4f46e5; --s2: #f59e0b; }
+body { --s1: #5b4ff0; --s2: #f59e0b; }
 .tab.on { box-shadow: 0 4px 12px -4px rgba(79,70,229,.5) !important; }
 .cal .d .cnt.l1 { background: #e0e7ff !important; color: #3730a3 !important; }
 .cal .d .cnt.l2 { background: #818cf8 !important; color: #fff !important; }
@@ -36,6 +56,9 @@ body { --s1: #4f46e5; --s2: #f59e0b; }
 .chat { background-image: radial-gradient(rgba(79,70,229,.07) 1px, transparent 1px) !important; }
 
 @media (max-width: 900px) {
+  .topbar { background: linear-gradient(90deg, #4338ca, #7c6cf6); border-bottom: 0; }
+  .topbar .inst-name { color: #fff !important; }
+  .topbar button { background: rgba(255,255,255,.16); border-color: rgba(255,255,255,.25); color: #fff; }
   main { padding: 18px 12px 30px; }
   h1 { font-size: 21px; margin-bottom: 18px; }
   .card { padding: 18px; }
