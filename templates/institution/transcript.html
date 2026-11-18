@@ -307,8 +307,8 @@ mark.hit.cur { background:#f59e0b; color:#fff; }
   document.addEventListener('keydown', function (e) {
     if (!hasAudio || /INPUT|TEXTAREA|SELECT/.test((e.target.tagName || '')) || e.target.isContentEditable) return;
     if (e.code === 'Space') { e.preventDefault(); plPlay.click(); }
-    else if (e.key === 'ArrowLeft') { e.preventDefault(); seekTo(curTime() + 5); }
-    else if (e.key === 'ArrowRight') { e.preventDefault(); seekTo(curTime() - 5); }
+    else if (e.key === 'ArrowRight') { e.preventDefault(); seekTo(curTime() + 5); }   // כמו כיוון פס ההתקדמות
+    else if (e.key === 'ArrowLeft') { e.preventDefault(); seekTo(curTime() - 5); }
   });
 
   /* ימות לא מאפשרים לקפוץ באמצע קובץ שמנגנים ישר משם. לכן מנגנים משם מיד, ובמקביל מושכים

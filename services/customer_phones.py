@@ -75,9 +75,22 @@ def customer_emails(customer):
     return emails
 
 
+def _institution_emails(customer):
+    """תלמיד של מוסד: גם המוסד עצמו (המייל שלו, מייל קבלת התמלולים ומורשי הכניסה) רשאי
+    לשלוח הקלטות בשמו - בעיקר לתלמידים שאין להם מייל משלהם."""
+    inst = getattr(customer, 'institution', None) if getattr(customer, 'institution_id', None) else None
+    if not inst:
+        return set()
+    out = {(inst.email or '').strip().lower(), (inst.notify_email or '').strip().lower()}
+    for a in (inst.authorized_logins or []):
+        if isinstance(a, dict):
+            out.add((a.get('email') or '').strip().lower())
+    return {e for e in out if e}
+
+
 def sender_is_registered(customer, sender_email):
     s = (sender_email or '').strip().lower()
-    return bool(s) and s in customer_emails(customer)
+    return bool(s) and (s in customer_emails(customer) or s in _institution_emails(customer))
 
 
 def effective_contact(customer, phone):
@@ -100,6 +113,9 @@ def delivery_email_for_sender(customer, sender_email):
     ממיילי החשבון), אחרת למייל הלקוח."""
     if getattr(customer, 'phones_separate', False) and sender_is_registered(customer, sender_email):
         return (sender_email or '').strip()
+    if not (customer.email or '').strip() and getattr(customer, 'institution_id', None) \
+            and sender_is_registered(customer, sender_email):
+        return (sender_email or '').strip()      # תלמיד בלי מייל - התמלול חוזר למוסד ששלח
     return customer.email
 
 

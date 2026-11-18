@@ -2432,7 +2432,16 @@ def _send_email(to, transcript, customer, rec_url, duration_seconds, source_file
         # אם ההקלטה התקבלה במייל - הכותרת היא שם הקובץ שנשלח, ולא נכלל קישור להורדת ההקלטה
         title = source_filename if source_filename else 'תמלול שיחה'
 
-        word_bytes = _build_word_doc(name, duration_str, transcript, title=title)
+        # תלמיד של מוסד שהגדיר מיתוג (לוגו / שם לכותרת) - הקובץ יוצא עם כותרת המוסד, כמו באזור המוסד
+        brand = None
+        try:
+            inst = customer.institution if getattr(customer, 'institution_id', None) else None
+            if inst and (inst.logo_mime or inst.brand_title or inst.brand_subtitle):
+                from services.portal_docx import brand_of
+                brand = brand_of(inst)
+        except Exception:
+            log.exception('Word: טעינת מיתוג המוסד נכשלה')
+        word_bytes = _build_word_doc(name, duration_str, transcript, title=title, brand=brand)
         word_b64 = base64.b64encode(word_bytes).decode('utf-8')
 
         from html import escape as _esc

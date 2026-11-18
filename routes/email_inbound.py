@@ -289,8 +289,8 @@ def _parse_proofing_subject(subject):
     tokens = remainder.split()
     if len(tokens) < 2:
         return None
-    phone = _normalize_israeli_phone(tokens[0])
-    if not phone or not phone.isdigit():
+    phone = _student_phone_for(tokens[0]) or _normalize_israeli_phone(tokens[0])
+    if not phone or not (phone.isdigit() or phone.startswith('stu')):
         return None
     try:
         page_id = int(tokens[1])
@@ -345,6 +345,28 @@ def _strip_quoted_reply(text):
     return text.strip()
 
 
+def _student_phone_for(token):
+    """תלמיד של מוסד ששולח במייל: בנושא כותבים את מספר התלמיד (למשל 482915, או stu482915).
+    מחזיר את מזהה ה"טלפון" שהתלמיד רשום תחתיו (כמו בשלוחה 7 בטלפון), או None אם זה לא מספר
+    תלמיד. מספר טלפון רגיל (שמתחיל ב-0 / 972) לא נבדק כאן בכלל."""
+    m = re.match(r'^(?:stu)?(\d{4,8})$', (token or '').strip(), re.IGNORECASE)
+    if not m or (token or '').strip().startswith(('0', '+', '972')):
+        return None
+    try:
+        from app import db
+        from models import Customer
+        st = Customer.query.filter(Customer.student_number == m.group(1), Customer.institution_id.isnot(None)).first()
+        if not st:
+            return None
+        if not st.phone:
+            st.phone = f'stu{st.student_number}'
+            db.session.commit()
+        return st.phone
+    except Exception:
+        log.exception('email-inbound: חיפוש מספר תלמיד נכשל')
+        return None
+
+
 def _parse_subject(subject):
     """מפענח את שורת הנושא לפי הפורמט שמתואר למעלה. מחזיר dict או None אם אין מספר טלפון."""
     tokens = _clean_text(_strip_reply_prefixes(subject)).split()
@@ -356,8 +378,8 @@ def _parse_subject(subject):
     if glued:
         tokens = [glued.group(1), glued.group(2)] + tokens[1:]
 
-    phone = _normalize_israeli_phone(tokens[0])
-    if not phone or not phone.isdigit():
+    phone = _student_phone_for(tokens[0]) or _normalize_israeli_phone(tokens[0])
+    if not phone or not (phone.isdigit() or phone.startswith('stu')):
         return None
 
     tier = 'gemini'

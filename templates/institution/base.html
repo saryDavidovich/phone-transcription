@@ -205,23 +205,24 @@ table tr { border-bottom:1px solid var(--border); }
   .topbar button { background:var(--surface2); border:1px solid var(--border); border-radius:10px; width:40px; height:40px; cursor:pointer; color:var(--text); display:flex; align-items:center; justify-content:center; }
   /* כמו בממשק הניהול: סרגל סמלים צר שתמיד קיים; לחיצה על התפריט / על הסרגל פותחת אותו עם השמות */
   .sidebar { width:64px; transition:width .2s, box-shadow .2s; overflow:hidden auto; padding-top:12px; }
-  body.nav-open .sidebar { width:250px; box-shadow:var(--shadow-lg); }
+  body.nav-open .sidebar, .sidebar:hover { width:250px; box-shadow:var(--shadow-lg); }
   body.nav-open .nav-backdrop { display:block; position:fixed; inset:0; background:rgba(20,25,40,.35); z-index:95; }
   .topbar { margin-right:64px; }
   main { margin-right:64px; padding:16px 12px 28px; max-width:100%; }
   .sidebar-logo { padding:0 0 12px; justify-content:center; cursor:pointer; }
   .sidebar-nav { padding:10px 8px; }
   .sidebar-nav a { position:relative; }
-  body:not(.nav-open) .sidebar-nav a { justify-content:center; padding:11px 0; }
-  body:not(.nav-open) .sidebar .inst-name,
-  body:not(.nav-open) .sidebar-nav a span,
-  body:not(.nav-open) .side-tool span,
-  body:not(.nav-open) .sidebar-footer span,
-  body:not(.nav-open) #pwaInstall { display:none !important; }
-  body:not(.nav-open) .sidebar-nav .nav-badge { position:absolute; top:3px; left:6px; min-width:17px; height:17px; font-size:10px; padding:0 4px; box-shadow:0 0 0 2px var(--surface); }
-  body:not(.nav-open) .side-tools { padding:8px 4px; }
-  body:not(.nav-open) .sidebar-footer { padding:12px 0; text-align:center; }
-  body.nav-open .sidebar-logo { justify-content:flex-start; padding:0 16px 12px; }
+  body:not(.nav-open) .sidebar:not(:hover) .sidebar-nav a { justify-content:center; padding:11px 0; }
+  body:not(.nav-open) .sidebar:not(:hover) .inst-name,
+  body:not(.nav-open) .sidebar:not(:hover) .sidebar-nav a span,
+  body:not(.nav-open) .sidebar:not(:hover) .side-tool span,
+  body:not(.nav-open) .sidebar:not(:hover) .sidebar-footer span,
+  body:not(.nav-open) .sidebar:not(:hover) #pwaInstall { display:none !important; }
+  body:not(.nav-open) .sidebar:not(:hover) .sidebar-nav .nav-badge { position:absolute; top:3px; left:6px; min-width:17px; height:17px; font-size:10px; padding:0 4px; box-shadow:0 0 0 2px var(--surface); }
+  body:not(.nav-open) .sidebar:not(:hover) .side-tools { padding:8px 4px; }
+  body:not(.nav-open) .sidebar:not(:hover) .sidebar-footer { padding:12px 0; text-align:center; }
+  body.nav-open .sidebar-logo, .sidebar:hover .sidebar-logo { justify-content:flex-start; padding:0 16px 12px; }
+  .topbar { justify-content:flex-start; gap:10px; }
   h1 { font-size:19px; margin-bottom:16px; }
   .card { padding:18px; }
   table { font-size:13px; }
@@ -259,8 +260,8 @@ window.IC = {
 <body class="{{ 'no-sidebar' if not inst_logged_in }}">
 {% if inst_logged_in %}
 <div class="topbar">
-  <div class="t-title"><span class="logo-ic">{{ ic('logo', 16, 2) }}</span> <span class="inst-name" style="font-size:17px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:62vw;">{{ current_user.name }}</span></div>
   <button type="button" aria-label="תפריט" onclick="document.body.classList.toggle('nav-open')">{{ ic('menu', 20) }}</button>
+  <div class="t-title"><span class="inst-name" style="font-size:17px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:62vw;">{{ current_user.name }}</span></div>
 </div>
 <div class="nav-backdrop" onclick="document.body.classList.remove('nav-open')"></div>
 <aside class="sidebar">
