@@ -31,7 +31,7 @@
     <form method="post" autocomplete="on">
       <input type="hidden" name="action" value="start">
       <input type="hidden" name="t0" value="{{ t0 }}">
-      <div class="hp" aria-hidden="true"><label>אתר <input name="website" tabindex="-1" autocomplete="off"></label></div>
+      <div class="hp" aria-hidden="true" style="display:none"><input type="text" name="hpz_note" value="" tabindex="-1" autocomplete="new-password" data-lpignore="true" data-1p-ignore></div>
       <div class="field"><label for="em">מייל</label>
         <input class="input" type="email" id="em" name="email" required maxlength="200" autocomplete="email" dir="ltr" value="{{ form.email or '' }}"></div>
       <div class="field"><label for="p1">סיסמה</label>

@@ -415,17 +415,19 @@ def signup():
             form = {'email': email}
             # מלכודת לבוטים: שדה נסתר שבני אדם לא ממלאים, וטופס שנשלח תוך פחות מ-3 שניות
             try:
-                quick = time.time() - float(request.form.get('t0') or 0) < 3
+                quick = time.time() - float(request.form.get('t0') or 0) < 1.5
             except ValueError:
-                quick = True
-            if request.form.get('website') or quick:
-                flash('משהו השתבש. נסו שוב.')
+                quick = False
+            if request.form.get('hpz_note') or quick:
+                log.info(f'signup: blocked as bot (hp={bool(request.form.get("hpz_note"))}, quick={quick})')
+                flash('הטופס נשלח מהר מדי או מולא אוטומטית. מלאו שוב ולחצו "שליחת קוד".')
                 return form_page(form)
             if not _rate('cs-ip:' + ip, 6, 60 * 60):
                 flash('יותר מדי ניסיונות הרשמה. נסו שוב בעוד שעה.')
                 return form_page(form)
             err = 'כתובת המייל לא תקינה' if not _EMAIL_RE.match(email) else (_email_status(email) or CA.password_error(pw1, pw2))
             if err:
+                log.info(f'signup refused: {err[:70]}')
                 flash(err)
                 return form_page(form)
             if not _rate('cs-mail:' + email, 3, 60 * 60):
