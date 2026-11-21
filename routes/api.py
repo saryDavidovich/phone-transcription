@@ -70,6 +70,8 @@ def get_customer(phone):
         'new_email_replies': _new_reply_count(customer),
         # מבצע דקות חינם: כמה שניות תמלול רגיל חינם נשארו היום (0 = אין מבצע עבורו)
         'promo_free_left': _promo_left(customer),
+        # מימש היום את ההקלטה החינמית (גם אם עוד בתמלול) - ה-IVR מדלג על הכרזת המבצע בפתיח עד חצות
+        'promo_used_today': _promo_used(customer),
         'promo_needs_balance': __import__('services.pricing', fromlist=['x']).promo_settings()['needs_balance'],
         # לשאול לפני ההקלטה אם לממש עכשיו את ההקלטה החינמית (מיועדת לתכנים תורניים)
         'promo_ask': __import__('services.pricing', fromlist=['x']).promo_settings()['ask_first'],
@@ -101,9 +103,20 @@ def phone_link_confirm():
     return jsonify({'result': res})
 
 
+def _promo_used(customer):
+    try:
+        from services import pricing as P
+        return bool(P.promo_used_today(customer))
+    except Exception:
+        db.session.rollback()
+        return False
+
+
 def _promo_left(customer):
     try:
         from services import pricing as P
+        if P.promo_used_today(customer):          # כבר מימש היום (גם אם עוד בתמלול) - לא מציעים שוב
+            return 0
         return int(P.promo_seconds_left(customer))
     except Exception:
         db.session.rollback()

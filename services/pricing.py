@@ -188,6 +188,24 @@ def _promo_used_today(customer, exclude_recording_id=None):
     return q.first() is not None
 
 
+def promo_used_today(customer):
+    """לפתיח בשיחה: הלקוח כבר מימש היום את ההקלטה החינמית - גם אם היא עוד בתמלול
+    (הסימון הרגיל, promo_free_seconds, נכתב רק כשהתמלול מסתיים). מתאפס בחצות (שעון ישראל)."""
+    from zoneinfo import ZoneInfo
+    from models import Recording
+    if customer is None:
+        return False
+    if _promo_used_today(customer):
+        return True
+    if not promo_active(customer):
+        return False
+    start = _il_now().replace(hour=0, minute=0, second=0, microsecond=0).astimezone(ZoneInfo('UTC')).replace(tzinfo=None)
+    busy = ('recording', 'processing', 'queued', 'transcribing', 'pending', 'queued_maintenance')
+    return Recording.query.filter(Recording.customer_id == customer.id, Recording.created_at >= start,
+                                  Recording.status.in_(busy), Recording.promo_declined.isnot(True),
+                                  Recording.transcription_tier.notin_(('premium', 'excel', 'phone_edit'))).first() is not None
+
+
 def promo_free_units(customer, exclude_recording_id=None):
     """כמה יחידות חינם להקלטה הבאה (0 אם אין מבצע עבורו או שכבר ניצל היום)."""
     if not promo_active(customer) or _promo_used_today(customer, exclude_recording_id):
