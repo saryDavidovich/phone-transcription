@@ -71,6 +71,8 @@ def get_customer(phone):
         # מבצע דקות חינם: כמה שניות תמלול רגיל חינם נשארו היום (0 = אין מבצע עבורו)
         'promo_free_left': _promo_left(customer),
         'promo_needs_balance': __import__('services.pricing', fromlist=['x']).promo_settings()['needs_balance'],
+        # לשאול לפני ההקלטה אם לממש עכשיו את ההקלטה החינמית (מיועדת לתכנים תורניים)
+        'promo_ask': __import__('services.pricing', fromlist=['x']).promo_settings()['ask_first'],
         # בקשה מהאזור האישי לצרף את המספר הזה לחשבון - ה-IVR מכריז ומבקש הקשה על 1 (services/phone_link.py)
         'phone_link': _phone_link_info(phone),
     })
@@ -388,6 +390,8 @@ def transcribe():
         transcription_tier=transcription_tier,
         language=language,
         output_language=output_language,
+        # מבצע: בשיחה נשאל "לממש עכשיו את ההקלטה החינמית?" והקיש 2 - ההקלטה הזו בתשלום רגיל
+        promo_declined=True if data.get('use_promo') is False else None,
     )
     if transcription_tier == 'excel':
         try:

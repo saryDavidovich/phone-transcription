@@ -626,6 +626,7 @@ def _migrate_db():
         "ALTER TABLE recordings ADD COLUMN IF NOT EXISTS play_url TEXT",
         "ALTER TABLE recordings ADD COLUMN IF NOT EXISTS transcript_original TEXT",
         "ALTER TABLE recordings ADD COLUMN IF NOT EXISTS transcript_html TEXT",
+        "ALTER TABLE recordings ADD COLUMN IF NOT EXISTS promo_declined BOOLEAN",
         "ALTER TABLE institution_uploads ADD COLUMN IF NOT EXISTS transcript_html TEXT",
         "ALTER TABLE customer_charge_logs ADD COLUMN IF NOT EXISTS kind VARCHAR(10) DEFAULT 'iframe'",
         "ALTER TABLE customer_charge_logs ADD COLUMN IF NOT EXISTS history_id VARCHAR(64)",

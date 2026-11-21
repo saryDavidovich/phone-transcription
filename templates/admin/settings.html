@@ -261,6 +261,8 @@
       <input class="form-input" type="number" name="promo_free_minutes" min="1" max="600" value="{{ promo.minutes }}" style="width:110px"></div>
     <div><label class="form-label">בתוקף עד (כולל)</label>
       <input class="form-input" type="date" name="promo_free_until" value="{{ promo.until }}" style="width:auto"></div>
+    <label style="display:flex;gap:8px;align-items:center;cursor:pointer;font-weight:600;padding-bottom:8px" title="הודעה 323 - הנוסח ניתן לעריכה בדף הקריין והודעות המערכת">
+      <input type="checkbox" name="promo_free_ask_first" value="1" {{ 'checked' if promo.ask_first }}> לשאול לפני ההקלטה אם לממש עכשיו (1 = חינם, 2 = בתשלום רגיל)</label>
     <button class="btn btn-primary" type="submit">💾 שמירה</button>
   </form>
   <div style="font-size:12.5px;margin-top:12px;color:var(--text2)">

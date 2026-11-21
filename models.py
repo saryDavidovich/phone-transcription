@@ -229,6 +229,7 @@ class Recording(db.Model):
     __tablename__ = 'recordings'
     id = db.Column(db.Integer, primary_key=True)
     promo_free_seconds = db.Column(db.Integer, nullable=True)   # כמה מהאורך היה חינם במבצע דקות החינם
+    promo_declined = db.Column(db.Boolean, nullable=True)       # הלקוח בחר בשיחה לא לממש את ההקלטה החינמית (להמשיך בתשלום)
     play_url = db.Column(db.Text, nullable=True)             # השמע בימות לנגן באזור המוסד (כשהמקור לא מימות)
     transcript_original = db.Column(db.Text, nullable=True)  # התמלול לפני עריכה ידנית באזור המוסד (לשחזור)
     edited_at = db.Column(db.DateTime, nullable=True)

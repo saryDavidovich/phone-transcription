@@ -369,7 +369,7 @@ def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, durat
             kind = 'video' if price_key == 'price_per_20min_video' else 'basic'
             price_per_20min = P.unit_price(customer, kind)          # מחיר ליחידה (20 או 5 דק')
             promo_free = 0
-            if kind == 'basic':          # מבצע: דקות תמלול רגיל חינם בכל יום (services/pricing.py)
+            if kind == 'basic' and not (rec and rec.promo_declined):   # מבצע: דקות חינם (אלא אם בחר בשיחה לא לממש)
                 cost, promo_free = P.basic_cost_with_promo(customer, duration_seconds, rec.id if rec else None)
             else:
                 cost = P.cost_for(customer, duration_seconds, kind)
@@ -526,7 +526,7 @@ def process_pending_recordings(customer_id):
             db.session.refresh(customer)
             kind = P.kind_for_tier(rec.transcription_tier)
             promo_free = 0
-            if kind == 'basic' and rec.transcript:
+            if kind == 'basic' and rec.transcript and not rec.promo_declined:
                 cost, promo_free = P.basic_cost_with_promo(customer, rec.duration_seconds or 0, rec.id)
             else:
                 cost = P.cost_for(customer, rec.duration_seconds or 0, kind)

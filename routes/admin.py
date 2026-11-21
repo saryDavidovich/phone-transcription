@@ -1963,6 +1963,7 @@ def promo_settings_save():
         mins = 20
     set_setting('promo_free_minutes', str(mins))
     set_setting('promo_free_needs_balance', '0' if request.form.get('promo_free_needs_balance') == '0' else '1')
+    set_setting('promo_free_ask_first', '1' if request.form.get('promo_free_ask_first') == '1' else '0')
     flash('✔ הגדרות המבצע נשמרו')
     return redirect(url_for('admin.settings') + '#promo')
 

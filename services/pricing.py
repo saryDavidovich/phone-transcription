@@ -160,6 +160,7 @@ def promo_settings():
         'until': (_setting('promo_free_until', '') or '').strip(),
         'minutes': int(float(_setting('promo_free_minutes', '20') or 20)),
         'needs_balance': _setting('promo_free_needs_balance', '1') != '0',
+        'ask_first': _setting('promo_free_ask_first', '1') != '0',   # שאלה בשיחה לפני ההקלטה (ברירת מחדל: כן)
     }
 
 
