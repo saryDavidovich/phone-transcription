@@ -168,6 +168,16 @@
         <option value="torah" {{ 'selected' if portal.route_mode == 'torah' }}>תמיד תורני</option>
         <option value="simple" {{ 'selected' if portal.route_mode == 'simple' }}>תמיד פשוט</option>
       </select></div>
+    <input type="hidden" name="_v3_opts" value="1">
+    <div><label class="form-label">מודל לקטעים תורניים {{ tip('Pro: מודל גדול יותר - יקר ואיטי יותר. רק בקטעים שזוהו כתורניים, ורק ב-v3. נכשל - עובר אוטומטית ל-Flash') }}</label>
+      <select class="form-input" name="v3_model" style="width:auto">
+        <option value="flash" {{ 'selected' if portal.v3_model != 'pro' }}>Flash (רגיל)</option>
+        <option value="pro" {{ 'selected' if portal.v3_model == 'pro' }}>Pro (חזק יותר)</option>
+      </select></div>
+    <label class="st-chk" style="padding-bottom:8px"><input type="checkbox" name="v3_slow" value="1" {{ 'checked' if portal.v3_slow }}> עותק מואט
+      {{ tip('בקטעים תורניים נשלח גם עותק מואט ל-80% של אותו קטע, לעזרה במילים לא ברורות. בערך פי 2.2 בעלות השמע') }}</label>
+    <label class="st-chk" style="padding-bottom:8px"><input type="checkbox" name="v3_clean" value="1" {{ 'checked' if portal.v3_clean }}> ניקוי רעשים
+      {{ tip('סינון זמזום ורעש ואיזון עוצמה לפני התמלול. לפעמים עוזר בהקלטה רועשת ולפעמים פוגע - לבדוק בהשוואה') }}</label>
     <button class="btn btn-primary" type="submit">💾 שמירה</button>
     <a class="btn" href="{{ url_for('admin.transcribe_compare') }}">⚖️ השוואת v2 מול v3</a>
     <a class="btn" href="{{ url_for('admin.test_transcribe') }}">🧪 בדיקת תמלול מקובץ</a>

@@ -19,6 +19,10 @@
     <div><label class="form-label">שפה</label><select class="form-input" name="language"><option value="he">עברית</option><option value="yi">אידיש</option><option value="en">אנגלית</option></select></div>
     <div><label class="form-label">מסלול ב-v3</label><select class="form-input" name="route">
       <option value="">אוטומטי (זיהוי לכל קטע)</option><option value="torah">תורני</option><option value="mixed">מעורב</option><option value="simple">פשוט</option></select></div>
+    <div><label class="form-label">מודל ב-v3 (קטעים תורניים)</label><select class="form-input" name="model">
+      <option value="flash">Flash (רגיל)</option><option value="pro">Pro (חזק יותר)</option></select></div>
+    <label style="display:flex;gap:6px;align-items:center;padding-bottom:8px;cursor:pointer" title="נשלח גם עותק מואט ל-80% של אותו קטע"><input type="checkbox" name="slow" value="1"> עותק מואט</label>
+    <label style="display:flex;gap:6px;align-items:center;padding-bottom:8px;cursor:pointer" title="סינון זמזום ורעש ואיזון עוצמה"><input type="checkbox" name="clean" value="1"> ניקוי רעשים</label>
     <button class="btn btn-primary" type="submit">▶ הרץ השוואה</button>
   </form>
   <div style="font-size:12px;color:var(--text2);margin-top:8px">שני המנועים רצים ברקע, אחד אחרי השני. הקלטה של 20 דקות לוקחת בערך 2–5 דקות. התמלול לא נשלח לאף אחד ולא מחויב.</div>
@@ -27,7 +31,8 @@
 {% if job %}
 <div class="card" style="margin-top:16px" id="job" data-status="{{ job.status }}">
   <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:12px">
-    <div style="font-weight:700">#{{ job.id }} · {{ job.name }}{% if job.route %} · מסלול כפוי: {{ {'torah':'תורני','simple':'פשוט','mixed':'מעורב'}[job.route] }}{% endif %}</div>
+    <div style="font-weight:700">#{{ job.id }} · {{ job.name }}{% if job.route %} · מסלול כפוי: {{ {'torah':'תורני','simple':'פשוט','mixed':'מעורב'}[job.route] }}{% endif %}
+      {% set o = job.options or {} %}<span style="font-weight:400;color:var(--text2);font-size:13px"> · v3: {{ 'Pro' if o.model == 'pro' else 'Flash' }}{{ ' + עותק מואט' if o.slow }}{{ ' + ניקוי רעשים' if o.clean }}</span></div>
     <div>
       {% if job.status == 'running' %}<span class="badge" style="background:#fef3c7;color:#92400e">⏳ רץ... (הדף מתרענן לבד)</span>
       {% elif job.status == 'error' %}<span class="badge" style="background:#fee2e2;color:#991b1b">שגיאה</span>
@@ -38,13 +43,14 @@
 
   {% if job.report %}
   <table class="cmp-tbl" style="margin-bottom:14px">
-    <thead><tr><th>קטע</th><th>מסלול</th><th>נושא</th><th>מקורות שנמצאו</th><th>ציטוטים תוקנו</th><th>זמן</th></tr></thead>
+    <thead><tr><th>קטע</th><th>מסלול</th><th>נושא</th><th>מקורות שנמצאו</th><th>ציטוטים תוקנו</th><th>מודל</th><th>זמן</th></tr></thead>
     <tbody>{% for r in job.report %}<tr>
       <td>{{ r.chunk }}</td>
       <td><span class="rt rt-{{ r.route }}">{{ {'torah':'תורני','simple':'פשוט','mixed':'מעורב'}.get(r.route, r.route) }}</span>{% if r.forced %} <span style="font-size:11px;color:var(--text2)">(כפוי)</span>{% endif %}</td>
       <td>{{ r.topic or '' }}</td>
       <td dir="ltr" style="font-size:12px">{{ (r.refs or [])|join(', ') }}</td>
       <td>{{ '✔' if r.fixed else '—' }}</td>
+      <td>{{ {'pro':'Pro','flash':'Flash'}.get(r.model, '') }}{{ ' + מואט' if r.slow }}{{ ' (נפל ל-Flash)' if r.fallback }}</td>
       <td>{{ r.seconds or '' }}</td>
     </tr>{% endfor %}</tbody>
   </table>
@@ -70,6 +76,7 @@
   <div style="font-weight:700;margin-bottom:8px">השוואות אחרונות</div>
   <table class="cmp-tbl"><tbody>{% for j in jobs %}<tr>
     <td><a href="{{ url_for('admin.transcribe_compare_view', job_id=j.id) }}">#{{ j.id }} · {{ j.name }}</a></td>
+    <td style="font-size:12px;color:var(--text2)">{% set o = j.options or {} %}{{ 'Pro' if o.model == 'pro' else 'Flash' }}{{ ' + מואט' if o.slow }}{{ ' + ניקוי' if o.clean }}</td>
     <td>{{ {'running':'⏳ רץ','done':'הסתיים','error':'שגיאה'}.get(j.status, j.status) }}</td>
     <td style="color:var(--text2);font-size:12px">{{ j.created_at.strftime('%d/%m %H:%M') if j.created_at }}</td>
   </tr>{% endfor %}</tbody></table>

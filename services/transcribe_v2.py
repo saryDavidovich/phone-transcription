@@ -208,27 +208,39 @@ def parse_json_transcript(raw):
     return raw
 
 
+SLOW_COPY_NOTE = (
+    '\n\nTWO AUDIO PARTS ARE ATTACHED: the FIRST is this segment at normal speed; the SECOND is the very same '
+    'segment slowed down, given ONLY to help you hear unclear or fast words. Transcribe the content ONE time '
+    '(never twice), following the first part from start to end.')
+
+
 def transcribe_chunk(client, gtypes, chunk_bytes, mime_type, language, output_language, prev_tail,
-                     chunk_num, n_chunks, seconds, model='gemini-3.5-flash', extra_rules='', context=''):
+                     chunk_num, n_chunks, seconds, model='gemini-3.5-flash', extra_rules='', context='',
+                     extra_audio=None):
     """תמלול של חלק אחד: עד 3 ניסיונות כשהתוצאה לא תקינה (ועוד ניסיונות על שגיאות רשת - אצל הקורא).
     מחזיר טקסט נקי (או None אם לא התקבל כלום)."""
     sysi = system_instruction(language, output_language, extra_rules)
     best, best_score = None, None
     for attempt in range(3):
         prompt = user_prompt(prev_tail, chunk_num, n_chunks, context)
+        if extra_audio:
+            prompt += SLOW_COPY_NOTE
         if attempt:
             prompt += ('\n\nIMPORTANT: your previous answer broke the rules (' + ', '.join(best_issues) +
                        '). Output ONLY the spoken words of this segment, once, in the required language, '
                        'as paragraphs - nothing else.')
         resp = client.models.generate_content(
             model=model,
-            contents=[prompt, gtypes.Part.from_bytes(data=chunk_bytes, mime_type=mime_type)],
+            contents=[prompt, gtypes.Part.from_bytes(data=chunk_bytes, mime_type=mime_type)] + (
+                [gtypes.Part.from_bytes(data=extra_audio, mime_type='audio/wav')] if extra_audio else []),
             config=gtypes.GenerateContentConfig(
                 system_instruction=sysi,
                 response_mime_type='application/json',
                 response_schema={'type': 'OBJECT', 'properties': {'transcript': {'type': 'STRING'}},
                                  'required': ['transcript']},
-                thinking_config=gtypes.ThinkingConfig(thinking_budget=0),
+                # מודלי Pro לא עובדים בלי "חשיבה" - שם חשיבה נמוכה; Flash - בלי חשיבה בכלל
+                thinking_config=(gtypes.ThinkingConfig(thinking_level='low') if '-pro' in model
+                                 else gtypes.ThinkingConfig(thinking_budget=0)),
             ),
         )
         text = parse_json_transcript(resp.text or '')

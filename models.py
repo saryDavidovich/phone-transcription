@@ -1121,5 +1121,6 @@ class TranscribeCompare(db.Model):
     v2_seconds = db.Column(db.Float)
     v3_seconds = db.Column(db.Float)
     report = db.Column(db.JSON)                               # לכל קטע: מסלול, נושא, מקורות, תוקן
+    options = db.Column(db.JSON)                              # אפשרויות v3: model / slow / clean
     error = db.Column(db.Text)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)

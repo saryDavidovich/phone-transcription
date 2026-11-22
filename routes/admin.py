@@ -1987,6 +1987,10 @@ def transcribe_engine_save():
     rm = request.form.get('route_mode')
     if rm in ('auto', 'torah', 'simple'):
         set_setting('transcribe_route_mode', rm)
+    if request.form.get('_v3_opts') == '1':
+        set_setting('transcribe_v3_model', 'pro' if request.form.get('v3_model') == 'pro' else 'flash')
+        set_setting('transcribe_v3_slow', '1' if request.form.get('v3_slow') == '1' else '0')
+        set_setting('transcribe_v3_clean', '1' if request.form.get('v3_clean') == '1' else '0')
     flash('✔ מנוע התמלול נשמר - חל מהתמלול הבא')
     return redirect(url_for('admin.settings') + '#engine')
 
@@ -2191,6 +2195,9 @@ def settings():
     from services import customer_auth as _CA
     portal = {'engine': get_setting('transcribe_engine', 'v2') or 'v2',
               'route_mode': get_setting('transcribe_route_mode', 'auto') or 'auto',
+              'v3_model': get_setting('transcribe_v3_model', 'flash') or 'flash',
+              'v3_slow': get_setting('transcribe_v3_slow', '0') == '1',
+              'v3_clean': get_setting('transcribe_v3_clean', '0') == '1',
               'signup': get_setting('customer_signup_on', '0') == '1',
               'phone_link': get_setting('phone_link_ivr_on', '0') == '1',
               'auto_topup': get_setting('auto_topup_on', '0') == '1',
@@ -2852,7 +2859,10 @@ def transcribe_compare():
         if not rec_url:
             flash('יש להעלות קובץ או לכתוב מספר הקלטה קיימת')
             return redirect(url_for('admin.transcribe_compare'))
-        job = TranscribeCompare(name=name, rec_url=rec_url, language=language, route=route, status='running')
+        opts = {'model': 'pro' if request.form.get('model') == 'pro' else 'flash',
+                'slow': request.form.get('slow') == '1', 'clean': request.form.get('clean') == '1'}
+        job = TranscribeCompare(name=name, rec_url=rec_url, language=language, route=route, status='running',
+                                options=opts)
         db.session.add(job)
         db.session.commit()
         threading.Thread(target=_run_compare, args=(job.id,), daemon=True).start()
@@ -2884,12 +2894,14 @@ def _run_compare(job_id):
             for eng in ('v2', 'v3'):
                 report = []
                 tok = TV3.engine_override.set(eng)
+                tok2 = TV3.options_override.set(job.options or {})
                 t0 = _t.time()
                 try:
                     with TV3.route_context(job.route, report=report):
                         text, _d, _v = _gemini_from_url(job.rec_url, job.language, 'he')
                 finally:
                     TV3.engine_override.reset(tok)
+                    TV3.options_override.reset(tok2)
                 job = TranscribeCompare.query.get(job_id)
                 if eng == 'v2':
                     job.v2_text, job.v2_seconds = text or '', round(_t.time() - t0, 1)
