@@ -37,7 +37,7 @@ TORAH_VOCAB = [
 ]
 
 
-def system_instruction(language, output_language):
+def system_instruction(language, output_language, extra_rules=''):
     src = LANG_NAMES.get(language, 'Hebrew')
     if output_language == 'original':
         output_language = language
@@ -75,17 +75,19 @@ FORMATTING
 - Group the text into paragraphs of about 3-6 sentences (roughly 300-800 characters). Start a new paragraph only on a change of topic or speaker. NEVER put each sentence or phrase on its own line.
 - Separate paragraphs with a single blank line.
 - No timestamps, no speaker labels, no headings, no bullet points, no quotation marks around the whole text.
-
+{extra_rules}
 STRICT OUTPUT CONTRACT
 - Return ONLY JSON of the form {{"transcript": "..."}}.
 - The "transcript" value contains only the words spoken in this audio segment - no introduction, no explanation of what you are doing, no analysis, no notes, no second "refined" version, no self-check. Transcribe the audio exactly once."""
 
 
-def user_prompt(prev_tail, chunk_num, n_chunks):
+def user_prompt(prev_tail, chunk_num, n_chunks, context=''):
     p = f'Transcribe this audio segment ({chunk_num} of {n_chunks}) according to the instructions.'
     if prev_tail:
         p += ('\n\nFor context only - the previous segment ended with the following words. Do NOT repeat them; '
               f'continue from where the speech continues in this segment:\n«{prev_tail}»')
+    if context:
+        p += '\n\n' + context
     return p
 
 
@@ -207,13 +209,13 @@ def parse_json_transcript(raw):
 
 
 def transcribe_chunk(client, gtypes, chunk_bytes, mime_type, language, output_language, prev_tail,
-                     chunk_num, n_chunks, seconds, model='gemini-3.5-flash'):
+                     chunk_num, n_chunks, seconds, model='gemini-3.5-flash', extra_rules='', context=''):
     """תמלול של חלק אחד: עד 3 ניסיונות כשהתוצאה לא תקינה (ועוד ניסיונות על שגיאות רשת - אצל הקורא).
     מחזיר טקסט נקי (או None אם לא התקבל כלום)."""
-    sysi = system_instruction(language, output_language)
+    sysi = system_instruction(language, output_language, extra_rules)
     best, best_score = None, None
     for attempt in range(3):
-        prompt = user_prompt(prev_tail, chunk_num, n_chunks)
+        prompt = user_prompt(prev_tail, chunk_num, n_chunks, context)
         if attempt:
             prompt += ('\n\nIMPORTANT: your previous answer broke the rules (' + ', '.join(best_issues) +
                        '). Output ONLY the spoken words of this segment, once, in the required language, '

@@ -114,7 +114,9 @@ def _process_upload(flask_app, upload_id, local_path, link, tier, language, outp
                                                                translate_to_hebrew=(output_language == 'he'))
             else:
                 from services.transcribe import _gemini_from_url
-                transcript, duration, is_video = _gemini_from_url(rec_url, language, output_language)
+                from services import transcribe_v3 as _TV3
+                with _TV3.route_context(_TV3.route_for_ids(institution_id=record.institution_id)):
+                    transcript, duration, is_video = _gemini_from_url(rec_url, language, output_language)
             if not transcript:
                 record.status = 'error'
                 record.error_message = 'התמלול נכשל - לא התקבל טקסט'

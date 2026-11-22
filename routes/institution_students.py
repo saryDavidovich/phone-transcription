@@ -790,8 +790,10 @@ def _process_student_upload(flask_app, recording_id, local_path, link=None, send
                 transcript, duration = alefbot_transcribe_wait(rec_url, recording.call_id,
                                                                translate_to_hebrew=(recording.output_language != 'original'))
             else:
-                transcript, duration, is_video = _gemini_from_url(rec_url, recording.language or 'he',
-                                                                  recording.output_language or 'he')
+                from services import transcribe_v3 as _TV3
+                with _TV3.route_context(_TV3.route_for_ids(customer_id=recording.customer_id)):
+                    transcript, duration, is_video = _gemini_from_url(rec_url, recording.language or 'he',
+                                                                      recording.output_language or 'he')
             if not transcript:
                 recording.status = 'error'
                 db.session.commit()

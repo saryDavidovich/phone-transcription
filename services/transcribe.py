@@ -327,7 +327,9 @@ def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, durat
 
                 _progress_local.call_id = call_id
                 try:
-                    transcript_raw, actual_duration, is_video = _gemini_from_url(rec_url, language, output_language)
+                    from services import transcribe_v3 as _TV3
+                    with _TV3.route_context(_TV3.route_for_ids(customer_id=customer_id)):
+                        transcript_raw, actual_duration, is_video = _gemini_from_url(rec_url, language, output_language)
                 finally:
                     _progress_local.call_id = None
                 transcript_fixed = transcript_raw
@@ -1171,11 +1173,18 @@ def _gemini_from_url(url, language='he', output_language='he'):
             from models import Settings as _S
             _row = _S.query.filter_by(key='transcribe_engine').first()
             engine = (_row.value if _row else '') or 'v2'
+            from services.transcribe_v3 import engine_override as _eo
+            if _eo.get():
+                engine = _eo.get()             # כלי ההשוואה במנהל: מנוע מסוים לתמלול הזה
         except Exception:
             engine = 'v2'
         if engine == 'transcribe' and language == 'en' and output_language == 'he':
             engine = 'v2'             # המודל הייעודי לא מתרגם מאנגלית
         log.info(f"Transcription engine: {engine}")
+        v3_state = None
+        if engine == 'v3':
+            from services import transcribe_v3 as TV3
+            v3_state = TV3.State()
 
         transcript_parts = []
         prev_tail = ''
@@ -1194,6 +1203,10 @@ def _gemini_from_url(url, language='he', output_language='he'):
                             log.warning(f"Chunk {chunk_num}: dedicated transcribe model failed ({te}) - using v2")
                             chunk_transcript = TV2.transcribe_chunk(client, gtypes, chunk_bytes, mime_type, language,
                                                                     output_language, prev_tail, chunk_num, n_chunks, seconds)
+                    elif engine == 'v3':
+                        chunk_transcript = TV3.transcribe_chunk(client, gtypes, chunk_bytes, mime_type, language,
+                                                                output_language, prev_tail, chunk_num, n_chunks,
+                                                                seconds, v3_state)
                     elif engine == 'v1':
                         response = client.models.generate_content(
                             model='gemini-3.5-flash',

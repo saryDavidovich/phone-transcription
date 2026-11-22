@@ -247,6 +247,16 @@
       🎁 מסומן למבצע דקות החינם</label>
     <span style="font-size:12px;color:var(--text2)">{{ promo_line }}</span>
   </form>
+  <form method="POST" action="{{ url_for('admin.customer_transcribe_route', id=customer.id) }}" style="margin-top:10px;display:flex;gap:10px;align-items:center;flex-wrap:wrap"
+        title="חל רק כשמנוע התמלול הוא v3. תורני = מילון מונחים, כללי הגייה ובדיקת ציטוטים; פשוט = תמלול רגיל">
+    <span>🎙️ מסלול תמלול (v3)</span>
+    <select class="form-input" name="transcribe_route" style="width:auto" onchange="this.form.requestSubmit()">
+      <option value="" {{ 'selected' if not customer.transcribe_route }}>לפי ההגדרה הכללית</option>
+      <option value="torah" {{ 'selected' if customer.transcribe_route == 'torah' }}>תמיד תורני</option>
+      <option value="mixed" {{ 'selected' if customer.transcribe_route == 'mixed' }}>מעורב</option>
+      <option value="simple" {{ 'selected' if customer.transcribe_route == 'simple' }}>תמיד פשוט</option>
+    </select>
+  </form>
 </div>
 </details>
 

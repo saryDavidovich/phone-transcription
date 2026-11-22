@@ -2,335 +2,256 @@
 {% block title %}הגדרות{% endblock %}
 {% block page_title %}הגדרות מערכת{% endblock %}
 {% block content %}
-<form method="POST">
-  <div>
-    <div class="card">
-      <div style="font-size:16px;font-weight:700;margin-bottom:20px">💰 תמחור</div>
-      <div class="form-group">
-        <label class="form-label">מחיר תמלול רגיל ל-20 דקות (₪)</label>
-        <input class="form-input" name="price_per_20min_basic" type="number" step="0.01" value="{{ settings.price_per_20min_basic }}">
-        <div style="font-size:11px;color:#4a5568;margin-top:4px">Gemini</div>
-      </div>
-      <div class="form-group">
-        <label class="form-label">מחיר תמלול מקצועי ל-20 דקות (₪)</label>
-        <input class="form-input" name="price_per_20min_premium" type="number" step="0.01" value="{{ settings.price_per_20min_premium }}">
-        <div style="font-size:11px;color:#4a5568;margin-top:4px">אלף בוט</div>
-      </div>
-      <div class="form-group">
-        <label class="form-label">מחיר תמלול וידאו ל-20 דקות (₪)</label>
-        <input class="form-input" name="price_per_20min_video" type="number" step="0.01" value="{{ settings.price_per_20min_video }}">
-        <div style="font-size:11px;color:#4a5568;margin-top:4px">קבצי MP4, MOV וכו' — Gemini מחייב פי ~2.8 מאודיו</div>
-      </div>
-      <div class="form-group">
-        <label class="form-label">מחיר טבלת אקסל מהקלטה ל-20 דקות (₪)</label>
-        <input class="form-input" name="price_per_20min_excel" type="number" step="0.01" value="{{ settings.price_per_20min_excel }}">
-        <div style="font-size:11px;color:#4a5568;margin-top:4px">שלוחה 1 ← 3 בטלפון: הקלטה שהופכת לטבלה לפי תבנית העמודות של הלקוח. החיוב רק אחרי שהטבלה נשלחה</div>
-      </div>
-      <div class="form-group">
-        <label class="form-label">מחיר "הקלטה עם עריכה" ל-20 דקות (₪)</label>
-        <input class="form-input" name="price_per_20min_phone_edit" type="number" step="0.01" value="{{ settings.price_per_20min_phone_edit }}" placeholder="כמו אקסל ({{ settings.price_per_20min_excel }})">
-        <div style="font-size:11px;color:#4a5568;margin-top:4px">שלוחה 1 ← 4 בטלפון: הקלטה עם הדגשות, קו תחתון וסוגריים, שמגיעה כקובץ Word. ריק = כמו מחיר האקסל.</div>
-      </div>
-      <div class="form-group" style="border:1px dashed var(--border);border-radius:10px;padding:12px">
-        <div style="font-weight:700;margin-bottom:6px">⏱️ מחירון לפי 5 דקות</div>
-        <div style="font-size:11px;color:#4a5568;margin-bottom:10px">ללקוחות שבכרטיס שלהם נבחר "חיוב לפי 5 דקות". שדה ריק = רבע ממחיר 20 הדקות.</div>
-        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px">
-          <div><label class="form-label">רגיל ל-5 דק׳ (₪)</label><input class="form-input" name="price_per_5min_basic" type="number" step="0.01" value="{{ settings.price_per_5min_basic }}" placeholder="{{ '%.2f'|format(settings.price_per_20min_basic|float / 4) }}"></div>
-          <div><label class="form-label">מקצועי ל-5 דק׳ (₪)</label><input class="form-input" name="price_per_5min_premium" type="number" step="0.01" value="{{ settings.price_per_5min_premium }}" placeholder="{{ '%.2f'|format(settings.price_per_20min_premium|float / 4) }}"></div>
-          <div><label class="form-label">וידאו ל-5 דק׳ (₪)</label><input class="form-input" name="price_per_5min_video" type="number" step="0.01" value="{{ settings.price_per_5min_video }}" placeholder="{{ '%.2f'|format(settings.price_per_20min_video|float / 4) }}"></div>
-          <div><label class="form-label">אקסל ל-5 דק׳ (₪)</label><input class="form-input" name="price_per_5min_excel" type="number" step="0.01" value="{{ settings.price_per_5min_excel }}" placeholder="{{ '%.2f'|format(settings.price_per_20min_excel|float / 4) }}"></div>
-          <div><label class="form-label">הקלטה עם עריכה ל-5 דק׳ (₪)</label><input class="form-input" name="price_per_5min_phone_edit" type="number" step="0.01" value="{{ settings.price_per_5min_phone_edit }}" placeholder="כמו אקסל"></div>
-          <div><label class="form-label">תוספת פקס (₪)</label><input class="form-input" name="fax_surcharge_5min" type="number" step="0.01" value="{{ settings.fax_surcharge_5min }}"></div>
-        </div>
-        <div style="font-size:11px;color:#4a5568;margin-top:6px">תוספת הפקס: נגבית בתנועה נפרדת כשהתמלול נשלח בפקס וההקלטה קצרה מ-20 דקות (פחות מ-4 חיובים של 5 דקות).</div>
-      </div>
-      <div class="form-group">
-        <label class="form-label">טוקן ימות המשיח (לקריאת דוח סליקות)</label>
-        <input class="form-input" name="yemot_token" type="text" value="{{ settings.yemot_token }}" placeholder="033131795:סיסמה">
-        <div style="font-size:11px;color:#4a5568;margin-top:4px">פורמט: מספר_מערכת:סיסמה — נדרש לעדכון יתרה אוטומטי אחרי סליקה</div>
-      </div>
-      <div class="form-group">
-        <label class="form-label">סיסמה סודית לאימות callback סליקה</label>
-        <input class="form-input" name="payment_callback_secret" type="text" value="{{ settings.payment_callback_secret }}" placeholder="לדוגמה: mySecretKey123">
-        <div style="font-size:11px;color:#4a5568;margin-top:4px">הגדר סיסמה כלשהי, ועדכן אותה גם בשלוחה 200 בימות בשורה: api_add_0=secret=הסיסמה</div>
-      </div>
-      <div class="form-group">
-        <label class="form-label">נתיב קובץ לוג סליקות בימות</label>
-        <input class="form-input" name="yemot_log_path" type="text" value="{{ settings.yemot_log_path }}">
-        <div style="font-size:11px;color:#4a5568;margin-top:4px">ברירת מחדל: ivr2:/199/LogCreditCardOK.ymgr</div>
-      </div>
+<style>
+.st-nav{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px;position:sticky;top:0;z-index:5;background:var(--bg,transparent);padding:6px 0}
+.st-nav a{padding:6px 12px;border-radius:20px;border:1px solid var(--border);background:var(--surface);font-size:13px;font-weight:600;color:var(--text);text-decoration:none}
+.st-nav a:hover{border-color:var(--accent);color:var(--accent)}
+.st-sec{margin-bottom:18px;scroll-margin-top:60px}
+.st-h{font-size:16px;font-weight:700;margin-bottom:14px;display:flex;align-items:center;gap:8px}
+.st-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:12px 16px}
+.st-f label.form-label{display:flex;align-items:center;gap:6px}
+.st-sub{font-size:13px;font-weight:700;margin:18px 0 10px;color:var(--text2)}
+.st-chk{display:flex;gap:8px;align-items:center;cursor:pointer;font-weight:600;font-size:13px}
+.st-row{display:flex;flex-wrap:wrap;gap:12px 20px;align-items:flex-end}
+.st-status{font-size:12.5px;margin-top:12px;color:var(--text2)}
+.tip{position:relative;display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;
+  background:var(--border);color:var(--text2);font-size:11px;font-weight:700;cursor:help;flex-shrink:0;outline:none}
+.tip:hover,.tip:focus{background:var(--accent);color:#fff}
+.tip::after{content:attr(data-tip);position:absolute;bottom:calc(100% + 8px);right:50%;transform:translateX(50%);
+  width:max-content;max-width:280px;white-space:normal;background:#1f2333;color:#fff;font-size:12px;font-weight:400;line-height:1.6;
+  padding:8px 10px;border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.25);opacity:0;pointer-events:none;transition:opacity .12s;z-index:50;text-align:right}
+.tip:hover::after,.tip:focus::after{opacity:1}
+.st-save{position:sticky;bottom:0;z-index:6;display:flex;justify-content:flex-start;gap:10px;align-items:center;padding:10px 0;margin-top:4px}
+.st-save .hint{font-size:12px;color:var(--text2)}
+</style>
 
-      <div style="border-top:2px solid #e2e8f0;margin:20px 0 12px;padding-top:16px">
-        <div style="font-size:14px;font-weight:700;margin-bottom:4px">🧾 הגדרות קבלות - נדרים פלוס</div>
-        <div style="font-size:11px;color:#4a5568">לאחר כל טעינה יופק קבלה אוטומטית ותישלח למייל הלקוח</div>
-      </div>
-      <div class="form-group">
-        <label class="form-label">מספר מוסד בנדרים פלוס (7 ספרות)</label>
-        <input class="form-input" name="nedarim_mosad_number" type="text" value="{{ settings.nedarim_mosad_number }}" placeholder="1234567">
-      </div>
-      <div class="form-group">
-        <label class="form-label">סיסמת API נדרים פלוס</label>
-        <input class="form-input" name="nedarim_api_password" type="password" value="{{ settings.nedarim_api_password }}" placeholder="לבקש ממשרד נדרים פלוס">
-      </div>
-      <div class="form-group">
-        <label class="form-label">סוג קבלה להנפקה</label>
-        <select class="form-input" name="nedarim_tamal_type">
-          <option value="400" {% if settings.nedarim_tamal_type == '400' %}selected{% endif %}>400 - קבלה רגילה</option>
-          <option value="320" {% if settings.nedarim_tamal_type == '320' %}selected{% endif %}>320 - חשבונית מס קבלה</option>
-          <option value="405" {% if settings.nedarim_tamal_type == '405' %}selected{% endif %}>405 - קבלת תרומה (עמותה)</option>
-        </select>
-      </div>
-      <div class="form-group">
-        <label class="form-label">מנוע OCR לכתב יד</label>
-        <select class="form-input" name="ocr_engine">
-          <option value="gemini" {% if settings.ocr_engine == 'gemini' %}selected{% endif %}>Gemini Flash (זול, ברירת מחדל)</option>
-          <option value="claude" {% if settings.ocr_engine == 'claude' %}selected{% endif %}>Claude Opus (איכות גבוהה)</option>
-          <option value="gpt4o" {% if settings.ocr_engine == 'gpt4o' %}selected{% endif %}>GPT-4o (איכות גבוהה)</option>
-        </select>
-        <div style="font-size:11px;color:#4a5568;margin-top:4px">Claude ו-GPT-4o מומלצים לכתב יד עברי — עלות גבוהה יותר</div>
-      </div>
-      <div class="form-group">
-        <label class="form-label">מחיר OCR כתב יד לכל 1,000 תווים (₪)</label>
-        <input class="form-input" name="price_per_1000_chars_ocr" type="number" step="0.01" value="{{ settings.price_per_1000_chars_ocr }}">
-        <div style="font-size:11px;color:#4a5568;margin-top:4px">זיהוי טקסט מתמונה/PDF — לקוח שולח תמונת כתב יד במייל. החיוב יחסי לכמות התווים בפועל, מעוגל כלפי מעלה ל-10 אגורות</div>
-      </div>
+{% macro tip(t) %}<span class="tip" tabindex="0" data-tip="{{ t }}">?</span>{% endmacro %}
+{% macro num(label, name, value, t='', ph='', step='0.01') %}
+<div class="st-f"><label class="form-label">{{ label }}{% if t %} {{ tip(t) }}{% endif %}</label>
+  <input class="form-input" form="mainform" name="{{ name }}" type="number" step="{{ step }}" min="0" value="{{ value }}" placeholder="{{ ph }}"></div>
+{% endmacro %}
 
-      <div style="border-top:2px solid #e2e8f0;margin:20px 0 12px;padding-top:16px">
-        <div style="font-size:14px;font-weight:700;margin-bottom:4px">🎙️ הקראת כתבי יד - תמחור</div>
-        <div style="font-size:11px;color:#4a5568">תמחור לפי יחידת תווים - ניתן להגדיר גם את גודל היחידה וגם את המחיר לכל יחידה. התשלום יורד מהלקוח רק בעת אישור סופי ושליחה בפועל של הכתב (לא בשלב ההקלטה/תמלול).</div>
-      </div>
-      <div class="form-group">
-        <label class="form-label">גודל יחידת תווים</label>
-        <input class="form-input" name="manuscript_char_unit_size" type="number" step="1" min="1" value="{{ settings.manuscript_char_unit_size }}">
-        <div style="font-size:11px;color:#4a5568;margin-top:4px">לדוגמה: 1000 - כלומר המחיר מוגדר לכל 1,000 תווים (החיוב בפועל יחסי לכמות, מעוגל כלפי מעלה ל-10 אגורות)</div>
-      </div>
-      <div class="form-group">
-        <label class="form-label">מחיר לכל יחידת תווים (₪)</label>
-        <input class="form-input" name="price_per_manuscript_char_unit" type="number" step="0.01" min="0" value="{{ settings.price_per_manuscript_char_unit }}">
-        <div style="font-size:11px;color:#4a5568;margin-top:4px">לדוגמה: 0.10 - כלומר 0.10 ₪ לכל יחידה כפי שהוגדרה למעלה</div>
-      </div>
-      <div class="form-group">
-        <label class="form-label">מחיר הגהה (₪ לדקת עבודה)</label>
-        <input class="form-input" name="price_manuscript_proofing" type="number" step="0.01" min="0" value="{{ settings.price_manuscript_proofing }}">
-        <div style="font-size:11px;color:#4a5568;margin-top:4px">כשהלקוח שולח בחזרה תיקוני הגהה (קובץ Word, או תמונה/PDF של דף מודפס עם תיקונים בכתב יד) - הנציג מפעיל שעון עצר בזמן שהוא מתקן, וזה המחיר לכל דקת עבודה בפועל (מעוגל כלפי מעלה לדקה שלמה). מחויב רק כשהנציג מסמן את ההגהה כהושלמה.</div>
-      </div>
-      <div style="border-top:2px solid #e2e8f0;margin:20px 0 12px;padding-top:16px">
-        <div style="font-size:14px;font-weight:700;margin-bottom:4px">📧 מיילים לאחרים, ⏰ משימות, 📊 אקסל ו-✏️ הקלטה עם עריכה (בטלפון: שלוחה 1 ואז 6 / 5 / 3 / 4)</div>
-        <div style="font-size:11px;color:#4a5568">כל עוד האפשרות כבויה - רק הטלפון של המנהל שומע אותה בתפריט (לבדיקה). מדליקים אחרי שבודקים ומקליטים את ההודעות בקריין.</div>
-      </div>
-      <input type="hidden" name="_features_field" value="1">
-      <div class="form-group" style="display:flex;gap:24px;flex-wrap:wrap">
-        <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" name="email_out_enabled" value="1" {% if settings.email_out_enabled == '1' %}checked{% endif %}> מיילים לאחרים פעיל לכל הלקוחות</label>
-        <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" name="tasks_enabled" value="1" {% if settings.tasks_enabled == '1' %}checked{% endif %}> משימות פעיל לכל הלקוחות</label>
-        <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" name="excel_enabled" value="1" {% if settings.excel_enabled == '1' %}checked{% endif %}> טבלאות אקסל (1 ← 3) פעיל לכל הלקוחות</label>
-        <label style="display:flex;gap:8px;align-items:center"><input type="checkbox" name="phone_edit_enabled" value="1" {% if settings.phone_edit_enabled == '1' %}checked{% endif %}> הקלטה עם עריכה (1 ← 4) פעיל לכל הלקוחות</label>
-      </div>
-      <div class="form-group">
-        <label class="form-label">מייל לאיש קשר - מחיר לכל 5 דקות הקלטה (₪)</label>
-        <input class="form-input" name="price_per_5min_email_out" type="number" step="0.01" min="0" value="{{ settings.price_per_5min_email_out }}">
-        <div style="font-size:11px;color:#4a5568;margin-top:4px">כולל תמלול ושליחה. נגבה מראש; אם השליחה נכשלת - מוחזר.</div>
-      </div>
-      <div class="form-group">
-        <label class="form-label">📞 כפתור חיוג ליד מספרי טלפון - כתובת החיוג</label>
-        <input class="form-input" name="dial_url_template" dir="ltr" value="{{ settings.dial_url_template }}" placeholder="tel:{phone}">
-        <div style="font-size:11px;color:#4a5568;margin-top:4px">{phone} = המספר (ספרות בלבד). ברירת המחדל tel:{phone} פותחת את תוכנת החיוג שמוגדרת ב-Windows לקישורי טלפון (למשל של נדרים פלוס). אם התוכנה משתמשת בקידומת אחרת (למשל callto:{phone}) - כותבים אותה כאן.</div>
-      </div>
-      <div class="form-group">
-        <label class="form-label">מקסימום מיילים לאנשי קשר ללקוח ב-24 שעות</label>
-        <input class="form-input" name="email_out_daily_limit" type="number" step="1" min="1" value="{{ settings.email_out_daily_limit }}">
-        <div style="font-size:11px;color:#4a5568;margin-top:4px">הגנה מפני שימוש לרעה (ספאם בשם המערכת).</div>
-      </div>
-      <div class="form-group">
-        <label class="form-label">משימה / תזכורת - מחיר לכל 2 דקות הקלטה (₪)</label>
-        <input class="form-input" name="price_per_2min_task" type="number" step="0.01" min="0" value="{{ settings.price_per_2min_task }}">
-      </div>
-      <div class="form-group">
-        <label class="form-label">תזכורת בפקס - תוספת לכל שליחה (₪)</label>
-        <input class="form-input" name="task_fax_price" type="number" step="0.01" min="0" value="{{ settings.task_fax_price }}">
-      </div>
+<form id="mainform" method="POST"><input type="hidden" name="_features_field" value="1"><input type="hidden" name="_topup_field" value="1"></form>
 
-      <div class="form-group">
-        <label class="form-label">מספר הפקס לקבלת כתבי יד/הגהות (כולל קידומת 153)</label>
-        <input class="form-input" name="fax_inbound_number" type="text" value="{{ settings.fax_inbound_number }}" placeholder="לדוגמה: 153-021234567">
-        <div style="font-size:11px;color:#4a5568;margin-top:4px">
-          מוצג ללקוח במייל ככתובת חלופית לשליחת כתב יד חדש או תיקוני הגהה למי שאין לו מייל/מחשב בכלל. דורש הגדרה מקדימה אצל ימות המשיח: שלוחת "קבלת פקסים" (type=recv_fax) עם העברה אוטומטית במייל (set_ok_send_mail=yes) לכתובת FAX_INBOUND_EMAIL (משתנה סביבה - ברירת מחדל: fax@ + אותו דומיין כמו כתובת המייל לתמלולים). כל פקס נכנס לא משויך אוטומטית ללקוח - נציג משייך אותו ידנית בלשונית "📠 פקסים ממתינים לשיוך" בתור ההקראה, לפי הטלפון והקוד האישי (5 ספרות) שהלקוח כותב בעמוד הראשון.
-        </div>
-      </div>
+<nav class="st-nav">
+  <a href="#prices">💰 מחירים</a><a href="#services">🧩 שירותים</a><a href="#bonus">🎁 מבצעים ובונוסים</a>
+  <a href="#engine">🎙️ מנוע תמלול</a><a href="#customer-portal">🔐 אזור אישי</a><a href="#fax-test">📠 פקס</a>
+  <a href="#connections">🔌 חיבורים</a><a href="#slow-pages">🐢 ביצועים</a>
+</nav>
 
-      <div class="form-group">
-        <label class="form-label" style="font-size:14px;font-weight:700">🎁 הגדרות בונוס טעינה (מבצע)</label>
-        <div style="font-size:11px;color:#4a5568;margin-bottom:10px">
-          הגדר עד 3 רמות בונוס — לקוח שטוען סכום ≥ הסף יקבל את הבונוס המתאים.
-          לדוגמה: טעינה מ-50 ₪ → בונוס 10 ₪, טעינה מ-100 ₪ → בונוס 25 ₪.
-          השאר ריק אם אין מבצע פעיל.
-        </div>
-        {% for i in range(3) %}
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;align-items:center">
-          <div>
-            <div style="font-size:11px;color:#6b7280;margin-bottom:3px">רמה {{ i+1 }} — סף מינימום (₪)</div>
-            <input class="form-input" name="bonus_threshold_{{ i+1 }}" type="number" step="1"
-              value="{{ settings.bonus_thresholds[i].threshold }}" placeholder="לדוגמה: 50">
-          </div>
-          <div>
-            <div style="font-size:11px;color:#6b7280;margin-bottom:3px">בונוס (₪)</div>
-            <input class="form-input" name="bonus_amount_{{ i+1 }}" type="number" step="1"
-              value="{{ settings.bonus_thresholds[i].amount }}" placeholder="לדוגמה: 10">
-          </div>
-        </div>
-        {% endfor %}
-      </div>
-      <div class="form-group" style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:12px">
-        <input type="hidden" name="_topup_field" value="1">
-        <label style="display:flex;gap:8px;align-items:center;cursor:pointer;font-weight:700;font-size:13px">
-          <input type="checkbox" name="allow_student_self_topup" value="1" {% if settings.allow_student_self_topup %}checked{% endif %}>
-          לאפשר טעינה עצמית של תלמידי מוסדות
-        </label>
-        <div style="font-size:11px;color:#6b7280;margin-top:6px">
-          מתג מרכזי: כשהוא דלוק, כל מוסד רואה בהגדרות שלו מתג משלו ("לאפשר לתלמידים לטעון יתרה בעצמם", ברירת מחדל: מותר) ויכול לכבות אותו.
-          תלמיד מקבל קישור/אפשרות טעינה רק כשגם המתג המרכזי וגם מתג המוסד דלוקים. כשהוא כבוי - אין מתג אצל המוסדות ותלמידים לא מקבלים קישור טעינה.
-        </div>
-      </div>
-      <div class="form-group">
-        <label class="form-label">יתרה מינימלית להקלטה (₪)</label>
-        <input class="form-input" name="min_balance" type="number" step="0.01" value="{{ settings.min_balance }}">
-      </div>
-      <div class="form-group">
-        <label class="form-label">אורך הקלטה מקסימלי (שניות)</label>
-        <input class="form-input" name="max_recording_seconds" type="number" value="{{ settings.max_recording_seconds }}">
-        <div style="font-size:11px;color:#4a5568;margin-top:4px">1800 = 30 דקות</div>
-      </div>
-    </div>
+<!-- ===== מחירים ===== -->
+<div class="card st-sec" id="prices">
+  <div class="st-h">💰 מחירים</div>
+  <div class="st-sub" style="margin-top:0">לכל 20 דקות (₪)</div>
+  <div class="st-grid">
+    {{ num('תמלול רגיל', 'price_per_20min_basic', settings.price_per_20min_basic, 'Gemini') }}
+    {{ num('תמלול מקצועי', 'price_per_20min_premium', settings.price_per_20min_premium, 'אלף בוט') }}
+    {{ num('וידאו', 'price_per_20min_video', settings.price_per_20min_video, 'קבצי MP4/MOV. ל-Gemini וידאו עולה פי ~2.8 מאודיו') }}
+    {{ num('טבלת אקסל', 'price_per_20min_excel', settings.price_per_20min_excel, 'שלוחה 1 ← 3. חיוב רק אחרי שהטבלה נשלחה') }}
+    {{ num('הקלטה עם עריכה', 'price_per_20min_phone_edit', settings.price_per_20min_phone_edit, 'שלוחה 1 ← 4 (קובץ Word). ריק = כמו אקסל', 'כמו אקסל') }}
   </div>
-  <div style="margin-top:20px">
-    <button class="btn btn-primary" type="submit" style="font-size:15px;padding:12px 24px">💾 שמור הגדרות</button>
+  <div class="st-sub">לכל 5 דקות (₪) {{ tip('ללקוחות שבכרטיס שלהם נבחר "חיוב לפי 5 דקות". ריק = רבע ממחיר 20 הדקות') }}</div>
+  <div class="st-grid">
+    {{ num('רגיל', 'price_per_5min_basic', settings.price_per_5min_basic, '', '%.2f'|format(settings.price_per_20min_basic|float / 4)) }}
+    {{ num('מקצועי', 'price_per_5min_premium', settings.price_per_5min_premium, '', '%.2f'|format(settings.price_per_20min_premium|float / 4)) }}
+    {{ num('וידאו', 'price_per_5min_video', settings.price_per_5min_video, '', '%.2f'|format(settings.price_per_20min_video|float / 4)) }}
+    {{ num('אקסל', 'price_per_5min_excel', settings.price_per_5min_excel, '', '%.2f'|format(settings.price_per_20min_excel|float / 4)) }}
+    {{ num('הקלטה עם עריכה', 'price_per_5min_phone_edit', settings.price_per_5min_phone_edit, '', 'כמו אקסל') }}
+    {{ num('תוספת פקס', 'fax_surcharge_5min', settings.fax_surcharge_5min, 'נגבית בנפרד כשהתמלול נשלח בפקס וההקלטה קצרה מ-20 דקות') }}
   </div>
-</form>
+  <div class="st-sub">כללי</div>
+  <div class="st-grid">
+    {{ num('יתרה מינימלית להקלטה (₪)', 'min_balance', settings.min_balance, 'מתחת ליתרה הזו הלקוח לא יכול להתחיל הקלטה') }}
+  </div>
+</div>
 
-<div class="card" style="margin-top:24px" id="fax-test">
-  <div style="font-size:16px;font-weight:700;margin-bottom:8px">📠 בדיקת פקס</div>
-  {% set cur_fax_provider = get_fax_provider() %}
-  <form method="POST" action="{{ url_for('admin.fax_provider_save') }}" style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:14px">
-    <div><label class="form-label">שליחת פקסים דרך</label>
-      <select class="form-input" name="fax_provider" style="width:300px">
-        <option value="exm" {% if cur_fax_provider != 'yemot' %}selected{% endif %}>אקסטרה מובייל (מייל לפקס)</option>
-        <option value="yemot" {% if cur_fax_provider == 'yemot' %}selected{% endif %}>ימות המשיח</option>
+<!-- ===== שירותים נוספים ===== -->
+<div class="card st-sec" id="services">
+  <div class="st-h">🧩 שירותים נוספים</div>
+  <div class="st-sub" style="margin-top:0">הפעלה לכל הלקוחות {{ tip('כבוי = רק הטלפון של המנהל שומע את האפשרות בתפריט, לבדיקה. מדליקים אחרי שמקליטים את ההודעות בקריין') }}</div>
+  <div class="st-row">
+    <label class="st-chk"><input type="checkbox" form="mainform" name="email_out_enabled" value="1" {% if settings.email_out_enabled == '1' %}checked{% endif %}> מיילים לאחרים (1 ← 6)</label>
+    <label class="st-chk"><input type="checkbox" form="mainform" name="tasks_enabled" value="1" {% if settings.tasks_enabled == '1' %}checked{% endif %}> משימות ותזכורות (1 ← 5)</label>
+    <label class="st-chk"><input type="checkbox" form="mainform" name="excel_enabled" value="1" {% if settings.excel_enabled == '1' %}checked{% endif %}> טבלאות אקסל (1 ← 3)</label>
+    <label class="st-chk"><input type="checkbox" form="mainform" name="phone_edit_enabled" value="1" {% if settings.phone_edit_enabled == '1' %}checked{% endif %}> הקלטה עם עריכה (1 ← 4)</label>
+  </div>
+
+  <div class="st-sub">📧 מיילים לאחרים ⏰ משימות</div>
+  <div class="st-grid">
+    {{ num('מייל לאיש קשר - ל-5 דק׳ (₪)', 'price_per_5min_email_out', settings.price_per_5min_email_out, 'כולל תמלול ושליחה. נגבה מראש, מוחזר אם השליחה נכשלה') }}
+    {{ num('מקסימום מיילים ללקוח ביממה', 'email_out_daily_limit', settings.email_out_daily_limit, 'הגנה מפני ספאם בשם המערכת', '', '1') }}
+    {{ num('משימה - ל-2 דק׳ (₪)', 'price_per_2min_task', settings.price_per_2min_task) }}
+    {{ num('תזכורת בפקס - תוספת (₪)', 'task_fax_price', settings.task_fax_price, 'לכל שליחה בפקס') }}
+  </div>
+
+  <div class="st-sub">🖼️ כתב יד (OCR) והקראת כתבי יד</div>
+  <div class="st-grid">
+    <div class="st-f"><label class="form-label">מנוע OCR {{ tip('לזיהוי כתב יד מתמונה/PDF שנשלחו במייל. Claude ו-GPT-4o טובים יותר לעברית בכתב יד, ויקרים יותר') }}</label>
+      <select class="form-input" form="mainform" name="ocr_engine">
+        <option value="gemini" {% if settings.ocr_engine == 'gemini' %}selected{% endif %}>Gemini Flash (זול)</option>
+        <option value="claude" {% if settings.ocr_engine == 'claude' %}selected{% endif %}>Claude Opus</option>
+        <option value="gpt4o" {% if settings.ocr_engine == 'gpt4o' %}selected{% endif %}>GPT-4o</option>
       </select></div>
-    <button class="btn" type="submit">💾 שמור</button>
+    {{ num('OCR - ל-1,000 תווים (₪)', 'price_per_1000_chars_ocr', settings.price_per_1000_chars_ocr, 'יחסי לכמות התווים, מעוגל למעלה ל-10 אגורות') }}
+    {{ num('הקראה - גודל יחידת תווים', 'manuscript_char_unit_size', settings.manuscript_char_unit_size, 'למשל 1000 = המחיר הבא הוא לכל 1,000 תווים', '', '1') }}
+    {{ num('הקראה - מחיר ליחידה (₪)', 'price_per_manuscript_char_unit', settings.price_per_manuscript_char_unit, 'נגבה רק באישור סופי ושליחת הכתב') }}
+    {{ num('הגהה - לדקת עבודה (₪)', 'price_manuscript_proofing', settings.price_manuscript_proofing, 'לפי שעון העצר של הנציג, מעוגל לדקה. נגבה כשההגהה מסומנת כהושלמה') }}
+  </div>
+</div>
+
+<!-- ===== מבצעים ובונוסים ===== -->
+<div class="card st-sec" id="bonus">
+  <div class="st-h">🎁 מבצעים ובונוסים</div>
+  <div class="st-sub" style="margin-top:0">בונוס טעינה {{ tip('עד 3 רמות: טעינה מעל הסף מקבלת את הבונוס. למשל מ-50 ₪ ← 10 ₪ בונוס. ריק = אין מבצע') }}</div>
+  <div class="st-grid">
+    {% for i in range(3) %}
+    <div class="st-f"><label class="form-label">רמה {{ i+1 }}: טעינה מ- (₪) / בונוס (₪)</label>
+      <div style="display:flex;gap:6px">
+        <input class="form-input" form="mainform" name="bonus_threshold_{{ i+1 }}" type="number" step="1" value="{{ settings.bonus_thresholds[i].threshold }}" placeholder="סף">
+        <input class="form-input" form="mainform" name="bonus_amount_{{ i+1 }}" type="number" step="1" value="{{ settings.bonus_thresholds[i].amount }}" placeholder="בונוס">
+      </div></div>
+    {% endfor %}
+  </div>
+  <div class="st-row" style="margin-top:14px">
+    <label class="st-chk"><input type="checkbox" form="mainform" name="allow_student_self_topup" value="1" {% if settings.allow_student_self_topup %}checked{% endif %}> טעינה עצמית לתלמידי מוסדות
+      {{ tip('מתג מרכזי. כשהוא דלוק, כל מוסד יכול לכבות אצלו. תלמיד מקבל קישור טעינה רק כששניהם דלוקים') }}</label>
+  </div>
+
+  <div class="st-sub" id="promo" style="scroll-margin-top:60px">🎁 הקלטה ראשונה ביום חינם
+    {{ tip('ההקלטה הראשונה בכל יום (תמלול רגיל) לא מחויבת על הדקות שהוגדרו. לא חל על תלמידי מוסדות, מקצועי, וידאו ושאר השירותים. פקס - בתוספת הרגילה') }}</div>
+  <form method="post" action="{{ url_for('admin.promo_settings_save') }}" class="st-row">
+    <label class="st-chk" style="padding-bottom:8px"><input type="checkbox" name="promo_free_on" value="1" {{ 'checked' if promo.on }}> המבצע פעיל</label>
+    <div><label class="form-label">למי {{ tip('סימון לקוח למבצע - בכרטיס הלקוח, בחלק מחירון') }}</label>
+      <select class="form-input" name="promo_free_scope" style="width:auto">
+        <option value="marked" {{ 'selected' if promo.scope != 'all' }}>רק מסומנים ({{ promo_stats.marked }})</option>
+        <option value="all" {{ 'selected' if promo.scope == 'all' }}>כל הלקוחות</option>
+      </select></div>
+    <div><label class="form-label">מי יכול</label>
+      <select class="form-input" name="promo_free_needs_balance" style="width:auto">
+        <option value="1" {{ 'selected' if promo.needs_balance }}>רק עם יתרה</option>
+        <option value="0" {{ 'selected' if not promo.needs_balance }}>גם בלי יתרה</option>
+      </select></div>
+    <div><label class="form-label">דקות חינם</label>
+      <input class="form-input" type="number" name="promo_free_minutes" min="1" max="600" value="{{ promo.minutes }}" style="width:100px"></div>
+    <div><label class="form-label">בתוקף עד</label>
+      <input class="form-input" type="date" name="promo_free_until" value="{{ promo.until }}" style="width:auto"></div>
+    <label class="st-chk" style="padding-bottom:8px"><input type="checkbox" name="promo_free_ask_first" value="1" {{ 'checked' if promo.ask_first }}> לשאול לפני ההקלטה
+      {{ tip('הודעה 323: 1 = לממש עכשיו חינם, 2 = במסלול הרגיל. הנוסח נערך בדף הקריין') }}</label>
+    <button class="btn btn-primary" type="submit">💾 שמירת המבצע</button>
   </form>
-  <div style="font-size:13px;color:var(--text2);margin-bottom:12px">שולח דף בדיקה לפקס דרך הספק שנבחר, ומציג בדיוק מה ענו בכל שלב.</div>
-  <form method="POST" action="{{ url_for('admin.fax_test') }}" style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap"
-        onsubmit="var b=this.querySelector('button');setTimeout(function(){b.disabled=true;b.textContent='⏳ שולח...'},0);return true">
-    <div><label class="form-label">מספר פקס</label><input class="form-input" name="number" inputmode="tel" dir="ltr" placeholder="02-1234567" style="width:200px"></div>
-    <button class="btn btn-primary" type="submit">📠 שלח פקס בדיקה</button>
+  <div class="st-status">
+    {% if promo.on and not promo_stats.expired %}<b style="color:var(--green)">● פעיל</b>{% if promo.until %} עד {{ promo.until[8:10] }}/{{ promo.until[5:7] }}/{{ promo.until[:4] }}{% else %} ללא תאריך סיום{% endif %}
+    {% elif promo.on and promo_stats.expired %}<b style="color:var(--amber)">● פג תוקף</b> ב-{{ promo.until[8:10] }}/{{ promo.until[5:7] }}
+    {% else %}<b>● כבוי</b>{% endif %} · היום: {{ promo_stats.today_recordings }} הקלטות במבצע
+  </div>
+</div>
+
+<div class="st-save">
+  <button class="btn btn-primary" type="submit" form="mainform" style="font-size:15px;padding:11px 22px">💾 שמירת מחירים, שירותים ובונוסים</button>
+  <span class="hint">שומר את שלושת החלקים למעלה ואת החיבורים</span>
+</div>
+
+<!-- ===== מנוע תמלול ===== -->
+<div class="card st-sec" id="engine">
+  <div class="st-h">🎙️ מנוע התמלול הרגיל</div>
+  <form method="post" action="{{ url_for('admin.transcribe_engine_save') }}" class="st-row">
+    <div><label class="form-label">מנוע {{ tip('v3 = מזהה לכל קטע אם הוא תורני, ובתורני מוסיף מילון מונחים, כללי הגייה ובדיקת ציטוטים מול ספריא. בלא תורני הוא בדיוק כמו המשופר') }}</label>
+      <select class="form-input" name="engine" style="width:auto">
+        <option value="v3" {{ 'selected' if portal.engine == 'v3' }}>v3 - תורני חכם (חדש)</option>
+        <option value="v2" {{ 'selected' if portal.engine == 'v2' }}>משופר (v2)</option>
+        <option value="transcribe" {{ 'selected' if portal.engine == 'transcribe' }}>המודל הייעודי של Google</option>
+        <option value="v1" {{ 'selected' if portal.engine == 'v1' }}>הישן</option>
+      </select></div>
+    <div><label class="form-label">מסלול ב-v3 {{ tip('אוטומטי = זיהוי לכל קטע. אפשר לכפות מסלול ללקוח או מוסד מסוים בכרטיס שלו') }}</label>
+      <select class="form-input" name="route_mode" style="width:auto">
+        <option value="auto" {{ 'selected' if portal.route_mode == 'auto' }}>אוטומטי</option>
+        <option value="torah" {{ 'selected' if portal.route_mode == 'torah' }}>תמיד תורני</option>
+        <option value="simple" {{ 'selected' if portal.route_mode == 'simple' }}>תמיד פשוט</option>
+      </select></div>
+    <button class="btn btn-primary" type="submit">💾 שמירה</button>
+    <a class="btn" href="{{ url_for('admin.transcribe_compare') }}">⚖️ השוואת v2 מול v3</a>
+    <a class="btn" href="{{ url_for('admin.test_transcribe') }}">🧪 בדיקת תמלול מקובץ</a>
   </form>
+</div>
+
+<!-- ===== אזור אישי ===== -->
+<div class="card st-sec" id="customer-portal">
+  <div class="st-h">🔐 אזור אישי ללקוחות פרטיים {{ tip('כתובת /my. כניסה ראשונה בקוד למייל ובחירת סיסמה. רק ללקוח פרטי עם מייל. הטלפון של המנהל נכנס תמיד') }}</div>
+  <form method="post" action="{{ url_for('admin.customer_portal_mode_save') }}" class="st-row">
+    <div><label class="form-label">מי יכול להיכנס {{ tip('סימון לקוח - בכרטיס הלקוח, בחלק האזור האישי') }}</label>
+      <select class="form-input" name="mode" style="width:auto">
+        <option value="off" {{ 'selected' if portal.mode == 'off' }}>כבוי</option>
+        <option value="marked" {{ 'selected' if portal.mode == 'marked' }}>רק מסומנים ({{ portal.marked }})</option>
+        <option value="all" {{ 'selected' if portal.mode == 'all' }}>כל הלקוחות הפרטיים</option>
+      </select></div>
+    <div><label class="form-label">קבלה לטעינה בלי קבלה {{ tip('אם לטעינה אין קבלה בנדרים - האם להפיק אחת') }}</label>
+      <select class="form-input" name="receipt_type" style="width:auto">
+        <option value="" {{ 'selected' if not portal.receipt_type }}>לא להפיק</option>
+        <option value="400" {{ 'selected' if portal.receipt_type == '400' }}>קבלה רגילה (400)</option>
+        <option value="320" {{ 'selected' if portal.receipt_type == '320' }}>חשבונית מס קבלה (320)</option>
+        <option value="405" {{ 'selected' if portal.receipt_type == '405' }}>קבלת תרומה (405)</option>
+      </select></div>
+    <label class="st-chk" style="padding-bottom:8px"><input type="checkbox" name="signup" value="1" {{ 'checked' if portal.signup }}> הרשמה עצמית</label>
+    <label class="st-chk" style="padding-bottom:8px"><input type="checkbox" name="phone_link" value="1" {{ 'checked' if portal.phone_link }}> אימות טלפון בשיחה
+      {{ tip('הלקוח מחייג ומקיש 1 כדי לצרף את המספר לחשבון') }}</label>
+    <label class="st-chk" style="padding-bottom:8px"><input type="checkbox" name="auto_topup" value="1" {{ 'checked' if portal.auto_topup }}> טעינה אוטומטית
+      {{ tip('כרטיס שמור בנדרים (הוראת קבע מוקפאת). דורש NEDARIM_API_KEY') }}</label>
+    <button class="btn btn-primary" type="submit">💾 שמירה</button>
+  </form>
+  <div class="st-status">{{ portal.active }} לקוחות כבר הגדירו סיסמה</div>
+</div>
+
+<!-- ===== פקס ===== -->
+<div class="card st-sec" id="fax-test">
+  <div class="st-h">📠 פקס</div>
+  {% set cur_fax_provider = get_fax_provider() %}
+  <div class="st-row">
+    <form method="POST" action="{{ url_for('admin.fax_provider_save') }}" class="st-row">
+      <div><label class="form-label">שליחה דרך</label>
+        <select class="form-input" name="fax_provider" style="width:auto">
+          <option value="exm" {% if cur_fax_provider != 'yemot' %}selected{% endif %}>אקסטרה מובייל (מייל לפקס)</option>
+          <option value="yemot" {% if cur_fax_provider == 'yemot' %}selected{% endif %}>ימות המשיח</option>
+        </select></div>
+      <button class="btn" type="submit">💾 שמירה</button>
+    </form>
+    <form method="POST" action="{{ url_for('admin.fax_test') }}" class="st-row"
+          onsubmit="var b=this.querySelector('button');setTimeout(function(){b.disabled=true;b.textContent='⏳ שולח...'},0);return true">
+      <div><label class="form-label">פקס בדיקה {{ tip('שולח דף בדיקה דרך הספק שנבחר ומציג מה ענו בכל שלב') }}</label>
+        <input class="form-input" name="number" inputmode="tel" dir="ltr" placeholder="02-1234567" style="width:170px"></div>
+      <button class="btn btn-primary" type="submit">📠 שליחה</button>
+    </form>
+  </div>
   {% set fax_rep = get_fax_test_report() if get_fax_test_report is defined else '' %}
-  {% if fax_rep %}<div style="margin-top:10px;font-size:13px">📬 <b>דוח מסירה אחרון</b> (מתעדכן כשהספק שולח דוח - לרענן את הדף):
+  {% if fax_rep %}<div style="margin-top:10px;font-size:13px">📬 <b>דוח מסירה אחרון</b> {{ tip('מתעדכן כשהספק שולח דוח - לרענן את הדף') }}
     <pre dir="ltr" style="background:var(--surface2,#22263a);padding:10px;border-radius:8px;font-size:12px;white-space:pre-wrap">{{ fax_rep }}</pre></div>{% endif %}
   {% if request.args.get('fax_steps') %}
   <pre dir="ltr" style="margin-top:12px;background:var(--surface2,#22263a);padding:12px;border-radius:8px;font-size:12px;white-space:pre-wrap;max-height:320px;overflow:auto">{{ request.args.get('fax_steps') }}</pre>
   {% endif %}
 </div>
 
-<div class="card" style="margin-top:24px">
-  <div style="font-size:16px;font-weight:700;margin-bottom:8px">🔒 סיסמת מנהל</div>
-  <div style="font-size:13px;color:#4a5568">שם המשתמש והסיסמה של המנהל מוגדרים רק במשתני הסביבה בשרת (Railway): <b>ADMIN_USERNAME</b> ו-<b>ADMIN_PASSWORD</b>. לשינוי - משנים אותם שם ומפעילים מחדש.</div>
+<!-- ===== חיבורים ===== -->
+<div class="card st-sec" id="connections">
+  <div class="st-h">🔌 חיבורים {{ tip('גיבוי למשתני הסביבה בשרת: אם המשתנה מוגדר ב-Railway - הוא קובע, והשדה כאן לא בשימוש') }}</div>
+  <div class="st-grid">
+    <div class="st-f"><label class="form-label">טוקן ימות המשיח {{ tip('גיבוי ל-YEMOT_TOKEN. משמש להורדת הקלטות ולהעלאת קבצים. פורמט: מספר_מערכת:סיסמה') }}</label>
+      <input class="form-input" form="mainform" name="yemot_token" type="password" autocomplete="off" value="{{ settings.yemot_token }}" dir="ltr"></div>
+    <div class="st-f"><label class="form-label">מספר מוסד בנדרים {{ tip('גיבוי ל-NEDARIM_MOSAD (7 ספרות)') }}</label>
+      <input class="form-input" form="mainform" name="nedarim_mosad_number" type="text" value="{{ settings.nedarim_mosad_number }}" dir="ltr"></div>
+    <div class="st-f"><label class="form-label">מפתח API נדרים {{ tip('גיבוי ל-NEDARIM_API_KEY. רק מפתח שמתחיל ב-npk_') }}</label>
+      <input class="form-input" form="mainform" name="nedarim_api_password" type="password" autocomplete="off" value="{{ settings.nedarim_api_password }}" dir="ltr"></div>
+    <div class="st-f"><label class="form-label">כתובת חיוג {{ tip('לכפתור החיוג ליד מספרי טלפון. {phone} = המספר. ברירת מחדל tel:{phone}') }}</label>
+      <input class="form-input" form="mainform" name="dial_url_template" dir="ltr" value="{{ settings.dial_url_template }}" placeholder="tel:{phone}"></div>
+  </div>
+  <div class="st-status">🔒 שם המשתמש והסיסמה של המנהל - רק במשתני הסביבה ADMIN_USERNAME ו-ADMIN_PASSWORD</div>
+  <div style="margin-top:12px"><button class="btn btn-primary" type="submit" form="mainform">💾 שמירה</button></div>
 </div>
 
-<div class="card" style="margin-top:24px" id="promo">
-  <div style="font-size:16px;font-weight:700;margin-bottom:6px">🎁 מבצע: הקלטה ראשונה ביום חינם</div>
-  <div style="font-size:13px;color:var(--text2);margin-bottom:12px">
-    בזמן המבצע, ההקלטה הראשונה של כל יום (תמלול רגיל) לא מחויבת על {{ promo.minutes }} הדקות הראשונות:
-    לקוח לפי 20 דקות - יחידה אחת חינם (21 דקות = יחידה אחת בתשלום במקום 2); לקוח לפי 5 דקות - {{ promo.minutes // 5 }} יחידות חינם
-    (21 דקות = יחידה אחת בתשלום). שאר ההקלטות באותו יום - כרגיל. שליחה בפקס - בחיוב הפקס הרגיל (₪{{ settings.fax_surcharge_5min or '0.30' }}).
-    לא חל על תלמידי מוסדות, תמלול מקצועי, וידאו ושאר השירותים.
-  </div>
-  <form method="post" action="{{ url_for('admin.promo_settings_save') }}" style="display:flex;flex-wrap:wrap;gap:14px 20px;align-items:flex-end">
-    <label style="display:flex;gap:8px;align-items:center;cursor:pointer;font-weight:700">
-      <input type="checkbox" name="promo_free_on" value="1" {{ 'checked' if promo.on }}> המבצע פעיל</label>
-    <div><label class="form-label">למי</label>
-      <select class="form-input" name="promo_free_scope" style="width:auto">
-        <option value="marked" {{ 'selected' if promo.scope != 'all' }}>רק לקוחות שסומנו ({{ promo_stats.marked }})</option>
-        <option value="all" {{ 'selected' if promo.scope == 'all' }}>כל הלקוחות</option>
-      </select></div>
-    <div><label class="form-label">מי יכול להקליט במבצע</label>
-      <select class="form-input" name="promo_free_needs_balance" style="width:auto">
-        <option value="1" {{ 'selected' if promo.needs_balance }}>רק מי שיש לו יתרה בארנק</option>
-        <option value="0" {{ 'selected' if not promo.needs_balance }}>כל אחד, גם בלי יתרה</option>
-      </select></div>
-    <div><label class="form-label">דקות חינם בהקלטה</label>
-      <input class="form-input" type="number" name="promo_free_minutes" min="1" max="600" value="{{ promo.minutes }}" style="width:110px"></div>
-    <div><label class="form-label">בתוקף עד (כולל)</label>
-      <input class="form-input" type="date" name="promo_free_until" value="{{ promo.until }}" style="width:auto"></div>
-    <label style="display:flex;gap:8px;align-items:center;cursor:pointer;font-weight:600;padding-bottom:8px" title="הודעה 323 - הנוסח ניתן לעריכה בדף הקריין והודעות המערכת">
-      <input type="checkbox" name="promo_free_ask_first" value="1" {{ 'checked' if promo.ask_first }}> לשאול לפני ההקלטה אם לממש עכשיו (1 = חינם, 2 = בתשלום רגיל)</label>
-    <button class="btn btn-primary" type="submit">💾 שמירה</button>
-  </form>
-  <div style="font-size:12.5px;margin-top:12px;color:var(--text2)">
-    {% if promo.on and not promo_stats.expired %}<b style="color:var(--green)">● פעיל</b>{% if promo.until %} עד {{ promo.until[8:10] }}/{{ promo.until[5:7] }}/{{ promo.until[:4] }}{% else %} ללא תאריך סיום{% endif %}
-    {% elif promo.on and promo_stats.expired %}<b style="color:var(--amber)">● פג תוקף</b> - המבצע הסתיים ב-{{ promo.until[8:10] }}/{{ promo.until[5:7] }}
-    {% else %}<b>● כבוי</b>{% endif %}
-    · היום: {{ promo_stats.today_recordings }} הקלטות במבצע.
-    סימון לקוח למבצע - בכרטיס הלקוח, בחלק "מחירון".
-  </div>
-</div>
-
-<div class="card" style="margin-top:24px" id="engine">
-  <div style="font-size:16px;font-weight:700;margin-bottom:6px">🎙️ מנוע התמלול הרגיל</div>
-  <div style="font-size:13px;color:var(--text2);margin-bottom:12px;line-height:1.7">
-    <b>משופר (מומלץ)</b> - הוראות מפורטות באנגלית, פלט מובנה בלי "הסברים" של המודל, בדיקת כל חלק (מעבר לאנגלית, חותמות זמן, כפילות, ירידות שורה) וניסיון חוזר, ופסקאות מסודרות.
-    <b>מודל התמלול הייעודי של Google</b> (gemini-3.5-transcribe) - מודל דיבור-לטקסט עם מילון מונחים תורניים; אם נכשל - עובר אוטומטית למשופר. מומלץ לנסות על כמה הקלטות ולהשוות.
-    <b>הישן</b> - הפרומפט הקודם, לחזרה מהירה אם צריך.
-  </div>
-  <form method="post" action="{{ url_for('admin.transcribe_engine_save') }}" style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end">
-    <select class="form-input" name="engine" style="width:auto">
-      <option value="v2" {{ 'selected' if portal.engine == 'v2' }}>משופר (מומלץ)</option>
-      <option value="transcribe" {{ 'selected' if portal.engine == 'transcribe' }}>מודל התמלול הייעודי של Google</option>
-      <option value="v1" {{ 'selected' if portal.engine == 'v1' }}>הישן</option>
-    </select>
-    <button class="btn btn-primary" type="submit">💾 שמירה</button>
-  </form>
-</div>
-
-<div class="card" style="margin-top:24px" id="customer-portal">
-  <div style="font-size:16px;font-weight:700;margin-bottom:6px">🔐 האזור האישי ללקוחות פרטיים</div>
-  <div style="font-size:13px;color:var(--text2);margin-bottom:12px;line-height:1.7">
-    אזור כמו של המוסדות, ללקוח פרטי: התמלולים שלו עם נגן ועריכה, תמלול חדש, יתרה וחיובים, הגדרות הטלפון וצור קשר.
-    כתובת: <b dir="ltr">/my</b>. כניסה ראשונה בקוד למייל הרשום ובחירת סיסמה; ממכשיר חדש - תמיד גם קוד למייל.
-    רק ללקוח פרטי עם מייל (לא תלמידי מוסדות). הטלפון של המנהל נכנס תמיד, לבדיקות.
-  </div>
-  <form method="post" action="{{ url_for('admin.customer_portal_mode_save') }}" style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end">
-    <div><label class="form-label">מי יכול להיכנס</label>
-      <select class="form-input" name="mode" style="width:auto">
-        <option value="off" {{ 'selected' if portal.mode == 'off' }}>כבוי - אף לקוח</option>
-        <option value="marked" {{ 'selected' if portal.mode == 'marked' }}>רק לקוחות שסומנו ({{ portal.marked }})</option>
-        <option value="all" {{ 'selected' if portal.mode == 'all' }}>כל הלקוחות הפרטיים</option>
-      </select></div>
-    <label style="display:flex;gap:8px;align-items:center;cursor:pointer;font-weight:600;padding-bottom:8px">
-      <input type="checkbox" name="signup" value="1" {{ 'checked' if portal.signup }}> לקוחות חדשים יכולים להירשם בעצמם באתר</label>
-    <label style="display:flex;gap:8px;align-items:center;cursor:pointer;font-weight:600;padding-bottom:8px">
-      <input type="checkbox" name="phone_link" value="1" {{ 'checked' if portal.phone_link }}> אימות טלפון בשיחה (צירוף מספר לחשבון בהקשה על 1)</label>
-    <label style="display:flex;gap:8px;align-items:center;cursor:pointer;font-weight:600;padding-bottom:8px">
-      <input type="checkbox" name="auto_topup" value="1" {{ 'checked' if portal.auto_topup }}> טעינה אוטומטית (כרטיס שמור בנדרים)</label>
-    <div><label class="form-label">קבלה לטעינה שאין לה קבלה</label>
-      <select class="form-input" name="receipt_type" style="width:auto">
-        <option value="" {{ 'selected' if not portal.receipt_type }}>לא להפיק - רק להציג קבלה קיימת</option>
-        <option value="400" {{ 'selected' if portal.receipt_type == '400' }}>להפיק קבלה רגילה (400)</option>
-        <option value="320" {{ 'selected' if portal.receipt_type == '320' }}>להפיק חשבונית מס קבלה (320)</option>
-        <option value="405" {{ 'selected' if portal.receipt_type == '405' }}>להפיק קבלת תרומה (405)</option>
-      </select></div>
-    <button class="btn btn-primary" type="submit">💾 שמירה</button>
-  </form>
-  <div style="font-size:12.5px;margin-top:10px;color:var(--text2);line-height:1.7">{{ portal.active }} לקוחות כבר הגדירו סיסמה. סימון לקוח - בכרטיס הלקוח, בחלק "האזור האישי".<br>
-    אימות טלפון בשיחה דורש גם את העדכון של שרת הטלפוניה. הטלפון שלך (0527134491) תמיד יכול לנסות.
-    טעינה אוטומטית וקבלות משתמשות במפתח ה-API של נדרים (NEDARIM_API_KEY, מתחיל ב-npk_).</div>
-</div>
-
-<div class="card" style="margin-top:24px" id="slow-pages">
+<!-- ===== ביצועים ===== -->
+<div class="card st-sec" id="slow-pages">
   <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px">
-    <div style="font-size:16px;font-weight:700">🐢 עמודים איטיים אחרונים</div>
-    {% if slow_pages %}<form method="post" action="{{ url_for('admin.clear_slow_pages') }}"><button class="btn btn-sm" type="submit">ניקוי הרשימה</button></form>{% endif %}
+    <div class="st-h" style="margin:0">🐢 עמודים איטיים {{ tip('עמודי ניהול שלקחו יותר מ-0.4 שניות (30 האחרונים)') }}</div>
+    {% if slow_pages %}<form method="post" action="{{ url_for('admin.clear_slow_pages') }}"><button class="btn btn-sm" type="submit">ניקוי</button></form>{% endif %}
   </div>
-  <div style="font-size:13px;color:var(--text2);margin-bottom:10px">כל עמוד בממשק הניהול שלקח יותר מ-0.4 שניות נרשם כאן (30 האחרונים) - כדי לדעת בדיוק מה לזרז.</div>
   {% if slow_pages %}
   <div class="table-responsive"><table style="width:100%;font-size:12.5px">
     <thead><tr><th style="text-align:right">מתי</th><th style="text-align:right">זמן</th><th style="text-align:right">שאילתות</th><th style="text-align:right">עמוד</th></tr></thead>
@@ -341,10 +262,5 @@
     {% endfor %}</tbody>
   </table></div>
   {% else %}<div style="font-size:13px;color:var(--text2)">אין עמודים איטיים.</div>{% endif %}
-</div>
-
-<div class="card" style="margin-top:24px">
-  <div style="font-size:16px;font-weight:700;margin-bottom:20px">🧪 בדיקת תמלול — העלאת קובץ</div>
-  <a href="{{ url_for('admin.test_transcribe') }}" class="btn btn-primary">פתח עמוד בדיקת תמלול</a>
 </div>
 {% endblock %}

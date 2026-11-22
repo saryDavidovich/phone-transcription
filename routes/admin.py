@@ -10,6 +10,7 @@ import os
 import re
 import logging
 
+import threading
 log = logging.getLogger(__name__)
 
 admin_bp = Blueprint('admin', __name__)
@@ -1982,8 +1983,11 @@ def _portal_info(customer):
 @login_required
 def transcribe_engine_save():
     eng = request.form.get('engine')
-    set_setting('transcribe_engine', eng if eng in ('v1', 'v2', 'transcribe') else 'v2')
-    flash('✔ מנוע התמלול הרגיל נשמר - חל מהתמלול הבא')
+    set_setting('transcribe_engine', eng if eng in ('v1', 'v2', 'v3', 'transcribe') else 'v2')
+    rm = request.form.get('route_mode')
+    if rm in ('auto', 'torah', 'simple'):
+        set_setting('transcribe_route_mode', rm)
+    flash('✔ מנוע התמלול נשמר - חל מהתמלול הבא')
     return redirect(url_for('admin.settings') + '#engine')
 
 
@@ -2048,6 +2052,33 @@ def customer_promo_toggle(id):
     return redirect(url_for('admin.customer_detail', id=id) + '#billing')
 
 
+_ROUTE_NAMES = {'torah': 'תמיד תורני', 'simple': 'תמיד פשוט', 'mixed': 'מעורב'}
+
+
+@admin_bp.route('/customers/<int:id>/transcribe-route', methods=['POST'])
+@login_required
+def customer_transcribe_route(id):
+    """מסלול תמלול ב-v3 ללקוח: ריק = לפי ההגדרה הכללית."""
+    customer = Customer.query.get_or_404(id)
+    r = request.form.get('transcribe_route')
+    customer.transcribe_route = r if r in _ROUTE_NAMES else None
+    db.session.commit()
+    flash('✔ מסלול התמלול: ' + _ROUTE_NAMES.get(customer.transcribe_route, 'לפי ההגדרה הכללית'))
+    return redirect(url_for('admin.customer_detail', id=id) + '#billing')
+
+
+@admin_bp.route('/institutions/<int:inst_id>/transcribe-route', methods=['POST'])
+@login_required
+def institution_transcribe_route(inst_id):
+    from models import Institution
+    inst = Institution.query.get_or_404(inst_id)
+    r = request.form.get('transcribe_route')
+    inst.transcribe_route = r if r in _ROUTE_NAMES else None
+    db.session.commit()
+    flash('✔ מסלול התמלול של המוסד: ' + _ROUTE_NAMES.get(inst.transcribe_route, 'לפי ההגדרה הכללית'))
+    return redirect(url_for('admin.institution_detail', inst_id=inst_id))
+
+
 @admin_bp.route('/settings/slow-pages/clear', methods=['POST'])
 @login_required
 def clear_slow_pages():
@@ -2089,19 +2120,14 @@ def settings():
             set_setting('tasks_enabled', '1' if request.form.get('tasks_enabled') == '1' else '0')
             set_setting('excel_enabled', '1' if request.form.get('excel_enabled') == '1' else '0')
             set_setting('phone_edit_enabled', '1' if request.form.get('phone_edit_enabled') == '1' else '0')
-        set_setting('fax_inbound_number', request.form.get('fax_inbound_number', ''))
         set_setting('yemot_token', request.form.get('yemot_token', ''))
-        set_setting('yemot_log_path', request.form.get('yemot_log_path', 'ivr2:/199/LogCreditCardOK.ymgr'))
-        set_setting('payment_callback_secret', request.form.get('payment_callback_secret', ''))
         set_setting('nedarim_mosad_number', request.form.get('nedarim_mosad_number', ''))
         set_setting('nedarim_api_password', request.form.get('nedarim_api_password', ''))
-        set_setting('nedarim_tamal_type', request.form.get('nedarim_tamal_type', '400'))
         # הגדרות בונוס - עד 3 רמות
         for i in range(1, 4):
             set_setting(f'bonus_threshold_{i}', request.form.get(f'bonus_threshold_{i}', ''))
             set_setting(f'bonus_amount_{i}', request.form.get(f'bonus_amount_{i}', ''))
         set_setting('min_balance', request.form.get('min_balance', '5'))
-        set_setting('max_recording_seconds', request.form.get('max_recording_seconds', '1800'))
         if request.form.get('_topup_field') == '1':
             set_setting('allow_student_self_topup', '1' if request.form.get('allow_student_self_topup') == '1' else '0')
         flash('הגדרות נשמרו בהצלחה')
@@ -2133,23 +2159,15 @@ def settings():
         'dial_url_template': get_setting('dial_url_template', '') or 'tel:{phone}',
         'email_out_enabled': get_setting('email_out_enabled', '0'),
         'tasks_enabled': get_setting('tasks_enabled', '0'),
-        'fax_inbound_number': get_setting('fax_inbound_number', ''),
         'yemot_token': get_setting('yemot_token', ''),
-        'yemot_log_path': get_setting('yemot_log_path', 'ivr2:/199/LogCreditCardOK.ymgr'),
-        'payment_callback_secret': get_setting('payment_callback_secret', ''),
         'nedarim_mosad_number': get_setting('nedarim_mosad_number', ''),
         'nedarim_api_password': get_setting('nedarim_api_password', ''),
-        'nedarim_tamal_type': get_setting('nedarim_tamal_type', '400'),
         'bonus_thresholds': [
             {'threshold': get_setting(f'bonus_threshold_{i}', ''), 'amount': get_setting(f'bonus_amount_{i}', '')}
             for i in range(1, 4)
         ],
         'allow_student_self_topup': get_setting('allow_student_self_topup', '0') == '1',
         'min_balance': get_setting('min_balance', '5'),
-        'max_recording_seconds': get_setting('max_recording_seconds', '1800'),
-        'welcome_new': get_setting('welcome_new', 'שלום וברוכים הבאים למערכת התמלול.'),
-        'welcome_returning': get_setting('welcome_returning', 'שלום וברוכים השבים.'),
-        'system_explanation': get_setting('system_explanation', 'מערכת התמלול מאפשרת לך להקליט הודעות שיתומללו ויישלחו אליך למייל או לפקס.'),
     }
     import json as _json
     try:
@@ -2172,6 +2190,7 @@ def settings():
     from models import CustomerAccount
     from services import customer_auth as _CA
     portal = {'engine': get_setting('transcribe_engine', 'v2') or 'v2',
+              'route_mode': get_setting('transcribe_route_mode', 'auto') or 'auto',
               'signup': get_setting('customer_signup_on', '0') == '1',
               'phone_link': get_setting('phone_link_ivr_on', '0') == '1',
               'auto_topup': get_setting('auto_topup_on', '0') == '1',
@@ -2803,6 +2822,88 @@ def debug_messages():
         'call_id': m.call_id,
         'rec_url': m.rec_url
     } for m in msgs])
+
+@admin_bp.route('/transcribe-compare', methods=['GET', 'POST'])
+@login_required
+def transcribe_compare():
+    """השוואת מנועים: אותה הקלטה ב-v2 וב-v3, זו לצד זו, עם המסלול שנבחר לכל קטע."""
+    import os
+    import uuid
+    from models import TranscribeCompare
+    if request.method == 'POST':
+        language = request.form.get('language') if request.form.get('language') in ('he', 'yi', 'en') else 'he'
+        route = request.form.get('route') if request.form.get('route') in ('torah', 'simple', 'mixed') else None
+        rec_url, name = None, ''
+        rid = (request.form.get('recording_id') or '').strip()
+        f = request.files.get('audio_file')
+        if f and f.filename:
+            static_dir = os.path.join(os.path.dirname(__file__), '..', 'static', 'fax_tmp')
+            os.makedirs(static_dir, exist_ok=True)
+            _ext = os.path.splitext(f.filename)[1].lower()
+            _ext = _ext if _ext in ('.wav', '.mp3', '.m4a', '.ogg', '.opus', '.flac', '.aac', '.webm', '.mp4') else '.wav'
+            fn = f"cmp_{uuid.uuid4().hex}{_ext}"
+            f.save(os.path.join(static_dir, fn))
+            rec_url = f"{os.environ.get('APP_BASE_URL', '').rstrip('/')}/static/fax_tmp/{fn}"
+            name = f.filename[:200]
+        elif rid.isdigit():
+            rec = Recording.query.get(int(rid))
+            if rec and rec.rec_url:
+                rec_url, name = rec.rec_url, f'הקלטה #{rec.id}' + (f' - {rec.source_filename}' if rec.source_filename else '')
+        if not rec_url:
+            flash('יש להעלות קובץ או לכתוב מספר הקלטה קיימת')
+            return redirect(url_for('admin.transcribe_compare'))
+        job = TranscribeCompare(name=name, rec_url=rec_url, language=language, route=route, status='running')
+        db.session.add(job)
+        db.session.commit()
+        threading.Thread(target=_run_compare, args=(job.id,), daemon=True).start()
+        return redirect(url_for('admin.transcribe_compare_view', job_id=job.id))
+    jobs = TranscribeCompare.query.order_by(TranscribeCompare.id.desc()).limit(20).all()
+    return render_template('admin/transcribe_compare.html', jobs=jobs, job=None)
+
+
+@admin_bp.route('/transcribe-compare/<int:job_id>')
+@login_required
+def transcribe_compare_view(job_id):
+    from models import TranscribeCompare
+    job = TranscribeCompare.query.get_or_404(job_id)
+    if request.args.get('state') == '1':
+        return jsonify({'status': job.status, 'v2': bool(job.v2_text), 'v3': bool(job.v3_text)})
+    jobs = TranscribeCompare.query.order_by(TranscribeCompare.id.desc()).limit(20).all()
+    return render_template('admin/transcribe_compare.html', jobs=jobs, job=job)
+
+
+def _run_compare(job_id):
+    import time as _t
+    from app import app as _app
+    with _app.app_context():
+        from models import TranscribeCompare
+        from services.transcribe import _gemini_from_url
+        from services import transcribe_v3 as TV3
+        job = TranscribeCompare.query.get(job_id)
+        try:
+            for eng in ('v2', 'v3'):
+                report = []
+                tok = TV3.engine_override.set(eng)
+                t0 = _t.time()
+                try:
+                    with TV3.route_context(job.route, report=report):
+                        text, _d, _v = _gemini_from_url(job.rec_url, job.language, 'he')
+                finally:
+                    TV3.engine_override.reset(tok)
+                job = TranscribeCompare.query.get(job_id)
+                if eng == 'v2':
+                    job.v2_text, job.v2_seconds = text or '', round(_t.time() - t0, 1)
+                else:
+                    job.v3_text, job.v3_seconds, job.report = text or '', round(_t.time() - t0, 1), report
+                db.session.commit()
+            job.status = 'done'
+        except Exception as e:
+            log.exception('transcribe compare failed')
+            db.session.rollback()
+            job = TranscribeCompare.query.get(job_id)
+            job.status, job.error = 'error', str(e)[:500]
+        db.session.commit()
+
 
 @admin_bp.route('/test-transcribe', methods=['GET', 'POST'])
 @login_required

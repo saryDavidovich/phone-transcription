@@ -39,6 +39,8 @@ class Customer(db.Model):
     phones_separate = db.Column(db.Boolean, nullable=True, default=False)
     # רשימת הצינתוקים האישית של הלקוח בימות (נוצרת כשהוא מקיש 4 בשלוחה 9) - services/voice_messages
     tzintuk_list = db.Column(db.String(40), nullable=True)
+    # מסלול התמלול במנוע v3: None = זיהוי אוטומטי, 'torah' / 'simple' = קבוע ללקוח (services/transcribe_v3.py)
+    transcribe_route = db.Column(db.String(10), nullable=True)
 
     # --- שיוך למוסד (תלמיד) ---
     # לקוח "רגיל" (הרשמה עצמאית) - institution_id ריק. "תלמיד" ששייך למוסד -
@@ -84,6 +86,7 @@ class Institution(db.Model, UserMixin):
     __tablename__ = 'institutions'
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(200), nullable=False)
+    transcribe_route = db.Column(db.String(10), nullable=True)   # v3: None אוטומטי / torah / simple - חל על כל התלמידים
     email = db.Column(db.String(200), nullable=True)   # התחברות אפשרית לפי מייל
     phone = db.Column(db.String(20), nullable=True)    # התחברות אפשרית לפי טלפון
     login_code = db.Column(db.String(255), nullable=True)     # גיבוב (scrypt) של הקוד הזמני - הקוד עצמו לא נשמר
@@ -1102,3 +1105,21 @@ class AutoTopup(db.Model):
     fails = db.Column(db.Integer, default=0)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class TranscribeCompare(db.Model):
+    """כלי ההשוואה במנהל: אותה הקלטה במנוע v2 ובמנוע v3 (services/transcribe_v3.py), זה לצד זה."""
+    __tablename__ = 'transcribe_compares'
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(200))
+    rec_url = db.Column(db.Text)
+    language = db.Column(db.String(10), default='he')
+    route = db.Column(db.String(10), nullable=True)          # כפיית מסלול ל-v3 (ריק = אוטומטי)
+    status = db.Column(db.String(20), default='running')     # running / done / error
+    v2_text = db.Column(db.Text)
+    v3_text = db.Column(db.Text)
+    v2_seconds = db.Column(db.Float)
+    v3_seconds = db.Column(db.Float)
+    report = db.Column(db.JSON)                               # לכל קטע: מסלול, נושא, מקורות, תוקן
+    error = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
