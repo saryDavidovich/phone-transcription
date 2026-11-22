@@ -665,6 +665,9 @@ def _save_pending_payment(rec, customer, duration_seconds, price_per_20min,
     from services import pricing as P
     units = P.units_for(customer, duration_seconds)            # price_per_20min = מחיר ליחידה של הלקוח
     cost = round(units * price_per_20min, 2) + P.fax_surcharge(customer, duration_seconds, delivery_method)
+    if P.kind_for_tier(transcription_tier) == 'basic' and not rec.promo_declined:   # מבצע: רק החלק שמעבר לדקות החינם
+        cost = round(P.basic_cost_with_promo(customer, duration_seconds, rec.id)[0]
+                     + P.fax_surcharge(customer, duration_seconds, delivery_method), 2)
 
     rec.status = 'pending_payment'
     rec.duration_seconds = duration_seconds

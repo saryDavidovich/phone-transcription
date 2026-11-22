@@ -301,8 +301,10 @@ def get_pending_recordings():
 
     from services import pricing as P
     secs = pending.duration_seconds or 0
-    cost = round(P.cost_for(customer, secs, P.kind_for_tier(pending.transcription_tier))
-                 + P.fax_surcharge(customer, secs, pending.delivery_method), 2)
+    kind = P.kind_for_tier(pending.transcription_tier)
+    base = (P.basic_cost_with_promo(customer, secs, pending.id)[0] if kind == 'basic' and not pending.promo_declined
+            else P.cost_for(customer, secs, kind))          # מבצע: ההודעה בשיחה - רק החלק שמעבר לדקות החינם
+    cost = round(base + P.fax_surcharge(customer, secs, pending.delivery_method), 2)
     minutes = (pending.duration_seconds or 0) // 60
 
     return jsonify({

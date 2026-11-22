@@ -200,7 +200,7 @@ def promo_used_today(customer):
     if not promo_active(customer):
         return False
     start = _il_now().replace(hour=0, minute=0, second=0, microsecond=0).astimezone(ZoneInfo('UTC')).replace(tzinfo=None)
-    busy = ('recording', 'processing', 'queued', 'transcribing', 'pending', 'queued_maintenance')
+    busy = ('recording', 'processing', 'queued', 'transcribing', 'pending', 'queued_maintenance', 'pending_payment')
     return Recording.query.filter(Recording.customer_id == customer.id, Recording.created_at >= start,
                                   Recording.status.in_(busy), Recording.promo_declined.isnot(True),
                                   Recording.transcription_tier.notin_(('premium', 'excel', 'phone_edit'))).first() is not None
