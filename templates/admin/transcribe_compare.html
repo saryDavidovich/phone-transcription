@@ -130,6 +130,8 @@
       {% if job.analysis_status == 'running' %}<span class="badge" style="background:#fef3c7;color:#92400e">⏳ מאזין להקלטה ומשווה... (הדף מתרענן לבד)</span>
       {% else %}<form method="POST" action="{{ url_for('admin.transcribe_compare_analyze', job_id=job.id) }}">
         <button class="btn btn-primary btn-sm" type="submit" {{ 'disabled' if job.status == 'running' or job.alef_status == 'running' }}>{{ '↻ ניתוח מחדש' if an and not an.error else '▶ נתח: מה שונה, מי צודק, מה לשפר' }}</button></form>{% endif %}
+      <form method="POST" action="{{ url_for('admin.transcribe_compare_email', job_id=job.id) }}" style="margin:0">
+        <input type="hidden" name="back" value="{{ request.path }}"><button class="btn btn-sm" type="submit">📧 שלח למייל</button></form>
       <button class="btn btn-sm" type="button" id="copyAll" title="מעתיק את כל הנתונים של ההשוואה - להדבקה בשיחה עם Claude">📋 העתק הכל ל-Claude</button>
     </div>
     {% if an.error %}<div class="err">{{ an.error }}</div>{% endif %}
@@ -202,6 +204,9 @@
     <td style="font-size:12px;color:var(--text2)">{{ MN.get(jo.model, 'Flash') }}{{ ' + תדריך' if jo.brief }}{{ ' + מואט' if jo.slow }}{{ ' + ניקוי' if jo.clean }}</td>
     <td>{{ {'running':'⏳ רץ','done':'הסתיים','error':'שגיאה'}.get(j.status, j.status) }}</td>
     <td style="color:var(--text2);font-size:12px">{{ j.created_at.strftime('%d/%m %H:%M') if j.created_at }}</td>
+    <td style="white-space:nowrap">{% if j.status != 'running' %}<form method="POST" action="{{ url_for('admin.transcribe_compare_email', job_id=j.id) }}" style="margin:0">
+      <input type="hidden" name="back" value="{{ request.path }}">
+      <button class="btn btn-sm" type="submit" title="שולח את כל הנתונים (תמלולים, תדריך, ניתוח) למייל שלך, עם קובץ txt להעתקה ל-Claude">📧 שלח למייל</button></form>{% endif %}</td>
   </tr>{% endfor %}</tbody></table>
 </div>
 {% endif %}

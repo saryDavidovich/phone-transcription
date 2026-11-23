@@ -2982,6 +2982,71 @@ def _run_compare_analysis(job_id):
         db.session.commit()
 
 
+def compare_bundle(job, limit=None):
+    """כל נתוני ההשוואה כטקסט אחד (אותו תוכן כמו "העתק הכל ל-Claude")."""
+    import json as _j
+
+    def cut(t):
+        t = t or ''
+        return t if not limit or len(t) <= limit else t[:limit] + f'\n[... קוצר - {len(t)} תווים בסך הכל]'
+    L = [f'### השוואת תמלול #{job.id} - {job.name or ""}',
+         f'שפה: {job.language} | מסלול כפוי: {job.route or "אוטומטי"} | אפשרויות v3: {_j.dumps(job.options or {}, ensure_ascii=False)}',
+         f'זמן: v2 {job.v2_seconds or "?"} שנ׳, v3 {job.v3_seconds or "?"} שנ׳ | סטטוס: {job.status}'
+         f' | אלף בוט: {job.alef_status or ("הודבק" if job.alef_text else "אין")}', '']
+    for r in job.report or []:
+        if not isinstance(r, dict):
+            continue
+        if r.get('briefing'):
+            L += ['## תדריך', _j.dumps(r['briefing'], ensure_ascii=False, indent=1),
+                  'מקורות שנמצאו בספריא: ' + ' | '.join(r.get('brief_sources') or []), '']
+        elif r.get('chunk'):
+            L.append(f"קטע {r['chunk']}: מסלול={r.get('route')}{' (לפי התדריך)' if r.get('by_brief') else ''} "
+                     f"מודל={r.get('model') or ''}{' +מואט' if r.get('slow') else ''}"
+                     f"{' נפל ל-Flash: ' + (r.get('error') or '') if r.get('fallback') else ''} "
+                     f"מקורות={' | '.join(r.get('refs') or [])} תוקן={'כן' if r.get('fixed') else 'לא'} זמן={r.get('seconds')}")
+    if job.analysis:
+        L += ['', '## ניתוח אוטומטי', _j.dumps(job.analysis, ensure_ascii=False, indent=1)]
+    L += ['', '## תמלול v2', cut(job.v2_text), '', '## תמלול v3', cut(job.v3_text)]
+    if job.alef_text:
+        L += ['', '## תמלול אלף בוט', cut(job.alef_text)]
+    L += ['', '---', 'תעבור על כל זה ותחליט: מה הבעיות, איפה כל מנוע יותר נכון, ומה לשפר במנוע שלנו.']
+    return '\n'.join(L)
+
+
+@admin_bp.route('/transcribe-compare/<int:job_id>/email', methods=['POST'])
+@login_required
+def transcribe_compare_email(job_id):
+    """שולח את כל נתוני ההשוואה למייל של המנהל - טקסט בגוף המייל וקובץ txt מצורף (להעתקה ל-Claude)."""
+    import base64
+    from html import escape as _esc
+    from models import TranscribeCompare
+    from services import admin_tasks as AT
+    job = TranscribeCompare.query.get_or_404(job_id)
+    to = (request.form.get('to') or '').strip() or AT.report_email()
+    back = request.form.get('back') or url_for('admin.transcribe_compare')
+    if not to:
+        flash('אין כתובת מייל למנהל (ADMIN_GOOGLE_EMAILS או כתובת דוח המשימות)')
+        return redirect(back)
+    full = compare_bundle(job)
+    try:
+        import sendgrid
+        from sendgrid.helpers.mail import Mail, Attachment, FileContent, FileName, FileType, Disposition, Email
+        body = compare_bundle(job, limit=12000)
+        html = ('<div dir="rtl" style="font-family:Arial,sans-serif;font-size:14px">'
+                '<p>כל נתוני ההשוואה מצורפים גם כקובץ טקסט - אפשר להעתיק אותו כמו שהוא לשיחה עם Claude.</p>'
+                f'<pre style="white-space:pre-wrap;font-family:Arial,sans-serif">{_esc(body)}</pre></div>')
+        msg = Mail(from_email=Email(os.environ.get('SENDGRID_FROM_EMAIL', os.environ.get('GMAIL_USER', '')), 'תמלול פון'),
+                   to_emails=to, subject=f'השוואת תמלול #{job.id} - {job.name or ""}'[:150], html_content=html)
+        msg.attachment = Attachment(FileContent(base64.b64encode(full.encode('utf-8')).decode()),
+                                    FileName(f'compare_{job.id}.txt'), FileType('text/plain'), Disposition('attachment'))
+        sendgrid.SendGridAPIClient(api_key=os.environ.get('SENDGRID_API_KEY')).send(msg)
+        flash(f'✔ ההשוואה #{job.id} נשלחה ל-{to}')
+    except Exception as e:
+        log.exception('compare email failed')
+        flash(f'השליחה נכשלה: {e}')
+    return redirect(back)
+
+
 @admin_bp.route('/transcribe-compare/<int:job_id>/audio')
 @login_required
 def transcribe_compare_audio(job_id):
