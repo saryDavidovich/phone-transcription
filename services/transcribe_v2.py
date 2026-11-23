@@ -18,6 +18,7 @@
 (gemini-3.5-transcribe) - מודל דיבור-לטקסט, לא מודל שיחה, ולכן לא "מדבר" בתוך התמלול. עם מילון
 מונחים תורניים. אם הוא נכשל - חוזרים אוטומטית לגרסה 2.
 """
+import contextvars
 import json
 import logging
 import re
@@ -214,7 +215,76 @@ SLOW_COPY_NOTE = (
     '(never twice), following the first part from start to end.')
 
 
+# ------------------------------------------------------------------ "נעצר באמצע"
+# המודל לפעמים מתמלל רק את תחילת החלק (למשל 40 שניות מתוך 5 דקות) ומסיים - בלי שגיאה. בדיקה:
+# פחות מ-MIN_CHARS_PER_SEC תווים לשנייה בחלק של דקה וחצי ומעלה = כנראה נעצר. אז מתמללים
+# את אותו חלק מחדש בחתיכות של דקה ומחברים; נשאר הארוך מבין השניים (שקט אמיתי - לא מפסידים כלום).
+MIN_CHARS_PER_SEC = 3.0
+RESPLIT_SECONDS = 60
+resplit_used = contextvars.ContextVar('transcribe_v2_resplit', default=False)
+
+
+def looks_cut(text, seconds):
+    return bool(seconds and seconds >= 90 and len((text or '').strip()) < seconds * MIN_CHARS_PER_SEC)
+
+
+def wav_pieces(chunk_bytes, piece_seconds):
+    """חותך WAV לחתיכות של piece_seconds. לא WAV - [] ."""
+    import io
+    import wave
+    out = []
+    try:
+        with wave.open(io.BytesIO(chunk_bytes), 'rb') as w:
+            ch, sw, fr = w.getnchannels(), w.getsampwidth(), w.getframerate()
+            while True:
+                data = w.readframes(fr * piece_seconds)
+                if not data:
+                    break
+                buf = io.BytesIO()
+                with wave.open(buf, 'wb') as o:
+                    o.setnchannels(ch)
+                    o.setsampwidth(sw)
+                    o.setframerate(fr)
+                    o.writeframes(data)
+                out.append((buf.getvalue(), len(data) / float(fr * sw * ch)))
+    except Exception:
+        return []
+    return out
+
+
 def transcribe_chunk(client, gtypes, chunk_bytes, mime_type, language, output_language, prev_tail,
+                     chunk_num, n_chunks, seconds, model='gemini-3.5-flash', extra_rules='', context='',
+                     extra_audio=None, thinking=None):
+    resplit_used.set(False)
+    text = _transcribe_once(client, gtypes, chunk_bytes, mime_type, language, output_language, prev_tail,
+                            chunk_num, n_chunks, seconds, model, extra_rules, context, extra_audio, thinking)
+    if not looks_cut(text, seconds) or mime_type not in ('audio/wav', 'audio/x-wav'):
+        return text
+    pieces = wav_pieces(chunk_bytes, RESPLIT_SECONDS)
+    if len(pieces) < 2:
+        return text
+    log.warning(f'transcribe_v2: chunk {chunk_num} looks cut ({len(text or "")} chars / {seconds}s) - '
+                f're-transcribing in {len(pieces)} pieces of {RESPLIT_SECONDS}s')
+    parts, tail = [], prev_tail
+    for i, (pb, psec) in enumerate(pieces):
+        try:
+            t = _transcribe_once(client, gtypes, pb, 'audio/wav', language, output_language, tail,
+                                 chunk_num, n_chunks, max(1, int(psec)), model, extra_rules, context, None, thinking)
+        except Exception as e:
+            log.warning(f'transcribe_v2: chunk {chunk_num} piece {i + 1} failed: {e}')
+            t = None
+        if t:
+            parts.append(t.strip())
+            tail = t[-300:]
+    joined = '\n\n'.join(parts)
+    if len(joined) > len(text or '') * 1.2:
+        resplit_used.set(True)
+        log.info(f'transcribe_v2: chunk {chunk_num} re-split: {len(text or "")} -> {len(joined)} chars')
+        return joined
+    return text
+
+
+def _transcribe_once(client, gtypes, chunk_bytes, mime_type, language, output_language, prev_tail,
                      chunk_num, n_chunks, seconds, model='gemini-3.5-flash', extra_rules='', context='',
                      extra_audio=None, thinking=None):
     """תמלול של חלק אחד: עד 3 ניסיונות כשהתוצאה לא תקינה (ועוד ניסיונות על שגיאות רשת - אצל הקורא).

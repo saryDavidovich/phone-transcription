@@ -3003,7 +3003,8 @@ def compare_bundle(job, limit=None):
             L.append(f"קטע {r['chunk']}: מסלול={r.get('route')}{' (לפי התדריך)' if r.get('by_brief') else ''} "
                      f"מודל={r.get('model') or ''}{' +מואט' if r.get('slow') else ''}"
                      f"{' נפל ל-Flash: ' + (r.get('error') or '') if r.get('fallback') else ''} "
-                     f"מקורות={' | '.join(r.get('refs') or [])} תוקן={'כן' if r.get('fixed') else 'לא'} זמן={r.get('seconds')}")
+                     f"מקורות={' | '.join(r.get('refs') or [])} תוקן={'כן' if r.get('fixed') else 'לא'} "
+                     f"תווים={r.get('chars', '')}{' (חולק מחדש)' if r.get('resplit') else ''} זמן={r.get('seconds')}")
     if job.analysis:
         L += ['', '## ניתוח אוטומטי', _j.dumps(job.analysis, ensure_ascii=False, indent=1)]
     L += ['', '## תמלול v2', cut(job.v2_text), '', '## תמלול v3', cut(job.v3_text)]

@@ -86,4 +86,9 @@ PRONUNCIATION_RULES = """ASHKENAZI / YESHIVISH / HASIDIC PRONUNCIATION - always 
 - Final "-ע"/"-עה" in Yiddish-style pronunciation of Hebrew words = "-ה": "תורע" = תורה, "גמרע" = גמרא, "סוגיע" = סוגיא/סוגיה, "בראכע" = ברכה.
 - "רעבע/רעבי" = רבי, "רבוסיי" = רבותי, "מיצווע/מצוויס" = מצוה/מצוות, "ספרים/סְפוֹרים" = ספרים, "תלמידים/תלמיידים" = תלמידים.
 - Aramaic Talmudic phrases are written in their standard Aramaic spelling (e.g. "תא שמע", "מאי טעמא", "איבעיא להו").
-- Acronyms are written with gershayim: רש"י, רמב"ם, הקב"ה, שו"ע, זצ"ל - never spelled out letter by letter."""
+- Acronyms are written with gershayim: רש"י, רמב"ם, הקב"ה, שו"ע, זצ"ל - never spelled out letter by letter.
+- More examples: "ניסעס ונסגאשה/נסעוסו" = נישאת ונתגרשה, "דויחיק/דוחיק" = דוחק, "ניבלע" = נבעלה, "מאמעס" = ממאנת.
+- EVERY word you write must be a real Hebrew / Aramaic / Yiddish word. Never write a phonetic non-word. When a
+  phrase sounds like a known Talmudic / halachic expression, write that expression in its standard spelling.
+- Talmud page numbers (דף כ"ט / ל"ט, עמוד א' / ב') and halacha numbers: follow the topic of the lesson - the
+  briefing tells which page is being learned."""

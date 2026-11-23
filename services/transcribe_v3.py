@@ -637,6 +637,8 @@ def transcribe_chunk(client, gtypes, chunk_bytes, mime_type, language, output_la
             if found:
                 state.add(found)
                 text, info['fixed'] = fix_quotes(client, gtypes, text, found)
+    info['resplit'] = TV2.resplit_used.get()
+    info['chars'] = len(text or '')
     info['seconds'] = round(time.time() - started, 1)
     log.info(f'v3 chunk {chunk_num}/{n_chunks}: {info}')
     rep = _report.get()

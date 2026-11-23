@@ -94,7 +94,7 @@
 
   {% if chunks %}
   <table class="cmp-tbl" style="margin-bottom:14px">
-    <thead><tr><th>קטע</th><th>מסלול</th><th>מקורות שנמצאו</th><th>ציטוטים תוקנו</th><th>מודל</th><th>זמן</th></tr></thead>
+    <thead><tr><th>קטע</th><th>מסלול</th><th>מקורות שנמצאו</th><th>ציטוטים תוקנו</th><th>מודל</th><th>תווים</th><th>זמן</th></tr></thead>
     <tbody>{% for r in chunks %}<tr>
       <td>{{ r.chunk }}</td>
       <td><span class="rt rt-{{ r.route }}">{{ RN.get(r.route, r.route) }}</span>{% if r.forced %} <span style="font-size:11px;color:var(--text2)">(כפוי)</span>{% elif r.by_brief %} <span style="font-size:11px;color:var(--text2)">(לפי התדריך)</span>{% endif %}</td>
@@ -102,6 +102,7 @@
       <td>{{ '✔' if r.fixed else '—' }}</td>
       <td>{% if r.route == 'simple' %}כמו v2{% else %}{{ MN.get(r.model, '') }}{{ ' + מואט' if r.slow }}{{ ' + ניקוי' if r.clean }}{% endif %}
         {% if r.fallback %}<div style="color:#b91c1c;font-size:12px;font-weight:600">נפל ל-Flash</div>{% if r.error %}<div class="err">{{ r.error }}</div>{% endif %}{% endif %}</td>
+      <td>{{ r.chars or '' }}{% if r.resplit %}<div style="font-size:11.5px;color:#92400e" title="המודל עצר באמצע הקטע - תומלל מחדש בחתיכות של דקה">🔁 חולק מחדש</div>{% endif %}</td>
       <td>{{ r.seconds or '' }}</td>
     </tr>{% endfor %}</tbody>
   </table>
@@ -176,7 +177,7 @@
            'זמן: v2 '+(DATA.v2_seconds||'?')+' שנ׳, v3 '+(DATA.v3_seconds||'?')+' שנ׳',''];
     (DATA.report||[]).forEach(function(r){
       if(r.briefing){L.push('## תדריך');L.push(JSON.stringify(r.briefing,null,1));L.push('מקורות שנמצאו בספריא: '+(r.brief_sources||[]).join(' | '));L.push('')}
-      else if(r.chunk){L.push('קטע '+r.chunk+': מסלול='+r.route+(r.by_brief?' (לפי התדריך)':'')+' מודל='+(r.model||'')+(r.slow?' +מואט':'')+(r.fallback?' נפל ל-Flash: '+(r.error||''):'')+' מקורות='+(r.refs||[]).join(' | ')+' תוקן='+(r.fixed?'כן':'לא')+' זמן='+r.seconds)}});
+      else if(r.chunk){L.push('קטע '+r.chunk+': מסלול='+r.route+(r.by_brief?' (לפי התדריך)':'')+' מודל='+(r.model||'')+(r.slow?' +מואט':'')+(r.fallback?' נפל ל-Flash: '+(r.error||''):'')+' מקורות='+(r.refs||[]).join(' | ')+' תוקן='+(r.fixed?'כן':'לא')+' תווים='+(r.chars||'')+(r.resplit?' (חולק מחדש)':'')+' זמן='+r.seconds)}});
     if(DATA.analysis){L.push('','## ניתוח אוטומטי');L.push(JSON.stringify(DATA.analysis,null,1))}
     L.push('','## תמלול v2',cut(DATA.v2,25000),'','## תמלול v3',cut(DATA.v3,25000));
     if(DATA.alef)L.push('','## תמלול אלף בוט',cut(DATA.alef,25000));
