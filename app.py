@@ -635,6 +635,7 @@ def _migrate_db():
         "ALTER TABLE transcribe_compares ADD COLUMN IF NOT EXISTS alef_text TEXT",
         "ALTER TABLE transcribe_compares ADD COLUMN IF NOT EXISTS analysis JSON",
         "ALTER TABLE transcribe_compares ADD COLUMN IF NOT EXISTS analysis_status VARCHAR(20)",
+        "ALTER TABLE transcribe_compares ADD COLUMN IF NOT EXISTS alef_status VARCHAR(20)",
         "ALTER TABLE customers ADD COLUMN IF NOT EXISTS transcribe_terms TEXT",
         "ALTER TABLE institutions ADD COLUMN IF NOT EXISTS transcribe_terms TEXT",
         "ALTER TABLE institution_uploads ADD COLUMN IF NOT EXISTS transcript_html TEXT",

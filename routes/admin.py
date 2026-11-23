@@ -2872,11 +2872,16 @@ def transcribe_compare():
             return redirect(url_for('admin.transcribe_compare'))
         opts = {'model': request.form.get('model') if request.form.get('model') in ('flash', 'think', 'flash36', 'pro') else 'flash',
                 'slow': request.form.get('slow') == '1', 'clean': request.form.get('clean') == '1',
-                'brief': request.form.get('brief') == '1'}
+                'brief': request.form.get('brief') == '1', 'alef': request.form.get('run_alef') == '1',
+                'auto_analyze': request.form.get('auto_analyze') == '1'}
         job = TranscribeCompare(name=name, rec_url=rec_url, language=language, route=route, status='running',
                                 options=opts, recording_id=rec_id, alef_text=_alef_text_from_request())
         db.session.add(job)
         db.session.commit()
+        if opts['alef'] and not job.alef_text:
+            job.alef_status = 'running'
+            db.session.commit()
+            threading.Thread(target=_run_compare_alef, args=(job.id,), daemon=True).start()
         threading.Thread(target=_run_compare, args=(job.id,), daemon=True).start()
         return redirect(url_for('admin.transcribe_compare_view', job_id=job.id))
     jobs = TranscribeCompare.query.order_by(TranscribeCompare.id.desc()).limit(20).all()
@@ -2890,7 +2895,7 @@ def transcribe_compare_view(job_id):
     job = TranscribeCompare.query.get_or_404(job_id)
     if request.args.get('state') == '1':
         return jsonify({'status': job.status, 'v2': bool(job.v2_text), 'v3': bool(job.v3_text),
-                        'analysis': job.analysis_status or ''})
+                        'analysis': job.analysis_status or '', 'alef': job.alef_status or ''})
     jobs = TranscribeCompare.query.order_by(TranscribeCompare.id.desc()).limit(20).all()
     return render_template('admin/transcribe_compare.html', jobs=jobs, job=job)
 
@@ -2933,7 +2938,7 @@ def transcribe_compare_alef(job_id):
 def transcribe_compare_analyze(job_id):
     from models import TranscribeCompare
     job = TranscribeCompare.query.get_or_404(job_id)
-    if job.status == 'running' or job.analysis_status == 'running':
+    if job.status == 'running' or job.analysis_status == 'running' or job.alef_status == 'running':
         flash('עוד רץ - אפשר לנתח כשההשוואה מסתיימת')
     else:
         job.analysis_status = 'running'
@@ -3035,6 +3040,47 @@ def _run_compare(job_id):
             job = TranscribeCompare.query.get(job_id)
             job.status, job.error = 'error', str(e)[:500]
         db.session.commit()
+        _maybe_auto_analyze(job_id)
+
+
+def _run_compare_alef(job_id):
+    """אותה הקלטה באלף בוט (דרך ה-API שלנו, מסלול standard עם אותה הנחיה כמו בתמלול המקצועי)."""
+    from app import app as _app
+    with _app.app_context():
+        from models import TranscribeCompare
+        from services.transcribe import alefbot_transcribe_wait
+        job = TranscribeCompare.query.get(job_id)
+        try:
+            text, _d = alefbot_transcribe_wait(job.rec_url, f'cmp{job_id}', translate_to_hebrew=(job.language == 'yi'),
+                                               max_minutes=60)
+            job = TranscribeCompare.query.get(job_id)
+            job.alef_text = text or job.alef_text
+            job.alef_status = 'done' if text else 'error'
+        except Exception as e:
+            log.exception('compare alef failed')
+            db.session.rollback()
+            job = TranscribeCompare.query.get(job_id)
+            job.alef_status = 'error'
+        db.session.commit()
+        _maybe_auto_analyze(job_id)
+
+
+def _maybe_auto_analyze(job_id):
+    """ניתוח אוטומטי כשהכל הסתיים (v2+v3, ואלף בוט אם רץ). מי שמסיים אחרון מפעיל - פעם אחת בלבד."""
+    from models import TranscribeCompare
+    try:
+        db.session.expire_all()
+        job = TranscribeCompare.query.get(job_id)
+        if not job or not (job.options or {}).get('auto_analyze') or job.status != 'done' or job.alef_status == 'running':
+            return
+        res = db.session.execute(db.text("UPDATE transcribe_compares SET analysis_status = 'running' "
+                                         "WHERE id = :i AND analysis_status IS NULL"), {'i': job_id})
+        db.session.commit()
+        if res.rowcount == 1:
+            _run_compare_analysis(job_id)
+    except Exception as e:
+        log.warning(f'auto analyze {job_id}: {e}')
+        db.session.rollback()
 
 
 @admin_bp.route('/test-transcribe', methods=['GET', 'POST'])

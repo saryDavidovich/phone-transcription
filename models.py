@@ -1129,5 +1129,6 @@ class TranscribeCompare(db.Model):
     alef_text = db.Column(db.Text, nullable=True)             # התמלול של אלף בוט לאותה הקלטה (הודבק)
     analysis = db.Column(db.JSON, nullable=True)              # ניתוח אוטומטי: מה שונה, מי צודק, מה לשפר
     analysis_status = db.Column(db.String(20), nullable=True)  # running / done / error
+    alef_status = db.Column(db.String(20), nullable=True)      # running / done / error - הרצה אוטומטית באלף בוט
     error = db.Column(db.Text)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)

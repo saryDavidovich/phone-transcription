@@ -37,6 +37,8 @@
       <label title="המודל מאזין קודם להקלטה כולה ומכין תדריך, ואז מתמלל כל קטע עם התדריך"><input type="checkbox" name="brief" value="1" checked> האזנה מקדימה ותדריך</label>
       <label title="נשלח גם עותק מואט ל-80% של אותו קטע"><input type="checkbox" name="slow" value="1"> עותק מואט</label>
       <label title="סינון זמזום ורעש ואיזון עוצמה"><input type="checkbox" name="clean" value="1"> ניקוי רעשים</label>
+      <label title="שולח את אותה הקלטה לאלף בוט דרך ה-API (מסלול רגיל, נגבה מהקרדיטים שלך שם)"><input type="checkbox" name="run_alef" value="1" checked> להריץ גם באלף בוט</label>
+      <label title="בסוף - האזנה להקלטה והשוואה: מה נאמר, מי צדק, מה לשפר"><input type="checkbox" name="auto_analyze" value="1" checked> ניתוח אוטומטי בסוף</label>
       <button class="btn btn-primary" type="submit">▶ הרץ השוואה</button>
     </div>
     <details style="margin-top:10px"><summary style="cursor:pointer;font-size:13px;font-weight:600">＋ התמלול של אלף בוט לאותה הקלטה (לא חובה)</summary>
@@ -45,7 +47,7 @@
         <input class="form-input" type="file" name="alef_file" accept=".txt,.srt,text/plain" style="width:auto">
       </div></details>
   </form>
-  <div style="font-size:12px;color:var(--text2);margin-top:8px">שני המנועים רצים ברקע, אחד אחרי השני. לא נשלח לאף אחד ולא מחויב.</div>
+  <div style="font-size:12px;color:var(--text2);margin-top:8px">הכל רץ ברקע: v2 ו-v3 אחד אחרי השני, ואלף בוט במקביל. הלקוחות לא מקבלים כלום ולא מחויבים; באלף בוט ההרצה נגבית מהקרדיטים שלך שם.</div>
 </div>
 
 {% if job %}
@@ -105,14 +107,14 @@
   </table>
   {% endif %}
 
-  {% set cols = 3 if job.alef_text else 2 %}
+  {% set cols = 3 if (job.alef_text or job.alef_status) else 2 %}
   <div class="cmp-grid" style="grid-template-columns:repeat({{ cols }}, minmax(0,1fr))">
     <div><div style="font-weight:700;margin-bottom:6px">v2 (המנוע הנוכחי){% if job.v2_seconds %} · {{ job.v2_seconds }} שנ׳{% endif %}</div>
       <div class="cmp-text" data-col>{{ job.v2_text or ('⏳' if job.status == 'running' else '') }}</div></div>
     <div><div style="font-weight:700;margin-bottom:6px">v3 (המנוע החדש){% if job.v3_seconds %} · {{ job.v3_seconds }} שנ׳{% endif %}</div>
       <div class="cmp-text" data-col>{{ job.v3_text or ('⏳' if job.status == 'running' else '') }}</div></div>
-    {% if job.alef_text %}<div><div style="font-weight:700;margin-bottom:6px">אלף בוט</div>
-      <div class="cmp-text" data-col>{{ job.alef_text }}</div></div>{% endif %}
+    {% if job.alef_text or job.alef_status %}<div><div style="font-weight:700;margin-bottom:6px">אלף בוט</div>
+      <div class="cmp-text" data-col>{% if job.alef_text %}{{ job.alef_text }}{% elif job.alef_status == 'running' %}⏳ נשלח לאלף בוט, ממתין לתמלול...{% else %}⚠ התמלול באלף בוט נכשל - אפשר להדביק אותו ידנית למטה{% endif %}</div></div>{% endif %}
   </div>
   <details style="margin-top:12px"><summary style="cursor:pointer;font-size:13px;font-weight:600">{{ '✎ החלפת' if job.alef_text else '＋ הוספת' }} התמלול של אלף בוט</summary>
     <form method="POST" enctype="multipart/form-data" action="{{ url_for('admin.transcribe_compare_alef', job_id=job.id) }}" style="display:flex;gap:10px;flex-wrap:wrap;margin-top:8px;align-items:flex-start">
@@ -127,7 +129,7 @@
       <div style="font-weight:700;font-size:15px">🔎 ניתוח אוטומטי</div>
       {% if job.analysis_status == 'running' %}<span class="badge" style="background:#fef3c7;color:#92400e">⏳ מאזין להקלטה ומשווה... (הדף מתרענן לבד)</span>
       {% else %}<form method="POST" action="{{ url_for('admin.transcribe_compare_analyze', job_id=job.id) }}">
-        <button class="btn btn-primary btn-sm" type="submit" {{ 'disabled' if job.status == 'running' }}>{{ '↻ ניתוח מחדש' if an and not an.error else '▶ נתח: מה שונה, מי צודק, מה לשפר' }}</button></form>{% endif %}
+        <button class="btn btn-primary btn-sm" type="submit" {{ 'disabled' if job.status == 'running' or job.alef_status == 'running' }}>{{ '↻ ניתוח מחדש' if an and not an.error else '▶ נתח: מה שונה, מי צודק, מה לשפר' }}</button></form>{% endif %}
       <button class="btn btn-sm" type="button" id="copyAll" title="מעתיק את כל הנתונים של ההשוואה - להדבקה בשיחה עם Claude">📋 העתק הכל ל-Claude</button>
     </div>
     {% if an.error %}<div class="err">{{ an.error }}</div>{% endif %}
@@ -183,10 +185,10 @@
     if(navigator.clipboard&&window.isSecureContext){navigator.clipboard.writeText(t).then(done,fb)}else fb();
     function fb(){var ta=document.createElement('textarea');ta.value=t;ta.style.position='fixed';ta.style.opacity='0';document.body.appendChild(ta);ta.select();
       try{document.execCommand('copy');done()}catch(e){alert('ההעתקה נכשלה')}document.body.removeChild(ta)}};
-  {% if job.status == 'running' or job.analysis_status == 'running' %}
+  {% if job.status == 'running' or job.analysis_status == 'running' or job.alef_status == 'running' %}
   var au=document.getElementById('cmpAudio');
   var t=setInterval(function(){if(au&&!au.paused)return;fetch('?state=1',{credentials:'same-origin'}).then(function(r){return r.json()}).then(function(d){
-    if(d.status!=={{ job.status|tojson }}||d.v2!=={{ 'true' if job.v2_text else 'false' }}||d.v3!=={{ 'true' if job.v3_text else 'false' }}||d.analysis!=={{ (job.analysis_status or '')|tojson }}){clearInterval(t);location.reload()}}).catch(function(){})},8000);
+    if(d.status!=={{ job.status|tojson }}||d.v2!=={{ 'true' if job.v2_text else 'false' }}||d.v3!=={{ 'true' if job.v3_text else 'false' }}||d.analysis!=={{ (job.analysis_status or '')|tojson }}||d.alef!=={{ (job.alef_status or '')|tojson }}){clearInterval(t);location.reload()}}).catch(function(){})},8000);
   {% endif %}
 })();
 </script>
