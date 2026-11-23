@@ -1988,9 +1988,11 @@ def transcribe_engine_save():
     if rm in ('auto', 'torah', 'simple'):
         set_setting('transcribe_route_mode', rm)
     if request.form.get('_v3_opts') == '1':
-        set_setting('transcribe_v3_model', 'pro' if request.form.get('v3_model') == 'pro' else 'flash')
+        _m = request.form.get('v3_model')
+        set_setting('transcribe_v3_model', _m if _m in ('flash', 'think', 'flash36', 'pro') else 'flash')
         set_setting('transcribe_v3_slow', '1' if request.form.get('v3_slow') == '1' else '0')
         set_setting('transcribe_v3_clean', '1' if request.form.get('v3_clean') == '1' else '0')
+        set_setting('transcribe_v3_brief', '1' if request.form.get('v3_brief') == '1' else '0')
     flash('✔ מנוע התמלול נשמר - חל מהתמלול הבא')
     return redirect(url_for('admin.settings') + '#engine')
 
@@ -2198,6 +2200,7 @@ def settings():
               'v3_model': get_setting('transcribe_v3_model', 'flash') or 'flash',
               'v3_slow': get_setting('transcribe_v3_slow', '0') == '1',
               'v3_clean': get_setting('transcribe_v3_clean', '0') == '1',
+              'v3_brief': get_setting('transcribe_v3_brief', '1') != '0',
               'signup': get_setting('customer_signup_on', '0') == '1',
               'phone_link': get_setting('phone_link_ivr_on', '0') == '1',
               'auto_topup': get_setting('auto_topup_on', '0') == '1',
@@ -2840,7 +2843,7 @@ def transcribe_compare():
     if request.method == 'POST':
         language = request.form.get('language') if request.form.get('language') in ('he', 'yi', 'en') else 'he'
         route = request.form.get('route') if request.form.get('route') in ('torah', 'simple', 'mixed') else None
-        rec_url, name = None, ''
+        rec_url, name, rec_id = None, '', None
         rid = (request.form.get('recording_id') or '').strip()
         f = request.files.get('audio_file')
         if f and f.filename:
@@ -2855,14 +2858,15 @@ def transcribe_compare():
         elif rid.isdigit():
             rec = Recording.query.get(int(rid))
             if rec and rec.rec_url:
-                rec_url, name = rec.rec_url, f'הקלטה #{rec.id}' + (f' - {rec.source_filename}' if rec.source_filename else '')
+                rec_url, name, rec_id = rec.rec_url, f'הקלטה #{rec.id}' + (f' - {rec.source_filename}' if rec.source_filename else ''), rec.id
         if not rec_url:
             flash('יש להעלות קובץ או לכתוב מספר הקלטה קיימת')
             return redirect(url_for('admin.transcribe_compare'))
-        opts = {'model': 'pro' if request.form.get('model') == 'pro' else 'flash',
-                'slow': request.form.get('slow') == '1', 'clean': request.form.get('clean') == '1'}
+        opts = {'model': request.form.get('model') if request.form.get('model') in ('flash', 'think', 'flash36', 'pro') else 'flash',
+                'slow': request.form.get('slow') == '1', 'clean': request.form.get('clean') == '1',
+                'brief': request.form.get('brief') == '1'}
         job = TranscribeCompare(name=name, rec_url=rec_url, language=language, route=route, status='running',
-                                options=opts)
+                                options=opts, recording_id=rec_id)
         db.session.add(job)
         db.session.commit()
         threading.Thread(target=_run_compare, args=(job.id,), daemon=True).start()
@@ -2882,6 +2886,21 @@ def transcribe_compare_view(job_id):
     return render_template('admin/transcribe_compare.html', jobs=jobs, job=job)
 
 
+@admin_bp.route('/transcribe-compare/<int:job_id>/audio')
+@login_required
+def transcribe_compare_audio(job_id):
+    """הנגן בדף ההשוואה: הקלטה קיימת - כמו בכרטיס ההקלטה; קובץ שהועלה - העותק בימות (נטפרי חוסמת שמע מהאתר)."""
+    from models import TranscribeCompare
+    from services import portal_media as PM
+    job = TranscribeCompare.query.get_or_404(job_id)
+    if job.recording_id:
+        return redirect(url_for('admin.recording_listen', id=job.recording_id))
+    url = PM.play_url_for_path(job.play_path) if job.play_path else None
+    if not url:
+        return 'השמע עוד לא מוכן', 404
+    return redirect(url, code=302)
+
+
 def _run_compare(job_id):
     import time as _t
     from app import app as _app
@@ -2890,6 +2909,16 @@ def _run_compare(job_id):
         from services.transcribe import _gemini_from_url
         from services import transcribe_v3 as TV3
         job = TranscribeCompare.query.get(job_id)
+        if not job.recording_id and '/static/fax_tmp/' in (job.rec_url or ''):
+            try:                                   # עותק לנגן בימות
+                from services import portal_media as PM
+                local = os.path.join(os.path.dirname(__file__), '..', 'static', 'fax_tmp', job.rec_url.rsplit('/', 1)[-1])
+                job.play_path = PM.push_to_yemot(local, f'cmp{job.id}_{os.urandom(4).hex()}')
+                db.session.commit()
+            except Exception as e:
+                log.warning(f'compare audio upload: {e}')
+                db.session.rollback()
+                job = TranscribeCompare.query.get(job_id)
         try:
             for eng in ('v2', 'v3'):
                 report = []

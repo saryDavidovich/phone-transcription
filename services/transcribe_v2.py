@@ -216,7 +216,7 @@ SLOW_COPY_NOTE = (
 
 def transcribe_chunk(client, gtypes, chunk_bytes, mime_type, language, output_language, prev_tail,
                      chunk_num, n_chunks, seconds, model='gemini-3.5-flash', extra_rules='', context='',
-                     extra_audio=None):
+                     extra_audio=None, thinking=None):
     """תמלול של חלק אחד: עד 3 ניסיונות כשהתוצאה לא תקינה (ועוד ניסיונות על שגיאות רשת - אצל הקורא).
     מחזיר טקסט נקי (או None אם לא התקבל כלום)."""
     sysi = system_instruction(language, output_language, extra_rules)
@@ -239,7 +239,8 @@ def transcribe_chunk(client, gtypes, chunk_bytes, mime_type, language, output_la
                 response_schema={'type': 'OBJECT', 'properties': {'transcript': {'type': 'STRING'}},
                                  'required': ['transcript']},
                 # מודלי Pro לא עובדים בלי "חשיבה" - שם חשיבה נמוכה; Flash - בלי חשיבה בכלל
-                thinking_config=(gtypes.ThinkingConfig(thinking_level='low') if '-pro' in model
+                thinking_config=(gtypes.ThinkingConfig(thinking_level=thinking) if thinking
+                                 else gtypes.ThinkingConfig(thinking_level='low') if '-pro' in model
                                  else gtypes.ThinkingConfig(thinking_budget=0)),
             ),
         )

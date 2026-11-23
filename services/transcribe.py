@@ -1185,6 +1185,11 @@ def _gemini_from_url(url, language='he', output_language='he'):
         if engine == 'v3':
             from services import transcribe_v3 as TV3
             v3_state = TV3.State()
+            try:
+                # שלב 0: האזנה להקלטה כולה ותדריך (נושא, הברה, שמות, מקורות) - לפני הקטעים
+                TV3.prepare(client, gtypes, prepared[0] if prepared else src[0], language, v3_state)
+            except Exception as _pe:
+                log.warning(f"v3 prepare failed: {_pe}")
 
         transcript_parts = []
         prev_tail = ''

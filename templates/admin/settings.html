@@ -169,11 +169,12 @@
         <option value="simple" {{ 'selected' if portal.route_mode == 'simple' }}>תמיד פשוט</option>
       </select></div>
     <input type="hidden" name="_v3_opts" value="1">
-    <div><label class="form-label">מודל לקטעים תורניים {{ tip('Pro: מודל גדול יותר - יקר ואיטי יותר. רק בקטעים שזוהו כתורניים, ורק ב-v3. נכשל - עובר אוטומטית ל-Flash') }}</label>
+    <div><label class="form-label">מודל לקטעים תורניים {{ tip('רק בקטעים תורניים ב-v3. חושב = אותו Flash שחושב לפני שהוא כותב (איטי ויקר יותר). Pro 3.1 = מודל גדול. נכשל - עובר אוטומטית ל-Flash') }}</label>
       <select class="form-input" name="v3_model" style="width:auto">
-        <option value="flash" {{ 'selected' if portal.v3_model != 'pro' }}>Flash (רגיל)</option>
-        <option value="pro" {{ 'selected' if portal.v3_model == 'pro' }}>Pro (חזק יותר)</option>
+<option value="flash" {{ 'selected' if portal.v3_model not in ('think','flash36','pro') }}>Flash (רגיל)</option><option value="think" {{ 'selected' if portal.v3_model == 'think' }}>Flash חושב</option><option value="flash36" {{ 'selected' if portal.v3_model == 'flash36' }}>Flash 3.6 (חדש, ניסיוני)</option><option value="pro" {{ 'selected' if portal.v3_model == 'pro' }}>Pro 3.1</option>
       </select></div>
+    <label class="st-chk" style="padding-bottom:8px"><input type="checkbox" name="v3_brief" value="1" {{ 'checked' if portal.v3_brief }}> האזנה מקדימה
+      {{ tip('לפני התמלול המודל מאזין להקלטה כולה ומכין תדריך: סוג התוכן, הברה, נושא, מהלך, שמות, מונחים ומקורות. כל קטע מתומלל עם התדריך. מוסיף בערך פי 1 לעלות השמע') }}</label>
     <label class="st-chk" style="padding-bottom:8px"><input type="checkbox" name="v3_slow" value="1" {{ 'checked' if portal.v3_slow }}> עותק מואט
       {{ tip('בקטעים תורניים נשלח גם עותק מואט ל-80% של אותו קטע, לעזרה במילים לא ברורות. בערך פי 2.2 בעלות השמע') }}</label>
     <label class="st-chk" style="padding-bottom:8px"><input type="checkbox" name="v3_clean" value="1" {{ 'checked' if portal.v3_clean }}> ניקוי רעשים

@@ -41,21 +41,25 @@ _report = contextvars.ContextVar('transcribe_v3_report', default=None)
 engine_override = contextvars.ContextVar('transcribe_engine_override', default=None)
 options_override = contextvars.ContextVar('transcribe_v3_options', default=None)   # כלי ההשוואה
 
-MODELS = {'flash': 'gemini-3.5-flash', 'pro': 'gemini-3.1-pro-preview'}
+# (מודל, רמת חשיבה). Flash בלי חשיבה = מה שרץ היום; "חושב" = אותו מודל עם חשיבה בינונית
+MODELS = {'flash': ('gemini-3.5-flash', None), 'think': ('gemini-3.5-flash', 'medium'),
+          'flash36': ('gemini-3.6-flash', None), 'pro': ('gemini-3.1-pro-preview', 'low')}
+MODEL_NAMES = {'flash': 'Flash', 'think': 'Flash חושב', 'flash36': 'Flash 3.6', 'pro': 'Pro 3.1'}
 SLOW_TEMPO = 0.8
 
 
 def options():
     """אפשרויות v3 לקטעים התורניים: model (flash/pro), slow (עותק איטי נוסף), clean (ניקוי שמע).
     ברירת מחדל - מההגדרות; כלי ההשוואה דורס עם options_override."""
-    o = {'model': 'flash', 'slow': False, 'clean': False}
+    o = {'model': 'flash', 'slow': False, 'clean': False, 'brief': True}
     try:
         from models import Settings
         rows = {r.key: r.value for r in Settings.query.filter(Settings.key.in_(
-            ['transcribe_v3_model', 'transcribe_v3_slow', 'transcribe_v3_clean'])).all()}
+            ['transcribe_v3_model', 'transcribe_v3_slow', 'transcribe_v3_clean', 'transcribe_v3_brief'])).all()}
         o['model'] = rows.get('transcribe_v3_model') if rows.get('transcribe_v3_model') in MODELS else 'flash'
         o['slow'] = rows.get('transcribe_v3_slow') == '1'
         o['clean'] = rows.get('transcribe_v3_clean') == '1'
+        o['brief'] = rows.get('transcribe_v3_brief', '1') != '0'
     except Exception:
         pass
     ov = options_override.get()
@@ -169,6 +173,149 @@ def wav_head(chunk_bytes, seconds=60):
         return buf.getvalue()
     except Exception:
         return chunk_bytes
+
+
+# ------------------------------------------------------------------ 0. תדריך: האזנה להקלטה כולה
+BRIEF_MAX_SECONDS = 3 * 3600
+BRIEF_INLINE_MAX = 18 * 1024 * 1024
+
+BRIEF_PROMPT = """Listen to the WHOLE recording. Before it is transcribed word by word (in another step), prepare a
+briefing for the transcriber - like a human transcriber who first listens to the whole lesson to understand it, so
+that later he knows what words to expect. Do NOT transcribe. Fill these fields, in Hebrew:
+- content_type: "torah" (Torah lesson / shiur / derasha / halacha / Gemara study), "simple" (everyday speech, phone
+  call, business, message - no Torah learning) or "mixed" (everyday speech with some Torah quotes).
+- accent: the speaker's Hebrew pronunciation (הברה): אשכנזית / חסידית / ספרדית / ישראלית / תימנית / מעורבת,
+  plus a short note about typical sounds (e.g. "ת רפה נשמעת ס, חולם נשמע אוי").
+- speakers: how many speakers and who they are (e.g. "מגיד שיעור ושואלים מהקהל").
+- topic: one line - what the recording is about (e.g. "בבא מציעא ב. - שנים אוחזין בטלית").
+- summary: 5-12 sentences describing the course of the recording in order: what is discussed, which questions,
+  answers and conclusions - so the transcriber can follow the argument.
+- sources: the Jewish texts that are read or quoted (verse, Mishna, Gemara page, Rashi, Tosafot, Rambam, Shulchan
+  Aruch...) as Sefaria references in English, e.g. "Bava Metzia 2a", "Mishneh Torah, Torah Study 1:8",
+  "Shulchan Arukh, Orach Chayim 319:1". Only texts that are actually read or quoted - at most 8.
+- names: people, rabbis, Tannaim/Amoraim, Rishonim/Acharonim, books, places and institutions mentioned - each in its
+  CORRECT standard Hebrew spelling.
+- terms: unusual words - Aramaic, Torah terms, acronyms (ראשי תיבות), foreign or professional words - in correct
+  Hebrew spelling.
+Return JSON only."""
+
+BRIEF_SCHEMA = {'type': 'OBJECT', 'properties': {
+    'content_type': {'type': 'STRING', 'enum': ['torah', 'simple', 'mixed']},
+    'accent': {'type': 'STRING'}, 'speakers': {'type': 'STRING'}, 'topic': {'type': 'STRING'},
+    'summary': {'type': 'STRING'},
+    'sources': {'type': 'ARRAY', 'items': {'type': 'STRING'}},
+    'names': {'type': 'ARRAY', 'items': {'type': 'STRING'}},
+    'terms': {'type': 'ARRAY', 'items': {'type': 'STRING'}}},
+    'required': ['content_type', 'accent', 'speakers', 'topic', 'summary', 'sources', 'names', 'terms']}
+
+
+def _compact_audio(path):
+    """כל ההקלטה (עד 3 שעות) כ-OGG/Opus מונו 24kbps - שעה ~ 11MB. נכשל - None."""
+    import os
+    import tempfile
+    ff = shutil.which('ffmpeg')
+    if not ff or not path:
+        return None
+    fd, out = tempfile.mkstemp(suffix='.ogg')
+    os.close(fd)
+    try:
+        r = subprocess.run([ff, '-nostdin', '-hide_banner', '-loglevel', 'error', '-y', '-i', path, '-t',
+                            str(BRIEF_MAX_SECONDS), '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'libopus',
+                            '-b:a', '24k', out], capture_output=True, timeout=900)
+        if r.returncode == 0 and os.path.getsize(out) > 1000:
+            return out
+        log.info(f'v3 briefing compact failed: {r.stderr[-200:]!r}')
+    except Exception as e:
+        log.info(f'v3 briefing compact failed: {e}')
+    try:
+        os.remove(out)
+    except OSError:
+        pass
+    return None
+
+
+def make_briefing(client, gtypes, audio_path, language='he'):
+    """מאזין להקלטה כולה ומחזיר תדריך (dict) או None. קובץ גדול - דרך Files API."""
+    import os
+    small = _compact_audio(audio_path)
+    if not small:
+        return None
+    uploaded = None
+    try:
+        if os.path.getsize(small) <= BRIEF_INLINE_MAX:
+            with open(small, 'rb') as f:
+                part = gtypes.Part.from_bytes(data=f.read(), mime_type='audio/ogg')
+        else:
+            uploaded = client.files.upload(file=small, config={'mime_type': 'audio/ogg'})
+            for _ in range(60):                       # עד דקה לעיבוד אצל Google
+                state = str(getattr(getattr(uploaded, 'state', None), 'name', getattr(uploaded, 'state', '')))
+                if 'PROCESSING' not in state.upper():
+                    break
+                time.sleep(1)
+                uploaded = client.files.get(name=uploaded.name)
+            part = uploaded
+        lang_note = {'yi': ' The speech is in Yiddish; still write the briefing in Hebrew.',
+                     'en': ' The speech is in English; write names/terms as spoken.'}.get(language, '')
+        resp = client.models.generate_content(
+            model=MODEL, contents=[BRIEF_PROMPT + lang_note, part],
+            config=gtypes.GenerateContentConfig(
+                response_mime_type='application/json', response_schema=BRIEF_SCHEMA,
+                thinking_config=gtypes.ThinkingConfig(thinking_budget=0), temperature=0.2))
+        d = json.loads(resp.text or '{}')
+        if not isinstance(d, dict) or not d.get('summary'):
+            return None
+        for k in ('sources', 'names', 'terms'):
+            d[k] = [str(x).strip()[:120] for x in (d.get(k) or []) if str(x).strip()][:60]
+        return d
+    except Exception as e:
+        log.warning(f'v3 briefing failed: {e}')
+        return None
+    finally:
+        try:
+            os.remove(small)
+        except OSError:
+            pass
+        if uploaded is not None:
+            try:
+                client.files.delete(name=uploaded.name)
+            except Exception:
+                pass
+
+
+def briefing_text(b):
+    """התדריך כטקסט לפרומפט של כל קטע."""
+    if not b:
+        return ''
+    lines = [f"Topic: {b.get('topic', '')}", f"Speakers: {b.get('speakers', '')}",
+             f"Pronunciation (הברה): {b.get('accent', '')}", f"Course of the recording: {b.get('summary', '')}"]
+    if b.get('names'):
+        lines.append('Names mentioned (correct spelling): ' + ', '.join(b['names']))
+    if b.get('terms'):
+        lines.append('Terms (correct spelling): ' + ', '.join(b['terms']))
+    return ('BACKGROUND - from listening to the whole recording beforehand. Use it ONLY to understand unclear words '
+            'and to spell names/terms correctly. Transcribe ONLY what is actually said in THIS segment; never add '
+            'content from the background:\n' + '\n'.join(lines))
+
+
+def prepare(client, gtypes, audio_path, language, state):
+    """שלב 0 של v3 (לפני הקטעים): תדריך, ושליפת המקורות שבו מספריא מראש."""
+    if not options().get('brief') or not audio_path:
+        return
+    t0 = time.time()
+    b = make_briefing(client, gtypes, audio_path, language)
+    if not b:
+        return
+    state.briefing = b
+    if b.get('content_type') in ('torah', 'simple'):
+        state.brief_route = b['content_type']
+    found = [x for x in (fetch_source(r) for r in b.get('sources', [])[:8]) if x]
+    if found:
+        state.add(found)
+    info = {'briefing': b, 'brief_sources': [n for n, _ in found], 'seconds': round(time.time() - t0, 1)}
+    log.info(f"v3 briefing: type={b.get('content_type')} topic={b.get('topic')!r} sources={info['brief_sources']}")
+    rep = _report.get()
+    if isinstance(rep, list):
+        rep.append(info)
 
 
 # ------------------------------------------------------------------ 2. זיהוי מסלול
@@ -382,13 +529,15 @@ class State:
     def __init__(self):
         self.sources = []          # [(שם, טקסט)]
         self.names = set()
+        self.briefing = None       # תדריך: מה ששמענו בהאזנה להקלטה כולה (prepare)
+        self.brief_route = None    # torah / simple כשהתדריך בטוח לגבי כל ההקלטה
 
     def add(self, items):
         for name, txt in items:
             if name not in self.names:
                 self.names.add(name)
                 self.sources.append((name, txt))
-        self.sources = self.sources[-6:]
+        self.sources = self.sources[-10:]
 
 
 def transcribe_chunk(client, gtypes, chunk_bytes, mime_type, language, output_language, prev_tail,
@@ -397,9 +546,12 @@ def transcribe_chunk(client, gtypes, chunk_bytes, mime_type, language, output_la
     forced = _route_hint.get() or ({'torah': 'torah', 'simple': 'simple'}.get(global_mode()))
     if forced:
         route, topic = forced, ''
+    elif state.brief_route:
+        route, topic = state.brief_route, (state.briefing or {}).get('topic', '')   # לפי התדריך
     else:
         route, topic = classify(client, gtypes, chunk_bytes, mime_type)
-    info = {'chunk': chunk_num, 'route': route, 'topic': topic, 'forced': bool(forced), 'refs': [], 'fixed': False}
+    info = {'chunk': chunk_num, 'route': route, 'topic': topic, 'forced': bool(forced), 'refs': [], 'fixed': False,
+            'by_brief': bool(not forced and state.brief_route)}
 
     if route == 'simple':
         # פשוט = בדיוק v2: אותו שמע, אותו מודל, בלי תוספות
@@ -412,26 +564,26 @@ def transcribe_chunk(client, gtypes, chunk_bytes, mime_type, language, output_la
         if opt['clean'] and mime_type in ('audio/wav', 'audio/x-wav'):
             audio = clean_audio(chunk_bytes)
         slow = slow_copy(audio) if (full and opt['slow']) else None
-        model = MODELS[opt['model']] if full else MODEL
+        model, thinking = MODELS[opt['model']] if full else (MODEL, None)
         info.update({'model': opt['model'] if full else 'flash', 'slow': bool(slow), 'clean': audio is not chunk_bytes})
         rules = '\nTORAH CONTENT\n' + (LX.PRONUNCIATION_RULES + '\n' if full else '') + (
             '- Correct spelling for names, books and terms that may be heard (use only if actually said): '
             + LX.glossary(full=full) + '\n'
             '- Write in standard Hebrew FULL spelling (כתיב מלא), also inside quotes.\n')
-        ctx = ''
+        ctx = briefing_text(state.briefing)
         if full and state.sources:
-            ctx = ('The lesson is studying these sources (for spelling of quotes only - transcribe only what is '
-                   'actually said):\n' + sources_block(state.sources))
+            ctx += ('\n\nThe lesson is studying these sources (for spelling of quotes only - transcribe only what '
+                    'is actually said):\n' + sources_block(state.sources))
         try:
             text = TV2.transcribe_chunk(client, gtypes, audio, amime, language, output_language, prev_tail,
                                         chunk_num, n_chunks, seconds, model=model, extra_rules=rules, context=ctx,
-                                        extra_audio=slow)
+                                        extra_audio=slow, thinking=thinking)
         except Exception as e:
-            if model == MODEL and not slow:
+            if model == MODEL and not slow and not thinking:
                 raise
             # Pro / עותק איטי נכשלו - הקטע לא הולך לאיבוד: אותו דבר ב-Flash בלי עותק
             log.warning(f'v3 chunk {chunk_num}: {opt} failed ({e}) - falling back to flash')
-            info.update({'model': 'flash', 'slow': False, 'fallback': True})
+            info.update({'model': 'flash', 'slow': False, 'fallback': True, 'error': f'{type(e).__name__}: {e}'[:300]})
             text = TV2.transcribe_chunk(client, gtypes, audio, amime, language, output_language, prev_tail,
                                         chunk_num, n_chunks, seconds, extra_rules=rules, context=ctx)
         if text and output_language in ('he', 'original') and language in ('he', 'yi'):

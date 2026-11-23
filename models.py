@@ -1121,6 +1121,8 @@ class TranscribeCompare(db.Model):
     v2_seconds = db.Column(db.Float)
     v3_seconds = db.Column(db.Float)
     report = db.Column(db.JSON)                               # לכל קטע: מסלול, נושא, מקורות, תוקן
-    options = db.Column(db.JSON)                              # אפשרויות v3: model / slow / clean
+    options = db.Column(db.JSON)                              # אפשרויות v3: model / slow / clean / brief
+    recording_id = db.Column(db.Integer, nullable=True)       # השוואה על הקלטה קיימת - הנגן מההקלטה
+    play_path = db.Column(db.Text, nullable=True)             # קובץ שהועלה - עותק בימות לנגן (נטפרי)
     error = db.Column(db.Text)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)

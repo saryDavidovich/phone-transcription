@@ -2,55 +2,99 @@
 {% block title %}השוואת מנועים{% endblock %}
 {% block page_title %}השוואת מנועי תמלול (v2 מול v3){% endblock %}
 {% block content %}
+{% set RN = {'torah':'תורני','simple':'פשוט','mixed':'מעורב'} %}
+{% set MN = {'flash':'Flash','think':'Flash חושב','flash36':'Flash 3.6','pro':'Pro 3.1'} %}
 <style>
-.cmp-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
-@media(max-width:900px){.cmp-grid{grid-template-columns:1fr}}
-.cmp-text{white-space:pre-wrap;line-height:1.8;font-size:14px;max-height:70vh;overflow:auto;background:var(--surface2,#f6f7fb);border:1px solid var(--border);border-radius:10px;padding:14px}
+.cmp-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px}
+.cmp-text{white-space:pre-wrap;line-height:1.85;font-size:14.5px;height:65vh;overflow:auto;background:var(--surface2,#f6f7fb);border:1px solid var(--border);border-radius:10px;padding:14px}
 .rt{display:inline-block;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:700}
 .rt-torah{background:#ede9fe;color:#5b21b6}.rt-simple{background:#e0f2fe;color:#075985}.rt-mixed{background:#fef3c7;color:#92400e}
-.cmp-tbl{width:100%;border-collapse:collapse;font-size:13px}.cmp-tbl td,.cmp-tbl th{padding:7px 8px;border-bottom:1px solid var(--border);text-align:right}
+.cmp-tbl{width:100%;border-collapse:collapse;font-size:13px}.cmp-tbl td,.cmp-tbl th{padding:7px 8px;border-bottom:1px solid var(--border);text-align:right;vertical-align:top}
+.cmp-opts{display:flex;gap:14px;flex-wrap:wrap;align-items:center}
+.cmp-opts label{display:flex;gap:6px;align-items:center;cursor:pointer;font-size:13px;font-weight:600}
+.cmp-player{position:sticky;top:0;z-index:5;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:10px 14px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
+.cmp-player audio{flex:1;min-width:260px;height:38px}
+.brief{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px 18px;font-size:13.5px;line-height:1.7}
+.brief h4{margin:0 0 2px;font-size:12px;color:var(--text2);font-weight:700}
+.brief .wide{grid-column:1/-1}
+.chip{display:inline-block;background:var(--surface2,#f1f2f7);border:1px solid var(--border);border-radius:14px;padding:1px 9px;margin:2px;font-size:12.5px}
+.err{color:#b91c1c;font-size:11.5px;direction:ltr;text-align:left;word-break:break-word}
 </style>
 
 <div class="card">
-  <form method="POST" enctype="multipart/form-data" style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">
-    <div><label class="form-label">קובץ שמע</label><input class="form-input" type="file" name="audio_file" accept="audio/*,video/*"></div>
-    <div style="align-self:center;color:var(--text2)">או</div>
-    <div><label class="form-label">מספר הקלטה קיימת</label><input class="form-input" name="recording_id" inputmode="numeric" style="width:140px" placeholder="לדוגמה 1234"></div>
-    <div><label class="form-label">שפה</label><select class="form-input" name="language"><option value="he">עברית</option><option value="yi">אידיש</option><option value="en">אנגלית</option></select></div>
-    <div><label class="form-label">מסלול ב-v3</label><select class="form-input" name="route">
-      <option value="">אוטומטי (זיהוי לכל קטע)</option><option value="torah">תורני</option><option value="mixed">מעורב</option><option value="simple">פשוט</option></select></div>
-    <div><label class="form-label">מודל ב-v3 (קטעים תורניים)</label><select class="form-input" name="model">
-      <option value="flash">Flash (רגיל)</option><option value="pro">Pro (חזק יותר)</option></select></div>
-    <label style="display:flex;gap:6px;align-items:center;padding-bottom:8px;cursor:pointer" title="נשלח גם עותק מואט ל-80% של אותו קטע"><input type="checkbox" name="slow" value="1"> עותק מואט</label>
-    <label style="display:flex;gap:6px;align-items:center;padding-bottom:8px;cursor:pointer" title="סינון זמזום ורעש ואיזון עוצמה"><input type="checkbox" name="clean" value="1"> ניקוי רעשים</label>
-    <button class="btn btn-primary" type="submit">▶ הרץ השוואה</button>
+  <form method="POST" enctype="multipart/form-data">
+    <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">
+      <div><label class="form-label">קובץ שמע</label><input class="form-input" type="file" name="audio_file" accept="audio/*,video/*"></div>
+      <div style="align-self:center;color:var(--text2)">או</div>
+      <div><label class="form-label">מספר הקלטה קיימת</label><input class="form-input" name="recording_id" inputmode="numeric" style="width:140px" placeholder="לדוגמה 1234"></div>
+      <div><label class="form-label">שפה</label><select class="form-input" name="language"><option value="he">עברית</option><option value="yi">אידיש</option><option value="en">אנגלית</option></select></div>
+      <div><label class="form-label">מסלול ב-v3</label><select class="form-input" name="route">
+        <option value="">אוטומטי</option><option value="torah">תורני</option><option value="mixed">מעורב</option><option value="simple">פשוט</option></select></div>
+      <div><label class="form-label">מודל (קטעים תורניים)</label><select class="form-input" name="model">
+        <option value="flash">Flash (רגיל)</option><option value="think">Flash חושב</option><option value="flash36">Flash 3.6 (חדש, ניסיוני)</option><option value="pro">Pro 3.1</option></select></div>
+    </div>
+    <div class="cmp-opts" style="margin-top:12px">
+      <label title="המודל מאזין קודם להקלטה כולה ומכין תדריך, ואז מתמלל כל קטע עם התדריך"><input type="checkbox" name="brief" value="1" checked> האזנה מקדימה ותדריך</label>
+      <label title="נשלח גם עותק מואט ל-80% של אותו קטע"><input type="checkbox" name="slow" value="1"> עותק מואט</label>
+      <label title="סינון זמזום ורעש ואיזון עוצמה"><input type="checkbox" name="clean" value="1"> ניקוי רעשים</label>
+      <button class="btn btn-primary" type="submit">▶ הרץ השוואה</button>
+    </div>
   </form>
-  <div style="font-size:12px;color:var(--text2);margin-top:8px">שני המנועים רצים ברקע, אחד אחרי השני. הקלטה של 20 דקות לוקחת בערך 2–5 דקות. התמלול לא נשלח לאף אחד ולא מחויב.</div>
+  <div style="font-size:12px;color:var(--text2);margin-top:8px">שני המנועים רצים ברקע, אחד אחרי השני. לא נשלח לאף אחד ולא מחויב.</div>
 </div>
 
 {% if job %}
-<div class="card" style="margin-top:16px" id="job" data-status="{{ job.status }}">
+{% set o = job.options or {} %}
+{% set rep = job.report or [] %}
+{% set brief_items = rep|selectattr('briefing', 'defined')|list %}
+{% set chunks = rep|selectattr('chunk', 'defined')|list %}
+<div class="card" style="margin-top:16px" id="job">
   <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:12px">
-    <div style="font-weight:700">#{{ job.id }} · {{ job.name }}{% if job.route %} · מסלול כפוי: {{ {'torah':'תורני','simple':'פשוט','mixed':'מעורב'}[job.route] }}{% endif %}
-      {% set o = job.options or {} %}<span style="font-weight:400;color:var(--text2);font-size:13px"> · v3: {{ 'Pro' if o.model == 'pro' else 'Flash' }}{{ ' + עותק מואט' if o.slow }}{{ ' + ניקוי רעשים' if o.clean }}</span></div>
+    <div style="font-weight:700">#{{ job.id }} · {{ job.name }}{% if job.route %} · מסלול כפוי: {{ RN[job.route] }}{% endif %}
+      <span style="font-weight:400;color:var(--text2);font-size:13px"> · v3: {{ MN.get(o.model, 'Flash') }}{{ ' + האזנה מקדימה' if o.brief }}{{ ' + עותק מואט' if o.slow }}{{ ' + ניקוי רעשים' if o.clean }}</span></div>
     <div>
       {% if job.status == 'running' %}<span class="badge" style="background:#fef3c7;color:#92400e">⏳ רץ... (הדף מתרענן לבד)</span>
       {% elif job.status == 'error' %}<span class="badge" style="background:#fee2e2;color:#991b1b">שגיאה</span>
       {% else %}<span class="badge" style="background:#dcfce7;color:#166534">הסתיים</span>{% endif %}
     </div>
   </div>
-  {% if job.error %}<div style="color:#b91c1c;font-size:13px;margin-bottom:10px" dir="ltr">{{ job.error }}</div>{% endif %}
+  {% if job.error %}<div class="err" style="margin-bottom:10px">{{ job.error }}</div>{% endif %}
 
-  {% if job.report %}
+  <div class="cmp-player">
+    <span style="font-weight:700">🎧 ההקלטה</span>
+    <audio id="cmpAudio" controls preload="none" src="{{ url_for('admin.transcribe_compare_audio', job_id=job.id) }}"></audio>
+    <label style="display:flex;gap:6px;align-items:center;font-size:13px;cursor:pointer"><input type="checkbox" id="syncScroll" checked> גלילה משותפת</label>
+  </div>
+
+  {% for bi in brief_items %}{% set b = bi.briefing %}
+  <div style="border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:14px">
+    <div style="font-weight:700;margin-bottom:10px">📋 תדריך - מה המודל הבין מהאזנה להקלטה כולה <span style="font-weight:400;color:var(--text2);font-size:12px">({{ bi.seconds }} שנ׳)</span></div>
+    <div class="brief">
+      <div><h4>סוג התוכן</h4><span class="rt rt-{{ b.content_type }}">{{ RN.get(b.content_type, b.content_type) }}</span></div>
+      <div><h4>הברה</h4>{{ b.accent }}</div>
+      <div><h4>דוברים</h4>{{ b.speakers }}</div>
+      <div class="wide"><h4>נושא</h4>{{ b.topic }}</div>
+      <div class="wide"><h4>מהלך</h4>{{ b.summary }}</div>
+      <div class="wide"><h4>מקורות</h4>{% for n in bi.brief_sources %}<span class="chip">✔ {{ n }}</span>{% endfor %}
+        {% if b.sources|length > bi.brief_sources|length %}<span style="font-size:12px;color:var(--text2)"> (המודל הציע {{ b.sources|length }}, נמצאו בספריא {{ bi.brief_sources|length }})</span>{% endif %}
+        {% if not b.sources %}<span style="color:var(--text2)">—</span>{% endif %}</div>
+      <div class="wide"><h4>שמות</h4>{% for n in b.names %}<span class="chip">{{ n }}</span>{% else %}<span style="color:var(--text2)">—</span>{% endfor %}</div>
+      <div class="wide"><h4>מונחים</h4>{% for n in b.terms %}<span class="chip">{{ n }}</span>{% else %}<span style="color:var(--text2)">—</span>{% endfor %}</div>
+    </div>
+  </div>
+  {% else %}{% if o.brief and job.status != 'running' and job.v3_text %}<div style="font-size:12.5px;color:#92400e;margin-bottom:10px">⚠ התדריך לא נוצר (ההאזנה המקדימה נכשלה) - v3 רץ בלעדיו.</div>{% endif %}
+  {% endfor %}
+
+  {% if chunks %}
   <table class="cmp-tbl" style="margin-bottom:14px">
-    <thead><tr><th>קטע</th><th>מסלול</th><th>נושא</th><th>מקורות שנמצאו</th><th>ציטוטים תוקנו</th><th>מודל</th><th>זמן</th></tr></thead>
-    <tbody>{% for r in job.report %}<tr>
+    <thead><tr><th>קטע</th><th>מסלול</th><th>מקורות שנמצאו</th><th>ציטוטים תוקנו</th><th>מודל</th><th>זמן</th></tr></thead>
+    <tbody>{% for r in chunks %}<tr>
       <td>{{ r.chunk }}</td>
-      <td><span class="rt rt-{{ r.route }}">{{ {'torah':'תורני','simple':'פשוט','mixed':'מעורב'}.get(r.route, r.route) }}</span>{% if r.forced %} <span style="font-size:11px;color:var(--text2)">(כפוי)</span>{% endif %}</td>
-      <td>{{ r.topic or '' }}</td>
-      <td dir="ltr" style="font-size:12px">{{ (r.refs or [])|join(', ') }}</td>
+      <td><span class="rt rt-{{ r.route }}">{{ RN.get(r.route, r.route) }}</span>{% if r.forced %} <span style="font-size:11px;color:var(--text2)">(כפוי)</span>{% elif r.by_brief %} <span style="font-size:11px;color:var(--text2)">(לפי התדריך)</span>{% endif %}</td>
+      <td style="font-size:12.5px">{{ (r.refs or [])|join(' · ') or '—' }}</td>
       <td>{{ '✔' if r.fixed else '—' }}</td>
-      <td>{{ {'pro':'Pro','flash':'Flash'}.get(r.model, '') }}{{ ' + מואט' if r.slow }}{{ ' (נפל ל-Flash)' if r.fallback }}</td>
+      <td>{% if r.route == 'simple' %}כמו v2{% else %}{{ MN.get(r.model, '') }}{{ ' + מואט' if r.slow }}{{ ' + ניקוי' if r.clean }}{% endif %}
+        {% if r.fallback %}<div style="color:#b91c1c;font-size:12px;font-weight:600">נפל ל-Flash</div>{% if r.error %}<div class="err">{{ r.error }}</div>{% endif %}{% endif %}</td>
       <td>{{ r.seconds or '' }}</td>
     </tr>{% endfor %}</tbody>
   </table>
@@ -58,25 +102,34 @@
 
   <div class="cmp-grid">
     <div><div style="font-weight:700;margin-bottom:6px">v2 (המנוע הנוכחי){% if job.v2_seconds %} · {{ job.v2_seconds }} שנ׳{% endif %}</div>
-      <div class="cmp-text">{{ job.v2_text or ('⏳' if job.status == 'running' else '') }}</div></div>
+      <div class="cmp-text" id="colA">{{ job.v2_text or ('⏳' if job.status == 'running' else '') }}</div></div>
     <div><div style="font-weight:700;margin-bottom:6px">v3 (המנוע החדש){% if job.v3_seconds %} · {{ job.v3_seconds }} שנ׳{% endif %}</div>
-      <div class="cmp-text">{{ job.v3_text or ('⏳' if job.status == 'running' else '') }}</div></div>
+      <div class="cmp-text" id="colB">{{ job.v3_text or ('⏳' if job.status == 'running' else '') }}</div></div>
   </div>
 </div>
-{% if job.status == 'running' %}
 <script>
-(function(){var t=setInterval(function(){fetch('?state=1',{credentials:'same-origin'}).then(function(r){return r.json()}).then(function(d){
-  if(d.status!=='running'||d.v2!=={{ 'true' if job.v2_text else 'false' }}||d.v3!=={{ 'true' if job.v3_text else 'false' }}){clearInterval(t);location.reload()}}).catch(function(){})},8000)})();
+(function(){
+  var a=document.getElementById('colA'),b=document.getElementById('colB'),sync=document.getElementById('syncScroll'),lock=false;
+  function link(src,dst){src.addEventListener('scroll',function(){
+    if(!sync.checked||lock)return;lock=true;
+    var r=src.scrollTop/Math.max(1,src.scrollHeight-src.clientHeight);dst.scrollTop=r*(dst.scrollHeight-dst.clientHeight);
+    requestAnimationFrame(function(){lock=false})})}
+  if(a&&b){link(a,b);link(b,a)}
+  {% if job.status == 'running' %}
+  var au=document.getElementById('cmpAudio');
+  var t=setInterval(function(){if(au&&!au.paused)return;fetch('?state=1',{credentials:'same-origin'}).then(function(r){return r.json()}).then(function(d){
+    if(d.status!=='running'||d.v2!=={{ 'true' if job.v2_text else 'false' }}||d.v3!=={{ 'true' if job.v3_text else 'false' }}){clearInterval(t);location.reload()}}).catch(function(){})},8000);
+  {% endif %}
+})();
 </script>
-{% endif %}
 {% endif %}
 
 {% if jobs %}
 <div class="card" style="margin-top:16px">
   <div style="font-weight:700;margin-bottom:8px">השוואות אחרונות</div>
-  <table class="cmp-tbl"><tbody>{% for j in jobs %}<tr>
+  <table class="cmp-tbl"><tbody>{% for j in jobs %}{% set jo = j.options or {} %}<tr>
     <td><a href="{{ url_for('admin.transcribe_compare_view', job_id=j.id) }}">#{{ j.id }} · {{ j.name }}</a></td>
-    <td style="font-size:12px;color:var(--text2)">{% set o = j.options or {} %}{{ 'Pro' if o.model == 'pro' else 'Flash' }}{{ ' + מואט' if o.slow }}{{ ' + ניקוי' if o.clean }}</td>
+    <td style="font-size:12px;color:var(--text2)">{{ MN.get(jo.model, 'Flash') }}{{ ' + תדריך' if jo.brief }}{{ ' + מואט' if jo.slow }}{{ ' + ניקוי' if jo.clean }}</td>
     <td>{{ {'running':'⏳ רץ','done':'הסתיים','error':'שגיאה'}.get(j.status, j.status) }}</td>
     <td style="color:var(--text2);font-size:12px">{{ j.created_at.strftime('%d/%m %H:%M') if j.created_at }}</td>
   </tr>{% endfor %}</tbody></table>
