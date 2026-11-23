@@ -791,7 +791,7 @@ def _process_student_upload(flask_app, recording_id, local_path, link=None, send
                                                                translate_to_hebrew=(recording.output_language != 'original'))
             else:
                 from services import transcribe_v3 as _TV3
-                with _TV3.route_context(_TV3.route_for_ids(customer_id=recording.customer_id)):
+                with _TV3.ctx_for_ids(customer_id=recording.customer_id):
                     transcript, duration, is_video = _gemini_from_url(rec_url, recording.language or 'he',
                                                                       recording.output_language or 'he')
             if not transcript:

@@ -40,6 +40,8 @@ _route_hint = contextvars.ContextVar('transcribe_route_hint', default=None)
 _report = contextvars.ContextVar('transcribe_v3_report', default=None)
 engine_override = contextvars.ContextVar('transcribe_engine_override', default=None)
 options_override = contextvars.ContextVar('transcribe_v3_options', default=None)   # כלי ההשוואה
+_terms = contextvars.ContextVar('transcribe_customer_terms', default='')         # שמות ומונחים של הלקוח
+TERMS_MAX = 1500
 
 # (מודל, רמת חשיבה). Flash בלי חשיבה = מה שרץ היום; "חושב" = אותו מודל עם חשיבה בינונית
 MODELS = {'flash': ('gemini-3.5-flash', None), 'think': ('gemini-3.5-flash', 'medium'),
@@ -72,17 +74,57 @@ class route_context:
     """with route_context('torah'): ... - מסלול קבוע לתמלול הזה (None/'auto' = זיהוי אוטומטי).
     report=list() - מקבל פירוט לכל קטע (לכלי ההשוואה בממשק המנהל)."""
 
-    def __init__(self, route=None, report=None):
-        self.route, self.report = route, report
+    def __init__(self, route=None, report=None, terms=None):
+        self.route, self.report, self.terms = route, report, terms
 
     def __enter__(self):
         self._t1 = _route_hint.set(self.route if self.route in ('torah', 'simple', 'mixed') else None)
         self._t2 = _report.set(self.report)
+        self._t3 = _terms.set(clean_terms(self.terms) if self.terms is not None else _terms.get())
         return self
 
     def __exit__(self, *a):
         _route_hint.reset(self._t1)
         _report.reset(self._t2)
+        _terms.reset(self._t3)
+
+
+def clean_terms(text):
+    """שמות ומונחים שהלקוח כתב: שורות/פסיקים -> רשימה אחת מופרדת בפסיקים, בלי תווים מוזרים."""
+    parts = re.split(r'[\n,;،]+', str(text or ''))
+    out, seen = [], set()
+    for p in parts:
+        p = re.sub(r'[<>{}\[\]`\\]', '', p).strip()[:80]
+        if p and p not in seen:
+            seen.add(p)
+            out.append(p)
+    return ', '.join(out)[:TERMS_MAX]
+
+
+def terms_rules():
+    """תוספת לפרומפט של כל קטע (גם ב-v2) - רק כשללקוח יש שמות ומונחים."""
+    t = _terms.get()
+    if not t:
+        return ''
+    return ('\nNAMES AND TERMS GIVEN BY THE CUSTOMER (correct spelling - use exactly this spelling when such a word '
+            'is actually said; never add them otherwise): ' + t + '\n')
+
+
+def terms_for(customer=None, institution=None):
+    vals = [getattr(o, 'transcribe_terms', None) for o in (customer, institution) if o is not None]
+    return clean_terms('\n'.join(v for v in vals if v))
+
+
+def ctx_for_ids(customer_id=None, institution_id=None):
+    """route_context עם המסלול והשמות/מונחים של הלקוח (תלמיד יורש גם מהמוסד)."""
+    try:
+        from models import Customer, Institution
+        c = Customer.query.get(customer_id) if customer_id else None
+        iid = institution_id or getattr(c, 'institution_id', None)
+        inst = Institution.query.get(iid) if iid else None
+        return route_context(route_for(c, inst), terms=terms_for(c, inst))
+    except Exception:
+        return route_context(None)
 
 
 def route_for(customer=None, institution=None):
@@ -256,6 +298,8 @@ def make_briefing(client, gtypes, audio_path, language='he'):
             part = uploaded
         lang_note = {'yi': ' The speech is in Yiddish; still write the briefing in Hebrew.',
                      'en': ' The speech is in English; write names/terms as spoken.'}.get(language, '')
+        if _terms.get():
+            lang_note += ' The customer says these names/terms may appear (correct spelling): ' + _terms.get()
         resp = client.models.generate_content(
             model=MODEL, contents=[BRIEF_PROMPT + lang_note, part],
             config=gtypes.GenerateContentConfig(
@@ -556,7 +600,7 @@ def transcribe_chunk(client, gtypes, chunk_bytes, mime_type, language, output_la
     if route == 'simple':
         # פשוט = בדיוק v2: אותו שמע, אותו מודל, בלי תוספות
         text = TV2.transcribe_chunk(client, gtypes, chunk_bytes, mime_type, language, output_language, prev_tail,
-                                    chunk_num, n_chunks, seconds)
+                                    chunk_num, n_chunks, seconds, extra_rules=terms_rules())
     else:
         full = route == 'torah'
         opt = options()
@@ -569,7 +613,7 @@ def transcribe_chunk(client, gtypes, chunk_bytes, mime_type, language, output_la
         rules = '\nTORAH CONTENT\n' + (LX.PRONUNCIATION_RULES + '\n' if full else '') + (
             '- Correct spelling for names, books and terms that may be heard (use only if actually said): '
             + LX.glossary(full=full) + '\n'
-            '- Write in standard Hebrew FULL spelling (כתיב מלא), also inside quotes.\n')
+            '- Write in standard Hebrew FULL spelling (כתיב מלא), also inside quotes.\n') + terms_rules()
         ctx = briefing_text(state.briefing)
         if full and state.sources:
             ctx += ('\n\nThe lesson is studying these sources (for spelling of quotes only - transcribe only what '
@@ -599,3 +643,88 @@ def transcribe_chunk(client, gtypes, chunk_bytes, mime_type, language, output_la
     if isinstance(rep, list):
         rep.append(info)
     return text
+
+
+# ------------------------------------------------------------------ ניתוח השוואה (כלי ההשוואה במנהל)
+ANALYZE_PROMPT = """You are the quality judge of Hebrew transcription engines. The audio recording is attached, with
+several transcripts of it (v2, v3 - our engines; alef - a competitor). LISTEN to the audio and decide, for every
+place where the transcripts differ in a meaningful way, what was ACTUALLY SAID and which transcript is right.
+Ignore differences that are only paragraph breaks or trivial punctuation, unless they hurt reading.
+Categories: names (people, rabbis, books, places), pronunciation (Ashkenazi/Chassidic sounds written wrongly),
+quotes (verses, Mishna, Gemara, Rambam - wording), aramaic_terms (Aramaic, Torah terms, acronyms), wrong_word
+(an ordinary word heard wrongly), missing (said but not written), extra (written but not said / repeated / invented),
+punctuation (punctuation, sentence and paragraph structure).
+Return JSON, all text in Hebrew:
+- verdict: 2-4 sentences - which transcript is best overall and why.
+- scores: for each transcript given: version, errors (number of real errors you found in it), strengths, weaknesses.
+- issues: up to 40 concrete differences, most important first: category, said (what was actually said, by the audio),
+  v2, v3, alef (what each wrote at that place; "" if that transcript is not given), best (v2 / v3 / alef / none).
+- rules: up to 10 concrete instructions to add to OUR transcription prompt so that our engine gets these places right
+  next time (general rules, not specific to this recording, unless it is a name/term to add to a glossary).
+Return JSON only."""
+
+ANALYZE_SCHEMA = {'type': 'OBJECT', 'properties': {
+    'verdict': {'type': 'STRING'},
+    'scores': {'type': 'ARRAY', 'items': {'type': 'OBJECT', 'properties': {
+        'version': {'type': 'STRING'}, 'errors': {'type': 'INTEGER'},
+        'strengths': {'type': 'STRING'}, 'weaknesses': {'type': 'STRING'}},
+        'required': ['version', 'errors', 'strengths', 'weaknesses']}},
+    'issues': {'type': 'ARRAY', 'items': {'type': 'OBJECT', 'properties': {
+        'category': {'type': 'STRING', 'enum': ['names', 'pronunciation', 'quotes', 'aramaic_terms', 'wrong_word',
+                                                'missing', 'extra', 'punctuation']},
+        'said': {'type': 'STRING'}, 'v2': {'type': 'STRING'}, 'v3': {'type': 'STRING'}, 'alef': {'type': 'STRING'},
+        'best': {'type': 'STRING', 'enum': ['v2', 'v3', 'alef', 'none']}},
+        'required': ['category', 'said', 'v2', 'v3', 'alef', 'best']}},
+    'rules': {'type': 'ARRAY', 'items': {'type': 'STRING'}}},
+    'required': ['verdict', 'scores', 'issues', 'rules']}
+
+ANALYZE_MAX_CHARS = 60000
+
+
+def analyze(client, gtypes, audio_path, texts, briefing=None):
+    """שופט: מאזין להקלטה ומשווה את התמלולים (dict גרסה -> טקסט). מחזיר dict או זורק שגיאה."""
+    import os
+    texts = {k: (v or '')[:ANALYZE_MAX_CHARS] for k, v in texts.items() if (v or '').strip()}
+    if len(texts) < 2:
+        raise ValueError('צריך לפחות שני תמלולים להשוואה')
+    small = _compact_audio(audio_path) if audio_path else None
+    uploaded = None
+    try:
+        parts = []
+        if small:
+            if os.path.getsize(small) <= BRIEF_INLINE_MAX:
+                with open(small, 'rb') as f:
+                    parts.append(gtypes.Part.from_bytes(data=f.read(), mime_type='audio/ogg'))
+            else:
+                uploaded = client.files.upload(file=small, config={'mime_type': 'audio/ogg'})
+                for _ in range(60):
+                    st = str(getattr(getattr(uploaded, 'state', None), 'name', getattr(uploaded, 'state', '')))
+                    if 'PROCESSING' not in st.upper():
+                        break
+                    time.sleep(1)
+                    uploaded = client.files.get(name=uploaded.name)
+                parts.append(uploaded)
+        body = ANALYZE_PROMPT + ('' if small else '\n(NO AUDIO AVAILABLE - judge by Hebrew/Torah knowledge only.)')
+        if briefing:
+            body += '\n\nBRIEFING OF THE RECORDING:\n' + json.dumps(briefing, ensure_ascii=False)[:4000]
+        for k, v in texts.items():
+            body += f'\n\n===== TRANSCRIPT {k} =====\n{v}'
+        resp = client.models.generate_content(
+            model=MODEL, contents=[body] + parts,
+            config=gtypes.GenerateContentConfig(
+                response_mime_type='application/json', response_schema=ANALYZE_SCHEMA,
+                thinking_config=gtypes.ThinkingConfig(thinking_level='medium')))
+        d = json.loads(resp.text or '{}')
+        d['with_audio'] = bool(small)
+        return d
+    finally:
+        if small:
+            try:
+                os.remove(small)
+            except OSError:
+                pass
+        if uploaded is not None:
+            try:
+                client.files.delete(name=uploaded.name)
+            except Exception:
+                pass

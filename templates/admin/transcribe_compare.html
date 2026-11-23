@@ -39,6 +39,11 @@
       <label title="סינון זמזום ורעש ואיזון עוצמה"><input type="checkbox" name="clean" value="1"> ניקוי רעשים</label>
       <button class="btn btn-primary" type="submit">▶ הרץ השוואה</button>
     </div>
+    <details style="margin-top:10px"><summary style="cursor:pointer;font-size:13px;font-weight:600">＋ התמלול של אלף בוט לאותה הקלטה (לא חובה)</summary>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:8px;align-items:flex-start">
+        <textarea class="form-input" name="alef_text" rows="4" style="flex:1;min-width:280px" placeholder="הדבק כאן את הטקסט, או העלה קובץ txt / srt שהורדת מאלף בוט"></textarea>
+        <input class="form-input" type="file" name="alef_file" accept=".txt,.srt,text/plain" style="width:auto">
+      </div></details>
   </form>
   <div style="font-size:12px;color:var(--text2);margin-top:8px">שני המנועים רצים ברקע, אחד אחרי השני. לא נשלח לאף אחד ולא מחויב.</div>
 </div>
@@ -100,25 +105,88 @@
   </table>
   {% endif %}
 
-  <div class="cmp-grid">
+  {% set cols = 3 if job.alef_text else 2 %}
+  <div class="cmp-grid" style="grid-template-columns:repeat({{ cols }}, minmax(0,1fr))">
     <div><div style="font-weight:700;margin-bottom:6px">v2 (המנוע הנוכחי){% if job.v2_seconds %} · {{ job.v2_seconds }} שנ׳{% endif %}</div>
-      <div class="cmp-text" id="colA">{{ job.v2_text or ('⏳' if job.status == 'running' else '') }}</div></div>
+      <div class="cmp-text" data-col>{{ job.v2_text or ('⏳' if job.status == 'running' else '') }}</div></div>
     <div><div style="font-weight:700;margin-bottom:6px">v3 (המנוע החדש){% if job.v3_seconds %} · {{ job.v3_seconds }} שנ׳{% endif %}</div>
-      <div class="cmp-text" id="colB">{{ job.v3_text or ('⏳' if job.status == 'running' else '') }}</div></div>
+      <div class="cmp-text" data-col>{{ job.v3_text or ('⏳' if job.status == 'running' else '') }}</div></div>
+    {% if job.alef_text %}<div><div style="font-weight:700;margin-bottom:6px">אלף בוט</div>
+      <div class="cmp-text" data-col>{{ job.alef_text }}</div></div>{% endif %}
   </div>
+  <details style="margin-top:12px"><summary style="cursor:pointer;font-size:13px;font-weight:600">{{ '✎ החלפת' if job.alef_text else '＋ הוספת' }} התמלול של אלף בוט</summary>
+    <form method="POST" enctype="multipart/form-data" action="{{ url_for('admin.transcribe_compare_alef', job_id=job.id) }}" style="display:flex;gap:10px;flex-wrap:wrap;margin-top:8px;align-items:flex-start">
+      <textarea class="form-input" name="alef_text" rows="4" style="flex:1;min-width:280px" placeholder="הדבק את הטקסט, או העלה קובץ txt / srt"></textarea>
+      <input class="form-input" type="file" name="alef_file" accept=".txt,.srt,text/plain" style="width:auto">
+      <button class="btn" type="submit">💾 שמירה</button>
+    </form></details>
+
+  {% set an = job.analysis or {} %}
+  <div id="analysis" style="margin-top:18px;border-top:1px solid var(--border);padding-top:14px">
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+      <div style="font-weight:700;font-size:15px">🔎 ניתוח אוטומטי</div>
+      {% if job.analysis_status == 'running' %}<span class="badge" style="background:#fef3c7;color:#92400e">⏳ מאזין להקלטה ומשווה... (הדף מתרענן לבד)</span>
+      {% else %}<form method="POST" action="{{ url_for('admin.transcribe_compare_analyze', job_id=job.id) }}">
+        <button class="btn btn-primary btn-sm" type="submit" {{ 'disabled' if job.status == 'running' }}>{{ '↻ ניתוח מחדש' if an and not an.error else '▶ נתח: מה שונה, מי צודק, מה לשפר' }}</button></form>{% endif %}
+      <button class="btn btn-sm" type="button" id="copyAll" title="מעתיק את כל הנתונים של ההשוואה - להדבקה בשיחה עם Claude">📋 העתק הכל ל-Claude</button>
+    </div>
+    {% if an.error %}<div class="err">{{ an.error }}</div>{% endif %}
+    {% if an.verdict %}
+      <div style="background:var(--surface2,#f6f7fb);border-radius:10px;padding:12px;line-height:1.8;margin-bottom:12px">{{ an.verdict }}
+        {% if not an.with_audio %}<div style="font-size:12px;color:#92400e">⚠ הניתוח נעשה בלי האזנה להקלטה (השמע לא היה זמין)</div>{% endif %}</div>
+      {% set VN = {'v2':'v2','v3':'v3','alef':'אלף בוט','none':'אף אחד'} %}
+      {% set CN = {'names':'שמות','pronunciation':'הגייה','quotes':'ציטוטים','aramaic_terms':'ארמית ומונחים','wrong_word':'מילה שגויה','missing':'חסר','extra':'מיותר','punctuation':'פיסוק ומבנה'} %}
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin-bottom:14px">
+        {% for sc in an.scores or [] %}<div style="border:1px solid var(--border);border-radius:10px;padding:10px;font-size:13px;line-height:1.7">
+          <div style="font-weight:700">{{ VN.get(sc.version, sc.version) }} · <span style="color:#b91c1c">{{ sc.errors }} טעויות</span></div>
+          <div>👍 {{ sc.strengths }}</div><div>👎 {{ sc.weaknesses }}</div></div>{% endfor %}
+      </div>
+      {% if an.issues %}<div style="overflow:auto"><table class="cmp-tbl">
+        <thead><tr><th>סוג</th><th>מה נאמר</th><th>v2</th><th>v3</th>{% if job.alef_text %}<th>אלף בוט</th>{% endif %}<th>הכי נכון</th></tr></thead>
+        <tbody>{% for it in an.issues %}<tr>
+          <td style="white-space:nowrap">{{ CN.get(it.category, it.category) }}</td><td style="font-weight:600">{{ it.said }}</td>
+          <td{% if it.best == 'v2' %} style="background:#dcfce7"{% endif %}>{{ it.v2 }}</td>
+          <td{% if it.best == 'v3' %} style="background:#dcfce7"{% endif %}>{{ it.v3 }}</td>
+          {% if job.alef_text %}<td{% if it.best == 'alef' %} style="background:#dcfce7"{% endif %}>{{ it.alef }}</td>{% endif %}
+          <td>{{ VN.get(it.best, it.best) }}</td></tr>{% endfor %}</tbody></table></div>{% endif %}
+      {% if an.rules %}<div style="margin-top:12px"><div style="font-weight:700;margin-bottom:4px">הוראות מוצעות למנוע שלנו</div>
+        <ol style="margin:0;padding-inline-start:20px;line-height:1.8;font-size:13.5px">{% for r in an.rules %}<li>{{ r }}</li>{% endfor %}</ol></div>{% endif %}
+    {% elif not an.error and job.analysis_status != 'running' %}
+      <div style="font-size:12.5px;color:var(--text2)">הניתוח מאזין להקלטה עצמה, מסמן בכל מקום שבו התמלולים שונים מה באמת נאמר ומי צדק, וכותב הוראות לשיפור המנוע.</div>
+    {% endif %}
+  </div>
+</div>
 </div>
 <script>
 (function(){
-  var a=document.getElementById('colA'),b=document.getElementById('colB'),sync=document.getElementById('syncScroll'),lock=false;
-  function link(src,dst){src.addEventListener('scroll',function(){
-    if(!sync.checked||lock)return;lock=true;
-    var r=src.scrollTop/Math.max(1,src.scrollHeight-src.clientHeight);dst.scrollTop=r*(dst.scrollHeight-dst.clientHeight);
-    requestAnimationFrame(function(){lock=false})})}
-  if(a&&b){link(a,b);link(b,a)}
-  {% if job.status == 'running' %}
+  var cols=[].slice.call(document.querySelectorAll('[data-col]')),sync=document.getElementById('syncScroll'),lock=false;
+  cols.forEach(function(src){src.addEventListener('scroll',function(){
+    if(!sync.checked||lock)return;lock=true;var r=src.scrollTop/Math.max(1,src.scrollHeight-src.clientHeight);
+    cols.forEach(function(d){if(d!==src)d.scrollTop=r*(d.scrollHeight-d.clientHeight)});requestAnimationFrame(function(){lock=false})})});
+  var DATA={{ {'id': job.id, 'name': job.name, 'language': job.language, 'route': job.route, 'options': job.options,
+               'report': job.report, 'analysis': job.analysis, 'v2': job.v2_text, 'v3': job.v3_text, 'alef': job.alef_text,
+               'v2_seconds': job.v2_seconds, 'v3_seconds': job.v3_seconds}|tojson }};
+  function cut(t,n){t=t||'';return t.length>n?t.slice(0,n)+'\n[... קוצר - '+t.length+' תווים בסך הכל]':t}
+  function bundle(){
+    var L=['### השוואת תמלול #'+DATA.id+' - '+(DATA.name||''),'שפה: '+DATA.language+' | מסלול כפוי: '+(DATA.route||'אוטומטי')+' | אפשרויות v3: '+JSON.stringify(DATA.options||{}),
+           'זמן: v2 '+(DATA.v2_seconds||'?')+' שנ׳, v3 '+(DATA.v3_seconds||'?')+' שנ׳',''];
+    (DATA.report||[]).forEach(function(r){
+      if(r.briefing){L.push('## תדריך');L.push(JSON.stringify(r.briefing,null,1));L.push('מקורות שנמצאו בספריא: '+(r.brief_sources||[]).join(' | '));L.push('')}
+      else if(r.chunk){L.push('קטע '+r.chunk+': מסלול='+r.route+(r.by_brief?' (לפי התדריך)':'')+' מודל='+(r.model||'')+(r.slow?' +מואט':'')+(r.fallback?' נפל ל-Flash: '+(r.error||''):'')+' מקורות='+(r.refs||[]).join(' | ')+' תוקן='+(r.fixed?'כן':'לא')+' זמן='+r.seconds)}});
+    if(DATA.analysis){L.push('','## ניתוח אוטומטי');L.push(JSON.stringify(DATA.analysis,null,1))}
+    L.push('','## תמלול v2',cut(DATA.v2,25000),'','## תמלול v3',cut(DATA.v3,25000));
+    if(DATA.alef)L.push('','## תמלול אלף בוט',cut(DATA.alef,25000));
+    L.push('','---','תעבור על כל זה ותחליט: מה הבעיות, איפה כל מנוע יותר נכון, ומה לשפר במנוע שלנו.');
+    return L.join('\n')}
+  document.getElementById('copyAll').onclick=function(){var b=this,t=bundle();
+    function done(){b.textContent='✔ הועתק - הדבק בשיחה עם Claude';setTimeout(function(){b.textContent='📋 העתק הכל ל-Claude'},4000)}
+    if(navigator.clipboard&&window.isSecureContext){navigator.clipboard.writeText(t).then(done,fb)}else fb();
+    function fb(){var ta=document.createElement('textarea');ta.value=t;ta.style.position='fixed';ta.style.opacity='0';document.body.appendChild(ta);ta.select();
+      try{document.execCommand('copy');done()}catch(e){alert('ההעתקה נכשלה')}document.body.removeChild(ta)}};
+  {% if job.status == 'running' or job.analysis_status == 'running' %}
   var au=document.getElementById('cmpAudio');
   var t=setInterval(function(){if(au&&!au.paused)return;fetch('?state=1',{credentials:'same-origin'}).then(function(r){return r.json()}).then(function(d){
-    if(d.status!=='running'||d.v2!=={{ 'true' if job.v2_text else 'false' }}||d.v3!=={{ 'true' if job.v3_text else 'false' }}){clearInterval(t);location.reload()}}).catch(function(){})},8000);
+    if(d.status!=={{ job.status|tojson }}||d.v2!=={{ 'true' if job.v2_text else 'false' }}||d.v3!=={{ 'true' if job.v3_text else 'false' }}||d.analysis!=={{ (job.analysis_status or '')|tojson }}){clearInterval(t);location.reload()}}).catch(function(){})},8000);
   {% endif %}
 })();
 </script>

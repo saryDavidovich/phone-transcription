@@ -66,6 +66,12 @@
       <div class="field"><label for="output">שפת התמלול</label><select class="input" id="output"></select></div>
     </div>
   </div>
+  <div class="card mb-18" id="termsCard">
+    <div class="card-head"><span class="ic">{{ ic('tag') }}</span><h3>שמות ומונחים</h3></div>
+    <div class="card-sub">שמות של רבנים, ספרים, מקומות ומונחים שחוזרים בהקלטות שלך - בכתיב הנכון. כך התמלול יכתוב אותם נכון. שורה לכל שם.</div>
+    <div class="field"><textarea class="input" id="terms" rows="5" maxlength="1500" placeholder="לדוגמה:&#10;הגאון רבי חיים קנייבסקי&#10;ישיבת פוניבז'&#10;קצות החושן">{{ c.transcribe_terms or '' }}</textarea></div>
+    <div class="modal-actions" style="margin-top:10px;"><button class="btn" id="saveTerms">{{ ic('check', 16, 2.2) }} שמירה</button></div>
+  </div>
   <div class="card mb-18">
     <div class="card-head"><span class="ic">{{ ic('send') }}</span><h3>איך מקבלים את התמלול</h3></div>
     <div class="seg" data-name="delivery">
@@ -252,6 +258,9 @@
     toast(d.message);
   });
 
+  $('saveTerms').onclick = busy($('saveTerms'), async function () {
+    var d = await post('/my/settings/terms', { terms: $('terms').value }); toast(d.message || 'נשמר');
+  });
   $('saveProfile').onclick = busy($('saveProfile'), async function () {
     var d = await post('/my/settings/profile', { name: $('pname').value, fax: $('pfax').value });
     toast(d.message);

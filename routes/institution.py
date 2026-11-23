@@ -485,6 +485,14 @@ def settings():
         db.session.commit()
         flash('ההגדרות נשמרו')
         return redirect(url_for('institution.settings'))
+    if request.method == 'POST' and request.form.get('section') == 'terms':
+        import re as _re
+        from services.transcribe_v3 import TERMS_MAX
+        t = _re.sub(r'[<>{}`\\]', '', request.form.get('transcribe_terms') or '').strip()[:TERMS_MAX]
+        inst.transcribe_terms = t or None
+        db.session.commit()
+        flash('השמות והמונחים נשמרו - חלים מהתמלול הבא')
+        return redirect(url_for('institution.settings') + '#terms')
     if request.method == 'POST':
         max_minutes = request.form.get('max_minutes_per_period')
         inst.max_minutes_per_period = float(max_minutes) if max_minutes else None

@@ -106,6 +106,16 @@
   </div>
 </form>
 
+<form method="post" class="card mb-18" id="terms">
+  <input type="hidden" name="section" value="terms">
+  <div class="card-head"><span class="ic">{{ ic("tag") }}</span><h3>שמות ומונחים לתמלול</h3></div>
+  <div class="card-sub">שמות של רבנים, ספרים, מקומות ומונחים שחוזרים בשיעורים - בכתיב הנכון. חל על התמלולים של המוסד ושל כל התלמידים. שורה לכל שם.</div>
+  <div class="card-body">
+    <textarea class="input" name="transcribe_terms" rows="5" maxlength="1500" placeholder="לדוגמה:&#10;ראש הישיבה הרב ...&#10;שיעורי רבי שמואל&#10;קצות החושן">{{ inst.transcribe_terms or '' }}</textarea>
+    <div class="card-actions"><button type="submit" class="btn">שמירה</button></div>
+  </div>
+</form>
+
 <div class="card mb-18" id="branding">
   <div class="card-head"><span class="ic">{{ ic("image") }}</span><h3>מיתוג קובצי ה-Word</h3></div>
   <div class="card-sub">הלוגו והשם יופיעו בראש כל קובץ תמלול שיורד מאזור המוסד (גם בהורדה מרוכזת ובמייל).</div>

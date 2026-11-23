@@ -62,13 +62,16 @@
     </form>
     <form method="post" action="{{ url_for('admin.institution_transcribe_route', inst_id=inst.id) }}" style="margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap"
           title="חל רק כשמנוע התמלול הוא v3. תורני = מילון מונחים, כללי הגייה ובדיקת ציטוטים; פשוט = תמלול רגיל">
-      <span>🎙️ מסלול תמלול (v3)</span>
-      <select class="form-input" name="transcribe_route" style="width:auto" onchange="this.form.requestSubmit()">
+      <span>🎙️ מסלול תמלול (v3) ושמות ומונחים</span>
+      <select class="form-input" name="transcribe_route" style="width:auto">
       <option value="" {{ 'selected' if not inst.transcribe_route }}>לפי ההגדרה הכללית</option>
       <option value="torah" {{ 'selected' if inst.transcribe_route == 'torah' }}>תמיד תורני</option>
       <option value="mixed" {{ 'selected' if inst.transcribe_route == 'mixed' }}>מעורב</option>
       <option value="simple" {{ 'selected' if inst.transcribe_route == 'simple' }}>תמיד פשוט</option>
     </select>
+    <textarea class="form-input" name="transcribe_terms" rows="3" maxlength="1500" style="flex-basis:100%;min-height:60px"
+      placeholder="שמות ומונחים בכתיב הנכון - שורה לכל שם (רבנים, ספרים, מקומות). נכנסים להנחיות בכל תמלול">{{ inst.transcribe_terms or '' }}</textarea>
+    <button class="btn btn-primary btn-sm" type="submit">שמירה</button>
     </form>
   </div>
   <div class="table-card" style="padding:16px; flex:1; min-width:260px;">

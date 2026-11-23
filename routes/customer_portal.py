@@ -938,6 +938,18 @@ def settings_profile():
     return _ok('הפרטים נשמרו')
 
 
+@customer_bp.route('/settings/terms', methods=['POST'])
+@customer_login_required
+def settings_terms():
+    """שמות ומונחים לתמלול (נכנסים להנחיות של המודל בכל תמלול של הלקוח)."""
+    from services.transcribe_v3 import TERMS_MAX
+    c = current_user
+    t = re.sub(r'[<>{}`\\]', '', ((request.get_json(silent=True) or {}).get('terms') or '')).strip()[:TERMS_MAX]
+    c.transcribe_terms = t or None
+    db.session.commit()
+    return _ok('השמות והמונחים נשמרו - חלים מהתמלול הבא')
+
+
 @customer_bp.route('/settings/email/start', methods=['POST'])
 @customer_login_required
 def settings_email_start():

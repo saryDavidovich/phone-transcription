@@ -328,7 +328,7 @@ def _process(call_id, rec_url, customer_id, delivery_method, delivered_to, durat
                 _progress_local.call_id = call_id
                 try:
                     from services import transcribe_v3 as _TV3
-                    with _TV3.route_context(_TV3.route_for_ids(customer_id=customer_id)):
+                    with _TV3.ctx_for_ids(customer_id=customer_id):
                         transcript_raw, actual_duration, is_video = _gemini_from_url(rec_url, language, output_language)
                 finally:
                     _progress_local.call_id = None
@@ -1221,8 +1221,10 @@ def _gemini_from_url(url, language='he', output_language='he'):
                         )
                         chunk_transcript = response.text.strip()
                     else:
+                        from services.transcribe_v3 import terms_rules as _tr   # שמות ומונחים של הלקוח
                         chunk_transcript = TV2.transcribe_chunk(client, gtypes, chunk_bytes, mime_type, language,
-                                                                output_language, prev_tail, chunk_num, n_chunks, seconds)
+                                                                output_language, prev_tail, chunk_num, n_chunks, seconds,
+                                                                extra_rules=_tr())
                     chunk_transcript = clean_model_transcript(chunk_transcript or '', output_language)
                     log.info(f"Chunk {chunk_num} done, {len(chunk_transcript)} chars")
                     break

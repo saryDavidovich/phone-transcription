@@ -41,6 +41,7 @@ class Customer(db.Model):
     tzintuk_list = db.Column(db.String(40), nullable=True)
     # מסלול התמלול במנוע v3: None = זיהוי אוטומטי, 'torah' / 'simple' = קבוע ללקוח (services/transcribe_v3.py)
     transcribe_route = db.Column(db.String(10), nullable=True)
+    transcribe_terms = db.Column(db.Text, nullable=True)      # שמות ומונחים שהלקוח/המוסד הגדירו לתמלול
 
     # --- שיוך למוסד (תלמיד) ---
     # לקוח "רגיל" (הרשמה עצמאית) - institution_id ריק. "תלמיד" ששייך למוסד -
@@ -86,7 +87,8 @@ class Institution(db.Model, UserMixin):
     __tablename__ = 'institutions'
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(200), nullable=False)
-    transcribe_route = db.Column(db.String(10), nullable=True)   # v3: None אוטומטי / torah / simple - חל על כל התלמידים
+    transcribe_route = db.Column(db.String(10), nullable=True)
+    transcribe_terms = db.Column(db.Text, nullable=True)      # שמות ומונחים שהלקוח/המוסד הגדירו לתמלול   # v3: None אוטומטי / torah / simple - חל על כל התלמידים
     email = db.Column(db.String(200), nullable=True)   # התחברות אפשרית לפי מייל
     phone = db.Column(db.String(20), nullable=True)    # התחברות אפשרית לפי טלפון
     login_code = db.Column(db.String(255), nullable=True)     # גיבוב (scrypt) של הקוד הזמני - הקוד עצמו לא נשמר
@@ -1124,5 +1126,8 @@ class TranscribeCompare(db.Model):
     options = db.Column(db.JSON)                              # אפשרויות v3: model / slow / clean / brief
     recording_id = db.Column(db.Integer, nullable=True)       # השוואה על הקלטה קיימת - הנגן מההקלטה
     play_path = db.Column(db.Text, nullable=True)             # קובץ שהועלה - עותק בימות לנגן (נטפרי)
+    alef_text = db.Column(db.Text, nullable=True)             # התמלול של אלף בוט לאותה הקלטה (הודבק)
+    analysis = db.Column(db.JSON, nullable=True)              # ניתוח אוטומטי: מה שונה, מי צודק, מה לשפר
+    analysis_status = db.Column(db.String(20), nullable=True)  # running / done / error
     error = db.Column(db.Text)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)

@@ -2068,8 +2068,12 @@ def customer_transcribe_route(id):
     customer = Customer.query.get_or_404(id)
     r = request.form.get('transcribe_route')
     customer.transcribe_route = r if r in _ROUTE_NAMES else None
+    if 'transcribe_terms' in request.form:
+        from services.transcribe_v3 import TERMS_MAX
+        _t = re.sub(r'[<>{}`\\]', '', request.form.get('transcribe_terms') or '').strip()[:TERMS_MAX]
+        customer.transcribe_terms = _t or None
     db.session.commit()
-    flash('✔ מסלול התמלול: ' + _ROUTE_NAMES.get(customer.transcribe_route, 'לפי ההגדרה הכללית'))
+    flash('✔ נשמר. מסלול התמלול: ' + _ROUTE_NAMES.get(customer.transcribe_route, 'לפי ההגדרה הכללית'))
     return redirect(url_for('admin.customer_detail', id=id) + '#billing')
 
 
@@ -2080,8 +2084,12 @@ def institution_transcribe_route(inst_id):
     inst = Institution.query.get_or_404(inst_id)
     r = request.form.get('transcribe_route')
     inst.transcribe_route = r if r in _ROUTE_NAMES else None
+    if 'transcribe_terms' in request.form:
+        from services.transcribe_v3 import TERMS_MAX
+        _t = re.sub(r'[<>{}`\\]', '', request.form.get('transcribe_terms') or '').strip()[:TERMS_MAX]
+        inst.transcribe_terms = _t or None
     db.session.commit()
-    flash('✔ מסלול התמלול של המוסד: ' + _ROUTE_NAMES.get(inst.transcribe_route, 'לפי ההגדרה הכללית'))
+    flash('✔ נשמר. מסלול התמלול של המוסד: ' + _ROUTE_NAMES.get(inst.transcribe_route, 'לפי ההגדרה הכללית'))
     return redirect(url_for('admin.institution_detail', inst_id=inst_id))
 
 
@@ -2866,7 +2874,7 @@ def transcribe_compare():
                 'slow': request.form.get('slow') == '1', 'clean': request.form.get('clean') == '1',
                 'brief': request.form.get('brief') == '1'}
         job = TranscribeCompare(name=name, rec_url=rec_url, language=language, route=route, status='running',
-                                options=opts, recording_id=rec_id)
+                                options=opts, recording_id=rec_id, alef_text=_alef_text_from_request())
         db.session.add(job)
         db.session.commit()
         threading.Thread(target=_run_compare, args=(job.id,), daemon=True).start()
@@ -2881,9 +2889,92 @@ def transcribe_compare_view(job_id):
     from models import TranscribeCompare
     job = TranscribeCompare.query.get_or_404(job_id)
     if request.args.get('state') == '1':
-        return jsonify({'status': job.status, 'v2': bool(job.v2_text), 'v3': bool(job.v3_text)})
+        return jsonify({'status': job.status, 'v2': bool(job.v2_text), 'v3': bool(job.v3_text),
+                        'analysis': job.analysis_status or ''})
     jobs = TranscribeCompare.query.order_by(TranscribeCompare.id.desc()).limit(20).all()
     return render_template('admin/transcribe_compare.html', jobs=jobs, job=job)
+
+
+def _alef_text_from_request():
+    """התמלול של אלף בוט: הדבקה בתיבה או קובץ txt/srt. srt - בלי מספרים וזמנים."""
+    txt = (request.form.get('alef_text') or '').strip()
+    f = request.files.get('alef_file')
+    if not txt and f and f.filename:
+        raw = f.read(3 * 1024 * 1024)
+        for enc in ('utf-8-sig', 'cp1255', 'utf-16'):
+            try:
+                txt = raw.decode(enc)
+                break
+            except UnicodeDecodeError:
+                continue
+    if not txt:
+        return None
+    lines = []
+    for ln in txt.replace('\r', '').split('\n'):
+        if re.fullmatch(r'\s*\d+\s*', ln) or re.fullmatch(r'\s*[\d:,.]+\s*-->\s*[\d:,.]+\s*', ln):
+            continue                                          # srt: מספר כתובית / שורת זמנים
+        lines.append(re.sub(r'^\s*\[?\d{1,2}:\d{2}(:\d{2})?([.,]\d+)?\]?\s*[-–]?\s*', '', ln))
+    return re.sub(r'\n{3,}', '\n\n', '\n'.join(lines)).strip()[:200000] or None
+
+
+@admin_bp.route('/transcribe-compare/<int:job_id>/alef', methods=['POST'])
+@login_required
+def transcribe_compare_alef(job_id):
+    from models import TranscribeCompare
+    job = TranscribeCompare.query.get_or_404(job_id)
+    job.alef_text = _alef_text_from_request()
+    db.session.commit()
+    flash('✔ התמלול של אלף בוט נשמר' if job.alef_text else 'התמלול של אלף בוט הוסר')
+    return redirect(url_for('admin.transcribe_compare_view', job_id=job_id))
+
+
+@admin_bp.route('/transcribe-compare/<int:job_id>/analyze', methods=['POST'])
+@login_required
+def transcribe_compare_analyze(job_id):
+    from models import TranscribeCompare
+    job = TranscribeCompare.query.get_or_404(job_id)
+    if job.status == 'running' or job.analysis_status == 'running':
+        flash('עוד רץ - אפשר לנתח כשההשוואה מסתיימת')
+    else:
+        job.analysis_status = 'running'
+        db.session.commit()
+        threading.Thread(target=_run_compare_analysis, args=(job.id,), daemon=True).start()
+    return redirect(url_for('admin.transcribe_compare_view', job_id=job_id) + '#analysis')
+
+
+def _run_compare_analysis(job_id):
+    from app import app as _app
+    with _app.app_context():
+        from models import TranscribeCompare
+        from services import transcribe_v3 as TV3
+        from services import audio_prep
+        from google import genai
+        from google.genai import types as gtypes
+        job = TranscribeCompare.query.get(job_id)
+        src = None
+        try:
+            try:
+                src = audio_prep.open_source(job.rec_url)
+            except Exception as e:
+                log.warning(f'compare analysis: no audio ({e})')
+            brief = next((r.get('briefing') for r in (job.report or []) if isinstance(r, dict) and r.get('briefing')), None)
+            client = genai.Client(api_key=os.environ.get('GOOGLE_API_KEY'))
+            res = TV3.analyze(client, gtypes, src[0] if src else None,
+                              {'v2': job.v2_text, 'v3': job.v3_text, 'alef': job.alef_text}, brief)
+            job = TranscribeCompare.query.get(job_id)
+            job.analysis, job.analysis_status = res, 'done'
+        except Exception as e:
+            log.exception('compare analysis failed')
+            db.session.rollback()
+            job = TranscribeCompare.query.get(job_id)
+            job.analysis, job.analysis_status = {'error': f'{type(e).__name__}: {e}'[:500]}, 'error'
+        finally:
+            if src and src[1]:
+                try:
+                    os.remove(src[0])
+                except OSError:
+                    pass
+        db.session.commit()
 
 
 @admin_bp.route('/transcribe-compare/<int:job_id>/audio')
