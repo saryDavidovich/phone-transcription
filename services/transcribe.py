@@ -1010,7 +1010,8 @@ def clean_model_transcript(text, output_language='he'):
     - אותיות ערביות בודדות בתמלול עברי."""
     if not text:
         return text
-    t = text
+    from services.transcribe_v2 import strip_model_leak
+    t = strip_model_leak(text, output_language)     # "מחשבות" של המודל שדלפו (אנגלית, טיוטות עם זמנים)
     if len(_TS_RE.findall(t)) >= 3:
         t = re.sub(r'[ \t]?' + _TS_RE.pattern + r'(?=[\u0590-\u05FF])', '', t)   # באמצע מילה - מחברים
         t = re.sub(r'[ \t]?' + _TS_RE.pattern + r'[ \t]?', ' ', t)

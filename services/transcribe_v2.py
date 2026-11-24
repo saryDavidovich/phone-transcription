@@ -68,7 +68,9 @@ TRANSCRIPTION RULES
 - Names of people, rabbis, books, places and institutions: write exactly as heard, even if unfamiliar. Never replace a name with a better-known one.
 - Torah, Talmudic and Aramaic terms and acronyms (ראשי תיבות): use the standard Hebrew spelling (e.g. רש"י, הקב"ה, זצ"ל).
 - Ashkenazi / Hasidic pronunciation ("בוריך אתוה", "תוירה", "שבס") must be written in standard Hebrew spelling ("ברוך אתה", "תורה", "שבת").
-- If a word is truly unintelligible, write your best guess; do not add notes like [לא ברור].
+- If a single word is unclear, write your best guess for that word. But if a whole phrase or sentence cannot be
+  heard (bad line, crosstalk, noise), write [לא ברור] once in its place. NEVER invent or "complete" sentences that
+  you did not clearly hear, and never write content that fits the topic but was not said.
 - Silence, music or background noise: write nothing for it.
 
 FORMATTING
@@ -104,6 +106,69 @@ _LAT = re.compile(r'[A-Za-z]')
 def latin_ratio(text):
     h, l = len(_HEB.findall(text or '')), len(_LAT.findall(text or ''))
     return l / max(1, h + l)
+
+
+# ------------------------------------------------------------------ "המודל חשב בקול"
+# קרה בתמלול אמיתי: המודל כתב לתוך התמלול את המחשבות שלו באנגלית ("The user wants a precise...",
+# "Key guidelines", "Let's do a refined listen"), טיוטות עם זמנים ("- 0:28: "...") שחזרו 2-3 פעמים,
+# ובסוף את התמלול הסופי. strip_model_leak משאירה רק את התמלול.
+_LEAK_LINE_RE = re.compile(r'^\s*(?:[-*•]\s*)?\d{1,2}:\d{2}(?::\d{2})?\s*[:\-–]\s*')
+_LEAK_WORDS_RE = re.compile(r'\b(?:the user|transcription|transcript|guidelines|audio|let\'s|verbatim|hebrew|'
+                            r'constraints|double-check|listen|analysis|segment|refined)\b', re.I)
+
+
+def _latin_share(line):
+    lat = len(re.findall(r'[A-Za-z]', line))
+    heb = len(re.findall(r'[\u05d0-\u05ea]', line))
+    return lat / max(1, lat + heb), lat
+
+
+def _is_leak_line(line):
+    if _LEAK_LINE_RE.match(line):
+        return True
+    share, lat = _latin_share(line)
+    if lat >= 12 and share > 0.5 and _LEAK_WORDS_RE.search(line):
+        return True
+    head = re.match(r'[^\u05d0-\u05ea]*', line).group(0)          # משפט באנגלית שהתמלול הודבק אחריו
+    return len(re.findall(r'[A-Za-z]', head)) >= 25 and bool(_LEAK_WORDS_RE.search(head))
+
+
+def strip_model_leak(text, output_language='he'):
+    """מסיר "מחשבות" של המודל שדלפו לתמלול. בלי דליפה - מחזיר את הטקסט כמו שהוא."""
+    if not text or output_language not in ('he', 'yi', 'original'):
+        return text
+    lines = text.split('\n')
+    leak = [i for i, l in enumerate(lines) if _is_leak_line(l)]
+    if not leak:
+        return text
+    heb = lambda t: len(re.findall(r'[\u05d0-\u05ea]', t))
+    last = lines[leak[-1]]
+    # "...according to all constraints.להראות להם" - התמלול הסופי מודבק לשורה האנגלית האחרונה
+    m = re.search(r'[.!:]\s*(?=[\u05d0-\u05ea])', last) if not _LEAK_LINE_RE.match(last) else None
+    tail = ([last[m.end():]] if m else []) + lines[leak[-1] + 1:]
+    final = '\n'.join(tail).strip()
+    if heb(final) >= 0.25 * heb(text) and not any(_is_leak_line(l) for l in tail):
+        out = final
+    else:
+        kept = []
+        for l in lines:
+            if _LEAK_LINE_RE.match(l):
+                l = _LEAK_LINE_RE.sub('', l).strip().strip('"\'')
+            elif _is_leak_line(l):
+                continue
+            kept.append(l)
+        out = '\n'.join(kept)
+    # טיוטות שחזרו: משפט ארוך שמופיע שוב - נשאר רק הראשון
+    seen, res = set(), []
+    for sent in re.split(r'(?<=[.?!])(\s+)', out):
+        key = sent.strip()
+        if len(key) >= 40 and key in seen:
+            continue
+        if len(key) >= 40:
+            seen.add(key)
+        res.append(sent)
+    out = re.sub(r'\n{3,}', '\n\n', ''.join(res)).strip()
+    return out
 
 
 def problems(text, language, output_language, seconds):
@@ -347,6 +412,9 @@ def transcribe_dedicated(client, chunk_bytes, mime_type, language, output_langua
         text = (getattr(res, 'output_text', None) or '').strip()
         if not text:
             raise RuntimeError('empty transcript')
+        bad = [p for p in problems(text, language, 'original', 0) if p != 'short_lines']
+        if bad:
+            raise RuntimeError(f'dedicated model output rejected: {bad}')   # הקורא עובר ל-v2
         return reflow(text)
     finally:
         try:
