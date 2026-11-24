@@ -23,3 +23,5 @@ pymupdf
 mutagen
 Pillow
 onnxruntime
+yt-dlp[default]
+cloudscraper

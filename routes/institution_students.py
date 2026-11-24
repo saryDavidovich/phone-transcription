@@ -739,7 +739,7 @@ def upload_for_student(student_id):
         file.save(local_path)
         name = file.filename
     else:
-        name = 'קישור Drive' if PM.link_kind(link) == 'drive' else "קישור ג'מבו מייל"
+        name = PM.link_name(link)
     name = (request.form.get('title') or '').strip()[:200] or name
 
     tier = 'premium' if request.form.get('tier') == 'premium' else 'gemini'

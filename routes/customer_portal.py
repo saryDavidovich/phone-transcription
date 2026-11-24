@@ -663,7 +663,7 @@ def transcribe_upload():
         file.save(local_path)
         name = file.filename
     else:
-        name = 'קישור Drive' if PM.link_kind(link) == 'drive' else "קישור ג'מבו מייל"
+        name = PM.link_name(link)
     name = (request.form.get('title') or '').strip()[:200] or name[:200]
     tier = 'premium' if request.form.get('tier') == 'premium' else 'gemini'
     language = request.form.get('language') if request.form.get('language') in ('he', 'yi', 'en') else 'he'

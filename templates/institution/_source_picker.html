@@ -1,4 +1,4 @@
-{# בחירת מקור לתמלול: קובץ / הקלטה ישירה מהמיקרופון / קישור Drive או ג'מבו מייל.
+{# בחירת מקור לתמלול: קובץ / הקלטה ישירה מהמיקרופון / קישור (יוטיוב, קול הלשון, Drive, ג'מבו מייל).
    שימוש: {% set sp_id = 'sp' %}{% include "institution/_source_picker.html" %}
    ובסקריפט: var picker = SrcPicker(document.getElementById('sp')); picker.items() -> [{label, fill(fd)}] #}
 {% from "institution/_icons.html" import ic %}
@@ -75,7 +75,7 @@
   <div class="src-pane" data-pane="link">
     <div class="field link-box" style="margin-bottom:6px;">
       <textarea class="input" data-links placeholder="https://drive.google.com/file/d/...&#10;https://jmb.co/..."></textarea>
-      <div class="hint">מדביקים קישור שיתוף של Google Drive או של ג'מבו מייל (כמה קישורים - כל אחד בשורה). הקובץ יורד ישירות אצלנו, בלי להוריד אותו למחשב. ב-Drive: לוודא שהשיתוף הוא "כל מי שיש לו את הקישור".</div>
+      <div class="hint">מדביקים קישור לסרטון ביוטיוב, לשיעור בקול הלשון, או קישור שיתוף של Google Drive / ג'מבו מייל (כמה קישורים - כל אחד בשורה). הקובץ יורד ישירות אצלנו, בלי להוריד אותו למחשב. ב-Drive: לוודא שהשיתוף הוא "כל מי שיש לו את הקישור".</div>
       <div class="link-chips" data-chips></div>
     </div>
   </div>
@@ -154,9 +154,12 @@ window.SrcPicker = window.SrcPicker || function (root) {
 
   /* --- קישורים --- */
   var linksIn = root.querySelector('[data-links]'), chipsEl = root.querySelector('[data-chips]');
+  var LK = { drive: 'Google Drive', jumbo: 'ג\'מבו מייל', youtube: 'יוטיוב', kolhalashon: 'קול הלשון' };
   function parseLinks() {
     return linksIn.value.split(/\s+/).map(function (s) { return s.trim(); }).filter(Boolean).map(function (u) {
-      var kind = /drive\.google\.com|docs\.google\.com/.test(u) ? 'drive' : (/jumbomail|jmb\.|jumbo/i.test(u) ? 'jumbo' : null);
+      var kind = /(youtube\.com\/(watch|shorts\/|live\/|embed\/)|youtu\.be\/)/i.test(u) ? 'youtube' :
+        (/kolhalashon\.com\//i.test(u) ? 'kolhalashon' :
+        (/drive\.google\.com|docs\.google\.com/.test(u) ? 'drive' : (/jumbomail|jmb\.|jumbo/i.test(u) ? 'jumbo' : null)));
       return { url: u, kind: /^https?:\/\//i.test(u) ? kind : null };
     });
   }
@@ -164,7 +167,7 @@ window.SrcPicker = window.SrcPicker || function (root) {
     var ls = parseLinks();
     chipsEl.innerHTML = ls.map(function (l) {
       return '<div class="link-chip ' + (l.kind ? 'ok' : 'bad') + '">' + (l.kind ? IC.check : IC.alert) + '<b>' +
-        (l.kind === 'drive' ? 'Google Drive' : l.kind === 'jumbo' ? 'ג\'מבו מייל' : 'קישור לא נתמך') + '</b><span>' + escHtml(l.url) + '</span></div>';
+        (LK[l.kind] || 'קישור לא נתמך') + '</b><span>' + escHtml(l.url) + '</span></div>';
     }).join('');
     if (root.onchange) root.onchange();
   }
@@ -175,7 +178,7 @@ window.SrcPicker = window.SrcPicker || function (root) {
     error: function () {
       if (mode === 'file' && !fileIn.files.length) return 'יש לבחור קובץ';
       if (mode === 'record') { if (rec && rec.state !== 'inactive') return 'יש לסיים את ההקלטה (הריבוע השחור)'; if (!blob) return 'עדיין לא הוקלט כלום'; }
-      if (mode === 'link') { var l = parseLinks(); if (!l.length) return 'יש להדביק קישור'; if (l.some(function (x) { return !x.kind; })) return 'יש קישור שאינו מ-Drive או מג\'מבו מייל'; }
+      if (mode === 'link') { var l = parseLinks(); if (!l.length) return 'יש להדביק קישור'; if (l.some(function (x) { return !x.kind; })) return 'יש קישור לא נתמך (נתמכים: יוטיוב, קול הלשון, Drive, ג\'מבו מייל)'; }
       return '';
     },
     items: function () {
@@ -185,7 +188,7 @@ window.SrcPicker = window.SrcPicker || function (root) {
         var name = (title || ('הקלטה ' + d.getDate() + '.' + (d.getMonth() + 1) + ' ' + d.getHours() + ':' + String(d.getMinutes()).padStart(2, '0'))) + '.' + ext;
         return [{ label: title || 'הקלטה ישירה', fill: function (fd) { fd.append('audio_file', blob, name); fd.append('source', 'record'); if (title) fd.append('title', title); } }];
       }
-      return parseLinks().map(function (l) { return { label: l.kind === 'drive' ? 'קישור Drive' : 'קישור ג\'מבו מייל', fill: function (fd) { fd.append('link', l.url); } }; });
+      return parseLinks().map(function (l) { return { label: 'קישור ' + (LK[l.kind] || ''), fill: function (fd) { fd.append('link', l.url); } }; });
     },
     reset: function () {
       fileIn.value = ''; dzName.innerHTML = '';

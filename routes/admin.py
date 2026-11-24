@@ -2875,6 +2875,13 @@ def transcribe_compare():
             f.save(os.path.join(static_dir, fn))
             rec_url = f"{os.environ.get('APP_BASE_URL', '').rstrip('/')}/static/fax_tmp/{fn}"
             name = f.filename[:200]
+        elif (request.form.get('link') or '').strip():
+            from services import portal_media as PM
+            link = request.form.get('link').strip()
+            if not PM.link_kind(link):
+                flash(PM.LINK_HELP)
+                return redirect(url_for('admin.transcribe_compare'))
+            rec_url, name = 'link:' + link, PM.link_name(link)       # ההורדה עצמה - ברקע (_run_compare)
         elif rid.isdigit():
             rec = Recording.query.get(int(rid))
             if rec and rec.rec_url:
@@ -2893,7 +2900,8 @@ def transcribe_compare():
         if opts['alef'] and not job.alef_text:
             job.alef_status = 'running'
             db.session.commit()
-            threading.Thread(target=_run_compare_alef, args=(job.id,), daemon=True).start()
+            if not job.rec_url.startswith('link:'):          # קישור: אלף בוט מתחיל אחרי ההורדה
+                threading.Thread(target=_run_compare_alef, args=(job.id,), daemon=True).start()
         threading.Thread(target=_run_compare, args=(job.id,), daemon=True).start()
         return redirect(url_for('admin.transcribe_compare_view', job_id=job.id))
     jobs = TranscribeCompare.query.order_by(TranscribeCompare.id.desc()).limit(20).all()
@@ -3086,6 +3094,22 @@ def _run_compare(job_id):
         from services.transcribe import _gemini_from_url
         from services import transcribe_v3 as TV3
         job = TranscribeCompare.query.get(job_id)
+        if (job.rec_url or '').startswith('link:'):          # יוטיוב / קול הלשון / Drive / ג'מבו
+            from services import portal_media as PM
+            try:
+                static_dir = os.path.join(os.path.dirname(__file__), '..', 'static', 'fax_tmp')
+                path, real = PM.fetch_link(job.rec_url[5:], static_dir)
+                job.rec_url = f"{os.environ.get('APP_BASE_URL', '').rstrip('/')}/static/fax_tmp/{os.path.basename(path)}"
+                job.name = f'{job.name} - {real}'[:200]
+                db.session.commit()
+            except Exception as e:
+                job.status, job.error = 'error', f'הורדת הקישור נכשלה: {e}'[:500]
+                if job.alef_status == 'running':
+                    job.alef_status = 'error'
+                db.session.commit()
+                return
+            if job.alef_status == 'running':
+                threading.Thread(target=_run_compare_alef, args=(job.id,), daemon=True).start()
         if not job.recording_id and '/static/fax_tmp/' in (job.rec_url or ''):
             try:                                   # עותק לנגן בימות
                 from services import portal_media as PM

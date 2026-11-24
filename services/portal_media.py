@@ -146,7 +146,13 @@ def remove_quietly(path):
 
 
 # ---------------------------------------------------------------- קישורים
-LINK_HELP = 'יש להדביק קישור שיתוף של Google Drive או של ג\'מבו מייל'
+LINK_HELP = 'יש להדביק קישור מיוטיוב, מקול הלשון, או קישור שיתוף של Google Drive / ג\'מבו מייל'
+LINK_NAMES = {'drive': 'קישור Drive', 'jumbo': "קישור ג'מבו מייל", 'youtube': 'קישור יוטיוב',
+              'kolhalashon': 'קישור קול הלשון'}
+
+
+def link_name(url):
+    return LINK_NAMES.get(link_kind(url) or '', 'קישור')
 
 
 def link_kind(url):
@@ -154,6 +160,9 @@ def link_kind(url):
     url = (url or '').strip()
     if not url.lower().startswith(('http://', 'https://')):
         return None
+    from services import link_sources as LS
+    if LS.kind(url):
+        return LS.kind(url)
     if _extract_gdrive_file_id(url):
         return 'drive'
     if _jumbo_find_link(url) or 'jumbomail' in url.lower() or 'jmb.' in url.lower():
@@ -162,7 +171,7 @@ def link_kind(url):
 
 
 def fetch_link(url, dest_dir):
-    """מוריד קובץ שמע/וידאו מקישור Drive / ג'מבו לתיקייה. מחזיר (path, original_name).
+    """מוריד קובץ שמע/וידאו מקישור Drive / ג'מבו / יוטיוב / קול הלשון לתיקייה. מחזיר (path, original_name).
     זורק ValueError עם הודעה בעברית בכשלון."""
     from routes import email_inbound as E
     os.makedirs(dest_dir, exist_ok=True)
@@ -186,6 +195,9 @@ def fetch_link(url, dest_dir):
         path, name, _dest = E._download_jumbo_file(info, fid, fname, dest_dir)
         if not path:
             raise ValueError('ההורדה מג\'מבו נכשלה - נסו שוב בעוד רגע')
+    elif kind in ('youtube', 'kolhalashon'):
+        from services import link_sources as LS
+        path, name = LS.fetch(url, dest_dir)
     else:
         raise ValueError(LINK_HELP)
     ext = os.path.splitext(path)[1].lstrip('.').lower()

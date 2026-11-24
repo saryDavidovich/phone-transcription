@@ -61,7 +61,7 @@ def upload():
         source = 'record' if request.form.get('source') == 'record' else 'file'
         name = file.filename
     else:
-        source, name = 'link', ('קישור Drive' if PM.link_kind(link) == 'drive' else "קישור ג'מבו מייל")
+        source, name = 'link', PM.link_name(link)
 
     record = InstitutionUpload(
         institution_id=current_user.id,

@@ -13,5 +13,6 @@
 # זו הייתה הסיבה לשלוש הפריסות שנכשלו ברצף. אם ffmpeg בכל זאת חסר בזמן
 # ריצה, pydub נכשל בשקט (יש טיפול בזה בקוד) והקובץ יישאר WAV בפועל -
 # אבל אין להוסיף כאן שוב חבילת ffmpeg מפורשת, כדי לא לשחזר את ההתנגשות.
+# nodejs_22: yt-dlp צריך מנוע JS כדי לפתור את האתגרים של יוטיוב (services/link_sources.py).
 [phases.setup]
-nixPkgs = ['...', 'libreoffice-fresh']
+nixPkgs = ['...', 'libreoffice-fresh', 'nodejs_22']
