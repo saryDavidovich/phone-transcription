@@ -1993,6 +1993,7 @@ def transcribe_engine_save():
         set_setting('transcribe_v3_slow', '1' if request.form.get('v3_slow') == '1' else '0')
         set_setting('transcribe_v3_clean', '1' if request.form.get('v3_clean') == '1' else '0')
         set_setting('transcribe_v3_brief', '1' if request.form.get('v3_brief') == '1' else '0')
+        set_setting('vad_enabled', '1' if request.form.get('vad_enabled') == '1' else '0')
     flash('✔ מנוע התמלול נשמר - חל מהתמלול הבא')
     return redirect(url_for('admin.settings') + '#engine')
 
@@ -2209,6 +2210,7 @@ def settings():
               'v3_slow': get_setting('transcribe_v3_slow', '0') == '1',
               'v3_clean': get_setting('transcribe_v3_clean', '0') == '1',
               'v3_brief': get_setting('transcribe_v3_brief', '1') != '0',
+              'vad': get_setting('vad_enabled', '1') != '0',
               'signup': get_setting('customer_signup_on', '0') == '1',
               'phone_link': get_setting('phone_link_ivr_on', '0') == '1',
               'auto_topup': get_setting('auto_topup_on', '0') == '1',
@@ -2996,7 +2998,10 @@ def compare_bundle(job, limit=None):
     for r in job.report or []:
         if not isinstance(r, dict):
             continue
-        if r.get('briefing'):
+        if r.get('vad'):
+            v = r['vad']
+            L.append(f"זיהוי דיבור: {v.get('speech')} שנ׳ דיבור מתוך {v.get('total')}, {v.get('chunks')} חלקים")
+        elif r.get('briefing'):
             L += ['## תדריך', _j.dumps(r['briefing'], ensure_ascii=False, indent=1),
                   'מקורות שנמצאו בספריא: ' + ' | '.join(r.get('brief_sources') or []), '']
         elif r.get('chunk'):

@@ -92,6 +92,9 @@
   {% else %}{% if o.brief and job.status != 'running' and job.v3_text %}<div style="font-size:12.5px;color:#92400e;margin-bottom:10px">⚠ התדריך לא נוצר (ההאזנה המקדימה נכשלה) - v3 רץ בלעדיו.</div>{% endif %}
   {% endfor %}
 
+  {% for vi in rep|selectattr('vad', 'defined')|list %}{% set v = vi.vad %}
+  <div style="font-size:13px;margin-bottom:8px">🔊 זיהוי דיבור: {{ v.speech }} שנ׳ דיבור מתוך {{ v.total }} ({{ (100 * v.speech / (v.total or 1))|round|int }}%) · {{ v.chunks }} חלקים · נשלח למודל רק הדיבור</div>
+  {% endfor %}
   {% if chunks %}
   <table class="cmp-tbl" style="margin-bottom:14px">
     <thead><tr><th>קטע</th><th>מסלול</th><th>מקורות שנמצאו</th><th>ציטוטים תוקנו</th><th>מודל</th><th>תווים</th><th>זמן</th></tr></thead>
@@ -176,7 +179,8 @@
     var L=['### השוואת תמלול #'+DATA.id+' - '+(DATA.name||''),'שפה: '+DATA.language+' | מסלול כפוי: '+(DATA.route||'אוטומטי')+' | אפשרויות v3: '+JSON.stringify(DATA.options||{}),
            'זמן: v2 '+(DATA.v2_seconds||'?')+' שנ׳, v3 '+(DATA.v3_seconds||'?')+' שנ׳',''];
     (DATA.report||[]).forEach(function(r){
-      if(r.briefing){L.push('## תדריך');L.push(JSON.stringify(r.briefing,null,1));L.push('מקורות שנמצאו בספריא: '+(r.brief_sources||[]).join(' | '));L.push('')}
+      if(r.vad){L.push('זיהוי דיבור: '+r.vad.speech+' שנ׳ דיבור מתוך '+r.vad.total+', '+r.vad.chunks+' חלקים')}
+      else if(r.briefing){L.push('## תדריך');L.push(JSON.stringify(r.briefing,null,1));L.push('מקורות שנמצאו בספריא: '+(r.brief_sources||[]).join(' | '));L.push('')}
       else if(r.chunk){L.push('קטע '+r.chunk+': מסלול='+r.route+(r.by_brief?' (לפי התדריך)':'')+' מודל='+(r.model||'')+(r.slow?' +מואט':'')+(r.fallback?' נפל ל-Flash: '+(r.error||''):'')+' מקורות='+(r.refs||[]).join(' | ')+' תוקן='+(r.fixed?'כן':'לא')+' תווים='+(r.chars||'')+(r.resplit?' (חולק מחדש)':'')+' זמן='+r.seconds)}});
     if(DATA.analysis){L.push('','## ניתוח אוטומטי');L.push(JSON.stringify(DATA.analysis,null,1))}
     L.push('','## תמלול v2',cut(DATA.v2,25000),'','## תמלול v3',cut(DATA.v3,25000));

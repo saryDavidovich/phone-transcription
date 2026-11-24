@@ -183,8 +183,8 @@ def problems(text, language, output_language, seconds):
         out.append('meta')
     if sum(1 for l in text.split('\n') if _TS_LINE_RE.match(l)) >= 3:
         out.append('timestamps')
-    if seconds and len(text) > max(2500, seconds * 38):
-        out.append('too_long')
+    if seconds and len(text) > max(600, seconds * MAX_CHARS_PER_SEC):
+        out.append('too_long')                  # יותר טקסט ממה שאפשר להגיד בזמן הזה = כנראה הומצא
     lines = [l for l in text.split('\n') if l.strip()]
     if len(lines) >= 12 and sorted(len(l) for l in lines)[len(lines) // 2] < 60:
         out.append('short_lines')
@@ -285,6 +285,7 @@ SLOW_COPY_NOTE = (
 # פחות מ-MIN_CHARS_PER_SEC תווים לשנייה בחלק של דקה וחצי ומעלה = כנראה נעצר. אז מתמללים
 # את אותו חלק מחדש בחתיכות של דקה ומחברים; נשאר הארוך מבין השניים (שקט אמיתי - לא מפסידים כלום).
 MIN_CHARS_PER_SEC = 3.0
+MAX_CHARS_PER_SEC = 28.0           # דיבור מהיר מאוד בעברית ~18 תווים לשנייה
 RESPLIT_SECONDS = 60
 resplit_used = contextvars.ContextVar('transcribe_v2_resplit', default=False)
 
@@ -323,12 +324,13 @@ def transcribe_chunk(client, gtypes, chunk_bytes, mime_type, language, output_la
     resplit_used.set(False)
     text = _transcribe_once(client, gtypes, chunk_bytes, mime_type, language, output_language, prev_tail,
                             chunk_num, n_chunks, seconds, model, extra_rules, context, extra_audio, thinking)
-    if not looks_cut(text, seconds) or mime_type not in ('audio/wav', 'audio/x-wav'):
+    too_long = bool(seconds and text and len(text) > max(600, seconds * MAX_CHARS_PER_SEC))
+    if not (looks_cut(text, seconds) or too_long) or mime_type not in ('audio/wav', 'audio/x-wav'):
         return text
     pieces = wav_pieces(chunk_bytes, RESPLIT_SECONDS)
     if len(pieces) < 2:
         return text
-    log.warning(f'transcribe_v2: chunk {chunk_num} looks cut ({len(text or "")} chars / {seconds}s) - '
+    log.warning(f'transcribe_v2: chunk {chunk_num} {"too long" if too_long else "looks cut"} ({len(text or "")} chars / {seconds}s) - '
                 f're-transcribing in {len(pieces)} pieces of {RESPLIT_SECONDS}s')
     parts, tail = [], prev_tail
     for i, (pb, psec) in enumerate(pieces):
@@ -342,6 +344,14 @@ def transcribe_chunk(client, gtypes, chunk_bytes, mime_type, language, output_la
             parts.append(t.strip())
             tail = t[-300:]
     joined = '\n\n'.join(parts)
+    if too_long:
+        # "הזיה": נשאר הקצר מבין השניים (מה שבאמת נשמע בחתיכות הקטנות)
+        if joined and len(joined) < len(text) * 0.8:
+            resplit_used.set(True)
+            log.warning(f'transcribe_v2: chunk {chunk_num} too long ({len(text)} chars / {seconds}s) -> '
+                        f'{len(joined)} chars after re-split')
+            return joined
+        return text
     if len(joined) > len(text or '') * 1.2:
         resplit_used.set(True)
         log.info(f'transcribe_v2: chunk {chunk_num} re-split: {len(text or "")} -> {len(joined)} chars')

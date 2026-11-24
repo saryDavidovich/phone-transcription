@@ -1192,11 +1192,35 @@ def _gemini_from_url(url, language='he', output_language='he'):
             except Exception as _pe:
                 log.warning(f"v3 prepare failed: {_pe}")
 
+        # זיהוי דיבור (services/vad.py): שולחים ל-Gemini רק את הדיבור, בחלקים שנחתכים בהפסקות.
+        # שקט ורעש לא מגיעים למודל - אין לו ממה להמציא. כשל / כבוי - החיתוך הרגיל כל 5 דקות.
+        vad_seconds = None
+        if prepared and mime_type == 'audio/wav':
+            from services import vad as VAD
+            _plan = VAD.plan_for(prepared[0], CHUNK_SECONDS)
+            if _plan:
+                _p, _speech, _total = _plan
+                try:
+                    from services.transcribe_v3 import _report as _rep_var
+                    _rep = _rep_var.get()
+                    if isinstance(_rep, list):
+                        _rep.append({'vad': {'speech': round(_speech), 'total': round(_total), 'chunks': len(_p)}})
+                except Exception:
+                    pass
+                if _speech < 1.0:
+                    log.warning(f"vad: no speech in {_total:.0f}s - not sent to the model")
+                    return '[לא נמצא דיבור בהקלטה]', actual_duration or _total, False
+                chunks = VAD.iter_speech_chunks(prepared[0], _p)
+                n_chunks = len(_p)
+                vad_seconds = [max(1, int(VAD.chunk_seconds(c))) for c in _p]
+                log.info(f"vad: {_speech:.0f}s speech of {_total:.0f}s -> {n_chunks} chunks")
+
         transcript_parts = []
         prev_tail = ''
         for i, chunk_bytes in enumerate(chunks):
             chunk_num = i + 1
-            seconds = max(1, min(CHUNK_SECONDS, (actual_duration or CHUNK_SECONDS * n_chunks) - i * CHUNK_SECONDS))
+            seconds = vad_seconds[i] if vad_seconds else \
+                max(1, min(CHUNK_SECONDS, (actual_duration or CHUNK_SECONDS * n_chunks) - i * CHUNK_SECONDS))
             log.info(f"Transcribing chunk {chunk_num}/{n_chunks} ({len(chunk_bytes)} bytes)")
             chunk_transcript = None
             for attempt in range(5):
