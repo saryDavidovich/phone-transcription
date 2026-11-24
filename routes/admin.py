@@ -1881,6 +1881,16 @@ def recording_listen(id):
     return redirect(target, code=302)
 
 
+@admin_bp.route('/recordings/<int:id>/text')
+@login_required
+def recording_text(id):
+    """התמלול והסיכום - נטענים רק בלחיצה בכרטיס ההקלטה (לא חלק מה-HTML של הדף)."""
+    rec = Recording.query.get_or_404(id)
+    resp = jsonify({'transcript': rec.transcript or '', 'summary': rec.summary or ''})
+    resp.headers['Cache-Control'] = 'no-store'
+    return resp
+
+
 @admin_bp.route('/recordings/live')
 @login_required
 def recordings_live():
