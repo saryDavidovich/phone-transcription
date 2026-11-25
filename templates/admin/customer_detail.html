@@ -589,12 +589,13 @@ function confirmOcrDelete() {
         <option value="file">📁 העלאת קובץ</option>
         <option value="link">🔗 קישור</option>
       </select></div>
-    <div id="mtLink" style="display:none"><label class="form-label" style="margin:0 0 4px">קישור</label>
-      <input class="form-input" name="link" placeholder="יוטיוב / קול הלשון / Drive / ג'מבו" style="width:300px" dir="ltr"></div>
+    <div id="mtLink" style="display:none"><label class="form-label" style="margin:0 0 4px">קישורים (כל אחד בשורה)</label>
+      <textarea class="form-input" name="link" rows="2" placeholder="יוטיוב / קול הלשון / Drive / ג'מבו - כמה קישורים: כל אחד בשורה" style="width:340px" dir="ltr"></textarea></div>
     <div id="mtYemot"><label class="form-label" style="margin:0 0 4px">מספר הקלטה בימות</label>
       <input class="form-input" name="yemot_path" placeholder="1507 או /recordings/1507.wav" style="width:220px" dir="ltr"></div>
-    <div id="mtFile" style="display:none"><label class="form-label" style="margin:0 0 4px">קובץ שמע/וידאו</label>
-      <input class="form-input" type="file" name="audio_file" accept="audio/*,video/*" style="width:260px"></div>
+    <div id="mtFile" style="display:none"><label class="form-label" style="margin:0 0 4px">קבצי שמע/וידאו (אפשר כמה)</label>
+      <input class="form-input" type="file" name="audio_file" accept="audio/*,video/*" multiple style="width:260px"
+             title="אפשר לבחור כמה קבצים יחד (Ctrl) - כל קובץ הוא הקלטה נפרדת"></div>
     <div><label class="form-label" style="margin:0 0 4px">סוג תמלול</label>
       <select class="form-input" name="tier" style="width:130px">
         <option value="regular">רגיל</option>

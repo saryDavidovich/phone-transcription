@@ -1720,39 +1720,76 @@ def customer_manual_transcribe(id):
         duration = info
         source_filename = f'ימות {path}'
     elif source == 'file':
+        # כמה קבצים יחד - כל קובץ הוא הקלטה נפרדת בכרטיס (תמלול, חיוב ושליחה לכל אחד)
         from routes.email_inbound import RECORDINGS_EMAIL_DIR, AUDIO_VIDEO_EXTENSIONS, _estimate_duration_seconds
-        f = request.files.get('audio_file')
-        if not f or not f.filename:
+        files = [f for f in request.files.getlist('audio_file') if f and f.filename]
+        if not files:
             flash('לא נבחר קובץ')
             return back
-        ext = os.path.splitext(f.filename)[1].lstrip('.').lower()
-        if ext not in AUDIO_VIDEO_EXTENSIONS:
-            flash(f'סוג קובץ לא נתמך ({ext or "ללא סיומת"}) - יש להעלות קובץ שמע/וידאו')
+        bad = [f.filename for f in files if os.path.splitext(f.filename)[1].lstrip('.').lower() not in AUDIO_VIDEO_EXTENSIONS]
+        if bad:
+            flash('סוג קובץ לא נתמך - יש להעלות קובצי שמע/וידאו בלבד: ' + ', '.join(bad[:5]))
+            return back
+        if len(files) > 30:
+            flash('אפשר להעלות עד 30 קבצים בבת אחת')
             return back
         os.makedirs(RECORDINGS_EMAIL_DIR, exist_ok=True)
-        filename = f'{uuid.uuid4().hex}.{ext}'
-        filepath = os.path.join(RECORDINGS_EMAIL_DIR, filename)
-        f.save(filepath)
-        if os.path.getsize(filepath) <= 150 * 1024 * 1024:   # גיבוי ב-DB - הדיסק נמחק בכל דיפלוי
-            with open(filepath, 'rb') as fh:
-                file_backup = fh.read()
-        rec_url = f"{os.environ.get('APP_BASE_URL', '').rstrip('/')}/api/recordings-email/{filename}"
-        duration = _estimate_duration_seconds(filepath) or 0
-        source_filename = f.filename
+        maintenance_on = get_setting('maintenance_mode', '0') == '1'
+        made = []
+        for f in files:
+            ext = os.path.splitext(f.filename)[1].lstrip('.').lower()
+            filename = f'{uuid.uuid4().hex}.{ext}'
+            filepath = os.path.join(RECORDINGS_EMAIL_DIR, filename)
+            f.save(filepath)
+            backup = None
+            if os.path.getsize(filepath) <= 150 * 1024 * 1024:   # גיבוי ב-DB - הדיסק נמחק בכל דיפלוי
+                with open(filepath, 'rb') as fh:
+                    backup = fh.read()
+            rec_url = f"{os.environ.get('APP_BASE_URL', '').rstrip('/')}/api/recordings-email/{filename}"
+            duration = _estimate_duration_seconds(filepath) or 0
+            rec = Recording(customer_id=customer.id, call_id=f'manual-{uuid.uuid4().hex[:12]}', duration_seconds=duration,
+                            status='queued_maintenance' if maintenance_on else 'processing',
+                            delivery_method=method, delivered_to=target, rec_url=rec_url,
+                            source_filename=f.filename[:255], transcription_tier=tier,
+                            language='he', output_language='he', file_data=backup)
+            db.session.add(rec)
+            db.session.commit()
+            made.append(rec.id)
+            if not maintenance_on:
+                transcribe_async(call_id=rec.call_id, rec_url=rec_url, customer_id=customer.id,
+                                 delivery_method=method, delivered_to=target, duration_seconds=duration,
+                                 transcription_tier=tier, language='he', output_language='he')
+        label = 'מקצועי' if tier == 'premium' else 'רגיל'
+        ids = ', '.join(f'#{x}' for x in made)
+        flash(f'מצב תחזוקה דלוק - {len(made)} הקלטות ({ids}) ייכנסו לתמלול {label} כשיכבה' if maintenance_on else
+              f'✔ {len(made)} הקלטות ({ids}) נשלחו לתמלול {label} - כל אחת תחויב ותישלח ל-{target} בסיום')
+        return back
     elif source == 'link':
         from services import portal_media as PM
-        link = (request.form.get('link') or '').strip()
-        if not PM.link_kind(link):
+        links = [x for x in re.split(r'\s+', request.form.get('link') or '') if x.strip()]
+        if not links:
             flash(PM.LINK_HELP)
             return back
-        rec = Recording(customer_id=customer.id, call_id=f'manual-{uuid.uuid4().hex[:12]}', duration_seconds=0,
-                        status='processing', delivery_method=method, delivered_to=target, rec_url='',
-                        source_filename=PM.link_name(link), transcription_tier=tier, language='he', output_language='he')
-        db.session.add(rec)
-        db.session.commit()
-        threading.Thread(target=_manual_link_transcribe, args=(rec.id, link), daemon=True).start()
-        flash(f'✔ הקלטה #{rec.id}: מורידים את הקישור ושולחים לתמלול {"מקצועי" if tier == "premium" else "רגיל"} - '
-              f'תחויב ותישלח ל-{target} בסיום')
+        bad = [x for x in links if not PM.link_kind(x)]
+        if bad:
+            flash(PM.LINK_HELP + ' - קישור לא נתמך: ' + bad[0][:120])
+            return back
+        if len(links) > 30:
+            flash('אפשר עד 30 קישורים בבת אחת')
+            return back
+        made = []
+        for link in links:
+            rec = Recording(customer_id=customer.id, call_id=f'manual-{uuid.uuid4().hex[:12]}', duration_seconds=0,
+                            status='processing', delivery_method=method, delivered_to=target, rec_url='',
+                            source_filename=PM.link_name(link), transcription_tier=tier, language='he',
+                            output_language='he')
+            db.session.add(rec)
+            db.session.commit()
+            made.append(rec.id)
+            threading.Thread(target=_manual_link_transcribe, args=(rec.id, link), daemon=True).start()
+        ids = ', '.join(f'#{x}' for x in made)
+        flash(f'✔ {len(made)} הקלטות ({ids}): מורידים את הקישורים ושולחים לתמלול '
+              f'{"מקצועי" if tier == "premium" else "רגיל"} - כל אחת תחויב ותישלח ל-{target} בסיום')
         return back
     else:
         flash('יש לבחור מקור: העלאת קובץ, קישור או משיכה מימות')
