@@ -576,10 +576,10 @@ function confirmOcrDelete() {
 {% endif %}
 </details>
 
-<details class="cd-sec" data-sec="manual"><summary>🔁 תמלול חוזר / הוספת הקלטה ידנית</summary>
+<details class="cd-sec" data-sec="manual"><summary>🔁 תמלול חוזר / הוספת הקלטה ידנית / מקישור</summary>
 <div style="margin-top:20px" class="card" id="manual-transcribe">
   <div style="font-weight:700;margin-bottom:4px">🔁 תמלול חוזר / הוספת הקלטה ידנית</div>
-  <div style="font-size:12px;color:var(--text2);margin-bottom:12px">להקלטה שנתקעה או לא הגיעה: מעלים קובץ, או מושכים מימות לפי מספר ההקלטה (למשל 1507 = /recordings/1507.wav). נוצרת הקלטה חדשה בכרטיס, והיא מתומללת, מחויבת ונשלחת כרגיל.</div>
+  <div style="font-size:12px;color:var(--text2);margin-bottom:12px">להקלטה שנתקעה או לא הגיעה: מעלים קובץ, מדביקים קישור (יוטיוב, קול הלשון, Drive, ג'מבו), או מושכים מימות לפי מספר ההקלטה (למשל 1507 = /recordings/1507.wav). נוצרת הקלטה חדשה בכרטיס, והיא מתומללת, מחויבת ונשלחת כרגיל.</div>
   <form method="POST" action="{{ url_for('admin.customer_manual_transcribe', id=customer.id) }}" enctype="multipart/form-data"
         style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap"
         onsubmit="var b=this.querySelector('button[type=submit]');setTimeout(function(){b.disabled=true;b.textContent='⏳ שולח...'},0);return true">
@@ -587,7 +587,10 @@ function confirmOcrDelete() {
       <select class="form-input" name="source" style="width:170px" onchange="mtSrc(this.value)">
         <option value="yemot">📞 משיכה מימות</option>
         <option value="file">📁 העלאת קובץ</option>
+        <option value="link">🔗 קישור</option>
       </select></div>
+    <div id="mtLink" style="display:none"><label class="form-label" style="margin:0 0 4px">קישור</label>
+      <input class="form-input" name="link" placeholder="יוטיוב / קול הלשון / Drive / ג'מבו" style="width:300px" dir="ltr"></div>
     <div id="mtYemot"><label class="form-label" style="margin:0 0 4px">מספר הקלטה בימות</label>
       <input class="form-input" name="yemot_path" placeholder="1507 או /recordings/1507.wav" style="width:220px" dir="ltr"></div>
     <div id="mtFile" style="display:none"><label class="form-label" style="margin:0 0 4px">קובץ שמע/וידאו</label>
@@ -609,7 +612,7 @@ function confirmOcrDelete() {
       <input type="checkbox" name="confirm_dup" value="1"> לתמלל למרות שכבר קיימת</label>
     <button class="btn btn-primary" type="submit">🔁 שלח לתמלול</button>
   </form>
-  <script>function mtSrc(v){document.getElementById('mtYemot').style.display=v==='yemot'?'':'none';document.getElementById('mtFile').style.display=v==='file'?'':'none'}</script>
+  <script>function mtSrc(v){document.getElementById('mtYemot').style.display=v==='yemot'?'':'none';document.getElementById('mtFile').style.display=v==='file'?'':'none';document.getElementById('mtLink').style.display=v==='link'?'':'none'}</script>
 </div>
 </details>
 

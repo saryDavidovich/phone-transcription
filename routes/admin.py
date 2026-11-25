@@ -1739,8 +1739,23 @@ def customer_manual_transcribe(id):
         rec_url = f"{os.environ.get('APP_BASE_URL', '').rstrip('/')}/api/recordings-email/{filename}"
         duration = _estimate_duration_seconds(filepath) or 0
         source_filename = f.filename
+    elif source == 'link':
+        from services import portal_media as PM
+        link = (request.form.get('link') or '').strip()
+        if not PM.link_kind(link):
+            flash(PM.LINK_HELP)
+            return back
+        rec = Recording(customer_id=customer.id, call_id=f'manual-{uuid.uuid4().hex[:12]}', duration_seconds=0,
+                        status='processing', delivery_method=method, delivered_to=target, rec_url='',
+                        source_filename=PM.link_name(link), transcription_tier=tier, language='he', output_language='he')
+        db.session.add(rec)
+        db.session.commit()
+        threading.Thread(target=_manual_link_transcribe, args=(rec.id, link), daemon=True).start()
+        flash(f'✔ הקלטה #{rec.id}: מורידים את הקישור ושולחים לתמלול {"מקצועי" if tier == "premium" else "רגיל"} - '
+              f'תחויב ותישלח ל-{target} בסיום')
+        return back
     else:
-        flash('יש לבחור מקור: העלאת קובץ או משיכה מימות')
+        flash('יש לבחור מקור: העלאת קובץ, קישור או משיכה מימות')
         return back
 
     maintenance_on = get_setting('maintenance_mode', '0') == '1'
@@ -1766,6 +1781,51 @@ def customer_manual_transcribe(id):
     mins = f' (~{duration // 60} דק\')' if duration else ''
     flash(f'✔ הקלטה #{rec.id}{mins} נשלחה לתמלול {label} - תחויב ותישלח ל-{target} בסיום')
     return back
+
+
+def _manual_link_transcribe(rec_id, link):
+    """ברקע: הורדת הקישור (יוטיוב / קול הלשון / Drive / ג'מבו) לתיקיית ההקלטות, ואז המסלול הרגיל
+    (transcribe_async: תמלול, חיוב ושליחה). יוטיוב שחסם הורדה - Gemini קורא ישירות מיוטיוב."""
+    from app import app as _app
+    with _app.app_context():
+        from services import portal_media as PM
+        from services.transcribe import transcribe_async
+        from routes.email_inbound import RECORDINGS_EMAIL_DIR, _estimate_duration_seconds
+        rec = Recording.query.get(rec_id)
+        try:
+            path, name, remote = PM.fetch_link_or_remote(link, RECORDINGS_EMAIL_DIR)
+        except Exception as e:
+            log.warning(f'manual link {rec_id}: {e}')
+            rec.status = 'error'
+            rec.source_filename = f'{rec.source_filename} - {e}'[:255]
+            db.session.commit()
+            return
+        if name:
+            rec.source_filename = name[:255]
+        duration = 0
+        if remote:
+            if rec.transcription_tier == 'premium':          # לאלף בוט צריך קובץ
+                rec.status = 'error'
+                rec.source_filename = f'{rec.source_filename} - יוטיוב חסם הורדה; תמלול מקצועי צריך קובץ'[:255]
+                db.session.commit()
+                return
+            rec.rec_url = remote
+        else:
+            rec.rec_url = f"{os.environ.get('APP_BASE_URL', '').rstrip('/')}/api/recordings-email/{os.path.basename(path)}"
+            if os.path.getsize(path) <= 150 * 1024 * 1024:        # גיבוי ב-DB - הדיסק נמחק בכל דיפלוי
+                with open(path, 'rb') as fh:
+                    rec.file_data = fh.read()
+            duration = _estimate_duration_seconds(path) or 0
+            rec.duration_seconds = duration
+        if get_setting('maintenance_mode', '0') == '1':
+            rec.status = 'queued_maintenance'
+            db.session.commit()
+            return
+        db.session.commit()
+        transcribe_async(call_id=rec.call_id, rec_url=rec.rec_url, customer_id=rec.customer_id,
+                         delivery_method=rec.delivery_method, delivered_to=rec.delivered_to,
+                         duration_seconds=duration, transcription_tier=rec.transcription_tier,
+                         language='he', output_language='he')
 
 
 @admin_bp.route('/recordings/<int:id>/download-audio')
