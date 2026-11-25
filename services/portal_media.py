@@ -151,6 +151,16 @@ LINK_NAMES = {'drive': 'קישור Drive', 'jumbo': "קישור ג'מבו מיי
               'kolhalashon': 'קישור קול הלשון'}
 
 
+def fetch_link_or_remote(url, dest_dir):
+    """כמו fetch_link, אבל יוטיוב שחסם את ההורדה מחזיר (None, כותרת, כתובת יוטיוב) לתמלול ישיר."""
+    if link_kind(url) == 'youtube':
+        from services import link_sources as LS
+        path, name, remote = LS.fetch_or_remote(url, dest_dir)
+        return path, name, remote
+    path, name = fetch_link(url, dest_dir)
+    return path, name, None
+
+
 def link_name(url):
     return LINK_NAMES.get(link_kind(url) or '', 'קישור')
 

@@ -3098,8 +3098,10 @@ def _run_compare(job_id):
             from services import portal_media as PM
             try:
                 static_dir = os.path.join(os.path.dirname(__file__), '..', 'static', 'fax_tmp')
-                path, real = PM.fetch_link(job.rec_url[5:], static_dir)
-                job.rec_url = f"{os.environ.get('APP_BASE_URL', '').rstrip('/')}/static/fax_tmp/{os.path.basename(path)}"
+                path, real, remote = PM.fetch_link_or_remote(job.rec_url[5:], static_dir)
+                job.rec_url = remote or f"{os.environ.get('APP_BASE_URL', '').rstrip('/')}/static/fax_tmp/{os.path.basename(path)}"
+                if remote:
+                    real = f'{real} (יוטיוב חסם הורדה - Gemini קורא ישירות מיוטיוב)'
                 job.name = f'{job.name} - {real}'[:200]
                 db.session.commit()
             except Exception as e:
@@ -3109,7 +3111,11 @@ def _run_compare(job_id):
                 db.session.commit()
                 return
             if job.alef_status == 'running':
-                threading.Thread(target=_run_compare_alef, args=(job.id,), daemon=True).start()
+                if remote:                                # לאלף בוט צריך קובץ
+                    job.alef_status = 'error'
+                    db.session.commit()
+                else:
+                    threading.Thread(target=_run_compare_alef, args=(job.id,), daemon=True).start()
         if not job.recording_id and '/static/fax_tmp/' in (job.rec_url or ''):
             try:                                   # עותק לנגן בימות
                 from services import portal_media as PM

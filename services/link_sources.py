@@ -39,6 +39,65 @@ def kind(url):
 LABELS = {'youtube': 'יוטיוב', 'kolhalashon': 'קול הלשון'}
 
 
+class YoutubeBlocked(ValueError):
+    """יוטיוב חסם את ההורדה לשרת ("Sign in to confirm you're not a bot") - עוברים לתמלול ישיר ב-Gemini."""
+
+
+_YT_ID = re.compile(r'(?:v=|youtu\.be/|shorts/|live/|embed/)([A-Za-z0-9_-]{11})')
+
+
+def youtube_id(url):
+    m = _YT_ID.search(url or '')
+    return m.group(1) if m else None
+
+
+def youtube_canonical(url):
+    vid = youtube_id(url)
+    return f'https://www.youtube.com/watch?v={vid}' if vid else url
+
+
+def _iso_dur(s):
+    m = re.fullmatch(r'P(?:(\d+)D)?T?(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?', s or '')
+    if not m:
+        return None
+    d, h, mi, se = (int(x or 0) for x in m.groups())
+    return d * 86400 + h * 3600 + mi * 60 + se
+
+
+def youtube_meta(url):
+    """(כותרת, אורך בשניות או None) - בלי להוריד: YouTube Data API (אם המפתח מורשה), דף הסרטון, oEmbed."""
+    import requests
+    vid = youtube_id(url)
+    title, dur = None, None
+    key = os.environ.get('YOUTUBE_API_KEY') or os.environ.get('GOOGLE_API_KEY')
+    if vid and key:
+        try:
+            r = requests.get('https://www.googleapis.com/youtube/v3/videos',
+                             params={'id': vid, 'part': 'contentDetails,snippet', 'key': key}, timeout=15)
+            items = (r.json() or {}).get('items') or [] if r.ok else []
+            if items:
+                title = items[0]['snippet'].get('title')
+                dur = _iso_dur(items[0]['contentDetails'].get('duration'))
+        except Exception as e:
+            log.info(f'youtube data api: {e}')
+    if vid and not dur:
+        try:
+            r = requests.get(youtube_canonical(url), headers={'User-Agent': UA, 'Accept-Language': 'he-IL,he;q=0.9'},
+                             cookies={'CONSENT': 'YES+1'}, timeout=20)
+            m = re.search(r'"lengthSeconds":"(\d+)"', r.text) if r.ok else None
+            dur = int(m.group(1)) if m else None
+        except Exception as e:
+            log.info(f'youtube page: {e}')
+    if not title:
+        try:
+            r = requests.get('https://www.youtube.com/oembed', params={'url': youtube_canonical(url), 'format': 'json'},
+                             timeout=15)
+            title = r.json().get('title') if r.ok else None
+        except Exception:
+            pass
+    return (title or 'סרטון יוטיוב')[:200], dur
+
+
 # ------------------------------------------------------------------ יוטיוב
 def fetch_youtube(url, dest_dir):
     try:
@@ -68,8 +127,8 @@ def fetch_youtube(url, dest_dir):
     except Exception as e:
         msg = str(e)
         log.warning(f'youtube download failed: {msg[:300]}')
-        if 'Sign in' in msg or 'bot' in msg.lower():
-            raise ValueError('יוטיוב חסם את ההורדה מהשרת שלנו. אפשר להוריד את הקובץ ולהעלות אותו כקובץ')
+        if 'Sign in' in msg or 'bot' in msg.lower() or '403' in msg or '429' in msg:
+            raise YoutubeBlocked('יוטיוב חסם את ההורדה מהשרת שלנו')
         if 'Private' in msg or 'unavailable' in msg.lower():
             raise ValueError('הסרטון פרטי או לא זמין')
         raise ValueError('ההורדה מיוטיוב נכשלה - נסו שוב, או הורידו את הקובץ והעלו אותו')
@@ -185,3 +244,15 @@ def fetch(url, dest_dir):
     if k == 'kolhalashon':
         return fetch_kol_halashon(url, dest_dir)
     raise ValueError('קישור לא נתמך')
+
+
+def fetch_or_remote(url, dest_dir):
+    """(נתיב מקומי או None, שם, כתובת לתמלול ישיר או None). יוטיוב שחסם - בלי קובץ: Gemini קורא את הסרטון
+    ישירות מיוטיוב (services/transcribe._gemini_from_youtube)."""
+    try:
+        path, name = fetch(url, dest_dir)
+        return path, name, None
+    except YoutubeBlocked:
+        title, _d = youtube_meta(url)
+        log.info(f'youtube blocked for download - direct Gemini transcription: {youtube_canonical(url)}')
+        return None, title, youtube_canonical(url)
