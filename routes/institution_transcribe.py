@@ -92,10 +92,9 @@ def _process_upload(flask_app, upload_id, local_path, link, tier, language, outp
     with flask_app.app_context(), tracked('institution_upload', label=f'העלאה {upload_id}'):
         record = InstitutionUpload.query.get(upload_id)
         try:
-            remote = None
-            if link:                     # קישור: מורידים קודם (Drive / ג'מבו / יוטיוב / קול הלשון)
+            if link:                     # קישור: מורידים קודם (Drive / ג'מבו)
                 try:
-                    local_path, real_name, remote = PM.fetch_link_or_remote(link, STATIC_TMP_DIR)
+                    local_path, real_name = PM.fetch_link(link, STATIC_TMP_DIR)
                 except ValueError as ve:
                     record.status = 'error'
                     record.error_message = str(ve)
@@ -104,17 +103,9 @@ def _process_upload(flask_app, upload_id, local_path, link, tier, language, outp
                 if record.original_filename in PM.LINK_NAMES.values() and real_name:
                     record.original_filename = real_name[:200]
                     db.session.commit()
-            if remote:                   # יוטיוב שחסם הורדה: Gemini קורא את הסרטון ישירות מיוטיוב
-                if tier == 'premium':
-                    record.status = 'error'
-                    record.error_message = 'יוטיוב חסם את ההורדה, ותמלול מקצועי צריך את הקובץ. אפשר לבחור תמלול רגיל, או להוריד את הקובץ ולהעלות'
-                    db.session.commit()
-                    return
-                rec_url = remote
-            else:
-                if PM.needs_conversion(local_path):      # הקלטה מהדפדפן (webm) -> mp3
-                    local_path = PM.convert_in_place(local_path)
-                rec_url = _public_url(local_path)
+            if PM.needs_conversion(local_path):      # הקלטה מהדפדפן (webm) -> mp3
+                local_path = PM.convert_in_place(local_path)
+            rec_url = _public_url(local_path)
 
             is_video = False
             if tier == 'premium':      # תמלול מקצועי - אלף בוט, כמו בתמלול מקצועי של לקוח
@@ -133,7 +124,7 @@ def _process_upload(flask_app, upload_id, local_path, link, tier, language, outp
                 return
 
             # השמע לנגן באזור המוסד - לימות (נטפרי חוסמת שמע מהאתר שלנו), והעותק אצלנו נמחק
-            play = PM.push_to_yemot(local_path, f'u{upload_id}_{uuid.uuid4().hex[:8]}') if local_path else None
+            play = PM.push_to_yemot(local_path, f'u{upload_id}_{uuid.uuid4().hex[:8]}')
             if play:
                 record.play_url = play
                 PM.remove_quietly(local_path)

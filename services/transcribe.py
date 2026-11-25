@@ -1076,68 +1076,8 @@ def _split_wav_chunks(audio_content, mime_type, chunk_seconds=300):
         return [audio_content]
 
 
-YT_CHUNK_SECONDS = 300
-YT_FPS = 0.05                 # תמונה אחת ל-20 שניות: כמעט רק שמע (כ-35 טוקנים לשנייה, קרוב לעלות של קובץ שמע)
-
-
-def _gemini_from_youtube(url, language='he', output_language='he'):
-    """תמלול סרטון יוטיוב ישירות ב-Gemini (כשיוטיוב חוסם הורדה לשרת שלנו): Gemini קורא את הסרטון
-    מיוטיוב בעצמו, בקטעים של 5 דקות (video_metadata), ברזולוציית תמונה נמוכה. אותן הנחיות כמו v2.
-    מחזיר (טקסט, אורך בשניות, False) או (None, 0, False)."""
-    from google import genai
-    from google.genai import types as gtypes
-    from services import transcribe_v2 as TV2
-    from services import link_sources as LS
-    from services.transcribe_v3 import terms_rules
-    client = genai.Client(api_key=os.environ.get('GOOGLE_API_KEY'))
-    url = LS.youtube_canonical(url)
-    _title, duration = LS.youtube_meta(url)
-    if not duration:
-        # אורך לא ידוע (יוטיוב חוסם גם את דף הסרטון) - שואלים את Gemini פעם אחת
-        try:
-            r = client.models.generate_content(
-                model='gemini-3.5-flash',
-                contents=['Return only the total duration of this video in whole seconds, as a number.',
-                          gtypes.Part(file_data=gtypes.FileData(file_uri=url),
-                                      video_metadata=gtypes.VideoMetadata(fps=0.01))],
-                config=gtypes.GenerateContentConfig(media_resolution='MEDIA_RESOLUTION_LOW',
-                                                    thinking_config=gtypes.ThinkingConfig(thinking_budget=0)))
-            m = re.search(r'\d+', r.text or '')
-            duration = int(m.group(0)) if m else None
-        except Exception as e:
-            log.warning(f'youtube duration probe failed: {e}')
-    if not duration or duration > 6 * 3600:
-        log.error(f'youtube {url}: duration unknown/too long ({duration})')
-        return None, 0, False
-    n = max(1, -(-duration // YT_CHUNK_SECONDS))
-    parts, tail = [], ''
-    for i in range(n):
-        s, e = i * YT_CHUNK_SECONDS, min(duration, (i + 1) * YT_CHUNK_SECONDS)
-        part = gtypes.Part(file_data=gtypes.FileData(file_uri=url),
-                           video_metadata=gtypes.VideoMetadata(start_offset=f'{s}s', end_offset=f'{e}s', fps=YT_FPS))
-        text = None
-        for attempt in range(4):
-            try:
-                text = TV2.transcribe_chunk(client, gtypes, None, 'video/youtube', language, output_language, tail,
-                                            i + 1, n, max(1, e - s), extra_rules=terms_rules(), media_part=part)
-                break
-            except Exception as ex:
-                log.warning(f'youtube chunk {i + 1}/{n} attempt {attempt + 1}: {ex}')
-                time.sleep(10 * (attempt + 1))
-        text = clean_model_transcript(text or '', output_language)
-        if text:
-            parts.append(text)
-            tail = text[-300:]
-        _report_progress(10 + 80 * (i + 1) / n)
-    transcript = '\n\n'.join(parts) if parts else None
-    log.info(f'youtube {url}: {n} chunks, {len(transcript or "")} chars, {duration}s')
-    return transcript, duration, False
-
-
 def _gemini_from_url(url, language='he', output_language='he'):
     log.info(f"Gemini: language={language}, output_language={output_language}")
-    if re.match(r'^https?://(?:www\.|m\.)?(?:youtube\.com|youtu\.be)/', url or '', re.I):
-        return _gemini_from_youtube(url, language, output_language)
     _cleanup_items = []
     try:
         import wave, audioop, io

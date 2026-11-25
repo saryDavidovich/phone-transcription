@@ -320,13 +320,10 @@ def wav_pieces(chunk_bytes, piece_seconds):
 
 def transcribe_chunk(client, gtypes, chunk_bytes, mime_type, language, output_language, prev_tail,
                      chunk_num, n_chunks, seconds, model='gemini-3.5-flash', extra_rules='', context='',
-                     extra_audio=None, thinking=None, media_part=None):
+                     extra_audio=None, thinking=None):
     resplit_used.set(False)
     text = _transcribe_once(client, gtypes, chunk_bytes, mime_type, language, output_language, prev_tail,
-                            chunk_num, n_chunks, seconds, model, extra_rules, context, extra_audio, thinking,
-                            media_part)
-    if media_part is not None:
-        return text                   # קטע מסרטון יוטיוב (אין קובץ לחתוך מחדש)
+                            chunk_num, n_chunks, seconds, model, extra_rules, context, extra_audio, thinking)
     too_long = bool(seconds and text and len(text) > max(600, seconds * MAX_CHARS_PER_SEC))
     if not (looks_cut(text, seconds) or too_long) or mime_type not in ('audio/wav', 'audio/x-wav'):
         return text
@@ -364,7 +361,7 @@ def transcribe_chunk(client, gtypes, chunk_bytes, mime_type, language, output_la
 
 def _transcribe_once(client, gtypes, chunk_bytes, mime_type, language, output_language, prev_tail,
                      chunk_num, n_chunks, seconds, model='gemini-3.5-flash', extra_rules='', context='',
-                     extra_audio=None, thinking=None, media_part=None):
+                     extra_audio=None, thinking=None):
     """תמלול של חלק אחד: עד 3 ניסיונות כשהתוצאה לא תקינה (ועוד ניסיונות על שגיאות רשת - אצל הקורא).
     מחזיר טקסט נקי (או None אם לא התקבל כלום)."""
     sysi = system_instruction(language, output_language, extra_rules)
@@ -379,8 +376,7 @@ def _transcribe_once(client, gtypes, chunk_bytes, mime_type, language, output_la
                        'as paragraphs - nothing else.')
         resp = client.models.generate_content(
             model=model,
-            contents=[prompt, media_part if media_part is not None
-                      else gtypes.Part.from_bytes(data=chunk_bytes, mime_type=mime_type)] + (
+            contents=[prompt, gtypes.Part.from_bytes(data=chunk_bytes, mime_type=mime_type)] + (
                 [gtypes.Part.from_bytes(data=extra_audio, mime_type='audio/wav')] if extra_audio else []),
             config=gtypes.GenerateContentConfig(
                 system_instruction=sysi,
@@ -388,7 +384,6 @@ def _transcribe_once(client, gtypes, chunk_bytes, mime_type, language, output_la
                 response_schema={'type': 'OBJECT', 'properties': {'transcript': {'type': 'STRING'}},
                                  'required': ['transcript']},
                 # מודלי Pro לא עובדים בלי "חשיבה" - שם חשיבה נמוכה; Flash - בלי חשיבה בכלל
-                media_resolution=('MEDIA_RESOLUTION_LOW' if media_part is not None else None),
                 thinking_config=(gtypes.ThinkingConfig(thinking_level=thinking) if thinking
                                  else gtypes.ThinkingConfig(thinking_level='low') if '-pro' in model
                                  else gtypes.ThinkingConfig(thinking_budget=0)),

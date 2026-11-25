@@ -1785,7 +1785,7 @@ def customer_manual_transcribe(id):
 
 def _manual_link_transcribe(rec_id, link):
     """ברקע: הורדת הקישור (יוטיוב / קול הלשון / Drive / ג'מבו) לתיקיית ההקלטות, ואז המסלול הרגיל
-    (transcribe_async: תמלול, חיוב ושליחה). יוטיוב שחסם הורדה - Gemini קורא ישירות מיוטיוב."""
+    (transcribe_async: תמלול, חיוב ושליחה)."""
     from app import app as _app
     with _app.app_context():
         from services import portal_media as PM
@@ -1793,7 +1793,7 @@ def _manual_link_transcribe(rec_id, link):
         from routes.email_inbound import RECORDINGS_EMAIL_DIR, _estimate_duration_seconds
         rec = Recording.query.get(rec_id)
         try:
-            path, name, remote = PM.fetch_link_or_remote(link, RECORDINGS_EMAIL_DIR)
+            path, name = PM.fetch_link(link, RECORDINGS_EMAIL_DIR)
         except Exception as e:
             log.warning(f'manual link {rec_id}: {e}')
             rec.status = 'error'
@@ -1802,21 +1802,12 @@ def _manual_link_transcribe(rec_id, link):
             return
         if name:
             rec.source_filename = name[:255]
-        duration = 0
-        if remote:
-            if rec.transcription_tier == 'premium':          # לאלף בוט צריך קובץ
-                rec.status = 'error'
-                rec.source_filename = f'{rec.source_filename} - יוטיוב חסם הורדה; תמלול מקצועי צריך קובץ'[:255]
-                db.session.commit()
-                return
-            rec.rec_url = remote
-        else:
-            rec.rec_url = f"{os.environ.get('APP_BASE_URL', '').rstrip('/')}/api/recordings-email/{os.path.basename(path)}"
-            if os.path.getsize(path) <= 150 * 1024 * 1024:        # גיבוי ב-DB - הדיסק נמחק בכל דיפלוי
-                with open(path, 'rb') as fh:
-                    rec.file_data = fh.read()
-            duration = _estimate_duration_seconds(path) or 0
-            rec.duration_seconds = duration
+        rec.rec_url = f"{os.environ.get('APP_BASE_URL', '').rstrip('/')}/api/recordings-email/{os.path.basename(path)}"
+        if os.path.getsize(path) <= 150 * 1024 * 1024:        # גיבוי ב-DB - הדיסק נמחק בכל דיפלוי
+            with open(path, 'rb') as fh:
+                rec.file_data = fh.read()
+        duration = _estimate_duration_seconds(path) or 0
+        rec.duration_seconds = duration
         if get_setting('maintenance_mode', '0') == '1':
             rec.status = 'queued_maintenance'
             db.session.commit()
@@ -3158,10 +3149,8 @@ def _run_compare(job_id):
             from services import portal_media as PM
             try:
                 static_dir = os.path.join(os.path.dirname(__file__), '..', 'static', 'fax_tmp')
-                path, real, remote = PM.fetch_link_or_remote(job.rec_url[5:], static_dir)
-                job.rec_url = remote or f"{os.environ.get('APP_BASE_URL', '').rstrip('/')}/static/fax_tmp/{os.path.basename(path)}"
-                if remote:
-                    real = f'{real} (יוטיוב חסם הורדה - Gemini קורא ישירות מיוטיוב)'
+                path, real = PM.fetch_link(job.rec_url[5:], static_dir)
+                job.rec_url = f"{os.environ.get('APP_BASE_URL', '').rstrip('/')}/static/fax_tmp/{os.path.basename(path)}"
                 job.name = f'{job.name} - {real}'[:200]
                 db.session.commit()
             except Exception as e:
@@ -3171,11 +3160,7 @@ def _run_compare(job_id):
                 db.session.commit()
                 return
             if job.alef_status == 'running':
-                if remote:                                # לאלף בוט צריך קובץ
-                    job.alef_status = 'error'
-                    db.session.commit()
-                else:
-                    threading.Thread(target=_run_compare_alef, args=(job.id,), daemon=True).start()
+                threading.Thread(target=_run_compare_alef, args=(job.id,), daemon=True).start()
         if not job.recording_id and '/static/fax_tmp/' in (job.rec_url or ''):
             try:                                   # עותק לנגן בימות
                 from services import portal_media as PM

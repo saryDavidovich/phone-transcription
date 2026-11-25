@@ -767,10 +767,9 @@ def _process_student_upload(flask_app, recording_id, local_path, link=None, send
         student = Customer.query.get(recording.customer_id)
         try:
             static_dir = os.path.join(os.path.dirname(__file__), '..', 'static', 'fax_tmp')
-            remote = None
-            if link:                      # קישור (Drive / ג'מבו / יוטיוב / קול הלשון) - מורידים קודם
+            if link:                      # קישור Drive / ג'מבו - מורידים קודם
                 try:
-                    local_path, real_name, remote = PM.fetch_link_or_remote(link, static_dir)
+                    local_path, real_name = PM.fetch_link(link, static_dir)
                 except ValueError as ve:
                     recording.status = 'error'
                     db.session.commit()
@@ -778,18 +777,10 @@ def _process_student_upload(flask_app, recording_id, local_path, link=None, send
                     return
                 if recording.source_filename in PM.LINK_NAMES.values() and real_name:
                     recording.source_filename = real_name[:200]
-            if remote:                    # יוטיוב שחסם הורדה: Gemini קורא את הסרטון ישירות מיוטיוב
-                if (recording.transcription_tier or 'gemini') == 'premium':
-                    recording.status = 'error'
-                    db.session.commit()
-                    log.warning(f'Student upload {recording_id}: premium from blocked youtube is not possible')
-                    return
-                rec_url = remote
-            else:
-                if PM.needs_conversion(local_path):       # הקלטה מהדפדפן (webm) -> mp3
-                    local_path = PM.convert_in_place(local_path)
-                base_url = os.environ.get('APP_BASE_URL', os.environ.get('APP_URL', '')).rstrip('/')
-                rec_url = f"{base_url}/static/fax_tmp/{os.path.basename(local_path)}"
+            if PM.needs_conversion(local_path):       # הקלטה מהדפדפן (webm) -> mp3
+                local_path = PM.convert_in_place(local_path)
+            base_url = os.environ.get('APP_BASE_URL', os.environ.get('APP_URL', '')).rstrip('/')
+            rec_url = f"{base_url}/static/fax_tmp/{os.path.basename(local_path)}"
             recording.rec_url = rec_url
             db.session.commit()
             from services.transcribe import _gemini_from_url, _send_email, _send_fax, alefbot_transcribe_wait
@@ -809,7 +800,7 @@ def _process_student_upload(flask_app, recording_id, local_path, link=None, send
                 return
 
             # השמע לנגן באזור המוסד - בימות (נטפרי חוסמת שמע מהאתר שלנו); העותק אצלנו נמחק
-            play = PM.push_to_yemot(local_path, f'r{recording_id}_{uuid.uuid4().hex[:8]}') if local_path else None
+            play = PM.push_to_yemot(local_path, f'r{recording_id}_{uuid.uuid4().hex[:8]}')
             if play:
                 recording.play_url = play
                 # כמו הקלטה מהטלפון: rec_url בימות (המנהל מאזין משם; שליחה חוזרת לתמלול מורידה משם)
