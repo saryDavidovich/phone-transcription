@@ -35,12 +35,26 @@
         return f.load({ coreURL: BASE + 'ffmpeg-core.js', wasmURL: BASE + 'ffmpeg-core.wasm' }).then(function () {
           ff = f; return f;
         });
-      }).catch(function (e) { loading = null; throw e; });
+      }).catch(function (e) { loading = null; throw (e && e.stage) ? e : why('load', e); });
     }
     return loading;
   }
 
   function secs(h, m, s) { return (+h) * 3600 + (+m) * 60 + parseFloat(s); }
+
+  // שגיאה ברורה עם השלב שבו נכשל (טעינה / פתיחת הקובץ / כיווץ) - כדי שאפשר יהיה להבין מה קרה
+  function why(stage, e, tail) {
+    var m = '';
+    if (e && typeof e === 'object') m = e.message || (e.type ? 'אירוע ' + e.type : '') || (e.target && e.target.src ? 'נחסם ' + e.target.src : '');
+    else if (e) m = String(e);
+    var label = { load: 'טעינת כלי הכיווץ נכשלה (ייתכן שהסינון חוסם את הקובץ ffmpeg-core.wasm)',
+                  mount: 'פתיחת הקובץ בכלי הכיווץ נכשלה',
+                  exec: 'הכיווץ נכשל' }[stage] || 'הכיווץ נכשל';
+    var err = new Error(label + (m ? ' [' + m + ']' : '') + (tail ? ' · ' + tail : ''));
+    err.stage = stage;
+    try { console.error('[compress]', stage, e, tail || ''); } catch (x) {}
+    return err;
+  }
 
   // כיווץ, ואם הקובץ עדיין גדול מ-maxBytes (הקלטה של יותר מ-~7 שעות) - שוב, חזק יותר (24kbps, ~14 שעות)
   async function compress(file, onProgress, maxBytes) {
@@ -63,13 +77,21 @@
         onProgress(Math.max(0, Math.min(1, secs(m[1], m[2], m[3]) / total)));
       }
     };
+    var tail = [];
+    var keepTail = function (e) { var t = (e && e.message) || ''; if (t) { tail.push(t); if (tail.length > 4) tail.shift(); } };
     f.on('log', onLog);
-    await f.createDir(dir);
-    await f.mount('WORKERFS', { files: [new File([file], inName)] }, dir);
+    f.on('log', keepTail);
     try {
-      var rc = await f.exec(['-hide_banner', '-i', dir + '/' + inName, '-vn', '-ac', '1', '-ar', '16000',
-                             '-c:a', 'libmp3lame', '-b:a', bitrate, 'out.mp3']);
-      if (rc !== 0) throw new Error('הקובץ לא נקרא - ייתכן שאינו קובץ שמע או וידאו');
+      await f.createDir(dir);
+      await f.mount('WORKERFS', { files: [new File([file], inName)] }, dir);
+    } catch (e) { f.off('log', onLog); f.off('log', keepTail); throw why('mount', e); }
+    try {
+      var rc;
+      try {
+        rc = await f.exec(['-hide_banner', '-i', dir + '/' + inName, '-vn', '-ac', '1', '-ar', '16000',
+                           '-c:a', 'libmp3lame', '-b:a', bitrate, 'out.mp3']);
+      } catch (e) { throw why('exec', e, tail.join(' | ').slice(-300)); }
+      if (rc !== 0) throw why('exec', 'קוד ' + rc + ' - ייתכן שהקובץ אינו קובץ שמע/וידאו תקין', tail.join(' | ').slice(-300));
       var data = await f.readFile('out.mp3');
       try { await f.deleteFile('out.mp3'); } catch (x) {}
       if (!data || data.length < 1000) throw new Error('הכיווץ לא הצליח - לא נמצא שמע בקובץ');
@@ -77,6 +99,7 @@
       return new File([data], file.name.replace(/\.[^.]+$/, '') + '.mp3', { type: 'audio/mpeg' });
     } finally {
       f.off('log', onLog);
+      f.off('log', keepTail);
       try { await f.unmount(dir); await f.deleteDir(dir); } catch (x) {}
     }
   }
