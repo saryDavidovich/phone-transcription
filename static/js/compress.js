@@ -5,7 +5,8 @@
  *
  * AudioCompress.supported()           - האם הדפדפן מסוגל
  * AudioCompress.needs(file)           - קובץ שכדאי לכווץ (מעל THRESH_MB)
- * AudioCompress.compress(file, onP)   - Promise<File> (onP(0..1) להתקדמות)
+ * AudioCompress.compress(file, onP, maxBytes) - Promise<File>; onP(0..1, 'second' בכיווץ השני)
+ *   קובץ שיוצא גדול מ-maxBytes מכווץ שוב ב-24kbps (עדיין מספיק לדיבור בתמלול)
  */
 (function () {
   var BASE = '/static/vendor/ffmpeg/';
@@ -41,7 +42,16 @@
 
   function secs(h, m, s) { return (+h) * 3600 + (+m) * 60 + parseFloat(s); }
 
-  async function compress(file, onProgress) {
+  // כיווץ, ואם הקובץ עדיין גדול מ-maxBytes (הקלטה של יותר מ-~7 שעות) - שוב, חזק יותר (24kbps, ~14 שעות)
+  async function compress(file, onProgress, maxBytes) {
+    var out = await encode(file, '48k', onProgress);
+    if (maxBytes && out.size > maxBytes) {
+      out = await encode(file, '24k', onProgress ? function (p) { onProgress(p, 'second'); } : null);
+    }
+    return out;
+  }
+
+  async function encode(file, bitrate, onProgress) {
     var f = await get();
     var ext = (file.name.match(/\.[A-Za-z0-9]{1,5}$/) || ['.bin'])[0].toLowerCase();
     var inName = 'input' + ext, dir = '/in' + Date.now();
@@ -58,7 +68,7 @@
     await f.mount('WORKERFS', { files: [new File([file], inName)] }, dir);
     try {
       var rc = await f.exec(['-hide_banner', '-i', dir + '/' + inName, '-vn', '-ac', '1', '-ar', '16000',
-                             '-c:a', 'libmp3lame', '-b:a', '48k', 'out.mp3']);
+                             '-c:a', 'libmp3lame', '-b:a', bitrate, 'out.mp3']);
       if (rc !== 0) throw new Error('הקובץ לא נקרא - ייתכן שאינו קובץ שמע או וידאו');
       var data = await f.readFile('out.mp3');
       try { await f.deleteFile('out.mp3'); } catch (x) {}

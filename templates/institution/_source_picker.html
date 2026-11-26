@@ -222,7 +222,8 @@ window.SrcPicker = window.SrcPicker || function (root) {
         if (onMsg) onMsg('מכינים את כלי הכיווץ...');
         var out;
         try {
-          out = await AudioCompress.compress(fs[i], function (p) { if (onMsg) onMsg('מכווצים ' + nm + ' ' + Math.round(p * 100) + '%'); });
+          out = await AudioCompress.compress(fs[i], function (p, again) {
+            if (onMsg) onMsg((again ? 'הקובץ ארוך - מכווצים שוב ' : 'מכווצים ') + nm + ' ' + Math.round(p * 100) + '%'); }, MAX_MB * 1048576);
         } catch (e) { throw new Error('"' + fs[i].name + '": ' + (e.message || 'הכיווץ נכשל')); }
         if (out.size > MAX_MB * 1048576) throw new Error('"' + fs[i].name + '" גדול מדי גם אחרי כיווץ - אפשר להעלות ל-Drive ולהדביק קישור');
         prepared[i] = out;

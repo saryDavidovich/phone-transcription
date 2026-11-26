@@ -637,8 +637,9 @@ function confirmOcrDelete() {
         for (var i = 0; i < fs.length; i++) {
           if (!AudioCompress.needs(fs[i])) { out.push(fs[i]); continue; }
           prog.textContent = '⏳ מכינים את כלי הכיווץ...';
-          out.push(await AudioCompress.compress(fs[i], function (p) {
-            prog.textContent = '🗜 מכווצים ' + (i + 1) + ' מתוך ' + fs.length + ': ' + fs[i].name + ' - ' + Math.round(p * 100) + '%'; }));
+          out.push(await AudioCompress.compress(fs[i], function (p, again) {
+            prog.textContent = '🗜 ' + (again ? 'הקובץ ארוך - מכווצים שוב ' : 'מכווצים ') + (i + 1) + ' מתוך ' + fs.length + ': ' +
+              fs[i].name + ' - ' + Math.round(p * 100) + '%'; }, MT_MAX));
         }
         var total = out.reduce(function (a, f) { return a + f.size; }, 0);
         if (total > MT_MAX) throw new Error('גם אחרי הכיווץ הקבצים שוקלים ' + Math.round(total / 1048576) + 'MB - יש לשלוח בכמה פעמים');
