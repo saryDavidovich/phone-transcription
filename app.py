@@ -1,4 +1,6 @@
 import os
+
+UPLOAD_LIMIT_MB = 150      # גודל מקסימלי לבקשה אחת (קובץ אחד בהעלאות). מעבר - הודעה מסבירה (413)
 import logging
 from flask import Flask, send_from_directory
 from flask_sqlalchemy import SQLAlchemy
@@ -43,7 +45,7 @@ def create_app():
                 database_url = database_url.replace('postgresql+psycopg://', 'postgresql+psycopg2://', 1)
     app.config['SQLALCHEMY_DATABASE_URI'] = database_url
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-    app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024
+    app.config['MAX_CONTENT_LENGTH'] = UPLOAD_LIMIT_MB * 1024 * 1024
     app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
     'pool_pre_ping': True,
     'pool_recycle': 1800,   # 30 דקות — מספיק לתמלולים ארוכים
@@ -84,6 +86,21 @@ def create_app():
     app.register_blueprint(features_api, url_prefix='/api')
     app.register_blueprint(ivr_bp, url_prefix='/ivr')
     app.register_blueprint(admin_bp, url_prefix='/admin')
+
+    from werkzeug.exceptions import RequestEntityTooLarge
+
+    @app.errorhandler(RequestEntityTooLarge)
+    def _too_large(_e):
+        """קובץ גדול מהמגבלה: הסבר ברור במקום שגיאה כללית."""
+        from flask import request as _rq, jsonify as _js, flash as _fl, redirect as _rd
+        msg = (f'הקובץ גדול מדי - המגבלה היא {UPLOAD_LIMIT_MB}MB לקובץ. '
+               'אפשר לכווץ אותו בכלי הכיווץ שבדף ההעלאה (רץ במחשב שלכם ומעלה לבד בסיום), '
+               'או להעלות אותו ל-Google Drive / ג\'מבו מייל ולהדביק את הקישור.')
+        wants_html = 'text/html' in (_rq.headers.get('Accept') or '') and not _rq.headers.get('X-Requested-With')
+        if wants_html and _rq.referrer:
+            _fl(msg)
+            return _rd(_rq.referrer)
+        return _js({'error': msg}), 413
     app.register_blueprint(payment_bp, url_prefix='/payment')
     app.register_blueprint(api_bp, url_prefix='/api')
     app.register_blueprint(email_bp, url_prefix='/api')
@@ -95,6 +112,10 @@ def create_app():
     app.register_blueprint(institution_portal_bp)
     from routes.customer_portal import customer_bp
     app.register_blueprint(customer_bp)
+
+    @app.context_processor
+    def _limits_ctx():
+        return {'upload_limit_mb': UPLOAD_LIMIT_MB}
 
     @app.context_processor
     def _portal_ctx():

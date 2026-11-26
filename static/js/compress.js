@@ -1,0 +1,81 @@
+/*
+ * כלי כיווץ הקלטות - רץ בדפדפן של המשתמש (ffmpeg.wasm מתוך /static/vendor/ffmpeg), לא בשרת.
+ * כל קובץ שמע/וידאו -> MP3 מונו 16kHz 48kbps: שעתיים ~ 43MB, בלי פגיעה בתמלול
+ * (השרת ממילא ממיר הכל ל-16kHz מונו). הקובץ המקורי לא נטען כולו לזיכרון (WORKERFS).
+ *
+ * AudioCompress.supported()           - האם הדפדפן מסוגל
+ * AudioCompress.needs(file)           - קובץ שכדאי לכווץ (מעל THRESH_MB)
+ * AudioCompress.compress(file, onP)   - Promise<File> (onP(0..1) להתקדמות)
+ */
+(function () {
+  var BASE = '/static/vendor/ffmpeg/';
+  var THRESH_MB = 40;
+  var ff = null, loading = null;
+
+  function supported() {
+    return typeof WebAssembly === 'object' && typeof Worker === 'function' && typeof File === 'function';
+  }
+
+  function loadScript(src) {
+    return new Promise(function (ok, bad) {
+      if (window.FFmpegWASM) return ok();
+      var s = document.createElement('script');
+      s.src = src; s.onload = function () { ok(); };
+      s.onerror = function () { bad(new Error('טעינת כלי הכיווץ נכשלה')); };
+      document.head.appendChild(s);
+    });
+  }
+
+  function get() {
+    if (ff) return Promise.resolve(ff);
+    if (!loading) {
+      loading = loadScript(BASE + 'ffmpeg.js').then(function () {
+        var f = new window.FFmpegWASM.FFmpeg();
+        return f.load({ coreURL: BASE + 'ffmpeg-core.js', wasmURL: BASE + 'ffmpeg-core.wasm' }).then(function () {
+          ff = f; return f;
+        });
+      }).catch(function (e) { loading = null; throw e; });
+    }
+    return loading;
+  }
+
+  function secs(h, m, s) { return (+h) * 3600 + (+m) * 60 + parseFloat(s); }
+
+  async function compress(file, onProgress) {
+    var f = await get();
+    var ext = (file.name.match(/\.[A-Za-z0-9]{1,5}$/) || ['.bin'])[0].toLowerCase();
+    var inName = 'input' + ext, dir = '/in' + Date.now();
+    var total = 0;
+    var onLog = function (e) {                     // ההתקדמות לפי "Duration" ו-"time=" בלוג של ffmpeg
+      var msg = (e && e.message) || '', m;
+      if (!total && (m = msg.match(/Duration:\s*(\d+):(\d+):([\d.]+)/))) total = secs(m[1], m[2], m[3]);
+      if (total && (m = msg.match(/time=\s*(\d+):(\d+):([\d.]+)/)) && onProgress) {
+        onProgress(Math.max(0, Math.min(1, secs(m[1], m[2], m[3]) / total)));
+      }
+    };
+    f.on('log', onLog);
+    await f.createDir(dir);
+    await f.mount('WORKERFS', { files: [new File([file], inName)] }, dir);
+    try {
+      var rc = await f.exec(['-hide_banner', '-i', dir + '/' + inName, '-vn', '-ac', '1', '-ar', '16000',
+                             '-c:a', 'libmp3lame', '-b:a', '48k', 'out.mp3']);
+      if (rc !== 0) throw new Error('הקובץ לא נקרא - ייתכן שאינו קובץ שמע או וידאו');
+      var data = await f.readFile('out.mp3');
+      try { await f.deleteFile('out.mp3'); } catch (x) {}
+      if (!data || data.length < 1000) throw new Error('הכיווץ לא הצליח - לא נמצא שמע בקובץ');
+      if (onProgress) onProgress(1);
+      return new File([data], file.name.replace(/\.[^.]+$/, '') + '.mp3', { type: 'audio/mpeg' });
+    } finally {
+      f.off('log', onLog);
+      try { await f.unmount(dir); await f.deleteDir(dir); } catch (x) {}
+    }
+  }
+
+  window.AudioCompress = {
+    THRESH_MB: THRESH_MB,
+    supported: supported,
+    needs: function (file) { return !!file && file.size > THRESH_MB * 1048576; },
+    compress: compress,
+    preload: function () { if (supported()) get().catch(function () {}); }
+  };
+})();

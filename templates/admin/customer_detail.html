@@ -582,7 +582,7 @@ function confirmOcrDelete() {
   <div style="font-size:12px;color:var(--text2);margin-bottom:12px">להקלטה שנתקעה או לא הגיעה: מעלים קובץ, מדביקים קישור (יוטיוב, קול הלשון, Drive, ג'מבו), או מושכים מימות לפי מספר ההקלטה (למשל 1507 = /recordings/1507.wav). נוצרת הקלטה חדשה בכרטיס, והיא מתומללת, מחויבת ונשלחת כרגיל.</div>
   <form method="POST" action="{{ url_for('admin.customer_manual_transcribe', id=customer.id) }}" enctype="multipart/form-data"
         style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap"
-        onsubmit="var b=this.querySelector('button[type=submit]');setTimeout(function(){b.disabled=true;b.textContent='⏳ שולח...'},0);return true">
+        id="mtForm" onsubmit="return mtSubmit(event, this)">
     <div><label class="form-label" style="margin:0 0 4px">מקור</label>
       <select class="form-input" name="source" style="width:170px" onchange="mtSrc(this.value)">
         <option value="yemot">📞 משיכה מימות</option>
@@ -613,6 +613,52 @@ function confirmOcrDelete() {
       <input type="checkbox" name="confirm_dup" value="1"> לתמלל למרות שכבר קיימת</label>
     <button class="btn btn-primary" type="submit">🔁 שלח לתמלול</button>
   </form>
+  <div id="mtProg" style="display:none;margin-top:10px;font-size:13px;font-weight:600"></div>
+  <script src="{{ url_for('static', filename='js/compress.js') }}"></script>
+  <script>
+  // קבצים גדולים: מכווצים כאן בדפדפן (ffmpeg במחשב שלך, לא בשרת) ואז שולחים לבד
+  var MT_MAX = {{ upload_limit_mb }} * 1048576;
+  function mtSubmit(e, form) {
+    var btn = form.querySelector('button[type=submit]'), prog = document.getElementById('mtProg');
+    if (form.source.value !== 'file') { setTimeout(function () { btn.disabled = true; btn.textContent = '⏳ שולח...'; }, 0); return true; }
+    var fs = Array.prototype.slice.call(form.audio_file.files);
+    var shrink = window.AudioCompress && AudioCompress.supported();
+    var big = fs.filter(function (f) { return shrink && AudioCompress.needs(f); });
+    if (!big.length) {
+      var t = fs.reduce(function (a, f) { return a + f.size; }, 0);
+      if (t > MT_MAX) { alert('הקבצים שוקלים יחד ' + Math.round(t / 1048576) + 'MB - המגבלה היא {{ upload_limit_mb }}MB לשליחה. אפשר לשלוח בכמה פעמים, או להעלות ל-Drive ולהדביק קישור.'); return false; }
+      setTimeout(function () { btn.disabled = true; btn.textContent = '⏳ שולח...'; }, 0); return true;
+    }
+    e.preventDefault();
+    btn.disabled = true; prog.style.display = '';
+    (async function () {
+      try {
+        var out = [];
+        for (var i = 0; i < fs.length; i++) {
+          if (!AudioCompress.needs(fs[i])) { out.push(fs[i]); continue; }
+          prog.textContent = '⏳ מכינים את כלי הכיווץ...';
+          out.push(await AudioCompress.compress(fs[i], function (p) {
+            prog.textContent = '🗜 מכווצים ' + (i + 1) + ' מתוך ' + fs.length + ': ' + fs[i].name + ' - ' + Math.round(p * 100) + '%'; }));
+        }
+        var total = out.reduce(function (a, f) { return a + f.size; }, 0);
+        if (total > MT_MAX) throw new Error('גם אחרי הכיווץ הקבצים שוקלים ' + Math.round(total / 1048576) + 'MB - יש לשלוח בכמה פעמים');
+        prog.textContent = '⬆ מעלים (' + Math.round(total / 1048576) + 'MB)...';
+        var fd = new FormData(form); fd.delete('audio_file');
+        out.forEach(function (f, k) { fd.append('audio_file', f, fs[k].name.replace(/\.[^.]+$/, '') + (f === fs[k] ? (fs[k].name.match(/\.[^.]+$/) || [""])[0] : ".mp3")); });
+        // redirect:'manual' - ההודעה (flash) נשארת לדף שייטען עכשיו
+        var r = await fetch(form.action, { method: 'POST', body: fd, credentials: 'same-origin', redirect: 'manual',
+                                           headers: { 'Accept': 'text/html' } });
+        if (r.status >= 400) throw new Error('השליחה נכשלה (' + r.status + ')');
+        location.href = location.pathname + '#manual-transcribe';
+        location.reload();
+      } catch (x) {
+        prog.textContent = '⚠ ' + (x.message || 'הכיווץ נכשל') + ' - אפשר להעלות ל-Drive ולהדביק קישור';
+        btn.disabled = false;
+      }
+    })();
+    return false;
+  }
+  </script>
   <script>function mtSrc(v){document.getElementById('mtYemot').style.display=v==='yemot'?'':'none';document.getElementById('mtFile').style.display=v==='file'?'':'none';document.getElementById('mtLink').style.display=v==='link'?'':'none'}</script>
 </div>
 </details>

@@ -121,8 +121,13 @@
   document.getElementById('uploadForm').addEventListener('submit', async function (e) {
     e.preventDefault();
     var err = picker.error(); if (err) { instToast(err, true); return; }
-    var items = picker.items(), mode = picker.mode(), btn = document.getElementById('uploadBtn'), old = btn.innerHTML;
+    var btn = document.getElementById('uploadBtn'), old = btn.innerHTML, mode = picker.mode();
+    var SPIN = '<span class="spinner-ring" style="border-color:rgba(255,255,255,.35);border-top-color:#fff"></span> ';
     btn.disabled = true;
+    try {        // קבצים גדולים: כיווץ במחשב של המשתמש, ואז ההעלאה ממשיכה לבד
+      await picker.prepare(function (t) { btn.innerHTML = SPIN + escHtml(t); });
+    } catch (x) { btn.disabled = false; btn.innerHTML = old; instToast(escHtml(x.message || 'הכיווץ נכשל'), true); return; }
+    var items = picker.items();
     var base = new FormData(this); base.delete('audio_file');
     var ok = 0, errors = [];
     for (var k = 0; k < items.length; k++) {

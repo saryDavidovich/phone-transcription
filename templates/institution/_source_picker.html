@@ -80,6 +80,7 @@
     </div>
   </div>
 </div>
+<script src="{{ url_for('static', filename='js/compress.js') }}"></script>
 <script>
 window.SrcPicker = window.SrcPicker || function (root) {
   var mode = 'file', tabs = root.querySelectorAll('.src-tab'), panes = root.querySelectorAll('.src-pane');
@@ -94,7 +95,22 @@ window.SrcPicker = window.SrcPicker || function (root) {
   tabs.forEach(function (t) { t.addEventListener('click', function () { setMode(t.dataset.mode); }); });
 
   /* --- קובץ --- */
-  function showName() { var n = fileIn.files.length; dzName.innerHTML = !n ? '' : IC.file + ' ' + escHtml(n === 1 ? fileIn.files[0].name : n + ' קבצים נבחרו'); if (root.onchange) root.onchange(); }
+  var prepared = {};          // קבצים שכווצו במחשב (אינדקס -> File)
+  function canShrink() { return window.AudioCompress && AudioCompress.supported(); }
+  function showName() {
+    prepared = {};
+    var n = fileIn.files.length;
+    var html = !n ? '' : IC.file + ' ' + escHtml(n === 1 ? fileIn.files[0].name : n + ' קבצים נבחרו');
+    var big = Array.prototype.filter.call(fileIn.files, function (f) { return window.AudioCompress && AudioCompress.needs(f); });
+    if (big.length && canShrink()) {
+      var mb = big.reduce(function (a, f) { return a + f.size; }, 0) / 1048576;
+      html += '<div class="hint" style="margin-top:6px">📦 ' + (big.length === 1 ? 'הקובץ גדול' : big.length + ' קבצים גדולים') +
+        ' (' + Math.round(mb) + 'MB) - יכווץ כאן במחשב שלכם לפני ההעלאה ויעלה לבד בסיום. ההעלאה תהיה מהירה בהרבה.</div>';
+      AudioCompress.preload();
+    }
+    dzName.innerHTML = html;
+    if (root.onchange) root.onchange();
+  }
   fileIn.addEventListener('change', showName);
   ['dragover', 'dragenter'].forEach(function (ev) { dz.addEventListener(ev, function (e) { e.preventDefault(); dz.classList.add('dragover'); }); });
   ['dragleave', 'dragend'].forEach(function (ev) { dz.addEventListener(ev, function () { dz.classList.remove('dragover'); }); });
@@ -154,6 +170,7 @@ window.SrcPicker = window.SrcPicker || function (root) {
 
   /* --- קישורים --- */
   var linksIn = root.querySelector('[data-links]'), chipsEl = root.querySelector('[data-chips]');
+  var MAX_MB = {{ upload_limit_mb or 150 }};
   var LK = { drive: 'Google Drive', jumbo: 'ג\'מבו מייל', youtube: 'יוטיוב', kolhalashon: 'קול הלשון' };
   function parseLinks() {
     return linksIn.value.split(/\s+/).map(function (s) { return s.trim(); }).filter(Boolean).map(function (u) {
@@ -177,12 +194,17 @@ window.SrcPicker = window.SrcPicker || function (root) {
     mode: function () { return mode; },
     error: function () {
       if (mode === 'file' && !fileIn.files.length) return 'יש לבחור קובץ';
+      if (mode === 'file') {
+        var big = Array.prototype.filter.call(fileIn.files, function (f) { return f.size > MAX_MB * 1048576; });
+        if (big.length && !canShrink()) return 'הקובץ "' + big[0].name + '" גדול מ-' + MAX_MB + 'MB (' + Math.round(big[0].size / 1048576) +
+          'MB). אפשר לכווץ אותו בכלי הכיווץ למטה - הוא רץ במחשב שלכם ומעלה לבד בסיום - או להעלות ל-Drive ולהדביק קישור.';
+      }
       if (mode === 'record') { if (rec && rec.state !== 'inactive') return 'יש לסיים את ההקלטה (הריבוע השחור)'; if (!blob) return 'עדיין לא הוקלט כלום'; }
       if (mode === 'link') { var l = parseLinks(); if (!l.length) return 'יש להדביק קישור'; if (l.some(function (x) { return !x.kind; })) return 'יש קישור לא נתמך (נתמכים: יוטיוב, קול הלשון, Drive, ג\'מבו מייל)'; }
       return '';
     },
     items: function () {
-      if (mode === 'file') return Array.prototype.map.call(fileIn.files, function (f) { return { label: f.name, fill: function (fd) { fd.append('audio_file', f); } }; });
+      if (mode === 'file') return Array.prototype.map.call(fileIn.files, function (f0, i) { var f = prepared[i] || f0; return { label: f0.name, fill: function (fd) { fd.append('audio_file', f); } }; });
       if (mode === 'record') {
         var title = root.querySelector('[data-title]').value.trim(), d = new Date();
         var name = (title || ('הקלטה ' + d.getDate() + '.' + (d.getMonth() + 1) + ' ' + d.getHours() + ':' + String(d.getMinutes()).padStart(2, '0'))) + '.' + ext;
@@ -190,7 +212,24 @@ window.SrcPicker = window.SrcPicker || function (root) {
       }
       return parseLinks().map(function (l) { return { label: 'קישור ' + (LK[l.kind] || ''), fill: function (fd) { fd.append('link', l.url); } }; });
     },
+    // לפני ההעלאה: קבצים גדולים מכווצים כאן במחשב (ffmpeg בדפדפן - static/js/compress.js)
+    prepare: async function (onMsg) {
+      if (mode !== 'file' || !canShrink()) return;
+      var fs = fileIn.files;
+      for (var i = 0; i < fs.length; i++) {
+        if (prepared[i] || !AudioCompress.needs(fs[i])) continue;
+        var nm = fs[i].name.length > 28 ? fs[i].name.slice(0, 26) + '…' : fs[i].name;
+        if (onMsg) onMsg('מכינים את כלי הכיווץ...');
+        var out;
+        try {
+          out = await AudioCompress.compress(fs[i], function (p) { if (onMsg) onMsg('מכווצים ' + nm + ' ' + Math.round(p * 100) + '%'); });
+        } catch (e) { throw new Error('"' + fs[i].name + '": ' + (e.message || 'הכיווץ נכשל')); }
+        if (out.size > MAX_MB * 1048576) throw new Error('"' + fs[i].name + '" גדול מדי גם אחרי כיווץ - אפשר להעלות ל-Drive ולהדביק קישור');
+        prepared[i] = out;
+      }
+    },
     reset: function () {
+      prepared = {};
       fileIn.value = ''; dzName.innerHTML = '';
       blob = null; chunks = []; if (vDone) view('idle'); tEl.textContent = '0:00'; root.querySelector('[data-title]').value = '';
       linksIn.value = ''; chipsEl.innerHTML = '';
