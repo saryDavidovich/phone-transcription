@@ -10,6 +10,9 @@
  */
 (function () {
   var BASE = '/static/vendor/ffmpeg/';
+  // נטפרי חוסמים קבצי wasm (מחזירים דף HTML במקום). לכן המנוע מגיע גם כ-7 קבצי טקסט (gzip+base64,
+  // core-wasm-N.js, ~13MB בסך הכל - פחות מחצי מה-32MB של הקובץ המקורי) ונבנה מחדש כאן בדפדפן.
+  var WASM_PARTS = 7;
   var THRESH_MB = 40;
   var ff = null, loading = null;
 
@@ -27,12 +30,42 @@
     });
   }
 
+  function isWasm(buf) {
+    var b = new Uint8Array(buf, 0, 4);
+    return b.length === 4 && b[0] === 0 && b[1] === 0x61 && b[2] === 0x73 && b[3] === 0x6d;
+  }
+
+  // כתובת blob: לקובץ המנוע (application/wasm), שנבנה מקבצי הטקסט; אם אי אפשר - הכתובת הרגילה
+  async function wasmURL() {
+    if (typeof DecompressionStream === 'function' && typeof Blob === 'function' && window.URL && URL.createObjectURL) {
+      try {
+        var idx = []; for (var i = 0; i < WASM_PARTS; i++) idx.push(i);
+        var texts = await Promise.all(idx.map(function (i) {
+          return fetch(BASE + 'core-wasm-' + i + '.js', { credentials: 'same-origin' }).then(function (r) {
+            if (!r.ok) throw new Error('חלק ' + i + ': ' + r.status);
+            return r.text();
+          });
+        }));
+        var b64 = texts.join('').replace(/\s+/g, '');
+        if (!/^[A-Za-z0-9+/=]+$/.test(b64.slice(0, 200))) throw new Error('חלקי המנוע הגיעו משובשים');
+        var bin = atob(b64), gz = new Uint8Array(bin.length);
+        for (var k = 0; k < bin.length; k++) gz[k] = bin.charCodeAt(k);
+        var wasm = await new Response(new Blob([gz]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
+        if (!isWasm(wasm)) throw new Error('המנוע לא נבנה כראוי');
+        return URL.createObjectURL(new Blob([wasm], { type: 'application/wasm' }));
+      } catch (e) {
+        try { console.warn('[compress] text parts failed, trying the .wasm file', e); } catch (x) {}
+      }
+    }
+    return BASE + 'ffmpeg-core.wasm';
+  }
+
   function get() {
     if (ff) return Promise.resolve(ff);
     if (!loading) {
-      loading = loadScript(BASE + 'ffmpeg.js').then(function () {
+      loading = loadScript(BASE + 'ffmpeg.js').then(wasmURL).then(function (wurl) {
         var f = new window.FFmpegWASM.FFmpeg();
-        return f.load({ coreURL: BASE + 'ffmpeg-core.js', wasmURL: BASE + 'ffmpeg-core.wasm' }).then(function () {
+        return f.load({ coreURL: BASE + 'ffmpeg-core.js', wasmURL: wurl }).then(function () {
           ff = f; return f;
         });
       }).catch(function (e) { loading = null; throw (e && e.stage) ? e : why('load', e); });
@@ -47,7 +80,7 @@
     var m = '';
     if (e && typeof e === 'object') m = e.message || (e.type ? 'אירוע ' + e.type : '') || (e.target && e.target.src ? 'נחסם ' + e.target.src : '');
     else if (e) m = String(e);
-    var label = { load: 'טעינת כלי הכיווץ נכשלה (ייתכן שהסינון חוסם את הקובץ ffmpeg-core.wasm)',
+    var label = { load: 'טעינת כלי הכיווץ נכשלה (ייתכן שהסינון חוסם את קבצי הכלי)',
                   mount: 'פתיחת הקובץ בכלי הכיווץ נכשלה',
                   exec: 'הכיווץ נכשל' }[stage] || 'הכיווץ נכשל';
     var err = new Error(label + (m ? ' [' + m + ']' : '') + (tail ? ' · ' + tail : ''));
